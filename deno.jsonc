@@ -1,0 +1,172 @@
+{
+  "tasks": {
+    "dev": "deno run compose up -d", // used in terminal to start the development environment
+    "build": "deno task web:build", // used in terminal to build production docker images
+
+    // #region apps/api
+    "api:dev": "deno serve --allow-net --allow-read=vapid.json --allow-env --watch apps/api/index.ts", // used in docker-compose to start the API server in development mode
+    // #endregion apps/api
+
+    // #region apps/web
+    "web:dev": "deno run -A --node-modules-dir npm:vite apps/web", // used in docker-compose to start the web app in development mode
+    "web:build": "deno run -A --node-modules-dir npm:vite build apps/web",
+    // #endregion apps/web
+
+    // #region Scripts
+    "db:migrate": "deno run -N=$DB_HOST:5432 -E -R=./libs/server/db/migrations ./libs/server/db/migrate.ts",
+    "db:seed": "deno run -N=$DB_HOST:5432,$KV_HOSTNAME:6379 -E -R=infra/envs/.env infra/scripts/seed-data.ts",
+    "deps:check": "deno outdated -r",
+    "deps:update": "deno outdated -r -u -i",
+    "update:ubuntu": "sudo apt update && sudo apt full-upgrade -y && sudo apt autoremove -y && sudo apt clean && sudo apt --fix-broken install && sudo do-release-upgrade",
+    "vapid-key:create": "deno run -W=infra/configs/vapid.json --allow-run=deno ./infra/scripts/vapid-keys-create.ts",
+    "compose": "deno run -R=./infra --allow-run=docker,podman ./infra/scripts/compose.ts",
+    "deploy": "deno run -R=./infra --allow-run=rsync,ssh ./infra/scripts/deploy.ts",
+    // #endregion Scripts
+
+    // #region Checks
+    "check": {
+      "command": "echo 'Checks passed!'",
+      "description": "Run all checks",
+      "dependencies": [
+        "lint:check",
+        "fmt:check",
+        "ts:check",
+        "test"
+      ]
+    },
+    "fmt:fix": "deno fmt",
+    "fmt:check": "deno fmt --check",
+    "lint:fix": "deno lint --fix",
+    "lint:check": "deno lint",
+    "ts:check": "deno check **/*.ts",
+    "test": "deno test",
+    "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright test",
+    "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright show-report",
+    "fix": {
+      "command": "echo 'Fixes applied!'",
+      "description": "Run all fixes",
+      "dependencies": [
+        "lint:fix",
+        "fmt:fix"
+      ]
+    },
+    "fix-n-check": {
+      "command": "echo 'Fixes applied and checks passed!'",
+      "description": "Run all fixes and checks",
+      "dependencies": [
+        "fix",
+        "check"
+      ]
+    },
+    // #endregion Checks
+
+    // #region Git Hooks
+    "hooks:install": "deno run -R=deno.json,deno.jsonc,.git/hooks/ -W=.git/hooks/ jsr:@hongminhee/deno-task-hooks",
+    "hooks:pre-commit": "deno task check"
+    // #endregion Git Hooks
+  },
+  "imports": {
+    // #region Aliases
+    "@api/services/": "./apps/api/services/",
+    "@api/middlewares/": "./apps/api/middlewares/",
+    "@api/cqrs/": "./apps/api/cqrs/",
+    "@web/state/": "./apps/web/src/state/",
+    "@web/components/": "./apps/web/src/components/",
+    "@shared/types": "./libs/shared/types/+index.ts",
+    "@shared/constants/": "./libs/shared/constants/",
+    "@shared/helpers/": "./libs/shared/helpers/",
+    "@shared/testing": "./libs/shared/testing/+index.ts",
+    "@shared/cqrs/": "./libs/shared/cqrs/",
+    "@shared/local-storage": "./libs/shared/local-storage/+index.ts",
+    "@shared/cache": "./libs/shared/cache/+index.ts",
+    "@shared/rpc": "./libs/shared/rpc/+index.ts",
+    "@server/db": "./libs/server/db/+index.ts",
+    "@server/kv": "./libs/server/kv/+index.ts",
+    "@server/helpers/": "./libs/server/helpers/",
+    "@client/preact/": "./libs/client/preact/",
+    "@client/vite/": "./libs/client/vite/",
+    "@client/browser": "./libs/client/browser/+index.ts",
+    "@client/helpers": "./libs/client/helpers/+index.ts",
+    "@client/icons": "./libs/client/icons/+index.tsx",
+    // #endregion Aliases
+
+    // #region Dependencies
+    // apps/api
+    "hono": "jsr:@hono/hono@^4.7.7",
+    "@hectorm/otpauth": "jsr:@hectorm/otpauth",
+    "qrcode": "jsr:@libs/qrcode@^3.0.0",
+    "webpush": "jsr:@negrel/webpush",
+
+    // apps/tgbot
+
+    // apps/web
+    "@deno/vite-plugin": "npm:@deno/vite-plugin@^1.0.4",
+    "@preact/preset-vite": "npm:@preact/preset-vite@^2.10.1",
+    "preact": "npm:preact@^10.26.2",
+    "vite": "npm:vite@^6.1.1",
+    "wouter-preact": "npm:wouter-preact@^3.7.1",
+    "@preact/signals": "npm:@preact/signals@^2.2.0",
+    "@preact/signals-core": "npm:@preact/signals-core@^1.9.0",
+    "tailwindcss": "npm:tailwindcss@4.1.8",
+    "tailwindcss/": "npm:/tailwindcss@4.1.8/",
+    "tailwindcss/plugin": "npm:/tailwindcss@4.1.8/plugin.js",
+    "@tailwindcss/forms": "npm:@tailwindcss/forms@0.5.10",
+    "@tailwindcss/vite": "npm:@tailwindcss/vite@4.1.8",
+
+    // shared
+    "@std/path": "jsr:@std/path@^1.0.3",
+    "@std/expect": "jsr:@std/expect@^1.0.15",
+    "@std/testing": "jsr:@std/testing@^1.0.11",
+    "@std/encoding": "jsr:@std/encoding@^1.0.5",
+    "@playwright/test": "npm:@playwright/test@^1.57.0",
+    "playwright": "npm:playwright@^1.57.0",
+
+    // shared/types
+    "arktype": "npm:arktype@^2.1.29",
+
+    // server/kv
+    "@iuioiua/redis": "jsr:@iuioiua/redis@^1.1.10",
+
+    // server/db
+    "postgres": "https://deno.land/x/postgresjs@v3.4.5/mod.js"
+    // #endregion Dependencies
+  },
+  "exclude": [
+    "**/.cache/*",
+    "**/dist/*",
+    ".volumes",
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "docs",
+    "infra",
+    "*.lock"
+  ],
+  "lint": {
+    "rules": {
+      "tags": [
+        "recommended"
+      ],
+      "exclude": [
+        "require-await"
+      ]
+    }
+  },
+  "fmt": {
+    "useTabs": false,
+    "lineWidth": 100,
+    "indentWidth": 2,
+    "singleQuote": false,
+    "proseWrap": "preserve",
+    "semiColons": false
+  },
+
+  // #region Preact Configs
+  "compilerOptions": {
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact"
+  }
+  // #endregion Preact Configs
+}

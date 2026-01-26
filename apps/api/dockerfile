@@ -1,0 +1,7 @@
+ARG DENO_VERSION=2.4.0
+FROM app/deno-base:${DENO_VERSION}
+
+# Copy application code
+COPY . .
+
+CMD ["sh", "-c", "deno task db:migrate && deno task api:dev"]

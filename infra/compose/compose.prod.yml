@@ -1,0 +1,56 @@
+networks:
+  proxy:
+    external: true
+
+services:
+
+  db:
+    healthcheck:
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 40s
+  
+  minio:
+    networks:
+      - proxy
+      - default
+    labels:
+      - "traefik.docker.network=proxy"
+      - 'traefik.http.routers.minio.entrypoints=websecure'
+      - 'traefik.http.routers.minio.tls=true'
+      - 'traefik.http.routers.minio.tls.certresolver=myresolver'
+
+  grafana:
+    networks:
+      - proxy
+      - default
+    labels:
+      - "traefik.docker.network=proxy"
+      - 'traefik.http.routers.grafana.entrypoints=websecure'
+      - 'traefik.http.routers.grafana.tls=true'
+      - 'traefik.http.routers.grafana.tls.certresolver=myresolver'
+
+  api:
+    networks:
+      - proxy
+      - default
+    environment:
+      - ENV=prod
+    labels:
+      - "traefik.docker.network=proxy"
+      - 'traefik.http.routers.api.entrypoints=websecure'
+      - 'traefik.http.routers.api.tls=true'
+      - 'traefik.http.routers.api.tls.certresolver=myresolver'
+
+  web:
+    networks:
+      - proxy
+      - default
+    build:
+      dockerfile: apps/web/dockerfile.prod
+    labels:
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.web.entrypoints=websecure"
+      - "traefik.http.routers.web.tls=true"
+      - "traefik.http.routers.web.tls.certresolver=myresolver"

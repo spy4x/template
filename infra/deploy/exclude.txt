@@ -1,0 +1,4 @@
+apps/***/build/
+apps/***/dist/
+apps/***/node_modules/
+apps/***/.vite/
