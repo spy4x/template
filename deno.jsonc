@@ -4,7 +4,8 @@
     "build": "deno task web:build", // used in terminal to build production docker images
 
     // #region apps/api
-    "api:dev": "deno serve --allow-net --allow-read=vapid.json --allow-env --watch apps/api/index.ts", // used in docker-compose to start the API server in development mode
+    "api:dev": "deno serve --allow-all --watch apps/api/index.ts", // used in docker-compose to start the API server in development mode
+    "api:prod": "deno serve --allow-all apps/api/index.ts", // production mode - no watch
     // #endregion apps/api
 
     // #region apps/web
@@ -21,6 +22,7 @@
     "vapid-key:create": "deno run -W=infra/configs/vapid.json --allow-run=deno ./infra/scripts/vapid-keys-create.ts",
     "compose": "deno run -R=./infra --allow-run=docker,podman ./infra/scripts/compose.ts",
     "deploy": "deno run -R=./infra --allow-run=rsync,ssh ./infra/scripts/deploy.ts",
+    "worker:github": "deno run -A apps/api/services/github/worker.ts",
     // #endregion Scripts
 
     // #region Checks

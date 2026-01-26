@@ -2,8 +2,10 @@
 ARG DENO_VERSION=2.4.0
 FROM app/deno-base:${DENO_VERSION} AS build
 
-# Copy application code
-COPY . .
+# Switch to root to copy files with proper permissions
+USER root
+COPY --chown=1000:1000 . .
+USER 1000:1000
 
 ARG VITE_ENV=prod
 ENV VITE_ENV=${VITE_ENV}

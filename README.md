@@ -1,59 +1,61 @@
-# template
+# Tampines Hackathon Tool
 
-Deno-first monorepo starter. Auth + web-push only. Minimal web shell. No domain logic.
+Tool/server that connects to other repos. Triggered by GitHub Issues/Projects actions. Uses existing Deno-first monorepo infra. Decisions tracked in GitHub issues.
 
-## Purpose
-- clean base for new apps
-- infra + auth + sessions + push
-- auditable, scalable, secure defaults
+## Goals
+- ship a demoable MVP in 48h
+- keep structure, security, auditability
+- avoid hard-lock tech choices when uncertain
 
-## What changed in this setup
-- slug/domain set to `app` / `app.localhost`
-- Traefik ping entrypoint fixed
-- Postgres/Valkey images switched to Debian to avoid locale noise
-- Valkey host requires `vm.overcommit_memory=1`
-- auth cache bug fixed (`isSessionTokenExpired`)
+## Scope (MVP)
+- tool/server API for multi-repo orchestration
+- issue/project event triggers
+- API + persistent storage
+- tests + CI placeholder
+- schedule/automation placeholder
 
-## Structure
-- `apps/api`: Deno + Hono API
-- `apps/web`: Preact shell (no auth UI)
-- `libs/*`: shared libs (helpers, cache, db, kv, types)
-- `infra/*`: compose, env, deploy, scripts
-- `docs/*`: principles, architecture, infra
+## Detected tech stack (team decision)
+- Runtime: Deno
+- API: Hono
+- Web: Preact + Vite + Tailwind
+- Data: Postgres, Valkey
+- Infra: compose + deploy scripts
+- GitHub integration: gh cli (preferred)
 
-## Stack
-- Deno, Hono, Preact, Vite
-- Postgres, Valkey
-- Traefik, Loki/Prom/Grafana
+## Repo map
+- `apps/api`: REST + WS-ready API
+- `apps/web`: minimal web shell (optional)
+- `libs/*`: shared libs
+- `infra/*`: env, compose, deploy
+- `docs/*`: plan, architecture, handoff
 
-## Run (dev)
+## How to run (dev)
 ```sh
 deno task dev
 ```
 Open: https://app.localhost
 
-## Auth API (no UI)
+## Worker
 ```sh
-curl -sS -H "Content-Type: application/json" \
-  -d '{"username":"user1","password":"Passw0rd!"}' \
-  https://app.localhost/api/auth/password/sign-up
-
-curl -sS -H "Content-Type: application/json" \
-  -d '{"username":"user1","password":"Passw0rd!"}' \
-  https://app.localhost/api/auth/password/check
-
-curl -sS https://app.localhost/api/auth/me
+deno task worker:github
 ```
 
-## Env
-- see `infra/envs/.env.example`
-- copy to `infra/envs/.env`
+## Security note
+Never commit secrets. Use env files or secret stores.
 
-## Notes
-- money as ints, enums start at 1
-- REST + WS ready, CQRS-ready
-- deps minimized
+## Acceptance checklist
+- README updated with goals + scope
+- architecture overview present (high-level)
+- issue templates + initial issues present
+- 48h milestone plan present
+- CI/test/schedule placeholders present
+- handoff note + open decisions listed
 
-## Tradeoffs
-- minimal UI for speed
-- auth only; no domain logic
+## Docs
+- `docs/architecture-overview.md`
+- `docs/milestones-48h.md`
+- `docs/initial-issues/*.md`
+- `docs/ci-placeholder.md`
+- `docs/schedule-placeholder.md`
+- `docs/handoff.md`
+- `docs/integration-github.md`

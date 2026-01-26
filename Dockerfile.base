@@ -7,12 +7,20 @@ FROM denoland/deno:alpine-${DENO_VERSION}
 
 WORKDIR /app
 
+# Install system dependencies (including C++ libs for OpenCode)
+RUN apk add --no-cache git github-cli curl bash libstdc++ libgcc
+
+# Install OpenCode from official install script
+RUN curl -fsSL https://opencode.ai/install | bash && \
+    find / -name opencode -type f 2>/dev/null | head -n 1 | xargs -I {} cp {} /usr/local/bin/opencode && \
+    chmod +x /usr/local/bin/opencode
+
 # Copy only dependency manifest for better layer caching
 COPY deno.jsonc ./
 
 # Install dependencies (this layer will be cached if deno.jsonc doesn't change)
 RUN deno install
 
-# Set ownership for non-root user
-RUN chown -R 1000:1000 /app
+# Set ownership for non-root user and ensure deno cache is writable
+RUN chown -R 1000:1000 /app /deno-dir
 USER 1000:1000

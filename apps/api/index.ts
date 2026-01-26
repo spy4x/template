@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import type { Context } from "hono"
 import { contextStorage } from "hono/context-storage"
 import { requestId } from "hono/request-id"
 import { db } from "@api/services/db.ts"
@@ -9,6 +10,7 @@ import { APIContext } from "./_types.ts"
 import { getRandomString } from "@shared/helpers/random.ts"
 import { authRoute } from "./routes/auth.ts"
 import { pushNotificationRoute } from "./routes/pushNotification.ts"
+import { githubRoute } from "./routes/github.ts"
 
 const app = new Hono<APIContext>().basePath("/api")
 app.use(
@@ -20,7 +22,7 @@ app.use(
 
 app.get(
   "/health",
-  async (c) =>
+  async (c: Context<APIContext>) =>
     c.json({
       status: "ok",
       isDbConnected: await db.isConnected(),
@@ -29,5 +31,6 @@ app.get(
 )
 app.route("/auth", authRoute) // has some public routes and some more protected
 app.route("/push", pushNotificationRoute)
+app.route("/github", githubRoute)
 
 export default app

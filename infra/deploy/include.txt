@@ -2,6 +2,8 @@ apps/***
 libs/***
 infra/***
 .dockerignore
+Dockerfile.base
 README.md
 deno.jsonc
 deno.lock
+apps/api/dockerfile.worker

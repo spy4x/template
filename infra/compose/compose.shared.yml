@@ -71,8 +71,6 @@ services:
     container_name: ${PROJECT}-kv
     image: valkey/valkey:8.1
     restart: unless-stopped
-    sysctls:
-      - vm.overcommit_memory=1
     volumes:
       - ../../.volumes/kv:/data:Z
     ports:
@@ -355,7 +353,7 @@ services:
     restart: unless-stopped
     build:
       context: ../..
-      dockerfile: apps/api/dockerfile
+      dockerfile: apps/api/dockerfile.worker
       args:
         - DENO_VERSION=${DENO_VERSION}
     volumes:
@@ -363,8 +361,13 @@ services:
       - ../../libs:/app/libs:z
       - ../../deno.jsonc:/app/deno.jsonc:z
       - ../../infra/configs/vapid.json:/app/vapid.json:Z
+      - ../../.volumes/gh:/home/deno/.config/gh:Z
+      - ../../.volumes/workspaces:/app/workspaces:Z
+      - ../../.volumes/opencode:/home/deno/.config/opencode:Z
     user: "1000:1000"
     environment:
+      - HOME=/home/deno
+      - ENV=${ENV}
       - DENO_DIR=/tmp/deno-cache
       - DENO_LOG=${DENO_LOG}
       - DB_HOST=db
@@ -383,6 +386,18 @@ services:
       - RATE_LIMITER_WINDOW_MS=${RATE_LIMITER_WINDOW_MS}
       - RATE_LIMITER_STRICT_LIMIT=${RATE_LIMITER_STRICT_LIMIT}
       - RATE_LIMITER_LIMIT=${RATE_LIMITER_LIMIT}
+      - GH_WEBHOOK_SECRET=${GH_WEBHOOK_SECRET}
+      - GH_WEBHOOK_ENFORCE=${GH_WEBHOOK_ENFORCE}
+      - GH_CLI_ENABLED=${GH_CLI_ENABLED}
+      - GH_CLI_DRY_RUN=${GH_CLI_DRY_RUN}
+      - GH_ALLOW_ALL_REPOS=${GH_ALLOW_ALL_REPOS}
+      - GH_ALLOWED_REPOS=${GH_ALLOWED_REPOS}
+      - GH_TOKEN=${GH_TOKEN}
+      - WORKSPACE_ROOT=/app/workspaces
+      - OPENCODE_CMD=${OPENCODE_CMD}
+      - OPENCODE_ARGS=${OPENCODE_ARGS}
+      - OPENCODE_CMD=${OPENCODE_CMD}
+      - OPENCODE_ARGS=${OPENCODE_ARGS}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL:-}
       - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
@@ -454,3 +469,11 @@ services:
       timeout: 5s
       retries: 5
   # endregion API & Web
+
+  # region Networking
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.50.0.0/16
