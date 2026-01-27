@@ -479,13 +479,12 @@ services:
       timeout: 5s
       retries: 5
 
+  # endregion API & Web
+
+# region Networking
 networks:
   proxy:
     external: true
-  # endregion API & Web
-
-  # region Networking
-networks:
   default:
     driver: bridge
     ipam:
