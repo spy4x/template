@@ -357,6 +357,91 @@ export class DbService extends DbServiceBase {
         LIMIT ${limit}`
     },
   }
+
+  githubInstallation = {
+    findByInstallationId: async (installationId: number) => {
+      return (
+        await this.sql<Array<{
+          id: number
+          userId: number
+          installationId: number
+          accountLogin: string
+          accountType: number
+          reposAccess: number
+          suspended: boolean
+          createdAt: Date
+          updatedAt: Date
+        }>>`
+          SELECT * FROM github_installations
+          WHERE installation_id = ${installationId}
+          LIMIT 1
+        `
+      )[0] ?? null
+    },
+  }
+
+  githubInstallationToken = {
+    findByInstallationId: async (installationId: number) => {
+      return (
+        await this.sql<Array<{
+          id: number
+          installationId: number
+          token: string
+          expiresAt: Date
+          createdAt: Date
+        }>>`
+          SELECT * FROM github_installation_tokens
+          WHERE installation_id = ${installationId}
+          LIMIT 1
+        `
+      )[0] ?? null
+    },
+    upsert: async (params: {
+      installationId: number
+      token: string
+      expiresAt: Date
+    }) => {
+      return (
+        await this.sql<Array<{
+          id: number
+          installationId: number
+          token: string
+          expiresAt: Date
+          createdAt: Date
+        }>>`
+          INSERT INTO github_installation_tokens
+            (installation_id, token, expires_at)
+          VALUES (${params.installationId}, ${params.token}, ${params.expiresAt})
+          ON CONFLICT (installation_id)
+          DO UPDATE SET
+            token = ${params.token},
+            expires_at = ${params.expiresAt},
+            created_at = CURRENT_TIMESTAMP
+          RETURNING *
+        `
+      )[0]
+    },
+  }
+
+  githubRepo = {
+    findByFullName: async (repoFullName: string) => {
+      return (
+        await this.sql<Array<{
+          id: number
+          installationId: number
+          repoId: number
+          repoFullName: string
+          private: boolean
+          webhookEnabled: boolean
+          createdAt: Date
+        }>>`
+          SELECT * FROM github_repos
+          WHERE repo_full_name = ${repoFullName}
+          LIMIT 1
+        `
+      )[0] ?? null
+    },
+  }
 }
 
 export const db = new DbService()

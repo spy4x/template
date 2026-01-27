@@ -33,6 +33,8 @@ export class Config {
       .split(" ")
       .map((value) => value.trim())
       .filter(Boolean),
+    appId: getEnvVar("GH_APP_ID", true),
+    appPrivateKey: getEnvVar("GH_APP_PRIVATE_KEY", true),
   }
 
   // Web App Configuration
