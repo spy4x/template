@@ -1,21 +1,10 @@
 import type {
   ApiSuccessResponse,
-  ProfileResponse,
   TotpConnectStartResponse,
   User,
 } from "@shared/types"
 import { apiFetch } from "./api.ts"
 import { sessionState, SessionUser } from "./session.ts"
-
-async function fetchAndUpdateProfile(): Promise<void> {
-  const profile = await apiFetch<ProfileResponse>("/api/users/me")
-  if (profile.ok) {
-    sessionState.value = {
-      ...sessionState.value,
-      user: profile.data.user,
-    }
-  }
-}
 
 export async function bootstrapSession(): Promise<void> {
   const me = await apiFetch<User>("/api/auth/me")
@@ -33,7 +22,6 @@ export async function bootstrapSession(): Promise<void> {
     user: me.data,
     isReady: true,
   }
-  await fetchAndUpdateProfile()
 }
 
 async function handleAuthResponse(
@@ -48,9 +36,6 @@ async function handleAuthResponse(
     user: result.data,
     isMfaRequired: mfaRequired,
     isReady: true,
-  }
-  if (!mfaRequired) {
-    await fetchAndUpdateProfile()
   }
   return { ok: true, mfaRequired }
 }
@@ -101,7 +86,6 @@ export async function checkTotp(otp: string): Promise<{ ok: boolean; error?: str
     user: result.data,
     isMfaRequired: false,
   }
-  await fetchAndUpdateProfile()
   return { ok: true }
 }
 
@@ -123,7 +107,7 @@ export async function profileUpdate(
   firstName: string,
   lastName: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const result = await apiFetch<ProfileResponse>("/api/users/me", {
+  const result = await apiFetch<{ user: User }>("/api/users/me", {
     method: "PATCH",
     body: JSON.stringify({ firstName, lastName }),
   })
