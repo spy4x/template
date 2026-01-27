@@ -61,7 +61,7 @@ class WsClient {
     if (msg.kind === "profile.updated") {
       sessionState.value = {
         ...sessionState.value,
-        profile: msg.payload.profile,
+        user: msg.payload.user,
       }
       return
     }
@@ -77,7 +77,6 @@ class WsClient {
       sessionState.value = {
         ...sessionState.value,
         user: null,
-        profile: null,
         isMfaRequired: false,
       }
     }

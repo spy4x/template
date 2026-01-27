@@ -14,7 +14,6 @@ export async function bootstrapSession(): Promise<void> {
       ...sessionState.value,
       isReady: true,
       user: null,
-      profile: null,
       isMfaRequired: false,
     }
     return
@@ -24,12 +23,11 @@ export async function bootstrapSession(): Promise<void> {
     user: me.data,
     isReady: true,
   }
-  const profile = await apiFetch<ProfileResponse>("/api/profile")
+  const profile = await apiFetch<ProfileResponse>("/api/users/me")
   if (profile.ok) {
     sessionState.value = {
       ...sessionState.value,
       user: profile.data.user,
-      profile: profile.data.profile,
     }
   }
 }
@@ -59,7 +57,6 @@ export async function signIn(username: string, password: string): Promise<{
       sessionState.value = {
         ...sessionState.value,
         user: profile.data.user,
-        profile: profile.data.profile,
       }
     }
   }
@@ -91,7 +88,6 @@ export async function signUp(username: string, password: string): Promise<{
       sessionState.value = {
         ...sessionState.value,
         user: profile.data.user,
-        profile: profile.data.profile,
       }
     }
   }
@@ -103,7 +99,6 @@ export async function signOut(): Promise<void> {
   sessionState.value = {
     ...sessionState.value,
     user: null,
-    profile: null,
     isMfaRequired: false,
   }
 }
@@ -121,12 +116,11 @@ export async function checkTotp(otp: string): Promise<{ ok: boolean; error?: str
     user: result.data,
     isMfaRequired: false,
   }
-  const profile = await apiFetch<ProfileResponse>("/api/profile")
+  const profile = await apiFetch<ProfileResponse>("/api/users/me")
   if (profile.ok) {
     sessionState.value = {
       ...sessionState.value,
       user: profile.data.user,
-      profile: profile.data.profile,
     }
   }
   return { ok: true }
@@ -146,10 +140,13 @@ export async function changePassword(
   return { ok: true }
 }
 
-export async function profileUpdate(displayName: string): Promise<{ ok: boolean; error?: string }> {
-  const result = await apiFetch<ProfileResponse>("/api/profile", {
+export async function profileUpdate(
+  firstName: string,
+  lastName: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const result = await apiFetch<ProfileResponse>("/api/users/me", {
     method: "PATCH",
-    body: JSON.stringify({ displayName }),
+    body: JSON.stringify({ firstName, lastName }),
   })
   if (!result.ok) {
     return { ok: false, error: result.error.message }
@@ -157,7 +154,6 @@ export async function profileUpdate(displayName: string): Promise<{ ok: boolean;
   sessionState.value = {
     ...sessionState.value,
     user: result.data.user,
-    profile: result.data.profile,
   }
   return { ok: true }
 }

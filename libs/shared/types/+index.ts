@@ -82,15 +82,9 @@ export type User = typeof userSchema.infer
 export const userUpdateSchema = userBaseSchema.pick("firstName", "lastName")
 export type UserUpdate = typeof userUpdateSchema.infer
 
-export const userProfileSchema = BaseModelSchema.and(type({
-  userId: "number",
-  displayName: `1 <= string <= ${NAME_MAX_LENGTH}`,
-  updatedBy: "number",
-}))
-export type UserProfile = typeof userProfileSchema.infer
-
 export const userProfileBaseSchema = type({
-  displayName: `1 <= string <= ${NAME_MAX_LENGTH}`,
+  firstName: `1 <= string <= ${NAME_MAX_LENGTH}`,
+  lastName: `1 <= string <= ${NAME_MAX_LENGTH}`,
 })
 export type UserProfileBase = typeof userProfileBaseSchema.infer
 
@@ -234,7 +228,7 @@ export const wsReadyPayloadSchema = type({
 export type WsReadyPayload = typeof wsReadyPayloadSchema.infer
 
 export const wsProfileUpdatedPayloadSchema = type({
-  profile: userProfileSchema,
+  user: userSchema,
 })
 export type WsProfileUpdatedPayload = typeof wsProfileUpdatedPayloadSchema.infer
 
@@ -323,7 +317,6 @@ export type ApiIsSuccessResponse = {
 
 export type ProfileResponse = {
   user: User
-  profile: UserProfile | null
 }
 
 export type PushSubscriptionData = PushSubscriptionJson

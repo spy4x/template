@@ -6,7 +6,8 @@ test.describe("auth profile ws push flow", () => {
   test("sign-up sign-in profile ws sign-out", async ({ page, request }) => {
     const username = "e2e_auth_profile_user"
     const password = "Passw0rd!"
-    const displayName = "E2E Display"
+    const firstName = "John"
+    const lastName = "Doe"
 
     const cleanup = async () => {
       try {
@@ -33,7 +34,8 @@ test.describe("auth profile ws push flow", () => {
       await page.waitForURL("/")
       await page.locator("[data-e2e=ws-status]", { hasText: "open" }).waitFor()
 
-      await page.locator("[data-e2e=profile-display-name]").fill(displayName)
+      await page.locator("[data-e2e=profile-first-name]").fill(firstName)
+      await page.locator("[data-e2e=profile-last-name]").fill(lastName)
       await page.locator("[data-e2e=profile-save]").click()
       await page.locator("[data-e2e=profile-saved]").waitFor()
 

@@ -7,23 +7,23 @@ import { UserProfileUpdatedEvent } from "@api/cqrs/events.ts"
 export const userProfileUpdateHandler: CommandHandler<UserProfileUpdateCommand> = async (
   command,
 ) => {
-  const { userId, displayName, request } = command.data
+  const { userId, firstName, lastName, request } = command.data
   const user = await db.user.findOne({ id: userId })
   if (!user || user.deletedAt) {
     throw new Error("User not found")
   }
 
-  const profile = await db.userProfile.upsert({
-    userId,
+  const updatedUser = await db.user.updateOne({
+    id: userId,
     data: {
-      displayName,
-      updatedBy: userId,
+      firstName,
+      lastName,
     },
   })
 
   eventBus.emit(
-    new UserProfileUpdatedEvent({ user, profile, request }),
+    new UserProfileUpdatedEvent({ user: updatedUser, request }),
   )
 
-  return { user, profile }
+  return { user: updatedUser }
 }

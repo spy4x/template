@@ -1,15 +1,15 @@
 import { Command } from "@shared/cqrs/types.ts"
-import { RequestInfo, User, UserProfile } from "@shared/types"
+import { RequestInfo, User } from "@shared/types"
 
 export interface UserProfileUpdatePayload {
   userId: number
-  displayName: string
+  firstName: string
+  lastName: string
   request: RequestInfo
 }
 
 export interface UserProfileUpdateResult {
   user: User
-  profile: UserProfile
 }
 
 export class UserProfileUpdateCommand

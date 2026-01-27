@@ -9,7 +9,7 @@ import { APIContext } from "./_types.ts"
 import { getRandomString } from "@shared/helpers/random.ts"
 import { authRoute } from "./routes/auth.ts"
 import { pushNotificationRoute } from "./routes/pushNotification.ts"
-import { profileRoute } from "./routes/profile.ts"
+import { usersRoute } from "./routes/users.ts"
 import { wsRoute } from "./routes/ws.ts"
 import "./cqrs/+init.ts"
 
@@ -31,7 +31,7 @@ app.get(
     }),
 )
 app.route("/auth", authRoute) // has some public routes and some more protected
-app.route("/profile", profileRoute)
+app.route("/users", usersRoute)
 app.route("/push", pushNotificationRoute)
 app.route("/ws", wsRoute)
 if (config.isDev) {

@@ -8,6 +8,5 @@ export const userProfileGetHandler: QueryHandler<UserProfileGetQuery> = async (q
   if (!user || user.deletedAt) {
     throw new Error("User not found")
   }
-  const profile = await db.userProfile.findByUser({ userId })
-  return { user, profile }
+  return { user }
 }

@@ -1,5 +1,5 @@
 import { Query } from "@shared/cqrs/types.ts"
-import { User, UserProfile } from "@shared/types"
+import { User } from "@shared/types"
 
 export interface UserProfileGetPayload {
   userId: number
@@ -7,7 +7,6 @@ export interface UserProfileGetPayload {
 
 export interface UserProfileGetResult {
   user: User
-  profile: UserProfile | null
 }
 
 export class UserProfileGetQuery implements Query<UserProfileGetPayload, UserProfileGetResult> {

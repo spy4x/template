@@ -8,16 +8,16 @@ import { UserProfileGetQuery } from "@api/cqrs/queries.ts"
 import { UserProfileUpdateCommand } from "@api/cqrs/commands.ts"
 import { requestInfoFromContext } from "@api/services/request-info.ts"
 
-export const profileRoute = new Hono<APIContext>()
+export const usersRoute = new Hono<APIContext>()
   .use(isAuthenticated2FA)
-  .get(`/`, async (c) => {
+  .get(`/me`, async (c) => {
     const authData = c.get("auth")
     const result = await queryBus.execute(
       new UserProfileGetQuery({ userId: authData.user.id }),
     )
-    return c.json({ user: result.user, profile: result.profile })
+    return c.json({ user: result.user })
   })
-  .patch(`/`, async (c) => {
+  .patch(`/me`, async (c) => {
     const authData = c.get("auth")
     const body = await c.req.json()
     const validationResult = validate(userProfileBaseSchema, body)
@@ -27,9 +27,10 @@ export const profileRoute = new Hono<APIContext>()
     const result = await commandBus.execute(
       new UserProfileUpdateCommand({
         userId: authData.user.id,
-        displayName: validationResult.data.displayName,
+        firstName: validationResult.data.firstName,
+        lastName: validationResult.data.lastName,
         request: requestInfoFromContext(c),
       }),
     )
-    return c.json({ user: result.user, profile: result.profile })
+    return c.json({ user: result.user })
   })

@@ -21,7 +21,8 @@ import type {
 
 export function ProfileView() {
   const session = sessionState.value
-  const [displayName, setDisplayName] = useState(session.profile?.displayName || "")
+  const [firstName, setFirstName] = useState(session.user?.firstName || "")
+  const [lastName, setLastName] = useState(session.user?.lastName || "")
   const [profileError, setProfileError] = useState<string | null>(null)
   const [profileSaved, setProfileSaved] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
@@ -40,8 +41,9 @@ export function ProfileView() {
   const [pushBusy, setPushBusy] = useState(false)
 
   useEffect(() => {
-    setDisplayName(session.profile?.displayName || "")
-  }, [session.profile?.displayName])
+    setFirstName(session.user?.firstName || "")
+    setLastName(session.user?.lastName || "")
+  }, [session.user?.firstName, session.user?.lastName])
 
   useEffect(() => {
     if (!session.user || session.isMfaRequired) return
@@ -73,7 +75,10 @@ export function ProfileView() {
         <h2 class="text-xl font-semibold">Sign in required</h2>
         <p class="mt-2 text-slate-300">Access your profile after sign in.</p>
         <div class="mt-6 flex flex-col gap-3 sm:flex-row">
-          <Link href="/sign-in" class="w-full rounded-lg bg-indigo-500 px-4 py-3 text-center text-sm text-white sm:w-auto">
+          <Link
+            href="/sign-in"
+            class="w-full rounded-lg bg-indigo-500 px-4 py-3 text-center text-sm text-white sm:w-auto"
+          >
             Sign in
           </Link>
           <Link
@@ -104,7 +109,7 @@ export function ProfileView() {
     setProfileError(null)
     setProfileSaved(false)
     setBusyProfile(true)
-    const result = await profileUpdate(displayName)
+    const result = await profileUpdate(firstName, lastName)
     setBusyProfile(false)
     if (!result.ok) {
       setProfileError(result.error || "Update failed")
@@ -174,10 +179,12 @@ export function ProfileView() {
       const deviceId = crypto.randomUUID()
       const result = await apiFetch<PushSubscribeResponse>("/api/push", {
         method: "POST",
-        body: JSON.stringify({
-          subscription: subscriptionToPayload(subscription),
-          deviceId,
-        } satisfies PushSubscribeRequest),
+        body: JSON.stringify(
+          {
+            subscription: subscriptionToPayload(subscription),
+            deviceId,
+          } satisfies PushSubscribeRequest,
+        ),
       })
       if (!result.ok) {
         setPushError(result.error.message)
@@ -207,12 +214,22 @@ export function ProfileView() {
         </div>
         <form class="mt-6 space-y-4" onSubmit={submitProfile}>
           <label class="block text-sm">
-            <span class="text-slate-300">Display name</span>
+            <span class="text-slate-300">First name</span>
             <input
-              data-e2e="profile-display-name"
+              data-e2e="profile-first-name"
               class="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-base text-slate-100"
-              value={displayName}
-              onInput={(e) => setDisplayName((e.target as HTMLInputElement).value)}
+              value={firstName}
+              onInput={(e) => setFirstName((e.target as HTMLInputElement).value)}
+              required
+            />
+          </label>
+          <label class="block text-sm">
+            <span class="text-slate-300">Last name</span>
+            <input
+              data-e2e="profile-last-name"
+              class="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-base text-slate-100"
+              value={lastName}
+              onInput={(e) => setLastName((e.target as HTMLInputElement).value)}
               required
             />
           </label>
@@ -364,9 +381,7 @@ export function ProfileView() {
           : null}
         <div class="mt-4 space-y-3">
           {pushDevices.length === 0
-            ? (
-              <div class="text-sm text-slate-400">No devices registered.</div>
-            )
+            ? <div class="text-sm text-slate-400">No devices registered.</div>
             : (
               pushDevices.map((device) => (
                 <div
@@ -376,7 +391,9 @@ export function ProfileView() {
                 >
                   <div class="text-slate-300">
                     <div class="font-medium">Device {device.deviceId.slice(0, 8)}</div>
-                    <div class="text-xs text-slate-500">{new Date(device.createdAt).toLocaleString()}</div>
+                    <div class="text-xs text-slate-500">
+                      {new Date(device.createdAt).toLocaleString()}
+                    </div>
                   </div>
                   <button
                     data-e2e={`push-remove-${device.deviceId}`}
@@ -415,7 +432,9 @@ function svgToDataUrl(svg: string): string {
   return `data:image/svg+xml;base64,${btoa(binary)}`
 }
 
-function subscriptionToPayload(subscription: PushSubscription): PushSubscribeRequest["subscription"] {
+function subscriptionToPayload(
+  subscription: PushSubscription,
+): PushSubscribeRequest["subscription"] {
   const json = subscription.toJSON()
   if (!json.endpoint || !json.keys?.auth || !json.keys?.p256dh) {
     throw new Error("Invalid push subscription")
