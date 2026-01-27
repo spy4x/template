@@ -3,7 +3,12 @@ import * as webpush from "webpush"
 import { encodeBase64Url } from "@std/encoding"
 import { db } from "@api/services/db.ts"
 import { config } from "@api/services/config.ts"
-import { UserPushToken } from "@shared/types"
+import type {
+  PushNotificationMessage,
+  PushSubscribeRequest,
+  UserPushTokenPublic,
+} from "@shared/types"
+import { pushNotificationMessageSchema, validate } from "@shared/types"
 
 type Subscriptions = { [deviceId: string]: webpush.PushSubscriber }
 
@@ -38,21 +43,9 @@ export class WebPushService {
       contactInformation,
       vapidKeys,
     })
-    const pushTokens = await db.userPushToken.findChanged(new Date(0))
-    const subscriptions: Subscriptions = {}
-    for (const token of pushTokens) {
-      const subscription: webpush.PushSubscription = {
-        endpoint: token.endpoint,
-        keys: {
-          auth: token.auth,
-          p256dh: token.p256dh,
-        },
-      }
-      subscriptions[token.deviceId] = appServer.subscribe(subscription)
-    }
     return new WebPushService(
       appServer,
-      subscriptions,
+      {},
       vapidKeys,
       encodeBase64Url(
         await crypto.subtle.exportKey(
@@ -68,10 +61,10 @@ export class WebPushService {
   }
 
   public async subscribe(
-    subscription: webpush.PushSubscription,
+    subscription: PushSubscribeRequest["subscription"],
     deviceId: string,
     userId: number,
-  ): Promise<Partial<UserPushToken>> {
+  ): Promise<UserPushTokenPublic> {
     this.subscriptions[deviceId] = this.appServer.subscribe(subscription)
     let userPushToken = undefined
     const existingToken = await db.userPushToken.findOne({ deviceId, userId })
@@ -113,7 +106,7 @@ export class WebPushService {
     }
   }
 
-  public async deviceList(userId: number) {
+  public async deviceList(userId: number): Promise<UserPushTokenPublic[]> {
     const deviceList = await db.userPushToken.findMany({ userId })
     return deviceList.map(({ id, userId, deviceId, createdAt, updatedAt }) => ({
       id,
@@ -132,15 +125,16 @@ export class WebPushService {
   }
 
   public async send(
-    message: {
-      title: string
-      body?: string
-      url?: string
-    },
+    message: PushNotificationMessage,
     urgency?: webpush.Urgency,
     ttl?: number,
     topic?: string,
   ): Promise<void> {
+    const validationResult = validate(pushNotificationMessageSchema, message)
+    if (validationResult.error) {
+      throw new Error(`Invalid push payload: ${validationResult.error.description}`)
+    }
+    const payload = validationResult.data
     const options: webpush.PushMessageOptions = {
       urgency,
       ttl,
@@ -150,7 +144,7 @@ export class WebPushService {
     for (const deviceId of deviceIds) {
       try {
         await this.subscriptions[deviceId].pushTextMessage(
-          JSON.stringify(message),
+          JSON.stringify(payload),
           options,
         )
       } catch (error) {

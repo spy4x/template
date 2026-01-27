@@ -31,9 +31,15 @@ Tool/server that connects to other repos. Triggered by GitHub Issues/Projects ac
 
 ## How to run (dev)
 ```sh
+deno task proxy:start
 deno task dev
 ```
 Open: https://app.localhost
+
+Stop proxy:
+```sh
+deno task proxy:stop
+```
 
 ## Worker
 ```sh

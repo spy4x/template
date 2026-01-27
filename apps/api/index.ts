@@ -10,7 +10,10 @@ import { APIContext } from "./_types.ts"
 import { getRandomString } from "@shared/helpers/random.ts"
 import { authRoute } from "./routes/auth.ts"
 import { pushNotificationRoute } from "./routes/pushNotification.ts"
+import { usersRoute } from "./routes/users.ts"
+import { wsRoute } from "./routes/ws.ts"
 import { githubRoute } from "./routes/github.ts"
+import "./cqrs/+init.ts"
 
 const app = new Hono<APIContext>().basePath("/api")
 app.use(
@@ -30,7 +33,13 @@ app.get(
     }),
 )
 app.route("/auth", authRoute) // has some public routes and some more protected
+app.route("/users", usersRoute)
 app.route("/push", pushNotificationRoute)
+app.route("/ws", wsRoute)
 app.route("/github", githubRoute)
+if (config.isDev) {
+  const { devRoute } = await import("./routes/dev.ts")
+  app.route("/test", devRoute)
+}
 
 export default app

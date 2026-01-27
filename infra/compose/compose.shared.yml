@@ -61,7 +61,7 @@ services:
       - POSTGRES_PASSWORD=${DB_PASS}
       - POSTGRES_DB=${DB_NAME}
     ports:
-      - ${DB_PORT}:5432
+      - ${DB_HOST_PORT:-${DB_PORT}}:5432
     healthcheck:
       test: [ 'CMD', 'pg_isready', '-d', '${DB_NAME}', '-U', '${DB_USER}' ]
     security_opt:
@@ -74,7 +74,7 @@ services:
     volumes:
       - ../../.volumes/kv:/data:Z
     ports:
-      - ${KV_PORT}:6379
+      - ${KV_HOST_PORT:-${KV_PORT}}:6379
     command:
       [
         'valkey-server',
@@ -424,9 +424,14 @@ services:
         max-file: '3'
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.api.rule=Host(`${DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))'
-      - 'traefik.http.services.api.loadbalancer.server.port=${API_PORT}'
-      - 'traefik.http.routers.api.entrypoints=web'
+      - 'traefik.http.routers.api-${PROJECT}.rule=Host(`${DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))'
+      - 'traefik.http.routers.api-${PROJECT}.entrypoints=web'
+      - 'traefik.http.routers.api-${PROJECT}.service=api-${PROJECT}'
+      - 'traefik.http.services.api-${PROJECT}.loadbalancer.server.port=${API_PORT}'
+      - 'traefik.docker.network=proxy'
+    networks:
+      - default
+      - proxy
 
   web:
     container_name: ${PROJECT}-web
@@ -460,14 +465,23 @@ services:
         condition: service_started
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.web.rule=Host(`${DOMAIN}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`)"
-      - "traefik.http.routers.web.entrypoints=web"
-      - "traefik.http.services.web.loadbalancer.server.port=8080"
+      - "traefik.http.routers.web-${PROJECT}.rule=Host(`${DOMAIN}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`)"
+      - "traefik.http.routers.web-${PROJECT}.entrypoints=web"
+      - "traefik.http.routers.web-${PROJECT}.service=web-${PROJECT}"
+      - "traefik.http.services.web-${PROJECT}.loadbalancer.server.port=8080"
+      - "traefik.docker.network=proxy"
+    networks:
+      - default
+      - proxy
     healthcheck:
       test: ["CMD", "wget", "--spider", "http://127.0.0.1:8080"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+networks:
+  proxy:
+    external: true
   # endregion API & Web
 
   # region Networking

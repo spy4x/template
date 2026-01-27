@@ -4,6 +4,7 @@ import {
   UserKey,
   UserSession,
   UserPushToken,
+  AuthAudit,
   ValidationSchema,
 } from "@shared/types"
 
@@ -32,6 +33,7 @@ export class PublicAPICache {
   userKey = buildMethods<UserKey>(`userKey`)
   userSession = buildMethods<UserSession>(`userSession`)
   userPushToken = buildMethods<UserPushToken>(`userPushToken`)
+  authAudit = buildMethods<AuthAudit>(`authAudit`)
   isSessionTokenExpired = buildMethodsBase<boolean>(
     cacheService,
     `isSessionTokenExpired`,

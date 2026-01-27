@@ -1,6 +1,8 @@
 import {
   User,
   UserBase,
+  AuthAudit,
+  AuthAuditBase,
   UserKey,
   UserKeyKind,
   UserPushToken,
@@ -337,6 +339,22 @@ export class DbService extends DbServiceBase {
             SET updated_at = NOW(), deleted_at = NOW()
             WHERE user_id = ${params.userId}
             RETURNING *`
+    },
+  }
+
+  authAudit = {
+    ...this.buildMethods<AuthAudit, AuthAuditBase, Partial<AuthAuditBase>>(
+      `auth_audits`,
+      publicAPICache.authAudit,
+    ),
+    findMany: async (params: { userId: number; limit?: number }): Promise<AuthAudit[]> => {
+      const limit = params.limit && params.limit > 0 ? params.limit : 50
+      return await this.sql<AuthAudit[]>`
+        SELECT *
+        FROM auth_audits
+        WHERE user_id = ${params.userId}
+        ORDER BY created_at DESC
+        LIMIT ${limit}`
     },
   }
 }
