@@ -7,6 +7,16 @@ import type {
 import { apiFetch } from "./api.ts"
 import { sessionState, SessionUser } from "./session.ts"
 
+async function fetchAndUpdateProfile(): Promise<void> {
+  const profile = await apiFetch<ProfileResponse>("/api/users/me")
+  if (profile.ok) {
+    sessionState.value = {
+      ...sessionState.value,
+      user: profile.data.user,
+    }
+  }
+}
+
 export async function bootstrapSession(): Promise<void> {
   const me = await apiFetch<User>("/api/auth/me")
   if (!me.ok) {
@@ -23,13 +33,26 @@ export async function bootstrapSession(): Promise<void> {
     user: me.data,
     isReady: true,
   }
-  const profile = await apiFetch<ProfileResponse>("/api/users/me")
-  if (profile.ok) {
-    sessionState.value = {
-      ...sessionState.value,
-      user: profile.data.user,
-    }
+  await fetchAndUpdateProfile()
+}
+
+async function handleAuthResponse(
+  result: Awaited<ReturnType<typeof apiFetch<SessionUser>>>,
+): Promise<{ ok: boolean; mfaRequired: boolean; error?: string }> {
+  if (!result.ok) {
+    return { ok: false, mfaRequired: false, error: result.error.message }
   }
+  const mfaRequired = result.status === 202
+  sessionState.value = {
+    ...sessionState.value,
+    user: result.data,
+    isMfaRequired: mfaRequired,
+    isReady: true,
+  }
+  if (!mfaRequired) {
+    await fetchAndUpdateProfile()
+  }
+  return { ok: true, mfaRequired }
 }
 
 export async function signIn(username: string, password: string): Promise<{
@@ -41,26 +64,7 @@ export async function signIn(username: string, password: string): Promise<{
     method: "POST",
     body: JSON.stringify({ username, password }),
   })
-  if (!result.ok) {
-    return { ok: false, mfaRequired: false, error: result.error.message }
-  }
-  const mfaRequired = result.status === 202
-  sessionState.value = {
-    ...sessionState.value,
-    user: result.data,
-    isMfaRequired: mfaRequired,
-    isReady: true,
-  }
-  if (!mfaRequired) {
-    const profile = await apiFetch<ProfileResponse>("/api/profile")
-    if (profile.ok) {
-      sessionState.value = {
-        ...sessionState.value,
-        user: profile.data.user,
-      }
-    }
-  }
-  return { ok: true, mfaRequired }
+  return handleAuthResponse(result)
 }
 
 export async function signUp(username: string, password: string): Promise<{
@@ -72,26 +76,7 @@ export async function signUp(username: string, password: string): Promise<{
     method: "POST",
     body: JSON.stringify({ username, password }),
   })
-  if (!result.ok) {
-    return { ok: false, mfaRequired: false, error: result.error.message }
-  }
-  const mfaRequired = result.status === 202
-  sessionState.value = {
-    ...sessionState.value,
-    user: result.data,
-    isMfaRequired: mfaRequired,
-    isReady: true,
-  }
-  if (!mfaRequired) {
-    const profile = await apiFetch<ProfileResponse>("/api/profile")
-    if (profile.ok) {
-      sessionState.value = {
-        ...sessionState.value,
-        user: profile.data.user,
-      }
-    }
-  }
-  return { ok: true, mfaRequired }
+  return handleAuthResponse(result)
 }
 
 export async function signOut(): Promise<void> {
@@ -116,13 +101,7 @@ export async function checkTotp(otp: string): Promise<{ ok: boolean; error?: str
     user: result.data,
     isMfaRequired: false,
   }
-  const profile = await apiFetch<ProfileResponse>("/api/users/me")
-  if (profile.ok) {
-    sessionState.value = {
-      ...sessionState.value,
-      user: profile.data.user,
-    }
-  }
+  await fetchAndUpdateProfile()
   return { ok: true }
 }
 
