@@ -12,9 +12,129 @@ import {
 } from "@shared/types"
 import { DbServiceBase } from "@server/db"
 import { publicAPICache } from "./cache.ts"
+import type { GithubActionRun, GithubWebhookEvent } from "@api/services/github/types.ts"
+import { GithubActionStatus, GithubWebhookStatus } from "@api/services/github/types.ts"
 // import { getLatestMetrics } from "../routes/metric.ts"
 
 export class DbService extends DbServiceBase {
+  githubWebhookEvent = {
+    createOne: async (params: {
+      deliveryId: string
+      event: string
+      action?: string | null
+      repoFullName?: string | null
+      payload: unknown
+      status?: GithubWebhookStatus
+      error?: string | null
+    }): Promise<GithubWebhookEvent> => {
+      const created = (
+        await this.sql<GithubWebhookEvent[]>`
+          INSERT INTO github_webhook_events
+            (delivery_id, event, action, repo_full_name, payload, status, error)
+          VALUES (
+            ${params.deliveryId},
+            ${params.event},
+            ${params.action ?? null},
+            ${params.repoFullName ?? null},
+            ${JSON.stringify(params.payload)},
+            ${params.status ?? GithubWebhookStatus.RECEIVED},
+            ${params.error ?? null}
+          )
+          ON CONFLICT (delivery_id) DO NOTHING
+          RETURNING *`
+      )[0]
+      if (created) return created
+      return (
+        await this.sql<GithubWebhookEvent[]>`
+          SELECT * FROM github_webhook_events WHERE delivery_id = ${params.deliveryId} LIMIT 1`
+      )[0]
+    },
+    updateStatus: async (params: {
+      id: number
+      status: GithubWebhookStatus
+      error?: string | null
+    }): Promise<GithubWebhookEvent> => {
+      const updated = (
+        await this.sql<GithubWebhookEvent[]>`
+          UPDATE github_webhook_events
+          SET status = ${params.status}, error = ${params.error ?? null}
+          WHERE id = ${params.id}
+          RETURNING *`
+      )[0]
+      return updated
+    },
+    claimBatch: async (params: { limit: number }): Promise<GithubWebhookEvent[]> => {
+      return await this.sql<GithubWebhookEvent[]>`
+        UPDATE github_webhook_events
+        SET status = ${GithubWebhookStatus.PROCESSING}
+        WHERE id IN (
+          SELECT id FROM github_webhook_events
+          WHERE status = ${GithubWebhookStatus.RECEIVED}
+          ORDER BY received_at ASC
+          LIMIT ${params.limit}
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *`
+    },
+  }
+
+  githubActionRun = {
+    createOne: async (params: {
+      webhookEventId?: number | null
+      actionKind: number
+      command?: string | null
+      args?: unknown | null
+      status?: GithubActionStatus
+      stdout?: string | null
+      stderr?: string | null
+    }): Promise<GithubActionRun> => {
+      const created = (
+        await this.sql<GithubActionRun[]>`
+          INSERT INTO github_action_runs
+            (webhook_event_id, action_kind, command, args, status, stdout, stderr)
+          VALUES (
+            ${params.webhookEventId ?? null},
+            ${params.actionKind},
+            ${params.command ?? null},
+            ${params.args ? JSON.stringify(params.args) : null},
+            ${params.status ?? GithubActionStatus.QUEUED},
+            ${params.stdout ?? null},
+            ${params.stderr ?? null}
+          )
+          RETURNING *`
+      )[0]
+      return created
+    },
+    updateOne: async (params: {
+      id: number
+      status: GithubActionStatus
+      stdout?: string | null
+      stderr?: string | null
+    }): Promise<GithubActionRun> => {
+      const updated = (
+        await this.sql<GithubActionRun[]>`
+          UPDATE github_action_runs
+          SET updated_at = NOW(), status = ${params.status},
+            stdout = ${params.stdout ?? null}, stderr = ${params.stderr ?? null}
+          WHERE id = ${params.id}
+          RETURNING *`
+      )[0]
+      return updated
+    },
+    findLatestByIssue: async (params: {
+      repoFullName: string
+      issueNumber: number
+    }): Promise<GithubActionRun | null> => {
+      return (
+        await this.sql<GithubActionRun[]>`
+          SELECT * FROM github_action_runs
+          WHERE args->>'repoFullName' = ${params.repoFullName}
+            AND args->>'issueNumber' = ${String(params.issueNumber)}
+          ORDER BY created_at DESC
+          LIMIT 1`
+      )[0] ?? null
+    },
+  }
   user = {
     ...this.buildMethods<User, UserBase, Partial<UserBase>>(`users`, publicAPICache.user),
   }

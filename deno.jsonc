@@ -4,7 +4,8 @@
     "build": "deno task web:build", // used in terminal to build production docker images
 
     // #region apps/api
-    "api:dev": "deno serve --allow-net --allow-read=vapid.json --allow-env --watch apps/api/index.ts", // used in docker-compose to start the API server in development mode
+    "api:dev": "deno serve --allow-all --watch apps/api/index.ts", // used in docker-compose to start the API server in development mode
+    "api:prod": "deno serve --allow-all apps/api/index.ts", // production mode - no watch
     // #endregion apps/api
 
     // #region apps/web
@@ -23,6 +24,7 @@
     "proxy:start": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env up -d",
     "proxy:stop": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env down",
     "deploy": "deno run -R=./infra --allow-run=rsync,ssh ./infra/scripts/deploy.ts",
+    "worker:github": "deno run -A apps/api/services/github/worker.ts",
     // #endregion Scripts
 
     // #region Checks
