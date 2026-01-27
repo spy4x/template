@@ -1,8 +1,12 @@
 import {
   User,
   UserBase,
+  AuthAudit,
+  AuthAuditBase,
   UserKey,
   UserKeyKind,
+  UserProfile,
+  UserProfileBase,
   UserPushToken,
   UserPushTokenBase,
   UserSession,
@@ -217,6 +221,56 @@ export class DbService extends DbServiceBase {
             SET updated_at = NOW(), deleted_at = NOW()
             WHERE user_id = ${params.userId}
             RETURNING *`
+    },
+  }
+
+  userProfile = {
+    ...this.buildMethods<UserProfile, UserProfileBase, Partial<UserProfileBase>>(
+      `user_profiles`,
+      publicAPICache.userProfile,
+    ),
+    findByUser: async (params: { userId: number }): Promise<UserProfile | null> => {
+      return (
+        await this.sql<UserProfile[]>`
+        SELECT *
+        FROM user_profiles
+        WHERE user_id = ${params.userId}
+        LIMIT 1`
+      )[0]
+    },
+    upsert: async (params: {
+      userId: number
+      data: UserProfileBase & { updatedBy: number }
+    }): Promise<UserProfile> => {
+      const row = (
+        await this.sql<UserProfile[]>`
+        INSERT INTO user_profiles (user_id, display_name, updated_by)
+        VALUES (${params.userId}, ${params.data.displayName}, ${params.data.updatedBy})
+        ON CONFLICT (user_id)
+        DO UPDATE SET display_name = EXCLUDED.display_name, updated_by = EXCLUDED.updated_by,
+          updated_at = NOW()
+        RETURNING *`
+      )[0]
+      if (row) {
+        await publicAPICache.userProfile.set(row.id, row)
+      }
+      return row
+    },
+  }
+
+  authAudit = {
+    ...this.buildMethods<AuthAudit, AuthAuditBase, Partial<AuthAuditBase>>(
+      `auth_audits`,
+      publicAPICache.authAudit,
+    ),
+    findMany: async (params: { userId: number; limit?: number }): Promise<AuthAudit[]> => {
+      const limit = params.limit && params.limit > 0 ? params.limit : 50
+      return await this.sql<AuthAudit[]>`
+        SELECT *
+        FROM auth_audits
+        WHERE user_id = ${params.userId}
+        ORDER BY created_at DESC
+        LIMIT ${limit}`
     },
   }
 }

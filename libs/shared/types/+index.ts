@@ -82,6 +82,18 @@ export type User = typeof userSchema.infer
 export const userUpdateSchema = userBaseSchema.pick("firstName", "lastName")
 export type UserUpdate = typeof userUpdateSchema.infer
 
+export const userProfileSchema = BaseModelSchema.and(type({
+  userId: "number",
+  displayName: `1 <= string <= ${NAME_MAX_LENGTH}`,
+  updatedBy: "number",
+}))
+export type UserProfile = typeof userProfileSchema.infer
+
+export const userProfileBaseSchema = type({
+  displayName: `1 <= string <= ${NAME_MAX_LENGTH}`,
+})
+export type UserProfileBase = typeof userProfileBaseSchema.infer
+
 export const authOTPSchema = type({
   otp: "string.numeric == 6",
 })
@@ -176,3 +188,159 @@ export type UserPushTokenBase = typeof userPushTokenSchemaBase.infer
 
 export const userPushTokenSchema = BaseModelSchema.and(userPushTokenSchemaBase)
 export type UserPushToken = typeof userPushTokenSchema.infer
+
+export const userPushTokenPublicSchema = userPushTokenSchema.omit(
+  "endpoint",
+  "auth",
+  "p256dh",
+  "deletedAt",
+)
+export type UserPushTokenPublic = typeof userPushTokenPublicSchema.infer
+
+export const pushSubscriptionKeysSchema = type({
+  auth: "string <= 256",
+  p256dh: "string <= 256",
+})
+export type PushSubscriptionKeys = typeof pushSubscriptionKeysSchema.infer
+
+export const pushSubscriptionSchema = type({
+  endpoint: "string <= 256",
+  expirationTime: "number | null = null",
+  keys: pushSubscriptionKeysSchema,
+})
+export type PushSubscriptionJson = typeof pushSubscriptionSchema.infer
+
+export const pushSubscribeRequestSchema = type({
+  deviceId: "string <= 256",
+  subscription: pushSubscriptionSchema,
+})
+export type PushSubscribeRequest = typeof pushSubscribeRequestSchema.infer
+
+export const pushUnsubscribeRequestSchema = type({
+  deviceId: "string <= 256",
+})
+export type PushUnsubscribeRequest = typeof pushUnsubscribeRequestSchema.infer
+
+export const pushNotificationMessageSchema = type({
+  title: "1 <= string <= 120",
+  body: "string <= 500 | null = null",
+  url: "string <= 2048 | null = null",
+})
+export type PushNotificationMessage = typeof pushNotificationMessageSchema.infer
+
+export const wsReadyPayloadSchema = type({
+  requestId: "string | null = null",
+})
+export type WsReadyPayload = typeof wsReadyPayloadSchema.infer
+
+export const wsProfileUpdatedPayloadSchema = type({
+  profile: userProfileSchema,
+})
+export type WsProfileUpdatedPayload = typeof wsProfileUpdatedPayloadSchema.infer
+
+export const wsPushDevicesUpdatedPayloadSchema = type({
+  devices: userPushTokenPublicSchema.array(),
+})
+export type WsPushDevicesUpdatedPayload = typeof wsPushDevicesUpdatedPayloadSchema.infer
+
+export const wsAuthSignedOutPayloadSchema = type({
+  userId: "number",
+})
+export type WsAuthSignedOutPayload = typeof wsAuthSignedOutPayloadSchema.infer
+
+export const wsReadyEventSchema = type({
+  kind: "'ws.ready'",
+  payload: wsReadyPayloadSchema,
+})
+export const wsProfileUpdatedEventSchema = type({
+  kind: "'profile.updated'",
+  payload: wsProfileUpdatedPayloadSchema,
+})
+export const wsPushDevicesUpdatedEventSchema = type({
+  kind: "'push.devices.updated'",
+  payload: wsPushDevicesUpdatedPayloadSchema,
+})
+export const wsAuthSignedOutEventSchema = type({
+  kind: "'auth.signed_out'",
+  payload: wsAuthSignedOutPayloadSchema,
+})
+export const wsProfileEventSchema = wsReadyEventSchema
+  .or(wsProfileUpdatedEventSchema)
+  .or(wsPushDevicesUpdatedEventSchema)
+  .or(wsAuthSignedOutEventSchema)
+export type WsProfileEvent = typeof wsProfileEventSchema.infer
+
+export enum AuthAuditEventType {
+  SIGNED_UP = 1,
+  SIGNED_IN = 2,
+  SIGNED_OUT = 3,
+  PROFILE_UPDATED = 4,
+}
+
+export const authAuditBaseSchema = type({
+  userId: "number = 0",
+  eventType: type.enumerated(
+    AuthAuditEventType.SIGNED_UP,
+    AuthAuditEventType.SIGNED_IN,
+    AuthAuditEventType.SIGNED_OUT,
+    AuthAuditEventType.PROFILE_UPDATED,
+  ),
+  identifier: "string <= 100 | null = null",
+  ip: "string <= 45 | null = null",
+  userAgent: "string <= 300 | null = null",
+})
+export type AuthAuditBase = typeof authAuditBaseSchema.infer
+
+export const authAuditSchema = BaseModelSchema.and(authAuditBaseSchema)
+export type AuthAudit = typeof authAuditSchema.infer
+
+export type RequestInfo = {
+  requestId?: string
+  ip?: string
+  userAgent?: string
+}
+
+export type ApiError = {
+  status: number
+  message: string
+}
+
+export type ApiResult<T> =
+  | { ok: true; status: number; data: T }
+  | { ok: false; status: number; error: ApiError }
+
+export type ApiErrorResponse = {
+  error: string
+}
+
+export type ApiSuccessResponse = {
+  success: boolean
+}
+
+export type ApiIsSuccessResponse = {
+  isSuccess: boolean
+}
+
+export type ProfileResponse = {
+  user: User
+  profile: UserProfile | null
+}
+
+export type PushSubscriptionData = PushSubscriptionJson
+
+export type PushPublicKeyResponse = {
+  publicKey: string
+}
+
+export type PushDevicesResponse = {
+  data: UserPushTokenPublic[]
+}
+
+export type PushSubscribeResponse = {
+  userPushToken: UserPushTokenPublic
+}
+
+export type TotpConnectStartResponse = {
+  qrcode: string
+  secret: string
+}

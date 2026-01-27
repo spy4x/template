@@ -2,8 +2,10 @@ import { KeyValueService } from "@server/kv"
 import {
   User,
   UserKey,
+  UserProfile,
   UserSession,
   UserPushToken,
+  AuthAudit,
   ValidationSchema,
 } from "@shared/types"
 
@@ -30,8 +32,10 @@ export enum CacheTTL {
 export class PublicAPICache {
   user = buildMethods<User>(`user`)
   userKey = buildMethods<UserKey>(`userKey`)
+  userProfile = buildMethods<UserProfile>(`userProfile`)
   userSession = buildMethods<UserSession>(`userSession`)
   userPushToken = buildMethods<UserPushToken>(`userPushToken`)
+  authAudit = buildMethods<AuthAudit>(`authAudit`)
   isSessionTokenExpired = buildMethodsBase<boolean>(
     cacheService,
     `isSessionTokenExpired`,

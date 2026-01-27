@@ -28,9 +28,15 @@ Deno-first monorepo starter. Auth + web-push only. Minimal web shell. No domain 
 
 ## Run (dev)
 ```sh
+deno task proxy:start
 deno task dev
 ```
 Open: https://app.localhost
+
+Stop proxy:
+```sh
+deno task proxy:stop
+```
 
 ## Auth API (no UI)
 ```sh

@@ -6,4 +6,10 @@ import { render } from "preact"
 import { App } from "./app.tsx"
 import { getEnvVar } from "@client/vite/env.ts"
 
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => undefined)
+  })
+}
+
 render(<App />, document.getElementById("app") as HTMLElement)

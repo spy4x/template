@@ -7,6 +7,9 @@ import { db } from "../db.ts"
 import { TOTPMethod } from "./totp.ts"
 import { APIContext } from "../../_types.ts"
 import { UserMFAStatus } from "@shared/types"
+import { eventBus } from "@api/services/eventBus.ts"
+import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
+import { requestInfoFromContext } from "@api/services/request-info.ts"
 
 class Auth {
   private cookie = new CookieManager()
@@ -55,6 +58,12 @@ class Auth {
       id: authData.user.id,
       data: { lastLoginAt: new Date() },
     })
+    eventBus.emit(
+      new UserSignedInEvent({
+        user: authData.user,
+        request: requestInfoFromContext(context),
+      }),
+    )
     return authData
   }
 
@@ -72,6 +81,14 @@ class Auth {
       context,
       authData.user.id,
       this.session.getIdTokenForCookie(authData.session),
+    )
+
+    eventBus.emit(
+      new UserSignedUpEvent({
+        user: authData.user,
+        username,
+        request: requestInfoFromContext(context),
+      }),
     )
 
     return authData
@@ -122,6 +139,15 @@ class Auth {
     this.cookie.invalidate(context)
     if (sessionIdToken) {
       await auth.session.delete(sessionIdToken)
+    }
+    const authData = context.get("auth")
+    if (authData) {
+      eventBus.emit(
+        new UserSignedOutEvent({
+          userId: authData.user.id,
+          request: requestInfoFromContext(context),
+        }),
+      )
     }
   }
 
