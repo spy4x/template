@@ -17,6 +17,10 @@ import type {
   PushSubscribeResponse,
   PushUnsubscribeRequest,
   UserPushTokenPublic,
+  GitHubInstallationsResponse,
+  GitHubReposResponse,
+  GitHubInstallation,
+  GitHubRepo,
 } from "@shared/types"
 
 export function ProfileView() {
@@ -39,11 +43,25 @@ export function ProfileView() {
   const [pushPublicKey, setPushPublicKey] = useState<string | null>(null)
   const [pushError, setPushError] = useState<string | null>(null)
   const [pushBusy, setPushBusy] = useState(false)
+  const [githubInstallations, setGithubInstallations] = useState<GitHubInstallation[]>([])
+  const [githubRepos, setGithubRepos] = useState<GitHubRepo[]>([])
+  const [githubBusy, setGithubBusy] = useState(false)
+  const [githubError, setGithubError] = useState<string | null>(null)
+  const [expandedInstallations, setExpandedInstallations] = useState<Set<number>>(new Set())
+  const [githubConnected, setGithubConnected] = useState(false)
 
   useEffect(() => {
     setFirstName(session.user?.firstName || "")
     setLastName(session.user?.lastName || "")
   }, [session.user?.firstName, session.user?.lastName])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("github_connected") === "true") {
+      setGithubConnected(true)
+      window.history.replaceState({}, "", window.location.pathname)
+    }
+  }, [])
 
   useEffect(() => {
     if (!session.user || session.isMfaRequired) return
@@ -52,6 +70,12 @@ export function ProfileView() {
     })
     apiFetch<PushPublicKeyResponse>("/api/push/public-key").then((res) => {
       if (res.ok) setPushPublicKey(res.data.publicKey)
+    })
+    apiFetch<GitHubInstallationsResponse>("/api/github/installations").then((res) => {
+      if (res.ok) setGithubInstallations(res.data.installations)
+    })
+    apiFetch<GitHubReposResponse>("/api/github/repos").then((res) => {
+      if (res.ok) setGithubRepos(res.data.repos)
     })
   }, [session.user?.id, session.isMfaRequired])
 
@@ -203,6 +227,39 @@ export function ProfileView() {
       body: JSON.stringify({ deviceId } satisfies PushUnsubscribeRequest),
     })
     setPushBusy(false)
+  }
+
+  const connectGitHub = () => {
+    window.location.href = "/api/github/connect"
+  }
+
+  const disconnectGitHub = async (id: number) => {
+    setGithubBusy(true)
+    setGithubError(null)
+    const result = await apiFetch<ApiIsSuccessResponse>(`/api/github/installations/${id}`, {
+      method: "DELETE",
+    })
+    setGithubBusy(false)
+    if (!result.ok) {
+      setGithubError(result.error.message)
+      return
+    }
+    const res = await apiFetch<GitHubInstallationsResponse>("/api/github/installations")
+    if (res.ok) setGithubInstallations(res.data.installations)
+    const reposRes = await apiFetch<GitHubReposResponse>("/api/github/repos")
+    if (reposRes.ok) setGithubRepos(reposRes.data.repos)
+  }
+
+  const toggleInstallation = (id: number) => {
+    setExpandedInstallations((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
   }
 
   return (
@@ -405,6 +462,114 @@ export function ProfileView() {
                   </button>
                 </div>
               ))
+            )}
+        </div>
+      </section>
+
+      <section class="rounded-2xl border border-slate-800 bg-slate-900 p-6 sm:p-8">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h3 class="text-lg font-semibold">GitHub Integration</h3>
+          {githubInstallations.length === 0
+            ? (
+              <button
+                data-e2e="github-connect"
+                class="w-full rounded-lg bg-indigo-500 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60 sm:w-auto"
+                onClick={connectGitHub}
+                disabled={githubBusy}
+              >
+                {githubBusy ? "Working..." : "Connect GitHub"}
+              </button>
+            )
+            : null}
+        </div>
+        {githubConnected
+          ? (
+            <div
+              data-e2e="github-connected"
+              class="mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200"
+            >
+              GitHub connected successfully
+            </div>
+          )
+          : null}
+        {githubError
+          ? (
+            <div class="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+              {githubError}
+            </div>
+          )
+          : null}
+        <div class="mt-4 space-y-3">
+          {githubInstallations.length === 0
+            ? <div class="text-sm text-slate-400">No GitHub installations connected.</div>
+            : (
+              githubInstallations.map((installation) => {
+                const installationRepos = githubRepos.filter(
+                  (repo) => repo.installationId === installation.id,
+                )
+                const isExpanded = expandedInstallations.has(installation.id)
+                return (
+                  <div
+                    key={installation.id}
+                    class="rounded-lg border border-slate-800 bg-slate-950"
+                    data-e2e={`github-installation-${installation.id}`}
+                  >
+                    <div class="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div class="flex-1">
+                        <div class="flex items-center gap-2">
+                          <div class="font-medium text-slate-300">{installation.accountLogin}</div>
+                          {installation.suspended
+                            ? <span class="text-xs text-rose-300">(Suspended)</span>
+                            : null}
+                        </div>
+                        <div class="text-xs text-slate-500">
+                          {installation.repoCount} {installation.repoCount === 1 ? "repo" : "repos"}
+                        </div>
+                      </div>
+                      <div class="flex gap-2">
+                        {installationRepos.length > 0
+                          ? (
+                            <button
+                              data-e2e={`github-toggle-${installation.id}`}
+                              class="text-xs text-slate-400 hover:text-slate-300"
+                              onClick={() => toggleInstallation(installation.id)}
+                            >
+                              {isExpanded ? "Hide repos" : "Show repos"}
+                            </button>
+                          )
+                          : null}
+                        <button
+                          data-e2e={`github-disconnect-${installation.id}`}
+                          class="text-xs text-rose-300 hover:text-rose-200"
+                          onClick={() => disconnectGitHub(installation.id)}
+                          disabled={githubBusy}
+                        >
+                          Disconnect
+                        </button>
+                      </div>
+                    </div>
+                    {isExpanded && installationRepos.length > 0
+                      ? (
+                        <div class="border-t border-slate-800 px-3 py-2">
+                          <div class="space-y-1">
+                            {installationRepos.map((repo) => (
+                              <div
+                                key={repo.id}
+                                class="flex items-center gap-2 text-xs text-slate-400"
+                                data-e2e={`github-repo-${repo.id}`}
+                              >
+                                <span class="text-slate-500">›</span>
+                                <span>{repo.repoFullName}</span>
+                                {repo.private ? <span class="text-slate-600">(private)</span> : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                      : null}
+                  </div>
+                )
+              })
             )}
         </div>
       </section>

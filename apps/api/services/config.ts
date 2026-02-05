@@ -35,6 +35,7 @@ export class Config {
       .filter(Boolean),
     appId: getEnvVar("GH_APP_ID", true),
     appPrivateKey: getEnvVar("GH_APP_PRIVATE_KEY", true),
+    appSlug: getEnvVar("GH_APP_SLUG", true) || "opencode-app",
   }
 
   // Web App Configuration

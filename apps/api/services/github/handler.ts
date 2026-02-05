@@ -22,6 +22,14 @@ export type GithubEventInput = {
 export async function handleGithubEvent(input: GithubEventInput): Promise<void> {
   console.log(`🔧 handleGithubEvent: ${input.event}/${input.action}`)
   try {
+    if (input.event === "installation") {
+      await handleInstallationEvent(input)
+      return
+    }
+    if (input.event === "installation_repositories") {
+      await handleInstallationRepositoriesEvent(input)
+      return
+    }
     if (input.event === "issues") {
       if (!input.repoFullName) return
       if (!config.github.allowAllRepos && config.github.allowedRepos.length &&
@@ -32,6 +40,146 @@ export async function handleGithubEvent(input: GithubEventInput): Promise<void> 
     console.log(`ℹ️  Ignored event: ${input.event}`)
   } catch (error) {
     console.error("❌ Error handling GitHub event:", error)
+    throw error
+  }
+}
+
+async function handleInstallationEvent(input: GithubEventInput): Promise<void> {
+  const action = input.action
+  console.log(`🔧 Installation event: action=${action}`)
+  
+  try {
+    const installation = input.payload.installation as {
+      id?: number
+      account?: { login?: string; type?: string }
+      repository_selection?: string
+    } | undefined
+    
+    if (!installation?.id) {
+      console.log("⚠️  Missing installation.id in payload")
+      return
+    }
+    
+    const installationId = installation.id
+    const accountLogin = installation.account?.login ?? ""
+    const accountTypeStr = installation.account?.type ?? "User"
+    const accountType = accountTypeStr === "Organization" ? 2 : 1
+    const reposAccessStr = installation.repository_selection ?? "all"
+    const reposAccess = reposAccessStr === "selected" ? 2 : 1
+    
+    if (action === "created") {
+      console.log(`➕ Installation created: ${installationId} (${accountLogin})`)
+      
+      // No user_id available in webhook - will link later via OAuth callback
+      const result = await db.githubInstallation.upsert({
+        userId: null,
+        installationId,
+        accountLogin,
+        accountType,
+        reposAccess,
+      })
+      
+      if (!result) {
+        console.log(`ℹ️  Installation ${installationId} queued for linking via OAuth`)
+        return
+      }
+      
+      // Upsert repositories if present
+      const repositories = input.payload.repositories as Array<{
+        id?: number
+        full_name?: string
+        private?: boolean
+      }> | undefined
+      
+      if (repositories?.length) {
+        console.log(`📦 Adding ${repositories.length} repos to installation ${result.id}`)
+        for (const repo of repositories) {
+          if (repo.id && repo.full_name) {
+            await db.githubRepo.upsert({
+              installationId: result.id,
+              repoId: repo.id,
+              repoFullName: repo.full_name,
+              private: repo.private ?? false,
+            })
+          }
+        }
+      }
+      
+      console.log(`✅ Installation ${installationId} processed`)
+    } else if (action === "deleted") {
+      console.log(`🗑️  Installation deleted: ${installationId}`)
+      await db.githubInstallation.suspendByInstallationId(installationId)
+      console.log(`✅ Installation ${installationId} suspended`)
+    }
+  } catch (error) {
+    console.error(`❌ Error handling installation event:`, error)
+    throw error
+  }
+}
+
+async function handleInstallationRepositoriesEvent(input: GithubEventInput): Promise<void> {
+  const action = input.action
+  console.log(`📦 Installation repositories event: action=${action}`)
+  
+  try {
+    const installation = input.payload.installation as {
+      id?: number
+    } | undefined
+    
+    if (!installation?.id) {
+      console.log("⚠️  Missing installation.id in payload")
+      return
+    }
+    
+    const installationId = installation.id
+    
+    // Find our internal installation record
+    const installationRecord = await db.githubInstallation.findByInstallationId(installationId)
+    
+    if (!installationRecord) {
+      console.log(`⚠️  Installation ${installationId} not found in DB`)
+      return
+    }
+    
+    if (action === "added") {
+      const repositories = input.payload.repositories_added as Array<{
+        id?: number
+        full_name?: string
+        private?: boolean
+      }> | undefined
+      
+      if (repositories?.length) {
+        console.log(`➕ Adding ${repositories.length} repos to installation ${installationRecord.id}`)
+        for (const repo of repositories) {
+          if (repo.id && repo.full_name) {
+            await db.githubRepo.upsert({
+              installationId: installationRecord.id,
+              repoId: repo.id,
+              repoFullName: repo.full_name,
+              private: repo.private ?? false,
+            })
+          }
+        }
+        console.log(`✅ Added ${repositories.length} repos`)
+      }
+    } else if (action === "removed") {
+      const repositories = input.payload.repositories_removed as Array<{
+        id?: number
+        full_name?: string
+      }> | undefined
+      
+      if (repositories?.length) {
+        console.log(`➖ Removing ${repositories.length} repos from installation ${installationRecord.id}`)
+        for (const repo of repositories) {
+          if (repo.id) {
+            await db.githubRepo.deleteByRepoId(repo.id)
+          }
+        }
+        console.log(`✅ Removed ${repositories.length} repos`)
+      }
+    }
+  } catch (error) {
+    console.error(`❌ Error handling installation_repositories event:`, error)
     throw error
   }
 }

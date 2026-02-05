@@ -378,6 +378,115 @@ export class DbService extends DbServiceBase {
         `
       )[0] ?? null
     },
+    findByUserId: async (userId: number) => {
+      return await this.sql<Array<{
+        id: number
+        userId: number
+        installationId: number
+        accountLogin: string
+        accountType: number
+        reposAccess: number
+        suspended: boolean
+        createdAt: Date
+        updatedAt: Date
+        repoCount: number
+      }>>`
+        SELECT 
+          gi.*,
+          COUNT(gr.id)::int as repo_count
+        FROM github_installations gi
+        LEFT JOIN github_repos gr ON gr.installation_id = gi.id
+        WHERE gi.user_id = ${userId}
+        GROUP BY gi.id
+        ORDER BY gi.created_at DESC
+      `
+    },
+    suspend: async (id: number) => {
+      return (
+        await this.sql<Array<{
+          id: number
+          userId: number
+          installationId: number
+          accountLogin: string
+          accountType: number
+          reposAccess: number
+          suspended: boolean
+          createdAt: Date
+          updatedAt: Date
+        }>>`
+          UPDATE github_installations
+          SET suspended = TRUE, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ${id}
+          RETURNING *
+        `
+      )[0] ?? null
+    },
+    suspendByInstallationId: async (installationId: number) => {
+      return (
+        await this.sql<Array<{
+          id: number
+          userId: number
+          installationId: number
+          accountLogin: string
+          accountType: number
+          reposAccess: number
+          suspended: boolean
+          createdAt: Date
+          updatedAt: Date
+        }>>`
+          UPDATE github_installations
+          SET suspended = TRUE, updated_at = CURRENT_TIMESTAMP
+          WHERE installation_id = ${installationId}
+          RETURNING *
+        `
+      )[0] ?? null
+    },
+    upsert: async (params: {
+      userId: number | null
+      installationId: number
+      accountLogin: string
+      accountType: number
+      reposAccess: number
+    }) => {
+      // user_id has NOT NULL constraint, skip if null (will link later via OAuth)
+      if (!params.userId) {
+        console.log(`⚠️  Skip upsert installation ${params.installationId} - no user_id`)
+        return null
+      }
+      return (
+        await this.sql<Array<{
+          id: number
+          userId: number
+          installationId: number
+          accountLogin: string
+          accountType: number
+          reposAccess: number
+          suspended: boolean
+          createdAt: Date
+          updatedAt: Date
+        }>>`
+          INSERT INTO github_installations
+            (user_id, installation_id, account_login, account_type, repos_access, suspended)
+          VALUES (
+            ${params.userId},
+            ${params.installationId},
+            ${params.accountLogin},
+            ${params.accountType},
+            ${params.reposAccess},
+            FALSE
+          )
+          ON CONFLICT (installation_id)
+          DO UPDATE SET
+            user_id = ${params.userId},
+            account_login = ${params.accountLogin},
+            account_type = ${params.accountType},
+            repos_access = ${params.reposAccess},
+            suspended = FALSE,
+            updated_at = CURRENT_TIMESTAMP
+          RETURNING *
+        `
+      )[0] ?? null
+    },
   }
 
   githubInstallationToken = {
@@ -440,6 +549,62 @@ export class DbService extends DbServiceBase {
           LIMIT 1
         `
       )[0] ?? null
+    },
+    findByUserId: async (userId: number) => {
+      return await this.sql<Array<{
+        id: number
+        installationId: number
+        repoId: number
+        repoFullName: string
+        private: boolean
+        webhookEnabled: boolean
+        createdAt: Date
+      }>>`
+        SELECT gr.*
+        FROM github_repos gr
+        INNER JOIN github_installations gi ON gi.id = gr.installation_id
+        WHERE gi.user_id = ${userId}
+        ORDER BY gr.created_at DESC
+      `
+    },
+    upsert: async (params: {
+      installationId: number
+      repoId: number
+      repoFullName: string
+      private: boolean
+    }) => {
+      return (
+        await this.sql<Array<{
+          id: number
+          installationId: number
+          repoId: number
+          repoFullName: string
+          private: boolean
+          webhookEnabled: boolean
+          createdAt: Date
+        }>>`
+          INSERT INTO github_repos
+            (installation_id, repo_id, repo_full_name, private)
+          VALUES (
+            ${params.installationId},
+            ${params.repoId},
+            ${params.repoFullName},
+            ${params.private}
+          )
+          ON CONFLICT (repo_id)
+          DO UPDATE SET
+            installation_id = ${params.installationId},
+            repo_full_name = ${params.repoFullName},
+            private = ${params.private}
+          RETURNING *
+        `
+      )[0]
+    },
+    deleteByRepoId: async (repoId: number) => {
+      await this.sql`
+        DELETE FROM github_repos
+        WHERE repo_id = ${repoId}
+      `
     },
   }
 }
