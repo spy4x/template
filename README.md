@@ -1,67 +1,75 @@
-# Tampines Hackathon Tool
+# Deno Platform Template
 
-Tool/server that connects to other repos. Triggered by GitHub Issues/Projects actions. Uses existing Deno-first monorepo infra. Decisions tracked in GitHub issues.
+Reusable Deno repository baseline for products that need API, web, worker, persistence, and
+offline sync foundations without product-specific business logic.
 
-## Goals
-- ship a demoable MVP in 48h
-- keep structure, security, auditability
-- avoid hard-lock tech choices when uncertain
+> **Migration status: WIP.** Current tree contains `apps/api`, `apps/web`, and
+> `libs/client`, `libs/server`, and `libs/shared`. Target directories below are not all present
+> yet. Target architecture below and ADR 001 are authoritative. Existing feature-specific code
+> and older docs remain as migration history.
 
-## Scope (MVP)
-- tool/server API for multi-repo orchestration
-- issue/project event triggers
-- API + persistent storage
-- tests + CI placeholder
-- schedule/automation placeholder
+## Deno policy
 
-## Detected tech stack (team decision)
-- Runtime: Deno
-- API: Hono
-- Web: Preact + Vite + Tailwind
-- Data: Postgres, Valkey
-- Infra: compose + deploy scripts
-- GitHub integration: gh cli (preferred)
+- Use Deno runtime and `deno task` for development, checks, builds, and operations.
+- Do not use Node.js, npm, pnpm, Yarn, or Bun commands.
+- Selected `npm:` dependencies may run through Deno when required by Vite, Preact, or Dexie.
+  This exception does not permit another runtime or task runner.
 
-## Repo map
-- `apps/api`: REST + WS-ready API
-- `apps/web`: minimal web shell (optional)
-- `libs/*`: shared libs
-- `infra/*`: env, compose, deploy
-- `docs/*`: plan, architecture, handoff
+## Quick start
 
-## How to run (dev)
+Current tasks come from
+[`deno.jsonc`](https://github.com/spy4x/template/blob/main/deno.jsonc).
+
 ```sh
 deno task proxy:start
 deno task dev
 ```
-Open: https://app.localhost
 
-Stop proxy:
+Stop local proxy:
+
 ```sh
 deno task proxy:stop
 ```
 
-## Worker
+Run repository checks:
+
 ```sh
-deno task worker:github
+deno task check
 ```
 
-## Security note
-Never commit secrets. Use env files or secret stores.
+## Target architecture
 
-## Acceptance checklist
-- README updated with goals + scope
-- architecture overview present (high-level)
-- issue templates + initial issues present
-- 48h milestone plan present
-- CI/test/schedule placeholders present
-- handoff note + open decisions listed
+Apps compose bounded domain and platform libraries: Postgres is authoritative, browser data is
+a Dexie projection, and REST endpoints dispatch CQRS flows with versioned, cursor-based,
+idempotent sync.
 
-## Docs
-- `docs/architecture-overview.md`
-- `docs/milestones-48h.md`
-- `docs/initial-issues/*.md`
-- `docs/ci-placeholder.md`
-- `docs/schedule-placeholder.md`
-- `docs/handoff.md`
-- `docs/integration-github.md`
+Target apps:
+
+- `apps/api`: REST, auth, authorization, CQRS dispatch, and sync transport.
+- `apps/spa`: offline-capable Preact/Vite client backed by Dexie.
+- `apps/mpa`: server-rendered multipage client for flows that do not need offline state.
+- `apps/worker`: asynchronous event handlers, projections, and integrations.
+
+Target libraries:
+
+- `libs/platform`: reusable technical primitives and contracts.
+- `libs/domain`: business rules, commands, events, and queries.
+- `libs/server`: Postgres and server-side adapters.
+- `libs/client`: browser, Dexie, Preact, and Vite adapters.
+
+`PERSONAL` and `SHARED` groups use one authorization and sync model. Full boundary and sync rules
+are recorded in
+[ADR 001](https://github.com/spy4x/template/blob/main/docs/decisions/001-deno-platform-template.md).
+
+Distribution proceeds in stages: Git template first, proven generic libraries on JSR second,
+then a CLI after generation and upgrade flows stabilize.
+
+## Documentation
+
+- [Architecture decision](https://github.com/spy4x/template/blob/main/docs/decisions/001-deno-platform-template.md)
+- [Contributing](https://github.com/spy4x/template/blob/main/CONTRIBUTING.md)
+
+## Maintenance
+
+Maintainer: docs owner. This file lives at repository root. Update it when target architecture,
+migration status, valid `deno task` commands, distribution stages, or documentation links change.
