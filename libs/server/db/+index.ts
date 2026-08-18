@@ -22,6 +22,7 @@ export { postgres }
 
 export class DbServiceBase {
   protected sql = sql
+  private pendingCacheOperations: Array<() => Promise<void>> | null = null
 
   protected setSql(_sql: typeof sql | Transaction): void {
     this.sql = _sql
@@ -29,19 +30,25 @@ export class DbServiceBase {
 
   async isConnected(): Promise<boolean> {
     try {
-      await sql`SELECT 1`
+      await this.sql`SELECT 1`
       return true
     } catch {
       return false
     }
   }
 
-  begin<T>(fn: (tx: this) => Promise<T>): Promise<T> {
-    return this.sql.begin((transaction) => {
-      const service = Object.create(this) as this
+  async begin<T>(fn: (tx: this) => Promise<T>): Promise<T> {
+    const pendingCacheOperations: Array<() => Promise<void>> = []
+    const result = await this.sql.begin(async (transaction: Transaction) => {
+      const service: this = Object.create(this)
       service.setSql(transaction)
-      return fn(service)
-    }) as Promise<T>
+      service.pendingCacheOperations = pendingCacheOperations
+      return await fn(service)
+    })
+    for (const operation of pendingCacheOperations) {
+      await operation()
+    }
+    return result
   }
 
   async connect(): Promise<void> {
@@ -72,6 +79,9 @@ export class DbServiceBase {
     id: number,
     command: postgres.PendingQuery<T[]>,
   ): Promise<null | T> {
+    if (this.pendingCacheOperations) {
+      return (await command)[0] ?? null
+    }
     return cache.wrap(id, async () => (await command)[0])
   }
 
@@ -81,7 +91,7 @@ export class DbServiceBase {
   ): Promise<T> {
     const created = (await command)[0]
     if (created) {
-      await cache.set(created.id, created)
+      await this.setCache(cache, created.id, created)
     }
     return created
   }
@@ -92,7 +102,7 @@ export class DbServiceBase {
   ): Promise<T> {
     const updated = (await command)[0]
     if (updated) {
-      await cache.set(updated.id, updated)
+      await this.setCache(cache, updated.id, updated)
     }
     return updated
   }
@@ -103,7 +113,7 @@ export class DbServiceBase {
   ): Promise<T> {
     const deleted = (await command)[0]
     if (deleted) {
-      await cache.delete(deleted.id)
+      await this.deleteCache(cache, deleted.id)
     }
     return deleted
   }
@@ -117,19 +127,21 @@ export class DbServiceBase {
         this.findOne<M>(
           cache,
           id,
-          sql`SELECT * FROM ${sql(table)} WHERE id = ${id}`,
+          this.sql`SELECT * FROM ${this.sql(table)} WHERE id = ${id}`,
         ),
       findChanged: async (updatedAtGt: Date): Promise<M[]> => {
-        return await sql<
+        return await this.sql<
           M[]
-        >`SELECT * FROM ${sql(table)} WHERE updated_at > ${updatedAtGt} ORDER BY updated_at DESC`
+        >`SELECT * FROM ${
+          this.sql(table)
+        } WHERE updated_at > ${updatedAtGt} ORDER BY updated_at DESC`
       },
       createOne: async ({ data }: { data: C }) =>
         this.createOne<M>(
           cache,
-          sql<M[]>`
-              INSERT INTO ${sql(table)}
-              ${sql(this.sanitize(data))}
+          this.sql<M[]>`
+              INSERT INTO ${this.sql(table)}
+              ${this.sql(this.sanitize(data))}
               RETURNING *`,
         ),
       updateOne: async (params: {
@@ -138,17 +150,17 @@ export class DbServiceBase {
       }) =>
         this.updateOne<M>(
           cache,
-          sql<M[]>`
-              UPDATE ${sql(table)}
-              SET updated_at = NOW(), ${sql(this.sanitize(params.data))}
+          this.sql<M[]>`
+              UPDATE ${this.sql(table)}
+              SET updated_at = NOW(), ${this.sql(this.sanitize(params.data))}
               WHERE id = ${params.id}
               RETURNING *`,
         ),
       deleteOne: async ({ id }: { id: number }) =>
         this.deleteOne<M>(
           cache,
-          sql<M[]>`
-              UPDATE ${sql(table)}
+          this.sql<M[]>`
+              UPDATE ${this.sql(table)}
               SET updated_at = NOW(), deleted_at = NOW()
               WHERE id = ${id}
               RETURNING *`,
@@ -156,12 +168,43 @@ export class DbServiceBase {
       undeleteOne: async ({ id }: { id: number }) =>
         this.updateOne<M>(
           cache,
-          sql<M[]>`
-              UPDATE ${sql(table)}
+          this.sql<M[]>`
+              UPDATE ${this.sql(table)}
               SET updated_at = NOW(), deleted_at = NULL
               WHERE id = ${id}
               RETURNING *`,
         ),
+    }
+  }
+
+  protected setCache<T extends postgres.Row>(
+    cache: PublicAPICacheModel<T>,
+    id: number,
+    value: T,
+  ): Promise<void> {
+    return this.runCacheOperation(() => cache.set(id, value))
+  }
+
+  protected deleteCache<T extends postgres.Row>(
+    cache: PublicAPICacheModel<T>,
+    id: number,
+  ): Promise<void> {
+    return this.runCacheOperation(() => cache.delete(id))
+  }
+
+  private runCacheOperation(operation: () => Promise<void>): Promise<void> {
+    if (this.pendingCacheOperations) {
+      this.pendingCacheOperations.push(() => this.executeCacheOperation(operation))
+      return Promise.resolve()
+    }
+    return this.executeCacheOperation(operation)
+  }
+
+  private async executeCacheOperation(operation: () => Promise<void>): Promise<void> {
+    try {
+      await operation()
+    } catch (error) {
+      console.error("Cache update failed", error)
     }
   }
 }

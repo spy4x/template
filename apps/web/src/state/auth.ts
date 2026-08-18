@@ -1,8 +1,4 @@
-import type {
-  ApiSuccessResponse,
-  TotpConnectStartResponse,
-  User,
-} from "@shared/types"
+import type { ApiSuccessResponse, TotpConnectStartResponse, User } from "@shared/types"
 import { apiFetch } from "./api.ts"
 import { sessionState, SessionUser } from "./session.ts"
 

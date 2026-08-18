@@ -14,8 +14,7 @@ export class UserSignedOutEvent implements Event<{ userId: number; request: Requ
   constructor(public data: { userId: number; request: RequestInfo }) {}
 }
 
-export class UserProfileUpdatedEvent
-  implements Event<{ user: User; request: RequestInfo }> {
+export class UserProfileUpdatedEvent implements Event<{ user: User; request: RequestInfo }> {
   constructor(public data: { user: User; request: RequestInfo }) {}
 }
 

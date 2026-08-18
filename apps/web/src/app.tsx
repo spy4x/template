@@ -25,6 +25,7 @@ function Shell() {
                 <>
                   <span class="hidden sm:block">{session.user.firstName || "User"}</span>
                   <button
+                    type="button"
                     data-e2e="signout"
                     class="rounded-md border border-slate-700 px-3 py-2 text-sm hover:border-slate-500"
                     onClick={() => signOut()}
@@ -33,9 +34,7 @@ function Shell() {
                   </button>
                 </>
               )
-              : (
-                <span>Guest</span>
-              )}
+              : <span>Guest</span>}
           </div>
         </div>
       </header>

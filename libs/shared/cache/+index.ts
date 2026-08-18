@@ -1,5 +1,17 @@
 import { validate, ValidationSchema } from "@shared/types"
 
+const isoDatePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/
+
+function parseCacheValue<T>(serialized: string): T {
+  return JSON.parse(
+    serialized,
+    (key, value) =>
+      key.endsWith("At") && typeof value === "string" && isoDatePattern.test(value)
+        ? new Date(value)
+        : value,
+  )
+}
+
 export interface ICacheStorage {
   /** Returns the value of the key if it exists, otherwise null */
   get(key: string): Promise<null | string>
@@ -38,7 +50,7 @@ export class CacheService implements ICacheService {
     if (!result) {
       return null
     }
-    return JSON.parse(result) as T
+    return parseCacheValue<T>(result)
   }
 
   public set<T>(key: string, value: T, ttlSec: number): Promise<void> {
@@ -57,7 +69,7 @@ export class CacheService implements ICacheService {
   ): Promise<T> {
     const data = await this.storage.get(key)
     if (data) {
-      return JSON.parse(data) as T
+      return parseCacheValue<T>(data)
     }
     const value = await fn()
     if (value || options.shouldSaveFalsy) {
@@ -71,29 +83,29 @@ export class CacheService implements ICacheService {
   }
 }
 
-export type PublicAPICacheModel<T> = {
-  key: (id: number) => string
+export type PublicAPICacheModel<T, K extends string | number = number> = {
+  key: (id: K) => string
   /** Cache expiration time in seconds */
   ttl: number
-  get: (id: number) => Promise<null | T>
-  set: (id: number, item: T) => Promise<void>
-  delete: (id: number) => Promise<void>
-  wrap: (id: number, fn: () => Promise<T>) => Promise<T>
+  get: (id: K) => Promise<null | T>
+  set: (id: K, item: T) => Promise<void>
+  delete: (id: K) => Promise<void>
+  wrap: (id: K, fn: () => Promise<T>) => Promise<T>
   wrapMany: (prefix: string, fn: () => Promise<T[]>) => Promise<T[]>
 }
 
-export const buildMethods = <T>(
+export const buildMethods = <T, K extends string | number = number>(
   cacheService: ICacheService,
   prefix: string,
   /** Cache expiration time in seconds */
   ttl: number,
   schema?: ValidationSchema,
-): PublicAPICacheModel<T> => {
-  const key = (id: number): string => `${prefix}_${id}`
+): PublicAPICacheModel<T, K> => {
+  const key = (id: K): string => `${prefix}_${id}`
   return {
     key,
     ttl,
-    get: async (id: number): Promise<null | T> => {
+    get: async (id: K): Promise<null | T> => {
       const result = await cacheService.get<T>(key(id))
       if (!result) {
         return null
@@ -107,13 +119,13 @@ export const buildMethods = <T>(
       }
       return result
     },
-    set: async (id: number, item: T): Promise<void> => {
+    set: async (id: K, item: T): Promise<void> => {
       return cacheService.set(key(id), item, ttl)
     },
-    delete: async (id: number): Promise<void> => {
+    delete: async (id: K): Promise<void> => {
       return cacheService.delete(key(id))
     },
-    wrap: async (id: number, fn: () => Promise<T>): Promise<T> => {
+    wrap: async (id: K, fn: () => Promise<T>): Promise<T> => {
       const result = await cacheService.wrap<T>(key(id), fn, ttl)
       if (schema) {
         const parseResult = validate(schema, result)

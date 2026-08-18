@@ -61,8 +61,8 @@ export function ProfileView() {
         setPushDevices(detail)
       }
     }
-    window.addEventListener("push.devices.updated", handler)
-    return () => window.removeEventListener("push.devices.updated", handler)
+    globalThis.addEventListener("push.devices.updated", handler)
+    return () => globalThis.removeEventListener("push.devices.updated", handler)
   }, [])
 
   if (!session.user) {
@@ -250,6 +250,7 @@ export function ProfileView() {
             )
             : null}
           <button
+            type="submit"
             data-e2e="profile-save"
             class="w-full rounded-lg bg-indigo-500 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60 sm:w-auto"
             disabled={busyProfile}
@@ -293,6 +294,7 @@ export function ProfileView() {
               )
               : null}
             <button
+              type="submit"
               data-e2e="password-save"
               class="w-full rounded-lg bg-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-white disabled:opacity-60 sm:w-auto"
               disabled={busyPassword}
@@ -310,6 +312,7 @@ export function ProfileView() {
             {!totpQr
               ? (
                 <button
+                  type="button"
                   data-e2e="totp-start"
                   class="w-full rounded-lg border border-slate-700 px-4 py-3 text-sm text-slate-100 hover:border-slate-500 disabled:opacity-60 sm:w-auto"
                   onClick={startTotp}
@@ -338,6 +341,7 @@ export function ProfileView() {
                     onInput={(e) => setTotpOtp((e.target as HTMLInputElement).value)}
                   />
                   <button
+                    type="button"
                     data-e2e="totp-connect-finish"
                     class="w-full rounded-lg bg-indigo-500 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60 sm:w-auto"
                     onClick={finishTotp}
@@ -348,6 +352,7 @@ export function ProfileView() {
                 </div>
               )}
             <button
+              type="button"
               data-e2e="totp-disable"
               class="w-full rounded-lg border border-rose-500/50 px-4 py-3 text-sm text-rose-200 hover:border-rose-400 disabled:opacity-60 sm:w-auto"
               onClick={disableTotp}
@@ -363,6 +368,7 @@ export function ProfileView() {
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h3 class="text-lg font-semibold">Push devices</h3>
           <button
+            type="button"
             data-e2e="push-register"
             class="w-full rounded-lg bg-indigo-500 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60 sm:w-auto"
             onClick={registerPush}
@@ -395,6 +401,7 @@ export function ProfileView() {
                     </div>
                   </div>
                   <button
+                    type="button"
                     data-e2e={`push-remove-${device.deviceId}`}
                     class="text-xs text-rose-300 hover:text-rose-200"
                     onClick={() => removePush(device.deviceId)}
@@ -414,7 +421,7 @@ export function ProfileView() {
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4)
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/")
-  const rawData = window.atob(base64)
+  const rawData = globalThis.atob(base64)
   const output = new Uint8Array(rawData.length)
   for (let i = 0; i < rawData.length; i += 1) {
     output[i] = rawData.charCodeAt(i)

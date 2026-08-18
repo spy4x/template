@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
 import { isAuthenticated2FA } from "../middlewares/auth.ts"
-import { validate, userProfileBaseSchema } from "@shared/types"
+import { userProfileBaseSchema, validate } from "@shared/types"
 import { commandBus } from "@api/services/commandBus.ts"
 import { queryBus } from "@api/services/queryBus.ts"
 import { UserProfileGetQuery } from "@api/cqrs/queries.ts"

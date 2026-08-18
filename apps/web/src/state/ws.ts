@@ -39,7 +39,7 @@ class WsClient {
 
   private scheduleReconnect() {
     if (this.reconnectTimer) return
-    this.reconnectTimer = window.setTimeout(() => {
+    this.reconnectTimer = globalThis.setTimeout(() => {
       this.reconnectTimer = null
       if (sessionState.value.user && !sessionState.value.isMfaRequired) {
         this.connect()
@@ -66,7 +66,7 @@ class WsClient {
       return
     }
     if (msg.kind === "push.devices.updated") {
-      window.dispatchEvent(
+      globalThis.dispatchEvent(
         new CustomEvent("push.devices.updated", {
           detail: msg.payload.devices,
         }),

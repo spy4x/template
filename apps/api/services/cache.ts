@@ -1,10 +1,10 @@
 import { KeyValueService } from "@server/kv"
 import {
+  AuthAudit,
   User,
   UserKey,
-  UserSession,
   UserPushToken,
-  AuthAudit,
+  UserSession,
   ValidationSchema,
 } from "@shared/types"
 
@@ -34,7 +34,7 @@ export class PublicAPICache {
   userSession = buildMethods<UserSession>(`userSession`)
   userPushToken = buildMethods<UserPushToken>(`userPushToken`)
   authAudit = buildMethods<AuthAudit>(`authAudit`)
-  isSessionTokenExpired = buildMethodsBase<boolean>(
+  isSessionTokenExpired = buildMethodsBase<boolean, string>(
     cacheService,
     `isSessionTokenExpired`,
     CacheTTL.day,

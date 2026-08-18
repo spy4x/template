@@ -1,6 +1,11 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
-import { createParseAuth, isAuthenticated1FA, isAuthenticated2FA, isRole } from "../../apps/api/middlewares/auth-guards.ts"
+import {
+  createParseAuth,
+  isAuthenticated1FA,
+  isAuthenticated2FA,
+  isRole,
+} from "../../apps/api/middlewares/auth-guards.ts"
 import { buildAuthData, stubContext } from "../helpers/fake-auth.ts"
 import { SessionMFAStatus, UserRole } from "../../libs/shared/types/+index.ts"
 

@@ -3,7 +3,9 @@ import { createMiddleware } from "hono/factory"
 import { APIContext } from "../_types.ts"
 import { SessionMFAStatus, UserRole } from "@shared/types"
 
-export type AuthResolver = (context: Context<APIContext>) => Promise<APIContext["Variables"]["auth"] | null>
+export type AuthResolver = (
+  context: Context<APIContext>,
+) => Promise<APIContext["Variables"]["auth"] | null>
 
 export const createParseAuth = (resolveAuth: AuthResolver) =>
   createMiddleware<APIContext>(async (c, next) => {

@@ -58,6 +58,7 @@ export function TotpView() {
           )
           : null}
         <button
+          type="submit"
           data-e2e="totp-submit"
           class="w-full rounded-lg bg-indigo-500 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60"
           disabled={busy}

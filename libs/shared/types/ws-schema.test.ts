@@ -1,6 +1,8 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
 import {
+  UserMFAStatus,
+  UserRole,
   validate,
   wsAuthSignedOutEventSchema,
   wsProfileEventSchema,
@@ -29,11 +31,13 @@ Deno.test("ws schema: accepts profile updated event", () => {
   const result = validate(wsProfileUpdatedEventSchema, {
     kind: "profile.updated",
     payload: {
-      profile: {
+      user: {
         id: 1,
-        userId: 1,
-        displayName: "User",
-        updatedBy: 1,
+        firstName: "Test",
+        lastName: "User",
+        lastLoginAt: new Date(),
+        mfa: UserMFAStatus.NOT_CONFIGURED,
+        role: UserRole.VIEWER,
         createdAt: new Date(),
         updatedAt: new Date(),
         deletedAt: null,

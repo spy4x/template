@@ -89,6 +89,7 @@ export function SignInView() {
           )
           : null}
         <button
+          type="submit"
           data-e2e="signin-submit"
           class="mt-6 w-full rounded-lg bg-indigo-500 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60"
           disabled={busy}

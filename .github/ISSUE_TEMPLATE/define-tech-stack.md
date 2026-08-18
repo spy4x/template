@@ -8,12 +8,14 @@ assignees: []
 ## System Required: Yes
 
 ### Detected stack (editable)
+
 - Runtime: Deno
 - API: Hono
 - Web: Preact + Vite + Tailwind
 - Data: Postgres, Valkey
 
 ### Reply here with:
+
 - Frontend: <choice>
 - Backend: <choice>
 - DB: <choice>

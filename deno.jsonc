@@ -41,8 +41,9 @@
     "fmt:check": "deno fmt --check",
     "lint:fix": "deno lint --fix",
     "lint:check": "deno lint",
-    "ts:check": "deno check **/*.ts",
-    "test": "ENV=dev deno test -A",
+    "ts:check": "deno run --allow-read --allow-run=deno infra/scripts/type-check.ts",
+    "test": "deno test --no-prompt libs/shared tests",
+    "test:integration": "deno test -E -N libs/server/db/+index.integration.test.ts",
     "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright test",
     "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright show-report",
     "fix": {

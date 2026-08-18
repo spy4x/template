@@ -6,11 +6,11 @@ import { UserProfileGetQuery } from "@api/cqrs/queries.ts"
 import { userProfileUpdateHandler } from "@api/cqrs/command-handlers/user-profile-update.ts"
 import { userProfileGetHandler } from "@api/cqrs/query-handlers/user-profile-get.ts"
 import {
+  PushDevicesUpdatedEvent,
   UserProfileUpdatedEvent,
   UserSignedInEvent,
   UserSignedOutEvent,
   UserSignedUpEvent,
-  PushDevicesUpdatedEvent,
 } from "@api/cqrs/events.ts"
 import { authAuditOnUserSignedUpHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-signed-up.ts"
 import { authAuditOnUserSignedInHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-signed-in.ts"
