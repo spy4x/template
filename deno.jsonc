@@ -24,7 +24,6 @@
     "proxy:start": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env up -d",
     "proxy:stop": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env down",
     "deploy": "deno run -R=./infra --allow-run=rsync,ssh ./infra/scripts/deploy.ts",
-    "worker:github": "deno run -A apps/api/services/github/worker.ts",
     // #endregion Scripts
 
     // #region Checks

@@ -6,4 +6,4 @@ USER root
 COPY --chown=1000:1000 . .
 USER 1000:1000
 
-CMD ["sh", "-c", "deno task db:migrate && deno task api:dev"]
+CMD ["sh", "-c", "deno task db:migrate && if [ \"$ENV\" = \"prod\" ]; then deno task api:prod; else deno task api:dev; fi"]

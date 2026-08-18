@@ -17,27 +17,6 @@ export class Config {
     limit: Number(getEnvVar("RATE_LIMITER_LIMIT")),
   }
 
-  github = {
-    webhookSecret: getEnvVar("GH_WEBHOOK_SECRET", true),
-    webhookEnforce: getEnvVar("GH_WEBHOOK_ENFORCE", true) === "1",
-    ghCliEnabled: getEnvVar("GH_CLI_ENABLED", true) === "1",
-    ghCliDryRun: getEnvVar("GH_CLI_DRY_RUN", true) === "1",
-    allowAllRepos: getEnvVar("GH_ALLOW_ALL_REPOS", true) === "1",
-    allowedRepos: getEnvVar("GH_ALLOWED_REPOS", true)
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
-    workspaceRoot: getEnvVar("WORKSPACE_ROOT", true) || "./workspaces",
-    opencodeCmd: getEnvVar("OPENCODE_CMD", true) || "opencode",
-    opencodeArgs: getEnvVar("OPENCODE_ARGS", true)
-      .split(" ")
-      .map((value) => value.trim())
-      .filter(Boolean),
-    appId: getEnvVar("GH_APP_ID", true),
-    appPrivateKey: getEnvVar("GH_APP_PRIVATE_KEY", true),
-    appSlug: getEnvVar("GH_APP_SLUG", true) || "opencode-app",
-  }
-
   // Web App Configuration
   domain = getEnvVar("DOMAIN")
   webAppUrl = `http${this.isDev ? "" : "s"}://${this.domain}`

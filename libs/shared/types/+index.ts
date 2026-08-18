@@ -337,34 +337,3 @@ export type TotpConnectStartResponse = {
   qrcode: string
   secret: string
 }
-
-export type GitHubInstallation = {
-  id: number
-  userId: number
-  installationId: number
-  accountLogin: string
-  accountType: number
-  reposAccess: number
-  suspended: boolean
-  createdAt: Date
-  updatedAt: Date
-  repoCount: number
-}
-
-export type GitHubRepo = {
-  id: number
-  installationId: number
-  repoId: number
-  repoFullName: string
-  private: boolean
-  webhookEnabled: boolean
-  createdAt: Date
-}
-
-export type GitHubInstallationsResponse = {
-  installations: GitHubInstallation[]
-}
-
-export type GitHubReposResponse = {
-  repos: GitHubRepo[]
-}
