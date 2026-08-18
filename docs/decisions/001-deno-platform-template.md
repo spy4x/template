@@ -8,9 +8,9 @@
 ## Context
 
 Repository is becoming a reusable product platform template rather than a product-specific app.
-It needs fixed runtime, app, library, tenancy, and sync boundaries before source migration starts.
-Current implementation still uses `apps/web` and `libs/shared`; `apps/spa`, `apps/mpa`,
-`apps/worker`, `libs/platform`, and `libs/domain` are target state, not completed components.
+It needs fixed runtime, app, library, group, and sync boundaries before source migration starts.
+Current implementation has all decided app and library directories. Generic CQRS primitives live
+in `libs/platform`; remaining `libs/shared` code still requires classification.
 
 Current task and dependency configuration is
 [`deno.jsonc`](https://github.com/spy4x/template/blob/main/deno.jsonc). Current source layout is
@@ -84,8 +84,7 @@ Distribution is staged:
 
 ## Consequences
 
-- Current `apps/web` must migrate toward `apps/spa`; server-rendered and worker apps remain WIP
-  until created.
+- `apps/spa` retains current client behavior while server-rendered and worker apps stay minimal.
 - Current `libs/shared` must split by platform and domain responsibility.
 - Postgres/Dexie reconciliation requires cursor, idempotency, and version metadata in every sync
   path.

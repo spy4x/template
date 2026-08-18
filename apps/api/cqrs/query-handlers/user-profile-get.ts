@@ -1,4 +1,4 @@
-import { QueryHandler } from "@shared/cqrs/types.ts"
+import { QueryHandler } from "@platform/cqrs/types.ts"
 import { UserProfileGetQuery } from "@api/cqrs/queries.ts"
 import { db } from "@api/services/db.ts"
 

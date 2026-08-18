@@ -1,0 +1,44 @@
+{
+  "tasks": {
+    "build": "deno run -A --node-modules-dir=auto npm:vite@7.3.6 build",
+    "check": "deno fmt --check . && deno lint . && deno check",
+    "dev": "deno run -A --node-modules-dir=auto npm:vite@7.3.6",
+    "start": "deno serve -A _fresh/server.js"
+  },
+  "imports": {
+    "@/": "./",
+    "@fresh/plugin-vite": "jsr:@fresh/plugin-vite@1.1.2",
+    "@types/babel__core": "npm:@types/babel__core@7.20.5",
+    "fresh": "jsr:@fresh/core@2.3.3",
+    "preact": "npm:preact@10.29.1",
+    "vite": "npm:vite@7.3.6"
+  },
+  "compilerOptions": {
+    "lib": ["dom", "dom.asynciterable", "dom.iterable", "deno.ns"],
+    "jsx": "precompile",
+    "jsxImportSource": "preact",
+    "jsxPrecompileSkipElements": [
+      "a",
+      "img",
+      "source",
+      "body",
+      "html",
+      "head",
+      "title",
+      "meta",
+      "script",
+      "link",
+      "style",
+      "base",
+      "noscript",
+      "template"
+    ],
+    "types": ["vite/client"]
+  },
+  "lint": {
+    "rules": {
+      "tags": ["fresh", "recommended"]
+    }
+  },
+  "exclude": ["**/_fresh/*"]
+}

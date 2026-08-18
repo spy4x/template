@@ -7,7 +7,7 @@ Create a clean template inside this repo under `/template` using the same top-le
 **Requirements:**
 - Keep Docker Compose, vertical scaling, Woodpecker CI
 - Same DB/auth stack
-- Multi-tenant needed, audit trails optional (we chose no audit table)
+- Groups needed, audit trails optional (we chose no audit table)
 - Remove Telegram entirely
 - Keep web push infra
 - Remove currency/exchange-rate infra
@@ -35,9 +35,9 @@ Copied specified folders/files into `/template` using rsync (dist removed):
 
 ### 3) Web App Minimal Shell
 
-- Removed `/template/apps/web/src/components`, `/routes`, `/state`, `/services`, `/assets`
-- Rewrote `apps/web/src/app.tsx` to simple placeholder
-- Rewrote `apps/web/src/app.css` to minimal styles
+- Removed `/template/apps/spa/src/components`, `/routes`, `/state`, `/services`, `/assets`
+- Rewrote `apps/spa/src/app.tsx` to simple placeholder
+- Rewrote `apps/spa/src/app.css` to minimal styles
 
 ### 4) Shared Libs Cleaned
 
@@ -75,8 +75,8 @@ Copied specified folders/files into `/template` using rsync (dist removed):
 
 ### 9) Rename "Financy" References
 
-- Updated `Dockerfile.base`, `apps/api/dockerfile`, `apps/web/dockerfile.*`, `infra/compose/compose.shared.yml` base image to `app/deno-base`
-- Updated `apps/web/index.html` title + manifest
+- Updated `Dockerfile.base`, `apps/api/dockerfile`, `apps/spa/dockerfile.*`, `infra/compose/compose.shared.yml` base image to `app/deno-base`
+- Updated `apps/spa/index.html` title + manifest
 - Updated `playwright.config.ts` header text
 - Updated db connection name to `app-backend`
 
@@ -99,8 +99,8 @@ Template is a clean infra/auth skeleton with web push and minimal web shell. Tel
 - `template/apps/api/services/config.ts`
 - `template/apps/api/services/cache.ts`
 - `template/apps/api/services/db.ts`
-- `template/apps/web/src/app.tsx`
-- `template/apps/web/src/app.css`
+- `template/apps/spa/src/app.tsx`
+- `template/apps/spa/src/app.css`
 - `template/docs/1.principles.md`
 - `template/docs/3.architecture.md`
 - `template/docs/4.tech-stack.md`
@@ -111,12 +111,12 @@ Template is a clean infra/auth skeleton with web push and minimal web shell. Tel
 - `template/infra/envs/.env.example`
 - `template/Dockerfile.base`
 - `template/apps/api/dockerfile`
-- `template/apps/web/dockerfile.dev`, `dockerfile.prod`
+- `template/apps/spa/dockerfile.dev`, `dockerfile.prod`
 - `template/infra/compose/compose.shared.yml`
 - `template/libs/server/db/+index.ts`
 - `template/playwright.config.ts`
-- `template/apps/web/index.html`
-- `template/apps/web/public/manifest.json`
+- `template/apps/spa/index.html`
+- `template/apps/spa/public/manifest.json`
 - `template/libs/server/kv/+index.ts` (connect name fixed)
 
 ### New Files
@@ -131,7 +131,7 @@ Template is a clean infra/auth skeleton with web push and minimal web shell. Tel
 - `template/apps/api/routes/telegram.ts`, `currencies.ts`, `gateway.ts`
 - `template/apps/api/services/exchange-rate-provider.ts`, `currency.ts`
 - `template/apps/api/services/websockets.ts`, `routes/websockets.ts`
-- `template/apps/web/src/components`, `routes`, `state`, `services`, `assets`
+- `template/apps/spa/src/components`, `routes`, `state`, `services`, `assets`
 - `template/e2e`
 - `template/docs/features`, `docs/2.features.md`, `docs/telegram-bot.md`, `docs/offline-first-with-dexie.md`
 - `template/libs/shared/helpers`, `constants`, `testing`, `rpc`, `local-storage`, `cqrs`
@@ -150,7 +150,7 @@ Template is a clean infra/auth skeleton with web push and minimal web shell. Tel
 - Keep template in `/template`
 - Keep infra stack (docker compose, woodpecker, vertical scaling)
 - Same auth/db stack
-- Multi-tenant needed
+- Groups needed
 - No audit trail table
 - No currency/exchange-rate infra
 - Remove Telegram entirely

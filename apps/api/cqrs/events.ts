@@ -1,4 +1,4 @@
-import { Event } from "@shared/cqrs/types.ts"
+import { Event } from "@platform/cqrs/types.ts"
 import { RequestInfo, User, UserPushTokenPublic } from "@shared/types"
 
 export class UserSignedUpEvent

@@ -52,7 +52,7 @@ Configure these secrets in your Woodpecker CI repository settings:
 
 ### Application Configuration
 - `API_PORT` - API server port (e.g., `8000`)
-- `WEB_PORT` - Web application port (e.g., `3000`)
+- `SPA_PORT` - SPA port (e.g., `3000`)
 - `DOMAIN` - Production domain (e.g., `app.example.com`)
 - `TRAEFIK_ACME_EMAIL` - Email for Let's Encrypt certificates
 

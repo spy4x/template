@@ -1,4 +1,4 @@
-import { Command } from "@shared/cqrs/types.ts"
+import { Command } from "@platform/cqrs/types.ts"
 import { RequestInfo, User } from "@shared/types"
 
 export interface UserProfileUpdatePayload {

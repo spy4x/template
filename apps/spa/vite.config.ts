@@ -13,7 +13,12 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     watch: {
-      ignored: ["!../../libs/client/**", "!../../libs/shared/**"],
+      ignored: [
+        "!../../libs/client/**",
+        "!../../libs/domain/**",
+        "!../../libs/platform/**",
+        "!../../libs/shared/**",
+      ],
     },
   },
 })

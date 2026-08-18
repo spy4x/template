@@ -1,4 +1,4 @@
-import { Query } from "@shared/cqrs/types.ts"
+import { Query } from "@platform/cqrs/types.ts"
 import { User } from "@shared/types"
 
 export interface UserProfileGetPayload {

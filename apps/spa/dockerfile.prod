@@ -1,5 +1,5 @@
 # Build stage
-ARG DENO_VERSION=2.4.0
+ARG DENO_VERSION=2.9.0
 FROM app/deno-base:${DENO_VERSION} AS build
 
 # Switch to root to copy files with proper permissions
@@ -9,12 +9,12 @@ USER 1000:1000
 
 ARG VITE_ENV=prod
 ENV VITE_ENV=${VITE_ENV}
-RUN deno task web:build
+RUN deno task spa:build
 
 # Production stage with nginx
 FROM nginxinc/nginx-unprivileged:stable-alpine
 WORKDIR /app
-COPY --from=build /app/apps/web/dist /usr/share/nginx/html
-COPY --from=build /app/apps/web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/apps/spa/dist /usr/share/nginx/html
+COPY --from=build /app/apps/spa/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

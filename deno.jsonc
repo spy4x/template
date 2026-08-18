@@ -1,17 +1,33 @@
 {
+  "workspace": [
+    "./apps/api",
+    "./apps/spa",
+    "./apps/mpa",
+    "./apps/worker",
+    "./libs/platform/cqrs"
+  ],
+  "nodeModulesDir": "auto",
+  "allowScripts": ["npm:@tailwindcss/oxide@4.1.12"],
   "tasks": {
     "dev": "deno run compose up -d", // used in terminal to start the development environment
-    "build": "deno task web:build", // used in terminal to build production docker images
+    "build": "deno task spa:build", // used in terminal to build production docker images
 
     // #region apps/api
     "api:dev": "deno serve --allow-all --watch apps/api/index.ts", // used in docker-compose to start the API server in development mode
     "api:prod": "deno serve --allow-all apps/api/index.ts", // production mode - no watch
     // #endregion apps/api
 
-    // #region apps/web
-    "web:dev": "deno run -A --node-modules-dir npm:vite apps/web", // used in docker-compose to start the web app in development mode
-    "web:build": "deno run -A --node-modules-dir npm:vite build apps/web",
-    // #endregion apps/web
+    // #region apps/spa
+    "spa:dev": "deno task --cwd apps/spa dev", // used in docker-compose to start the SPA in development mode
+    "spa:build": "deno task --cwd apps/spa build",
+    // #endregion apps/spa
+
+    // #region apps/mpa
+    "mpa:dev": "deno task --cwd apps/mpa dev",
+    "mpa:build": "deno task --cwd apps/mpa build",
+    "mpa:start": "deno task --cwd apps/mpa start",
+    "mpa:check": "deno task --cwd apps/mpa check",
+    // #endregion apps/mpa
 
     // #region Scripts
     "db:migrate": "deno run -N=$DB_HOST:5432 -E -R=./libs/server/db/migrations ./libs/server/db/migrate.ts",
@@ -74,13 +90,13 @@
     "@api/services/": "./apps/api/services/",
     "@api/middlewares/": "./apps/api/middlewares/",
     "@api/cqrs/": "./apps/api/cqrs/",
-    "@web/state/": "./apps/web/src/state/",
-    "@web/components/": "./apps/web/src/components/",
+    "@spa/state/": "./apps/spa/src/state/",
+    "@spa/components/": "./apps/spa/src/components/",
     "@shared/types": "./libs/shared/types/+index.ts",
     "@shared/constants/": "./libs/shared/constants/",
     "@shared/helpers/": "./libs/shared/helpers/",
     "@shared/testing": "./libs/shared/testing/+index.ts",
-    "@shared/cqrs/": "./libs/shared/cqrs/",
+    "@platform/cqrs/": "./libs/platform/cqrs/",
     "@shared/local-storage": "./libs/shared/local-storage/+index.ts",
     "@shared/cache": "./libs/shared/cache/+index.ts",
     "@shared/rpc": "./libs/shared/rpc/+index.ts",
@@ -103,19 +119,11 @@
 
     // apps/tgbot
 
-    // apps/web
-    "@deno/vite-plugin": "npm:@deno/vite-plugin@^1.0.4",
-    "@preact/preset-vite": "npm:@preact/preset-vite@^2.10.1",
-    "preact": "npm:preact@^10.26.2",
-    "vite": "npm:vite@^6.1.1",
-    "wouter-preact": "npm:wouter-preact@^3.7.1",
-    "@preact/signals": "npm:@preact/signals@^2.2.0",
-    "@preact/signals-core": "npm:@preact/signals-core@^1.9.0",
-    "tailwindcss": "npm:tailwindcss@4.1.8",
-    "tailwindcss/": "npm:/tailwindcss@4.1.8/",
-    "tailwindcss/plugin": "npm:/tailwindcss@4.1.8/plugin.js",
-    "@tailwindcss/forms": "npm:@tailwindcss/forms@0.5.10",
-    "@tailwindcss/vite": "npm:@tailwindcss/vite@4.1.8",
+    // client
+    "preact": "npm:preact@10.28.2",
+    "wouter-preact": "npm:wouter-preact@3.9.0",
+    "@preact/signals": "npm:@preact/signals@2.5.1",
+    "@preact/signals-core": "npm:@preact/signals-core@1.12.1",
 
     // shared
     "@std/path": "jsr:@std/path@^1.0.3",

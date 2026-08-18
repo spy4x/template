@@ -1,12 +1,11 @@
 # Deno Platform Template
 
-Reusable Deno repository baseline for products that need API, web, worker, persistence, and
+Reusable Deno repository baseline for products that need API, SPA, MPA, worker, persistence, and
 offline sync foundations without product-specific business logic.
 
-> **Migration status: WIP.** Current tree contains `apps/api`, `apps/web`, and
-> `libs/client`, `libs/server`, and `libs/shared`. Target directories below are not all present
-> yet. Target architecture below and ADR 001 are authoritative. Existing feature-specific code
-> and older docs remain as migration history.
+> **Migration status: WIP.** App directories and platform/domain boundaries now exist. Remaining
+> `libs/shared` code still needs classification, while MPA and worker implementations stay
+> intentionally minimal. Target architecture below and ADR 001 are authoritative.
 
 ## Deno policy
 
@@ -36,6 +35,9 @@ Run repository checks:
 ```sh
 deno task check
 ```
+
+Run individual app tasks with `api:*`, `spa:*`, or `mpa:*`. Deno workspace members inherit shared
+imports and tooling settings from root `deno.jsonc`.
 
 ## Target architecture
 

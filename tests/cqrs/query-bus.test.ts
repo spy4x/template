@@ -1,7 +1,7 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
-import { QueryBus } from "../../libs/shared/cqrs/query-bus.ts"
-import type { Query } from "../../libs/shared/cqrs/types.ts"
+import { QueryBus } from "../../libs/platform/cqrs/query-bus.ts"
+import type { Query } from "../../libs/platform/cqrs/types.ts"
 
 class PingQuery implements Query<{ value: string }, { value: string }> {
   __resultType?: { value: string }

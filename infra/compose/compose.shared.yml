@@ -418,12 +418,12 @@ services:
       - default
       - proxy
 
-  web:
-    container_name: ${PROJECT}-web
+  spa:
+    container_name: ${PROJECT}-spa
     restart: unless-stopped
     build:
       context: ../..
-      dockerfile: apps/web/dockerfile.prod
+      dockerfile: apps/spa/dockerfile.prod
       args:
         - DENO_VERSION=${DENO_VERSION}
     environment:
@@ -438,8 +438,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: ${WEB_CPU_LIMIT}
-          memory: "${WEB_MEM_LIMIT}"
+          cpus: ${SPA_CPU_LIMIT}
+          memory: "${SPA_MEM_LIMIT}"
     logging:
       driver: json-file
       options:
@@ -450,10 +450,10 @@ services:
         condition: service_started
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.web-${PROJECT}.rule=Host(`${DOMAIN}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`)"
-      - "traefik.http.routers.web-${PROJECT}.entrypoints=web"
-      - "traefik.http.routers.web-${PROJECT}.service=web-${PROJECT}"
-      - "traefik.http.services.web-${PROJECT}.loadbalancer.server.port=8080"
+      - "traefik.http.routers.spa-${PROJECT}.rule=Host(`${DOMAIN}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`)"
+      - "traefik.http.routers.spa-${PROJECT}.entrypoints=web"
+      - "traefik.http.routers.spa-${PROJECT}.service=spa-${PROJECT}"
+      - "traefik.http.services.spa-${PROJECT}.loadbalancer.server.port=8080"
       - "traefik.docker.network=proxy"
     networks:
       - default
@@ -464,7 +464,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # endregion API & Web
+  # endregion API & SPA
 
 # region Networking
 networks:

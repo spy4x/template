@@ -2,7 +2,7 @@
 # This image contains the common setup for all Deno-based services
 # Build: docker build -t app/deno-base:${DENO_VERSION} -f Dockerfile.base --build-arg DENO_VERSION=X.X.X
 
-ARG DENO_VERSION=2.6.3
+ARG DENO_VERSION=2.9.0
 FROM denoland/deno:alpine-${DENO_VERSION}
 
 WORKDIR /app
@@ -10,8 +10,13 @@ WORKDIR /app
 # Install common system dependencies
 RUN apk add --no-cache git curl bash libstdc++ libgcc
 
-# Copy only dependency manifest for better layer caching
-COPY deno.jsonc ./
+# Copy dependency manifests for better layer caching
+COPY deno.jsonc deno.lock ./
+COPY apps/api/deno.json ./apps/api/deno.json
+COPY apps/mpa/deno.json ./apps/mpa/deno.json
+COPY apps/spa/deno.json ./apps/spa/deno.json
+COPY apps/worker/deno.json ./apps/worker/deno.json
+COPY libs/platform/cqrs/deno.json ./libs/platform/cqrs/deno.json
 
 # Install dependencies (this layer will be cached if deno.jsonc doesn't change)
 RUN deno install
