@@ -10,6 +10,7 @@ import { UserMFAStatus } from "@shared/types"
 import { eventBus } from "@api/services/eventBus.ts"
 import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
 import { requestInfoFromContext } from "@api/services/request-info.ts"
+import { GroupError } from "@domain/groups"
 
 class Auth {
   private cookie = new CookieManager()
@@ -32,9 +33,18 @@ class Auth {
     const { session, user } = result
     const key = await db.userKey.findById(session.keyId)
 
-    if (!user || !key) {
+    if (!user || user.deletedAt || !key) {
       this.cookie.invalidate(context)
       return null
+    }
+    try {
+      await db.group.ensurePersonal({ id: crypto.randomUUID(), name: "Personal" }, user.id)
+    } catch (error) {
+      if (error instanceof GroupError && error.code === "USER_NOT_ACTIVE") {
+        this.cookie.invalidate(context)
+        return null
+      }
+      throw error
     }
     return { user, key, session }
   }

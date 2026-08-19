@@ -1,7 +1,7 @@
 import { Context, Next } from "hono"
 import { createMiddleware } from "hono/factory"
 import { APIContext } from "../_types.ts"
-import { SessionMFAStatus, UserRole } from "@shared/types"
+import { SessionMFAStatus, UserMFAStatus, UserRole } from "@shared/types"
 
 export type AuthResolver = (
   context: Context<APIContext>,
@@ -30,7 +30,10 @@ export const isAuthenticated2FA = createMiddleware<APIContext>(
     if (!auth) {
       return c.json({ error: "Not authenticated" }, 401)
     }
-    if (auth.session.mfa === SessionMFAStatus.NOT_PASSED_YET) {
+    if (
+      auth.user.mfa === UserMFAStatus.CONFIGURED &&
+      auth.session.mfa !== SessionMFAStatus.COMPLETED
+    ) {
       return c.json({ error: "Need to pass 2FA" }, 401)
     }
     return next()

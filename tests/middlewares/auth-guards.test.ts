@@ -7,7 +7,7 @@ import {
   isRole,
 } from "../../apps/api/middlewares/auth-guards.ts"
 import { buildAuthData, stubContext } from "../helpers/fake-auth.ts"
-import { SessionMFAStatus, UserRole } from "../../libs/shared/types/+index.ts"
+import { SessionMFAStatus, UserMFAStatus, UserRole } from "../../libs/shared/types/+index.ts"
 
 describe("auth-guards", () => {
   it("parseAuth stores auth payload", async () => {
@@ -39,11 +39,38 @@ describe("auth-guards", () => {
   })
 
   it("isAuthenticated2FA rejects pending mfa", async () => {
-    const authData = buildAuthData({ session: { mfa: SessionMFAStatus.NOT_PASSED_YET } })
+    const authData = buildAuthData({
+      user: { mfa: UserMFAStatus.CONFIGURED },
+      session: { mfa: SessionMFAStatus.NOT_PASSED_YET },
+    })
     const context = stubContext(authData)
     const result = await isAuthenticated2FA(context, async () => undefined as never)
     expect(result).not.toBeUndefined()
     expect((result as Response).status).toBe(401)
+  })
+
+  it("isAuthenticated2FA rejects configured mfa with not-required session", async () => {
+    const authData = buildAuthData({
+      user: { mfa: UserMFAStatus.CONFIGURED },
+      session: { mfa: SessionMFAStatus.NOT_REQUIRED },
+    })
+    const context = stubContext(authData)
+    const result = await isAuthenticated2FA(context, async () => undefined as never)
+    expect(result).not.toBeUndefined()
+    expect((result as Response).status).toBe(401)
+  })
+
+  it("isAuthenticated2FA accepts unconfigured mfa", async () => {
+    const authData = buildAuthData({
+      user: { mfa: UserMFAStatus.NOT_CONFIGURED },
+      session: { mfa: SessionMFAStatus.NOT_REQUIRED },
+    })
+    const context = stubContext(authData)
+    let nextCalled = false
+    await isAuthenticated2FA(context, async () => {
+      nextCalled = true
+    })
+    expect(nextCalled).toBe(true)
   })
 
   it("isRole blocks unauthorized role", async () => {

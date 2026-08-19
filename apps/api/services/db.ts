@@ -12,9 +12,14 @@ import {
 } from "@shared/types"
 import { DbServiceBase } from "@server/db"
 import { publicAPICache } from "./cache.ts"
+import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 // import { getLatestMetrics } from "../routes/metric.ts"
 
 export class DbService extends DbServiceBase {
+  get group() {
+    return new PostgresGroupRepository(this.sql)
+  }
+
   get user() {
     return {
       ...this.buildMethods<User, UserBase, Partial<UserBase>>(`users`, publicAPICache.user),

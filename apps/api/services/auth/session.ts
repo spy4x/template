@@ -58,7 +58,7 @@ export class SessionManager {
     }
 
     const user = await db.user.findOne({ id: session.userId })
-    if (!user) {
+    if (!user || user.deletedAt) {
       return null
     }
     // if expires in less than 1/4 of the duration, update it to extend
