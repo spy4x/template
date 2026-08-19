@@ -19,7 +19,10 @@ We are implementing the **group foundation** — the first slice of the group-sc
 - `deno task test:integration`: ✅ 2 suites, 9 steps, all pass (disposable Postgres)
 - `deno task spa:build`: ✅
 - `deno task mpa:check`: ✅
-- Committed as `11d646d feat(groups): add group foundation slice` and pushed to `origin/refactor/platform-template`
+- Pushed to `origin/refactor/platform-template`:
+  - `11d646d feat(groups): add group foundation slice`
+  - `6bf080d chore(template): remove product residue and dead config`
+  - `26db2e1 refactor(libs): split libs/shared into platform and domain`
 
 ### Contents of the group foundation commit (14 modified + 20 new files, ~2900 lines)
 
@@ -143,22 +146,24 @@ Rollback test fixture username exceeded 50-char validator limit. Fixed by shorte
 
 ### Immediate (Do Now)
 
-1. **Commit + push** — clean atomic commit of group foundation slice
-2. **Update PR #4 body** with current state
+1. **Add sync protocol endpoints** — manifest, bootstrap, `POST /api/sync/push`, `GET /api/sync/pull`,
+   per `docs/design/group-sync.md`
+2. **Add notes example aggregate** — prove the sync protocol end-to-end with one real entity
+3. **Update PR #4 body** with current state
 
 ### Short Term
 
-5. **Add sync protocol endpoints** — `POST /api/sync/push`, `GET /api/sync/pull`, manifest, bootstrap
-6. **Add notes example aggregate** — prove sync end-to-end with one entity
-7. **Implement SPA Dexie outbox** — client-side CQRS command queue
-8. **Add Playwright e2e** for offline→reconnect flow
+4. **Implement SPA Dexie outbox** — client-side CQRS command queue and local projection
+5. **Add Playwright e2e** for the offline→reconnect flow
+6. **Decide PR #4 base branch** — rebase onto `master` or retarget
 
 ### Medium Term
 
-9. **Outbox processor in worker** — consume outbox events, produce sync notifications
-10. **WebSocket hint channel** — optional real-time push for faster sync
-11. **CLI scaffolding** — `npx template-init` for new project generation
-12. **JSR library packaging** — extract `libs/domain/groups` etc. to publishable packages
+7. **Outbox processor in worker** — consume outbox events, produce sync notifications
+8. **WebSocket hint channel** — optional real-time push for faster sync
+9. **JSR library packaging** — `libs/platform/*` and `libs/domain/*` are now workspace members with
+   `exports`, so they are extractable once their APIs prove stable across projects
+10. **CLI scaffolding** — Deno-only (`deno run -A jsr:...`); npx/Node is disallowed by ADR 001
 
 ## Key Decisions (Why)
 
@@ -171,6 +176,17 @@ Rollback test fixture username exceeded 50-char validator limit. Fixed by shorte
 | Atomic signup transaction          | All-or-nothing: no orphaned users/groups without sessions           |
 | Domain enums start at 1            | Global convention; avoids falsy-0 bugs                              |
 | Bigints as decimal strings in JSON | JS `Number.MAX_SAFE_INTEGER` = 2^53-1; Postgres BIGINT exceeds      |
+
+## Operational Notes
+
+- **This repo lives inside a Syncthing folder (`~/sync/code`) shared across 6 devices, and
+  `.stignore` excludes only `node_modules` and `.volumes` — so `.git` itself is synced.** Concurrent
+  git operations on two devices can corrupt objects and refs. Prefer the git remote as the sync
+  channel for this repo.
+- The code folder is at `~/sync/code` on `spy4x-mini-pc` but `~/ssd-2tb/sync/code` on at least one
+  other device. Absolute paths (git worktree pointers, synced symlink targets) do not survive the
+  hop. If a worktree looks missing or `prunable`, run `git worktree repair <path>` locally rather
+  than assuming data loss.
 
 ## Environment Setup for Integration Tests
 
