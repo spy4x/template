@@ -231,3 +231,42 @@ export type TotpConnectStartResponse = {
   qrcode: string
   secret: string
 }
+
+/**
+ * Who is acting, in a form no transport owns.
+ *
+ * REST builds this from the session cookie on each request; WebSocket builds it
+ * once at upgrade and reuses it per message. Handlers depend on this rather than
+ * on a Hono context, so one authorization implementation covers both.
+ */
+export interface Actor {
+  userId: number
+  userMfa: UserMFAStatus
+  sessionMfa: SessionMFAStatus
+}
+
+export type AccessErrorCode = "AUTH_REQUIRED" | "MFA_REQUIRED"
+
+export class AccessError extends Error {
+  constructor(
+    public readonly code: AccessErrorCode,
+    message: string,
+  ) {
+    super(message)
+    this.name = "AccessError"
+  }
+}
+
+/**
+ * Authentication is the transport's job - it either produces an Actor or
+ * refuses the request. Authorization is this: it runs per command inside the
+ * handler, so a second transport cannot skip it by not mounting a middleware.
+ */
+export function assertMfaSatisfied(actor: Actor): void {
+  if (
+    actor.userMfa === UserMFAStatus.CONFIGURED &&
+    actor.sessionMfa !== SessionMFAStatus.COMPLETED
+  ) {
+    throw new AccessError("MFA_REQUIRED", "Second factor has not been completed for this session")
+  }
+}

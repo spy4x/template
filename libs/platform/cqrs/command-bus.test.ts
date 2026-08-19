@@ -38,3 +38,70 @@ describe("command-bus", () => {
     expect(bus.getRegisteredCommands()).toEqual(["PingCommand"])
   })
 })
+
+describe("CommandBus middleware", () => {
+  class Ping implements Command<{ value: string }, string> {
+    __resultType?: string
+    constructor(public data: { value: string }) {}
+  }
+
+  it("runs middlewares outermost first and reaches the handler", async () => {
+    const order: string[] = []
+    const bus = new CommandBus()
+    bus.use(async (_m, next) => {
+      order.push("first:before")
+      const result = await next()
+      order.push("first:after")
+      return result
+    })
+    bus.use(async (_m, next) => {
+      order.push("second:before")
+      const result = await next()
+      order.push("second:after")
+      return result
+    })
+    bus.register(Ping, (command) => {
+      order.push("handler")
+      return Promise.resolve(command.data.value)
+    })
+
+    expect(await bus.execute(new Ping({ value: "pong" }))).toBe("pong")
+    expect(order).toEqual([
+      "first:before",
+      "second:before",
+      "handler",
+      "second:after",
+      "first:after",
+    ])
+  })
+
+  it("lets a middleware short-circuit before the handler", async () => {
+    let handled = false
+    const bus = new CommandBus()
+    bus.use(() => Promise.reject(new Error("blocked")))
+    bus.register(Ping, () => {
+      handled = true
+      return Promise.resolve("unreachable")
+    })
+
+    await expect(bus.execute(new Ping({ value: "x" }))).rejects.toThrow("blocked")
+    expect(handled).toBe(false)
+  })
+
+  it("rejects a middleware that calls next() twice", async () => {
+    const bus = new CommandBus()
+    bus.use(async (_m, next) => {
+      await next()
+      return await next()
+    })
+    bus.register(Ping, () => Promise.resolve("ok"))
+
+    await expect(bus.execute(new Ping({ value: "x" }))).rejects.toThrow("more than once")
+  })
+
+  it("dispatches straight to the handler when no middleware is registered", async () => {
+    const bus = new CommandBus()
+    bus.register(Ping, (command) => Promise.resolve(command.data.value))
+    expect(await bus.execute(new Ping({ value: "direct" }))).toBe("direct")
+  })
+})

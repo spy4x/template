@@ -1,4 +1,6 @@
 import { Hono } from "hono"
+import type { Actor } from "@domain/identity"
+import type { AuthData } from "@api/services/auth/types.ts"
 import { APIContext } from "../_types.ts"
 import { isAuthenticated2FA } from "../middlewares/auth.ts"
 import { validate } from "@platform/types"
@@ -14,7 +16,7 @@ export const usersRoute = new Hono<APIContext>()
   .get(`/me`, async (c) => {
     const authData = c.get("auth")
     const result = await queryBus.execute(
-      new UserProfileGetQuery({ userId: authData.user.id }),
+      new UserProfileGetQuery({ actor: actorFrom(authData) }),
     )
     return c.json({ user: result.user })
   })
@@ -27,7 +29,7 @@ export const usersRoute = new Hono<APIContext>()
     }
     const result = await commandBus.execute(
       new UserProfileUpdateCommand({
-        userId: authData.user.id,
+        actor: actorFrom(authData),
         firstName: validationResult.data.firstName,
         lastName: validationResult.data.lastName,
         request: requestInfoFromContext(c),
@@ -35,3 +37,11 @@ export const usersRoute = new Hono<APIContext>()
     )
     return c.json({ user: result.user })
   })
+
+function actorFrom(authData: AuthData): Actor {
+  return {
+    userId: authData.user.id,
+    userMfa: authData.user.mfa,
+    sessionMfa: authData.session.mfa,
+  }
+}

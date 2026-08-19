@@ -1,5 +1,6 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
+import { type Actor, SessionMFAStatus, UserMFAStatus } from "@domain/identity"
 import {
   CreatePersonalGroupInput,
   CreateSharedGroupInput,
@@ -51,13 +52,22 @@ class FakeGroupRepository implements GroupRepository {
   }
 }
 
+function actor(userId: number, overrides: Partial<Actor> = {}): Actor {
+  return {
+    userId,
+    userMfa: UserMFAStatus.NOT_CONFIGURED,
+    sessionMfa: SessionMFAStatus.NOT_REQUIRED,
+    ...overrides,
+  }
+}
+
 describe("group CQRS handlers", () => {
   it("scopes create to command user", async () => {
     const repository = new FakeGroupRepository()
     const handler = createGroupCreateHandler(repository)
     const result = await handler(
       new GroupCreateCommand({
-        userId: 42,
+        actor: actor(42),
         id: summary.id,
         kind: GroupKind.SHARED,
         name: "Team",
@@ -71,7 +81,7 @@ describe("group CQRS handlers", () => {
   it("scopes list to query user", async () => {
     const repository = new FakeGroupRepository()
     const handler = createGroupListHandler(repository)
-    const result = await handler(new GroupListQuery({ userId: 84, page: { limit: 50 } }))
+    const result = await handler(new GroupListQuery({ actor: actor(84), page: { limit: 50 } }))
 
     expect(repository.listUserId).toBe(84)
     expect(result.groups).toEqual([summary])

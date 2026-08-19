@@ -7,7 +7,8 @@ import { UserProfileUpdatedEvent } from "@api/cqrs/events.ts"
 export const userProfileUpdateHandler: CommandHandler<UserProfileUpdateCommand> = async (
   command,
 ) => {
-  const { userId, firstName, lastName, request } = command.data
+  const { actor, firstName, lastName, request } = command.data
+  const userId = actor.userId
   const user = await db.user.findOne({ id: userId })
   if (!user || user.deletedAt) {
     throw new Error("User not found")

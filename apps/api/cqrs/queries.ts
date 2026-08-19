@@ -1,7 +1,7 @@
 import { Query } from "@platform/cqrs/types.ts"
-import { User } from "@domain/identity"
+import { type Actor, User } from "@domain/identity"
 export interface UserProfileGetPayload {
-  userId: number
+  actor: Actor
 }
 
 export interface UserProfileGetResult {

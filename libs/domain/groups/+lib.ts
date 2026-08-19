@@ -104,7 +104,7 @@ export interface GroupListResult {
 }
 
 export interface GroupCreatePayload {
-  userId: number
+  actor: Actor
   id: string
   kind: GroupKind.SHARED
   name: string
@@ -119,7 +119,7 @@ export class GroupCreateCommand implements Command<GroupCreatePayload, GroupCrea
 }
 
 export interface GroupListPayload {
-  userId: number
+  actor: Actor
   page: GroupListPage
 }
 
@@ -218,3 +218,4 @@ function isGroupRole(role: GroupRole): boolean {
   return Number.isInteger(role) && role >= GroupRole.VIEWER && role <= GroupRole.OWNER
 }
 import type { Command, Query } from "@platform/cqrs/types.ts"
+import type { Actor } from "@domain/identity"

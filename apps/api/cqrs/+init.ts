@@ -1,4 +1,5 @@
 import { commandBus } from "@api/services/commandBus.ts"
+import { createSessionGate } from "@api/cqrs/session-gate.ts"
 import { queryBus } from "@api/services/queryBus.ts"
 import { eventBus } from "@api/services/eventBus.ts"
 import { UserProfileUpdateCommand } from "@api/cqrs/commands.ts"
@@ -22,6 +23,17 @@ import { authAuditOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/a
 import { wsOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/ws-on-user-profile-updated.ts"
 import { wsOnUserSignedOutHandler } from "@api/cqrs/event-handlers/ws-on-user-signed-out.ts"
 import { wsOnPushDevicesUpdatedHandler } from "@api/cqrs/event-handlers/ws-on-push-devices-updated.ts"
+
+/**
+ * Applied to every dispatch before any handler runs. Deny by default: a message
+ * only skips the gate by being listed here, and the list is empty because every
+ * message currently carries an actor. Anonymous flows - sign-in, sign-up,
+ * password reset - are REST services rather than CQRS messages today; if they
+ * become messages, add them here.
+ */
+const sessionGate = createSessionGate([])
+commandBus.use(sessionGate)
+queryBus.use(sessionGate)
 
 eventBus.on(UserSignedUpEvent, authAuditOnUserSignedUpHandler)
 eventBus.on(UserSignedInEvent, authAuditOnUserSignedInHandler)
