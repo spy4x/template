@@ -1,5 +1,13 @@
 # Group Sync Platform PRD
 
+> **Status: superseded in part by [ADR 002](../decisions/002-realtime-transport-and-sync.md).**
+>
+> Written before ADR 002, so it describes both clients consuming REST. The SPA
+> now speaks WebSocket for mutations, queries and realtime, using REST only for
+> auth and bootstrap; the MPA remains REST-only. Read every "REST" requirement
+> below as "through the shared CQRS handlers", which is what the requirement
+> actually meant - the transport split is decided in the ADR.
+
 ## 1. Introduction/Overview
 
 This product is a reusable Deno platform template for future web applications that need a REST
