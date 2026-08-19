@@ -1,5 +1,6 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
+import { AccessError, type Actor, SessionMFAStatus, UserMFAStatus } from "@domain/identity"
 import {
   CreatePersonalGroupInput,
   CreateSharedGroupInput,
@@ -51,13 +52,22 @@ class FakeGroupRepository implements GroupRepository {
   }
 }
 
+function actor(userId: number, overrides: Partial<Actor> = {}): Actor {
+  return {
+    userId,
+    userMfa: UserMFAStatus.NOT_CONFIGURED,
+    sessionMfa: SessionMFAStatus.NOT_REQUIRED,
+    ...overrides,
+  }
+}
+
 describe("group CQRS handlers", () => {
   it("scopes create to command user", async () => {
     const repository = new FakeGroupRepository()
     const handler = createGroupCreateHandler(repository)
     const result = await handler(
       new GroupCreateCommand({
-        userId: 42,
+        actor: actor(42),
         id: summary.id,
         kind: GroupKind.SHARED,
         name: "Team",
@@ -71,9 +81,42 @@ describe("group CQRS handlers", () => {
   it("scopes list to query user", async () => {
     const repository = new FakeGroupRepository()
     const handler = createGroupListHandler(repository)
-    const result = await handler(new GroupListQuery({ userId: 84, page: { limit: 50 } }))
+    const result = await handler(new GroupListQuery({ actor: actor(84), page: { limit: 50 } }))
 
     expect(repository.listUserId).toBe(84)
     expect(result.groups).toEqual([summary])
+  })
+
+  it("refuses a command when the session has not completed MFA", async () => {
+    const repository = new FakeGroupRepository()
+    const handler = createGroupCreateHandler(repository)
+    const command = new GroupCreateCommand({
+      actor: actor(42, {
+        userMfa: UserMFAStatus.CONFIGURED,
+        sessionMfa: SessionMFAStatus.NOT_PASSED_YET,
+      }),
+      id: summary.id,
+      kind: GroupKind.SHARED,
+      name: "Team",
+    })
+
+    await expect(handler(command)).rejects.toThrow(AccessError)
+    // The repository is never reached, so no transport can dispatch past this.
+    expect(repository.createActorId).toBe(null)
+  })
+
+  it("refuses a query when the session has not completed MFA", async () => {
+    const repository = new FakeGroupRepository()
+    const handler = createGroupListHandler(repository)
+    const query = new GroupListQuery({
+      actor: actor(84, {
+        userMfa: UserMFAStatus.CONFIGURED,
+        sessionMfa: SessionMFAStatus.NOT_PASSED_YET,
+      }),
+      page: { limit: 50 },
+    })
+
+    await expect(handler(query)).rejects.toThrow(AccessError)
+    expect(repository.listUserId).toBe(null)
   })
 })

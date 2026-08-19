@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import type { MiddlewareHandler } from "hono"
+import type { Context, MiddlewareHandler } from "hono"
 import {
   GroupCreateCommand,
   GroupCreateResult,
@@ -9,7 +9,7 @@ import {
   GroupListResult,
   parseCreateSharedGroupRequest,
 } from "@domain/groups"
-import { SessionMFAStatus, UserMFAStatus } from "@domain/identity"
+import type { Actor } from "@domain/identity"
 import { APIContext } from "../_types.ts"
 import { groupErrorResponse, GroupFeatureError } from "../features/groups/errors.ts"
 import { createSameOriginMutationGuard } from "../middlewares/same-origin.ts"
@@ -28,15 +28,15 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
     .onError((error, c) => groupErrorResponse(c, error))
     .use(requireGroupAuthentication)
     .get("/", async (c) => {
-      const userId = c.get("auth").user.id
+      const actor = actorFrom(c)
       const limit = parseLimit(c.req.query("limit"))
       const cursor = c.req.query("cursor")
-      const after = cursor ? await dependencies.cursor.decode(cursor, userId) : undefined
+      const after = cursor ? await dependencies.cursor.decode(cursor, actor.userId) : undefined
       const result = await dependencies.list(
-        new GroupListQuery({ userId, page: { limit, after } }),
+        new GroupListQuery({ actor, page: { limit, after } }),
       )
       const nextCursor = result.nextPageKey
-        ? await dependencies.cursor.encode(userId, result.nextPageKey)
+        ? await dependencies.cursor.encode(actor.userId, result.nextPageKey)
         : null
       return c.json({ groups: result.groups, nextCursor })
     })
@@ -53,7 +53,7 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
       const input = parseCreateSharedGroupRequest(body)
       const result = await dependencies.create(
         new GroupCreateCommand({
-          userId: c.get("auth").user.id,
+          actor: actorFrom(c),
           id: input.id,
           kind: GroupKind.SHARED,
           name: input.name,
@@ -71,18 +71,25 @@ const requireSameOrigin = createSameOriginMutationGuard((c) =>
   )
 )
 
+/**
+ * Authentication only. Whether the session is good enough to perform the
+ * operation is decided by the handler, so the WebSocket transport gets the same
+ * answer without duplicating this.
+ */
 const requireGroupAuthentication: MiddlewareHandler<APIContext> = async (c, next) => {
-  const auth = c.get("auth")
-  if (!auth) {
+  if (!c.get("auth")) {
     return groupErrorResponse(c, new GroupFeatureError("AUTH_REQUIRED", "Missing session"))
   }
-  if (
-    auth.user.mfa === UserMFAStatus.CONFIGURED &&
-    auth.session.mfa !== SessionMFAStatus.COMPLETED
-  ) {
-    return groupErrorResponse(c, new GroupFeatureError("MFA_REQUIRED", "MFA is incomplete"))
-  }
   return await next()
+}
+
+function actorFrom(c: Context<APIContext>): Actor {
+  const auth = c.get("auth")
+  return {
+    userId: auth.user.id,
+    userMfa: auth.user.mfa,
+    sessionMfa: auth.session.mfa,
+  }
 }
 
 function parseLimit(value: string | undefined): number {
