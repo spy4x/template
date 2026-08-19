@@ -1,203 +1,185 @@
-# Handoff: Group Foundation Slice
+# Handoff: Deno platform template
 
-> Generated 2026-08-19. TLDR for resuming work in this worktree.
+> Written 2026-08-19 for whoever picks this up next, human or AI. It describes the
+> state of `master`, the decisions already made and why, the traps this codebase
+> has, and what to do next. Read [ADR 001](docs/decisions/001-deno-platform-template.md)
+> and [ADR 002](docs/decisions/002-realtime-transport-and-sync.md) first - they are
+> authoritative and this file is not.
 
-## Where Are We
+## What this repository is
 
-**Worktree:** `/home/spy4x/sync/code/worktrees/template/refactor/platform-template`
-**Branch:** `refactor/platform-template`
-**Base:** `feature/github-app-oauth` (NOT `master`)
-**PR #4:** https://github.com/spy4x/template/pull/4
+A reusable Deno platform template. **The reusability is the product.** Nothing here
+is a shipping application; the goal is a baseline that new projects are generated
+from, so anything product-specific is a defect rather than a feature.
 
-We are implementing the **group foundation** — the first slice of the group-scoped offline-first sync architecture. This slice delivers: group persistence, shared-group create/list with bounded pagination, CQRS wiring, signup atomicity (user+key+personal-group+session), CSRF protection, audit/outbox tables, and extensive integration tests.
+Distribution is staged: Git template first, JSR packages for libraries once proven
+across real projects, a CLI last.
 
-## Current State
+## Ground rules
 
-### Green
+- **Deno only.** No `node`, `npm`, `pnpm`, `yarn` or `bun` commands. Selected
+  `npm:` specifiers are fine where Vite, Preact or Dexie need them - they still
+  run through Deno.
+- Enums start at 1, never 0.
+- Money is integers.
+- `BIGINT` crosses JSON as a decimal string (`::text` in SQL), because
+  `Number.MAX_SAFE_INTEGER` is smaller than a Postgres bigint.
+- Tenancy has exactly one boundary: the **group** (`PERSONAL = 1`, `SHARED = 2`).
+  Roles are `VIEWER = 1`, `EDITOR = 2`, `ADMIN = 3`, `OWNER = 4`.
+- Postgres is authoritative. The browser's local store is a disposable projection
+  and never resolves a conflict.
 
-- `deno task check`: ✅ 20 tests, 48 steps, all pass (lint+fmt+ts+test)
-- `deno task test:integration`: ✅ 2 suites, 9 steps, all pass (disposable Postgres)
-- `deno task spa:build`: ✅
-- `deno task mpa:check`: ✅
-- Pushed to `origin/refactor/platform-template`:
-  - `11d646d feat(groups): add group foundation slice`
-  - `6bf080d chore(template): remove product residue and dead config`
-  - `26db2e1 refactor(libs): split libs/shared into platform and domain`
+## State of master
 
-### Contents of the group foundation commit (14 modified + 20 new files, ~2900 lines)
+Green: `deno task check` (30 tests, 59 steps), `deno task test:integration`
+(3 suites, 14 steps, needs Postgres), `deno task spa:build`, `deno task mpa:check`.
 
-**New files:**
+```
+apps/api      REST, auth, CQRS dispatch. The only app with real behaviour.
+apps/spa      Preact + Vite PWA. Auth and profile UI only.
+apps/mpa      Fresh. SSR shell plus /health. No features yet.
+apps/worker   Drains outbox_events. Real, small.
 
-- `libs/domain/groups/+lib.ts` (220L) — pure enums, interfaces, validation, policy
-- `libs/domain/groups/+lib.test.ts` (107L) — domain unit tests
-- `libs/domain/groups/deno.json` — workspace member config
-- `libs/server/groups/postgres-group-repository.ts` (378L) — membership-scoped Postgres queries
-- `libs/server/groups/group-list-cursor.ts` (103L) — signed, user-bound keyset cursor
-- `libs/server/db/migrations/2026_08_18_0001_group_core.sql` (157L) — DDL
-- `libs/server/db/migrations/2026_08_18_0002_personal_group_backfill.sql` (46L) — rerunnable backfill
-- `apps/api/features/groups/handlers.ts` (20L) — CQRS command/query handlers
-- `apps/api/features/groups/errors.ts` (55L) — typed error mapping
-- `apps/api/routes/groups.ts` (100L) — REST list/create with MFA + same-origin guard
-- `apps/api/middlewares/same-origin.ts` — CSRF middleware
-- `apps/api/services/auth/password-signup.ts` (140L) — atomic signup transaction
-- `apps/api/cqrs/command-handlers/group-create.ts` — CQRS wiring
-- `apps/api/cqrs/query-handlers/group-list.ts` — CQRS wiring
-- `tests/auth/password-signup.test.ts` (201L) — signup unit tests
-- `tests/groups/handlers.test.ts` (82L) — handler unit tests
-- `tests/groups/route.test.ts` (211L) — route unit tests
-- `tests/groups/cursor.test.ts` (33L) — cursor unit tests
-- `tests/integration/groups.integration.test.ts` (453L) — Postgres integration tests
-- `tests/middlewares/same-origin.test.ts` (74L) — CSRF unit tests
+libs/platform  cqrs (buses), types (validation, API envelopes, push contracts),
+               cache, helpers. Depends on nothing but arktype and std.
+libs/domain    groups (enums, policy, commands/queries), identity (user, session,
+               auth, ws payload contracts). May depend on platform only.
+libs/server    db, groups (Postgres repository, cursor), outbox, crypto, kv,
+               helpers.
+libs/client    browser, preact, vite, icons, helpers.
+```
 
-**Modified files:**
+What genuinely works end to end: sign-up creates user, key, personal group and
+session in one transaction; `GET/POST /api/groups` with MFA-aware auth, CSRF
+guard and signed keyset pagination; the worker claims and publishes outbox rows.
 
-- `deno.jsonc` — workspace members, imports, tasks
-- `libs/server/db/schema.sql` — group tables in schema snapshot
-- `libs/server/db/+index.integration.test.ts` — expanded transaction boundary tests
-- `apps/api/index.ts` — route mounting
-- `apps/api/services/db.ts` — DbService extensions
-- `apps/api/services/auth/password.ts` — signup wiring personal group ID
-- `apps/api/services/auth/+index.ts` — export additions
-- `apps/api/services/auth/session.ts` — minor type fix
-- `apps/api/middlewares/auth-guards.ts` — soft-delete rejection
-- `apps/api/cqrs/+init.ts` — group command/query registration
-- `apps/api/routes/groups.ts` — CSRF + pagination
-- `Dockerfile.base` — group migration permissions
-- `README.md` — workspace description update
-- `docs/3.architecture.md` — workspace description update
+## What is decided (and must not be quietly re-litigated)
 
-## Reviewer Blockers — Status
+ADR 002 is recent and reverses part of ADR 001. In short:
 
-Reviewer found 11 findings (6 blocker, 5 follow-up). Agent fix round resolved most. QA pass 2 found one test bug. Current status:
+- `apps/spa` speaks **WebSocket** for mutations, queries and realtime. It uses
+  REST only for bootstrap and the auth endpoints that must exist before a socket
+  can open.
+- `apps/mpa` speaks **REST only**, request/response, no realtime. Being strictly
+  synchronous is what makes it a distinct reference architecture.
+- Both are thin adapters over **one set of CQRS handlers**. A transport parses,
+  authenticates and dispatches; it holds no business rule.
+- **Push with sequence, pull as the authority.** A pushed change carries the
+  sequence it was committed at. The client applies it only if that sequence is
+  contiguous with its cursor; on any gap it discards the payload and pulls.
+- The governing test: **delete every line of WebSocket code and the app must
+  still converge to correct state.**
+- Bootstrap is REST for both apps.
+- Idempotency key on every command, expected version on updates, keys kept 7 days.
+- `Origin` is validated at the WebSocket upgrade. Handshakes are not governed by
+  CORS, and `SameSite=Lax` still admits a same-site subdomain.
+- Live sockets are re-evaluated on sign-out, session expiry and
+  `authorization_revision` change.
 
-| #  | Finding                                        | Status                                                                 |
-| -- | ---------------------------------------------- | ---------------------------------------------------------------------- |
-| 1  | Signup TOCTOU — no DB unique constraint        | ✅ Fixed: `(kind, identification)` unique index + `23505` catch        |
-| 2  | Migration rollout — backfill before deployment | ✅ Fixed: split DDL + rerunnable backfill + `ensurePersonal` self-heal |
-| 3  | Group create missing audit/outbox              | ✅ Fixed: atomic audit + outbox writes in transaction                  |
-| 4  | CSRF missing on cookie mutation                | ✅ Fixed: same-origin middleware on POST                               |
-| 5  | Group list unbounded, no pagination            | ✅ Fixed: signed cursor, default 50, max 100                           |
-| 6  | Soft-deleted user can create groups            | ✅ Fixed: `assertActiveUser` with `FOR UPDATE`                         |
-| 7  | Test uses hand-shaped SQL not real signup      | ✅ Fixed: uses `persistPasswordSignup` with failure injection          |
-| 8  | Single connection no concurrency testing       | ✅ Fixed: `Promise.all` with deferred gate                             |
-| 9  | Postgres adapter in API app                    | ✅ Fixed: moved to `libs/server/groups/`                               |
-| 10 | CQRS contracts in API app                      | ✅ Fixed: moved to `libs/domain/groups`                                |
-| 11 | Snapshot parity trigger/function def drift     | ✅ Fixed: compares `pg_get_triggerdef` + `pg_get_functiondef`          |
+## Traps in this codebase
 
-## QA Issue — Fixed
+These cost real time to find. Do not rediscover them.
 
-Rollback test fixture username exceeded 50-char validator limit. Fixed by shortening to `rb-<step>-<8char-suffix>`. Integration tests fully green.
+1. **Deno workspace test discovery.** `deno test <dir>` only collects from
+   workspace _members_ once the directory contains any. Moving tests under
+   `libs/platform` silently dropped 10 of 20 tests, with the step count unchanged
+   so it looked fine. Every lib holding tests is registered in the `workspace`
+   array in `deno.jsonc`; add new ones there or their tests will not run.
+2. **`deno fmt` from the repo root, always.** Running it inside a member
+   directory picks up that member's `deno.json`, which has no `fmt` block, so it
+   formats with defaults and adds semicolons that root `fmt --check` then rejects.
+3. **Postgres readiness must be checked over TCP.** The postgres image runs a
+   temporary unix-socket-only server during initdb. `pg_isready` without `-h`
+   reports ready against that one, tests connect, the temporary server shuts
+   down, and everything fails with `ConnectionReset` at random. See the recipe
+   below.
+4. **`.git` is inside a Syncthing folder shared across several machines.**
+   `.stignore` excludes only `node_modules` and `.volumes`. Absolute paths in
+   worktree pointers do not survive the hop between machines, so a worktree can
+   look missing or `prunable` when nothing is wrong - run `git worktree repair`
+   rather than assuming lost work. Concurrent git operations on two machines can
+   corrupt objects; prefer the remote as the sync channel.
+5. **`DbService.group` is constructed per access on purpose.** `begin()` derives
+   the transactional service with `Object.create(this)` and rebinds `sql`, so
+   caching the repository would silently escape the transaction.
 
-## Architecture Recap
+## Running it
 
-### DDL (`libs/server/db/migrations/2026_08_18_0001_group_core.sql`)
+```sh
+deno task check            # fmt, lint, types, unit tests
+deno task spa:build
+deno task mpa:check
+deno task dev              # compose up
+```
 
-- `groups` table: UUID PK, kind (1=personal, 2=shared), name, owner_user_id, authorization_revision, next_change_sequence, timestamps, soft delete
-- `group_members` table: composite PK (group_id, user_id), role (1-4)
-- Unique partial index: one active personal group per user
-- PL/pgSQL functions: `assert_personal_group_membership`, `check_personal_group_membership_trigger`
-- Deferred constraint triggers on groups + group_members for personal group invariant
-- `audit_events` table: idempotent (group_id, event_kind) unique
-- `outbox_events` table: idempotent (aggregate_type, aggregate_id, aggregate_version, event_kind) unique
-- Pre-migration: `UPDATE user_keys SET identification = lower(btrim(identification))` + unique index
-
-### Domain (`libs/domain/groups/+lib.ts`)
-
-- Enums: `GroupKind.PERSONAL=1, GroupKind.SHARED=2`, `GroupRole.VIEWER=1..OWNER=4`
-- Interfaces: `Group`, `GroupSummary`, `GroupAccess`, `GroupRepository`
-- Commands/Queries: `GroupCreateCommand`, `GroupListQuery`
-- Pure functions: `parseCreateSharedGroupRequest`, role policy matrix
-- Cursor types: `GroupListPageKey`, `encode`/`decode` interfaces
-
-### Repository (`libs/server/groups/postgres-group-repository.ts`)
-
-- `listForUser`: membership-scoped, keyset pagination, user active check
-- `getForMember`: single group access check
-- `createShared`: atomic transaction with active user assertion, idempotent retry, audit+outbox
-- `createPersonal`: insert + owner membership
-- `ensurePersonal`: idempotent, handles concurrent creation race
-
-### Auth Flow (`apps/api/services/auth/password-signup.ts`)
-
-- Normalized username (trim+lower)
-- Atomic transaction: user → key → personal-group → session
-- Unique violation → returns null (existing account)
-- Each step injectable for rollback testing
-
-### Routes (`apps/api/routes/groups.ts`)
-
-- `GET /api/groups` — authenticated, MFA required, bounded pagination
-- `POST /api/groups` — authenticated, MFA required, same-origin guard, JSON content-type check
-
-### Tests
-
-- **Unit:** domain enums/policy, cursor encode/decode, handlers, routes, same-origin, password-signup
-- **Integration:** migration rerunnable, schema snapshot parity, signup rollback, 20x concurrent signup, personal self-heal, concurrent exact/mismatched shared create, pagination/isolation, soft-delete rejection
-
-## Known Follow-ups (Not Blockers)
-
-1. **Audit/outbox tables are generic but no processor exists yet** — outbox table created, events written atomically, but nothing reads/processes them. Worker will consume later.
-2. **Sync protocol not implemented yet** — manifest, bootstrap, push, pull endpoints still ahead.
-3. **No SPA Dexie local projection yet** — client-side offline cache is next major slice.
-4. **PR #4 base is `feature/github-app-oauth`** — needs eventual base branch decision (rebase to `master`?).
-5. **Stale references removed** — Telegram, exchange-rate and Financy residue cleared from code, infra and docs; 14 hackathon/OpenCode-era docs deleted.
-
-## Next Steps (Ordered)
-
-### Immediate (Do Now)
-
-1. **Add sync protocol endpoints** — manifest, bootstrap, `POST /api/sync/push`, `GET /api/sync/pull`,
-   per `docs/design/group-sync.md`
-2. **Add notes example aggregate** — prove the sync protocol end-to-end with one real entity
-3. **Update PR #4 body** with current state
-
-### Short Term
-
-4. **Implement SPA Dexie outbox** — client-side CQRS command queue and local projection
-5. **Add Playwright e2e** for the offline→reconnect flow
-6. **Decide PR #4 base branch** — rebase onto `master` or retarget
-
-### Medium Term
-
-7. **Outbox processor in worker** — consume outbox events, produce sync notifications
-8. **WebSocket hint channel** — optional real-time push for faster sync
-9. **JSR library packaging** — `libs/platform/*` and `libs/domain/*` are now workspace members with
-   `exports`, so they are extractable once their APIs prove stable across projects
-10. **CLI scaffolding** — Deno-only (`deno run -A jsr:...`); npx/Node is disallowed by ADR 001
-
-## Key Decisions (Why)
-
-| Decision                           | Why                                                                 |
-| ---------------------------------- | ------------------------------------------------------------------- |
-| Single tenant boundary = group     | Eliminates workspace/group confusion; simpler mental model          |
-| No Postgres RLS in v1              | App-layer auth easier to test/debug; RLS later for defense-in-depth |
-| Signed cursor for pagination       | Prevents tampering, no server state needed, user-bound              |
-| Generic audit+outbox tables        | Avoids per-aggregate table proliferation; event_kind for routing    |
-| Atomic signup transaction          | All-or-nothing: no orphaned users/groups without sessions           |
-| Domain enums start at 1            | Global convention; avoids falsy-0 bugs                              |
-| Bigints as decimal strings in JSON | JS `Number.MAX_SAFE_INTEGER` = 2^53-1; Postgres BIGINT exceeds      |
-
-## Operational Notes
-
-- **This repo lives inside a Syncthing folder (`~/sync/code`) shared across 6 devices, and
-  `.stignore` excludes only `node_modules` and `.volumes` — so `.git` itself is synced.** Concurrent
-  git operations on two devices can corrupt objects and refs. Prefer the git remote as the sync
-  channel for this repo.
-- The code folder is at `~/sync/code` on `spy4x-mini-pc` but `~/ssd-2tb/sync/code` on at least one
-  other device. Absolute paths (git worktree pointers, synced symlink targets) do not survive the
-  hop. If a worktree looks missing or `prunable`, run `git worktree repair <path>` locally rather
-  than assuming data loss.
-
-## Environment Setup for Integration Tests
+Integration tests need a throwaway Postgres:
 
 ```bash
-cd /home/spy4x/sync/code/worktrees/template/refactor/platform-template
-
-NAME="template-groups-test-$$"
+NAME="template-test-$$"
 PASS=$(openssl rand -hex 24)
-docker run -d --name "$NAME" -e POSTGRES_USER=tester -e POSTGRES_PASSWORD="$PASS" -e POSTGRES_DB=template_test -p 127.0.0.1::5432 postgres:16-alpine
-# Wait for ready...
+docker run -d --name "$NAME" -e POSTGRES_USER=tester -e POSTGRES_PASSWORD="$PASS" \
+  -e POSTGRES_DB=template_test -p 127.0.0.1::5432 postgres:16-alpine
 PORT=$(docker port "$NAME" 5432/tcp | cut -d: -f2)
-DB_HOST=127.0.0.1 DB_PORT="$PORT" DB_USER=tester DB_PASS="$PASS" DB_NAME=template_test deno task test:integration
+
+# Wait over TCP, not the unix socket - see trap 3 above.
+timeout 90 docker exec "$NAME" sh -c \
+  'until pg_isready -h 127.0.0.1 -U tester -d template_test -q; do sleep 0.5; done'
+
+DB_HOST=127.0.0.1 DB_PORT="$PORT" DB_USER=tester DB_PASS="$PASS" DB_NAME=template_test \
+  deno task test:integration
 docker rm -f "$NAME"
 ```
+
+To run the API for real you also need Valkey, migrations applied
+(`deno task db:migrate`), and `infra/configs/vapid.json` present
+(`deno task vapid-key:create`) copied to `./vapid.json`, since the API reads it
+from the working directory while compose bind-mounts it.
+
+## What is not built yet
+
+The sync protocol is designed and not implemented. Specifically:
+
+- `next_change_sequence` and `authorization_revision` exist as columns on
+  `groups` and are **never incremented**. No cursor exists yet.
+- There is no change log, so nothing can be replayed in order.
+- `outbox_events` is drained by the worker, but the publisher only logs. Nothing
+  consumes the events.
+- No bootstrap or pull endpoint.
+- No WebSocket transport beyond the existing profile socket.
+- No local projection in the SPA, no offline outbox, no conflict UI.
+- No idempotency key store.
+
+## Next steps, in dependency order
+
+Each is intended to be one small PR. Small PRs are an explicit requirement here.
+
+1. **Increment `next_change_sequence`** on every committed group-scoped change
+   and record changes so they can be replayed in order. Everything else depends
+   on this; without it there is no cursor.
+2. **Increment `authorization_revision`** on membership and role changes.
+3. **Idempotency key store** with a 7-day sweep.
+4. **Bootstrap and pull REST endpoints** over the change log.
+5. **`libs/server/realtime`** - connection registry, `Origin` validation at
+   upgrade, sequence-stamped push, sign-out fan-out. Mounted by `apps/api`; keep
+   it behind a library boundary so it can move to `apps/realtime` later without a
+   rewrite.
+6. **A notes example aggregate**, to prove the protocol end to end on something
+   other than groups.
+7. **SPA local projection and offline outbox.**
+8. **Deterministic Playwright e2e** for offline to reconnect.
+
+Also open and unresolved: authorization currently lives in `apps/api` route
+middleware, which the WebSocket transport will bypass. That has to be solved
+before step 5, and the approach is still under discussion - see the open PR.
+
+Extraction from the sibling Financy project is tracked separately in
+[docs/financy-extraction-inventory.md](docs/financy-extraction-inventory.md);
+delete rows there as they land.
+
+## Working agreements
+
+- Small, focused PRs. The first one was 277 files and that was too big to review.
+- Verify before claiming. Run the gates, and run the app when the change touches
+  runtime behaviour.
+- State facts from the code, not from memory. Both sibling projects were read
+  before being described, and both turned out to differ from their own docs.
