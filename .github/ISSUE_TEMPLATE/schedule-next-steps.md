@@ -8,8 +8,10 @@ assignees: []
 ## System Required: No
 
 ### Objective
+
 Set cadence + automation.
 
 ### Reply here with:
+
 - schedule window (cron-like)
 - reporting channel

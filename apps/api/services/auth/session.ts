@@ -1,6 +1,6 @@
-import { User, UserSession, UserSessionBase, UserSessionStatus } from "@shared/types"
-import { getRandomString } from "@shared/helpers/random.ts"
-import { checkHash, hash } from "@shared/helpers/hash.ts"
+import { User, UserSession, UserSessionBase, UserSessionStatus } from "@domain/identity"
+import { getRandomString } from "@platform/helpers/random.ts"
+import { checkHash, hash } from "@platform/helpers/hash.ts"
 
 import { db } from "../db.ts"
 import { config } from "../config.ts"
@@ -58,7 +58,7 @@ export class SessionManager {
     }
 
     const user = await db.user.findOne({ id: session.userId })
-    if (!user) {
+    if (!user || user.deletedAt) {
       return null
     }
     // if expires in less than 1/4 of the duration, update it to extend

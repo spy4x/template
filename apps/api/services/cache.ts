@@ -1,16 +1,9 @@
 import { KeyValueService } from "@server/kv"
-import {
-  User,
-  UserKey,
-  UserSession,
-  UserPushToken,
-  AuthAudit,
-  ValidationSchema,
-} from "@shared/types"
-
+import { ValidationSchema } from "@platform/types"
+import { AuthAudit, User, UserKey, UserPushToken, UserSession } from "@domain/identity"
 import { config } from "../services/config.ts"
 
-import { buildMethods as buildMethodsBase, CacheService } from "@shared/cache"
+import { buildMethods as buildMethodsBase, CacheService } from "@platform/cache"
 
 const kv = await KeyValueService.connect(config.kv.hostname, config.kv.port)
 const cacheService = new CacheService(kv)
@@ -34,7 +27,7 @@ export class PublicAPICache {
   userSession = buildMethods<UserSession>(`userSession`)
   userPushToken = buildMethods<UserPushToken>(`userPushToken`)
   authAudit = buildMethods<AuthAudit>(`authAudit`)
-  isSessionTokenExpired = buildMethodsBase<boolean>(
+  isSessionTokenExpired = buildMethodsBase<boolean, string>(
     cacheService,
     `isSessionTokenExpired`,
     CacheTTL.day,

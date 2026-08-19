@@ -1,0 +1,7 @@
+{
+  "exports": "./+index.ts",
+  "tasks": {
+    "check": "deno check +index.ts",
+    "test": "deno test push-schema.test.ts"
+  }
+}

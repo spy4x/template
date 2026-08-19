@@ -353,7 +353,7 @@ services:
     restart: unless-stopped
     build:
       context: ../..
-      dockerfile: apps/api/dockerfile.worker
+      dockerfile: apps/api/dockerfile
       args:
         - DENO_VERSION=${DENO_VERSION}
     volumes:
@@ -361,9 +361,6 @@ services:
       - ../../libs:/app/libs:z
       - ../../deno.jsonc:/app/deno.jsonc:z
       - ../../infra/configs/vapid.json:/app/vapid.json:Z
-      - ../../.volumes/gh:/home/deno/.config/gh:Z
-      - ../../.volumes/workspaces:/app/workspaces:Z
-      - ../../.volumes/opencode:/home/deno/.config/opencode:Z
     user: "1000:1000"
     environment:
       - HOME=/home/deno
@@ -386,23 +383,6 @@ services:
       - RATE_LIMITER_WINDOW_MS=${RATE_LIMITER_WINDOW_MS}
       - RATE_LIMITER_STRICT_LIMIT=${RATE_LIMITER_STRICT_LIMIT}
       - RATE_LIMITER_LIMIT=${RATE_LIMITER_LIMIT}
-      - GH_WEBHOOK_SECRET=${GH_WEBHOOK_SECRET}
-      - GH_WEBHOOK_ENFORCE=${GH_WEBHOOK_ENFORCE}
-      - GH_CLI_ENABLED=${GH_CLI_ENABLED}
-      - GH_CLI_DRY_RUN=${GH_CLI_DRY_RUN}
-      - GH_ALLOW_ALL_REPOS=${GH_ALLOW_ALL_REPOS}
-      - GH_ALLOWED_REPOS=${GH_ALLOWED_REPOS}
-      - GH_TOKEN=${GH_TOKEN}
-      - WORKSPACE_ROOT=/app/workspaces
-      - OPENCODE_CMD=${OPENCODE_CMD}
-      - OPENCODE_ARGS=${OPENCODE_ARGS}
-      - OPENCODE_CMD=${OPENCODE_CMD}
-      - OPENCODE_ARGS=${OPENCODE_ARGS}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      - TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL:-}
-      - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
-      - EXCHANGE_RATE_API_KEY=${EXCHANGE_RATE_API_KEY:-}
-      - FIXER_IO_API_KEY=${FIXER_IO_API_KEY:-}
     deploy:
       resources:
         limits:
@@ -433,12 +413,12 @@ services:
       - default
       - proxy
 
-  web:
-    container_name: ${PROJECT}-web
+  spa:
+    container_name: ${PROJECT}-spa
     restart: unless-stopped
     build:
       context: ../..
-      dockerfile: apps/web/dockerfile.prod
+      dockerfile: apps/spa/dockerfile.prod
       args:
         - DENO_VERSION=${DENO_VERSION}
     environment:
@@ -453,8 +433,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: ${WEB_CPU_LIMIT}
-          memory: "${WEB_MEM_LIMIT}"
+          cpus: ${SPA_CPU_LIMIT}
+          memory: "${SPA_MEM_LIMIT}"
     logging:
       driver: json-file
       options:
@@ -465,10 +445,10 @@ services:
         condition: service_started
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.web-${PROJECT}.rule=Host(`${DOMAIN}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`)"
-      - "traefik.http.routers.web-${PROJECT}.entrypoints=web"
-      - "traefik.http.routers.web-${PROJECT}.service=web-${PROJECT}"
-      - "traefik.http.services.web-${PROJECT}.loadbalancer.server.port=8080"
+      - "traefik.http.routers.spa-${PROJECT}.rule=Host(`${DOMAIN}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`)"
+      - "traefik.http.routers.spa-${PROJECT}.entrypoints=web"
+      - "traefik.http.routers.spa-${PROJECT}.service=spa-${PROJECT}"
+      - "traefik.http.services.spa-${PROJECT}.loadbalancer.server.port=8080"
       - "traefik.docker.network=proxy"
     networks:
       - default
@@ -479,13 +459,12 @@ services:
       timeout: 5s
       retries: 5
 
+  # endregion API & SPA
+
+# region Networking
 networks:
   proxy:
     external: true
-  # endregion API & Web
-
-  # region Networking
-networks:
   default:
     driver: bridge
     ipam:

@@ -1,22 +1,24 @@
-import { checkHash, hash } from "@shared/helpers/hash.ts"
+import { checkHash, hash } from "@platform/helpers/hash.ts"
 import {
   SessionMFAStatus,
   User,
   UserKey,
   UserKeyKind,
   UserMFAStatus,
-  UserRole,
   UserSession,
-} from "@shared/types"
+} from "@domain/identity"
 import { config } from "../config.ts"
 import { db } from "../db.ts"
 import { SessionManager } from "./session.ts"
 import { AuthData } from "./types.ts"
+import { normalizeUsername, persistPasswordSignup } from "./password-signup.ts"
+import type { DbService } from "../db.ts"
 
 export class PasswordMethod {
   constructor(private session: SessionManager) {}
 
   async check(username: string, password: string): Promise<null | AuthData> {
+    username = normalizeUsername(username)
     const key = await db.userKey.findOne({
       kind: UserKeyKind.USERNAME_PASSWORD,
       identification: username,
@@ -28,7 +30,7 @@ export class PasswordMethod {
       return null
     }
     const user = await db.user.findOne({ id: key.userId })
-    if (!user) {
+    if (!user || user.deletedAt) {
       return null
     }
 
@@ -53,55 +55,18 @@ export class PasswordMethod {
   }
 
   async signUp(username: string, password: string): Promise<null | AuthData> {
-    return db.begin(async (tx) => {
-      const existingKey = await tx.userKey.findOne({
-        kind: UserKeyKind.USERNAME_PASSWORD,
-        identification: username,
-      })
-      if (existingKey) { // Username already taken
-        return null
-      }
-      const user = await tx.user.createOne({
-        data: {
-          firstName: "",
-          lastName: "",
-          mfa: UserMFAStatus.NOT_CONFIGURED,
-          role: UserRole.VIEWER,
-          lastLoginAt: new Date(),
-        },
-      })
-      if (!user) {
-        console.error("Failed to create user", { username })
-        return null
-      }
-      const key = await tx.userKey.createOne({
-        userId: user.id,
-        kind: UserKeyKind.USERNAME_PASSWORD,
-        identification: username,
-        secret: await hash(password, config.authPepper),
-      })
-      if (!key) {
-        console.error("Failed to create key", {
-          userId: user.id,
-          username,
-          kind: UserKeyKind.USERNAME_PASSWORD,
-        })
-        return null
-      }
-      const session = await this.session.create({
-        userId: user.id,
-        keyId: key.id,
-        mfa: SessionMFAStatus.NOT_REQUIRED,
-      }, tx)
-      if (!session) {
-        console.error("Failed to create session", { userId: user.id, keyId: key.id, username })
-        return null
-      }
-      return { user, key, session }
-    })
+    username = normalizeUsername(username)
+    const passwordHash = await hash(password, config.authPepper)
+    const personalGroupId = crypto.randomUUID()
+    return persistPasswordSignup<DbService>(
+      db,
+      { username, passwordHash, personalGroupId },
+      (session, transaction) => this.session.create(session, transaction),
+    )
   }
 
   async connect(userId: number, username: string, password: string): Promise<null | AuthData> {
+    username = normalizeUsername(username)
     const key = await db.userKey.createOne({
       userId,
       kind: UserKeyKind.USERNAME_PASSWORD,
@@ -117,7 +82,7 @@ export class PasswordMethod {
       return null
     }
     const user = await db.user.findOne({ id: userId })
-    if (!user) {
+    if (!user || user.deletedAt) {
       // throw new Error("Failed to get user")
       console.error("Failed to get user", { userId })
       return null
@@ -142,6 +107,7 @@ export class PasswordMethod {
   }
 
   async getUserByUsername(username: string): Promise<null | User> {
+    username = normalizeUsername(username)
     const key = await db.userKey.findOne({
       kind: UserKeyKind.USERNAME_PASSWORD,
       identification: username,
@@ -153,6 +119,7 @@ export class PasswordMethod {
   }
 
   async isUsernameTaken(username: string): Promise<boolean> {
+    username = normalizeUsername(username)
     const key = await db.userKey.findOne({
       kind: UserKeyKind.USERNAME_PASSWORD,
       identification: username,
@@ -196,8 +163,9 @@ export class PasswordMethod {
   }
 
   async set(userId: number, password: string, username: string): Promise<boolean> {
+    username = normalizeUsername(username)
     const user = await db.user.findOne({ id: userId })
-    if (!user) {
+    if (!user || user.deletedAt) {
       return false
     }
     const otherUserUsername = await db.userKey.findOne({

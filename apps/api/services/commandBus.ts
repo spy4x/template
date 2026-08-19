@@ -1,3 +1,3 @@
-import { CommandBus } from "@shared/cqrs/command-bus.ts"
+import { CommandBus } from "@platform/cqrs/command-bus.ts"
 
 export const commandBus = new CommandBus()

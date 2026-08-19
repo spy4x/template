@@ -5,12 +5,7 @@ import { isAuthenticated2FA } from "@api/middlewares/auth.ts"
 import { eventBus } from "@api/services/eventBus.ts"
 import { PushDevicesUpdatedEvent } from "@api/cqrs/events.ts"
 import { requestInfoFromContext } from "@api/services/request-info.ts"
-import {
-  pushSubscribeRequestSchema,
-  pushUnsubscribeRequestSchema,
-  validate,
-} from "@shared/types"
-
+import { pushSubscribeRequestSchema, pushUnsubscribeRequestSchema, validate } from "@platform/types"
 export const pushNotificationRoute = new Hono<APIContext>()
   .use(isAuthenticated2FA)
   .get(`/public-key`, async (c) => {

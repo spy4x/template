@@ -3,14 +3,17 @@ import { queryBus } from "@api/services/queryBus.ts"
 import { eventBus } from "@api/services/eventBus.ts"
 import { UserProfileUpdateCommand } from "@api/cqrs/commands.ts"
 import { UserProfileGetQuery } from "@api/cqrs/queries.ts"
+import { GroupCreateCommand, GroupListQuery } from "@domain/groups"
 import { userProfileUpdateHandler } from "@api/cqrs/command-handlers/user-profile-update.ts"
 import { userProfileGetHandler } from "@api/cqrs/query-handlers/user-profile-get.ts"
+import { groupCreateHandler } from "@api/cqrs/command-handlers/group-create.ts"
+import { groupListHandler } from "@api/cqrs/query-handlers/group-list.ts"
 import {
+  PushDevicesUpdatedEvent,
   UserProfileUpdatedEvent,
   UserSignedInEvent,
   UserSignedOutEvent,
   UserSignedUpEvent,
-  PushDevicesUpdatedEvent,
 } from "@api/cqrs/events.ts"
 import { authAuditOnUserSignedUpHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-signed-up.ts"
 import { authAuditOnUserSignedInHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-signed-in.ts"
@@ -29,6 +32,8 @@ eventBus.on(UserSignedOutEvent, wsOnUserSignedOutHandler)
 eventBus.on(PushDevicesUpdatedEvent, wsOnPushDevicesUpdatedHandler)
 
 commandBus.register(UserProfileUpdateCommand, userProfileUpdateHandler)
+commandBus.register(GroupCreateCommand, groupCreateHandler)
 queryBus.register(UserProfileGetQuery, userProfileGetHandler)
+queryBus.register(GroupListQuery, groupListHandler)
 
 console.log("✅ CQRS handlers initialized")

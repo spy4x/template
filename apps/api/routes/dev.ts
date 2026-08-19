@@ -1,8 +1,9 @@
 import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
-import { authUsernameSchema, UserKeyKind, validate } from "@shared/types"
+import { validate } from "@platform/types"
+import { authUsernameSchema, UserKeyKind } from "@domain/identity"
 import { db } from "@api/services/db.ts"
-import { sql } from "@server/db"
+import { sql, Transaction } from "@server/db"
 
 export const devRoute = new Hono<APIContext>()
   .post("/cleanup-user", async (c) => {
@@ -28,11 +29,10 @@ export const devRoute = new Hono<APIContext>()
       return c.json({ success: true })
     }
     const userId = key.userId
-    await sql.begin(async (tx) => {
+    await sql.begin(async (tx: Transaction) => {
       await tx`DELETE FROM auth_audits WHERE user_id = ${userId}`
       await tx`DELETE FROM user_push_tokens WHERE user_id = ${userId}`
       await tx`DELETE FROM user_sessions WHERE user_id = ${userId}`
-      await tx`DELETE FROM user_profiles WHERE user_id = ${userId}`
       await tx`DELETE FROM user_keys WHERE user_id = ${userId}`
       await tx`DELETE FROM users WHERE id = ${userId}`
     })

@@ -1,11 +1,11 @@
 import { Hono } from "hono"
+import { validate } from "@platform/types"
 import {
   authOTPSchema,
   authPasswordChangeSchema,
   authUsernamePasswordSchema,
   SessionMFAStatus,
-  validate,
-} from "@shared/types"
+} from "@domain/identity"
 import { auth } from "@api/services/auth/+index.ts"
 import { APIContext } from "../_types.ts"
 import { isAuthenticated1FA, isAuthenticated2FA } from "../middlewares/auth.ts"

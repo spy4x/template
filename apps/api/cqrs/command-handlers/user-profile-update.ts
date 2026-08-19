@@ -1,4 +1,4 @@
-import { CommandHandler } from "@shared/cqrs/types.ts"
+import { CommandHandler } from "@platform/cqrs/types.ts"
 import { UserProfileUpdateCommand } from "@api/cqrs/commands.ts"
 import { db } from "@api/services/db.ts"
 import { eventBus } from "@api/services/eventBus.ts"

@@ -2,6 +2,10 @@
 import { getEnvVar } from "@server/helpers/env.ts"
 import { sql } from "./+index.ts"
 
+interface TableRow {
+  tableName: string
+}
+
 /** Drops all tables from the database.
  *  if NODE_ENV!='prod' || 'production' and not --prod - then abort */
 async function purge(): Promise<void> {
@@ -12,13 +16,13 @@ async function purge(): Promise<void> {
   let tables: string[] = []
   try {
     console.log("Fetching table names...")
-    const result = await sql`
+    const result = await sql<TableRow[]>`
         SELECT table_name
         FROM information_schema.tables
         WHERE table_schema = 'public'
         AND table_type = 'BASE TABLE'
     `
-    tables = result.map((r) => r.tableName)
+    tables = result.map((row: TableRow) => row.tableName)
   } catch (err) {
     console.error("❌ Failed to fetch table names", err)
     Deno.exit(1)

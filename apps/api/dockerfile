@@ -1,4 +1,4 @@
-ARG DENO_VERSION=2.4.0
+ARG DENO_VERSION=2.9.0
 FROM app/deno-base:${DENO_VERSION}
 
 # Copy application code with proper ownership
@@ -6,4 +6,4 @@ USER root
 COPY --chown=1000:1000 . .
 USER 1000:1000
 
-CMD ["sh", "-c", "deno task db:migrate && deno task api:dev"]
+CMD ["sh", "-c", "deno task db:migrate && if [ \"$ENV\" = \"prod\" ]; then deno task api:prod; else deno task api:dev; fi"]

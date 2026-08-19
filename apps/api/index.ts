@@ -7,12 +7,15 @@ import { config } from "@api/services/config.ts"
 import { logger } from "@api/middlewares/log.ts"
 import { parseAuth } from "@api/middlewares/auth.ts"
 import { APIContext } from "./_types.ts"
-import { getRandomString } from "@shared/helpers/random.ts"
+import { getRandomString } from "@platform/helpers/random.ts"
 import { authRoute } from "./routes/auth.ts"
 import { pushNotificationRoute } from "./routes/pushNotification.ts"
 import { usersRoute } from "./routes/users.ts"
 import { wsRoute } from "./routes/ws.ts"
-import { githubRoute } from "./routes/github.ts"
+import { createGroupsRoute } from "./routes/groups.ts"
+import { commandBus } from "./services/commandBus.ts"
+import { queryBus } from "./services/queryBus.ts"
+import { GroupListCursorCodec } from "@server/groups/group-list-cursor.ts"
 import "./cqrs/+init.ts"
 
 const app = new Hono<APIContext>().basePath("/api")
@@ -36,7 +39,15 @@ app.route("/auth", authRoute) // has some public routes and some more protected
 app.route("/users", usersRoute)
 app.route("/push", pushNotificationRoute)
 app.route("/ws", wsRoute)
-app.route("/github", githubRoute)
+const groupListCursor = new GroupListCursorCodec(config.authCookieSecret)
+app.route(
+  "/groups",
+  createGroupsRoute({
+    create: (command) => commandBus.execute(command),
+    list: (query) => queryBus.execute(query),
+    cursor: groupListCursor,
+  }),
+)
 if (config.isDev) {
   const { devRoute } = await import("./routes/dev.ts")
   app.route("/test", devRoute)

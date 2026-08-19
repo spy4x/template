@@ -1,5 +1,4 @@
-import { User, UserKey, UserSession } from "@shared/types"
-
+import { User, UserKey, UserSession } from "@domain/identity"
 export interface AuthData {
   user: User
   key: UserKey

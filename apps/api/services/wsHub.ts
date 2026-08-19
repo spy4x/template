@@ -1,8 +1,9 @@
 import { Context } from "hono"
-import type { RequestInfo, WsProfileEvent } from "@shared/types"
+import type { RequestInfo } from "@platform/types"
+import type { WsProfileEvent } from "@domain/identity"
 import { APIContext } from "../_types.ts"
-import { validate, wsReadyEventSchema } from "@shared/types"
-
+import { validate } from "@platform/types"
+import { wsReadyEventSchema } from "@domain/identity"
 type WsClient = {
   userId: number
   socket: WebSocket

@@ -61,8 +61,8 @@ steps:
         from_secret: kv_port
       API_PORT:
         from_secret: api_port
-      WEB_PORT:
-        from_secret: web_port
+      SPA_PORT:
+        from_secret: spa_port
       DOMAIN:
         from_secret: domain
       TRAEFIK_ACME_EMAIL:
@@ -86,7 +86,7 @@ steps:
         KV_HOSTNAME=${KV_HOSTNAME}
         KV_PORT=${KV_PORT}
         API_PORT=${API_PORT}
-        WEB_PORT=${WEB_PORT}
+        SPA_PORT=${SPA_PORT}
         DOMAIN=${DOMAIN}
         TRAEFIK_ACME_EMAIL=${TRAEFIK_ACME_EMAIL}
         SSH_TO_SERVER=${SSH_TO_SERVER}
@@ -137,7 +137,7 @@ steps:
 #   postgres:
 #     image: postgres:16-alpine
 #     environment:
-#       - POSTGRES_DB=financy_test
+#       - POSTGRES_DB=template_test
 #       - POSTGRES_USER=test
 #       - POSTGRES_PASSWORD=test
 #     when:

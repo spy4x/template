@@ -1,0 +1,6 @@
+{
+  "tasks": {
+    "check": "deno check postgres-group-repository.ts group-list-cursor.ts",
+    "test": "deno test group-list-cursor.test.ts"
+  }
+}

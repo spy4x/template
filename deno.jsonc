@@ -1,21 +1,43 @@
 {
+  "workspace": [
+    "./apps/api",
+    "./apps/spa",
+    "./apps/mpa",
+    "./apps/worker",
+    "./libs/platform/cqrs",
+    "./libs/platform/types",
+    "./libs/platform/cache",
+    "./libs/domain/groups",
+    "./libs/domain/identity",
+    "./libs/server/crypto",
+    "./libs/server/groups"
+  ],
+  "nodeModulesDir": "auto",
+  "allowScripts": ["npm:@tailwindcss/oxide@4.1.12"],
   "tasks": {
     "dev": "deno run compose up -d", // used in terminal to start the development environment
-    "build": "deno task web:build", // used in terminal to build production docker images
+    "build": "deno task spa:build", // used in terminal to build production docker images
 
     // #region apps/api
     "api:dev": "deno serve --allow-all --watch apps/api/index.ts", // used in docker-compose to start the API server in development mode
     "api:prod": "deno serve --allow-all apps/api/index.ts", // production mode - no watch
     // #endregion apps/api
 
-    // #region apps/web
-    "web:dev": "deno run -A --node-modules-dir npm:vite apps/web", // used in docker-compose to start the web app in development mode
-    "web:build": "deno run -A --node-modules-dir npm:vite build apps/web",
-    // #endregion apps/web
+    // #region apps/spa
+    "spa:dev": "deno task --cwd apps/spa dev", // used in docker-compose to start the SPA in development mode
+    "spa:build": "deno task --cwd apps/spa build",
+    // #endregion apps/spa
+
+    // #region apps/mpa
+    "mpa:dev": "deno task --cwd apps/mpa dev",
+    "mpa:build": "deno task --cwd apps/mpa build",
+    "mpa:start": "deno task --cwd apps/mpa start",
+    "mpa:check": "deno task --cwd apps/mpa check",
+    // #endregion apps/mpa
 
     // #region Scripts
-    "db:migrate": "deno run -N=$DB_HOST:5432 -E -R=./libs/server/db/migrations ./libs/server/db/migrate.ts",
-    "db:seed": "deno run -N=$DB_HOST:5432,$KV_HOSTNAME:6379 -E -R=infra/envs/.env infra/scripts/seed-data.ts",
+    "db:migrate": "deno run -N=$DB_HOST:$DB_PORT -E -R=./libs/server/db/migrations ./libs/server/db/migrate.ts",
+    "db:seed": "deno run -N=$DB_HOST:$DB_PORT,$KV_HOSTNAME:$KV_PORT -E -R=infra/envs/.env infra/scripts/seed-data.ts",
     "deps:check": "deno outdated -r",
     "deps:update": "deno outdated -r -u -i",
     "update:ubuntu": "sudo apt update && sudo apt full-upgrade -y && sudo apt autoremove -y && sudo apt clean && sudo apt --fix-broken install && sudo do-release-upgrade",
@@ -24,7 +46,6 @@
     "proxy:start": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env up -d",
     "proxy:stop": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env down",
     "deploy": "deno run -R=./infra --allow-run=rsync,ssh ./infra/scripts/deploy.ts",
-    "worker:github": "deno run -A apps/api/services/github/worker.ts",
     // #endregion Scripts
 
     // #region Checks
@@ -42,8 +63,9 @@
     "fmt:check": "deno fmt --check",
     "lint:fix": "deno lint --fix",
     "lint:check": "deno lint",
-    "ts:check": "deno check **/*.ts",
-    "test": "ENV=dev deno test -A",
+    "ts:check": "deno run --allow-read --allow-run=deno infra/scripts/type-check.ts",
+    "test": "deno test --no-prompt apps/api libs",
+    "test:integration": "ENV=test deno test --no-prompt -E -N -R=./libs/server/db/migrations,./libs/server/db/schema.sql tests/integration",
     "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright test",
     "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright show-report",
     "fix": {
@@ -74,19 +96,19 @@
     "@api/services/": "./apps/api/services/",
     "@api/middlewares/": "./apps/api/middlewares/",
     "@api/cqrs/": "./apps/api/cqrs/",
-    "@web/state/": "./apps/web/src/state/",
-    "@web/components/": "./apps/web/src/components/",
-    "@shared/types": "./libs/shared/types/+index.ts",
-    "@shared/constants/": "./libs/shared/constants/",
-    "@shared/helpers/": "./libs/shared/helpers/",
-    "@shared/testing": "./libs/shared/testing/+index.ts",
-    "@shared/cqrs/": "./libs/shared/cqrs/",
-    "@shared/local-storage": "./libs/shared/local-storage/+index.ts",
-    "@shared/cache": "./libs/shared/cache/+index.ts",
-    "@shared/rpc": "./libs/shared/rpc/+index.ts",
+    "@spa/state/": "./apps/spa/src/state/",
+    "@spa/components/": "./apps/spa/src/components/",
+    "@platform/types": "./libs/platform/types/+index.ts",
+    "@platform/helpers/": "./libs/platform/helpers/",
+    "@platform/cqrs/": "./libs/platform/cqrs/",
+    "@domain/groups": "./libs/domain/groups/+lib.ts",
+    "@domain/identity": "./libs/domain/identity/+lib.ts",
+    "@platform/cache": "./libs/platform/cache/+index.ts",
+    "@server/crypto": "./libs/server/crypto/+index.ts",
     "@server/db": "./libs/server/db/+index.ts",
     "@server/kv": "./libs/server/kv/+index.ts",
     "@server/helpers/": "./libs/server/helpers/",
+    "@server/groups/": "./libs/server/groups/",
     "@client/preact/": "./libs/client/preact/",
     "@client/vite/": "./libs/client/vite/",
     "@client/browser": "./libs/client/browser/+index.ts",
@@ -103,19 +125,11 @@
 
     // apps/tgbot
 
-    // apps/web
-    "@deno/vite-plugin": "npm:@deno/vite-plugin@^1.0.4",
-    "@preact/preset-vite": "npm:@preact/preset-vite@^2.10.1",
-    "preact": "npm:preact@^10.26.2",
-    "vite": "npm:vite@^6.1.1",
-    "wouter-preact": "npm:wouter-preact@^3.7.1",
-    "@preact/signals": "npm:@preact/signals@^2.2.0",
-    "@preact/signals-core": "npm:@preact/signals-core@^1.9.0",
-    "tailwindcss": "npm:tailwindcss@4.1.8",
-    "tailwindcss/": "npm:/tailwindcss@4.1.8/",
-    "tailwindcss/plugin": "npm:/tailwindcss@4.1.8/plugin.js",
-    "@tailwindcss/forms": "npm:@tailwindcss/forms@0.5.10",
-    "@tailwindcss/vite": "npm:@tailwindcss/vite@4.1.8",
+    // client
+    "preact": "npm:preact@10.28.2",
+    "wouter-preact": "npm:wouter-preact@3.9.0",
+    "@preact/signals": "npm:@preact/signals@2.5.1",
+    "@preact/signals-core": "npm:@preact/signals-core@1.12.1",
 
     // shared
     "@std/path": "jsr:@std/path@^1.0.3",
