@@ -1,16 +1,15 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
+import { validate } from "@platform/types"
 import {
   UserMFAStatus,
   UserRole,
-  validate,
   wsAuthSignedOutEventSchema,
   wsProfileEventSchema,
   wsProfileUpdatedEventSchema,
   wsPushDevicesUpdatedEventSchema,
   wsReadyEventSchema,
-} from "@shared/types"
-
+} from "@domain/identity"
 Deno.test("ws schema: accepts ready event", () => {
   const result = validate(wsReadyEventSchema, {
     kind: "ws.ready",

@@ -1,5 +1,5 @@
 import { expect } from "@std/expect"
-import { PublicAPICacheModel } from "@shared/cache"
+import { PublicAPICacheModel } from "@platform/cache"
 import { DbServiceBase, postgres } from "./+index.ts"
 
 interface TransactionRow extends postgres.Row {

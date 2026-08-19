@@ -1,5 +1,4 @@
 import { expect } from "@std/expect"
-import { SessionMFAStatus, UserSession, UserSessionStatus } from "@shared/types"
 import { buildMethods, CacheService, ICacheStorage } from "./+index.ts"
 
 class MemoryCacheStorage implements ICacheStorage {
@@ -25,8 +24,19 @@ class MemoryCacheStorage implements ICacheStorage {
   }
 }
 
+/**
+ * Local fixture rather than a domain entity: this suite covers date revival for
+ * any cached record whose keys end in "At", and platform must not depend on domain.
+ */
+type ExpiringRecord = {
+  id: number
+  createdAt: Date
+  updatedAt: Date
+  expiresAt: Date
+}
+
 Deno.test("cache revives dates for immediate session expiry checks", async () => {
-  const cache = buildMethods<UserSession>(
+  const cache = buildMethods<ExpiringRecord>(
     new CacheService(new MemoryCacheStorage()),
     "session",
     60,
@@ -35,11 +45,6 @@ Deno.test("cache revives dates for immediate session expiry checks", async () =>
 
   await cache.set(1, {
     id: 1,
-    userId: 1,
-    keyId: 1,
-    token: "token",
-    status: UserSessionStatus.ACTIVE,
-    mfa: SessionMFAStatus.NOT_REQUIRED,
     expiresAt: expiredAt,
     createdAt: new Date(),
     updatedAt: new Date(),

@@ -1,16 +1,9 @@
 import { KeyValueService } from "@server/kv"
-import {
-  AuthAudit,
-  User,
-  UserKey,
-  UserPushToken,
-  UserSession,
-  ValidationSchema,
-} from "@shared/types"
-
+import { ValidationSchema } from "@platform/types"
+import { AuthAudit, User, UserKey, UserPushToken, UserSession } from "@domain/identity"
 import { config } from "../services/config.ts"
 
-import { buildMethods as buildMethodsBase, CacheService } from "@shared/cache"
+import { buildMethods as buildMethodsBase, CacheService } from "@platform/cache"
 
 const kv = await KeyValueService.connect(config.kv.hostname, config.kv.port)
 const cacheService = new CacheService(kv)

@@ -1,4 +1,5 @@
-import { validate, wsProfileEventSchema } from "@shared/types"
+import { validate } from "@platform/types"
+import { wsProfileEventSchema } from "@domain/identity"
 import { sessionState } from "./session.ts"
 
 class WsClient {

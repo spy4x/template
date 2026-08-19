@@ -8,7 +8,7 @@ import {
   GroupListQuery,
   GroupRole,
 } from "@domain/groups"
-import { SessionMFAStatus, UserMFAStatus } from "@shared/types"
+import { SessionMFAStatus, UserMFAStatus } from "@domain/identity"
 import type { APIContext } from "../../apps/api/_types.ts"
 import { createGroupsRoute, GroupsRouteDependencies } from "../../apps/api/routes/groups.ts"
 import { buildAuthData } from "../helpers/fake-auth.ts"

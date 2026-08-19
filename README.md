@@ -3,10 +3,10 @@
 Reusable Deno repository baseline for products that need API, SPA, MPA, worker, persistence, and
 offline sync foundations without product-specific business logic.
 
-> **Migration status: WIP.** App boundaries, group core persistence, signup personal groups, and
-> basic group REST/CQRS now exist. Remaining `libs/shared` classification, notes/sync, group
-> administration, MPA, and worker behavior stay incomplete. Target architecture below and ADR 001
-> are authoritative.
+> **Migration status: WIP.** App boundaries, group core persistence, signup personal groups,
+> basic group REST/CQRS, and the `libs/shared` split into `libs/platform` and `libs/domain` now
+> exist. Notes/sync, group administration, MPA, and worker behavior stay incomplete. Target
+> architecture below and ADR 001 are authoritative.
 
 Database evolution is forward-additive. Group-core DDL and personal-group backfill use separate
 migrations; backfill is idempotent and safe to rerun during rollout.

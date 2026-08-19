@@ -1,6 +1,5 @@
 import { signal } from "@preact/signals"
-import type { User } from "@shared/types"
-
+import type { User } from "@domain/identity"
 export type SessionUser = User
 
 export type SessionState = {

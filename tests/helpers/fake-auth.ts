@@ -1,11 +1,6 @@
 import type { APIContext } from "../../apps/api/_types.ts"
 import type { AuthData } from "../../apps/api/services/auth/types.ts"
-import {
-  SessionMFAStatus,
-  UserMFAStatus,
-  UserRole,
-  UserSessionStatus,
-} from "../../libs/shared/types/+index.ts"
+import { SessionMFAStatus, UserMFAStatus, UserRole, UserSessionStatus } from "@domain/identity"
 
 type AuthOverrides = {
   user?: Partial<AuthData["user"]>

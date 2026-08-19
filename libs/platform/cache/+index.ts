@@ -1,5 +1,4 @@
-import { validate, ValidationSchema } from "@shared/types"
-
+import { validate, ValidationSchema } from "@platform/types"
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/
 
 function parseCacheValue<T>(serialized: string): T {

@@ -9,8 +9,7 @@ import {
   persistPasswordSignup,
 } from "../../apps/api/services/auth/password-signup.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
-import { SessionMFAStatus, User, UserKey, UserSession, UserSessionStatus } from "@shared/types"
-
+import { SessionMFAStatus, User, UserKey, UserSession, UserSessionStatus } from "@domain/identity"
 const REQUIRED_DB_ENV = ["DB_HOST", "DB_USER", "DB_PASS", "DB_NAME"]
 const hasDatabase = REQUIRED_DB_ENV.every((name) => Boolean(Deno.env.get(name)))
 

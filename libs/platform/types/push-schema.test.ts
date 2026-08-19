@@ -1,6 +1,5 @@
 import { expect } from "@std/expect"
-import { pushSubscribeRequestSchema, pushUnsubscribeRequestSchema, validate } from "@shared/types"
-
+import { pushSubscribeRequestSchema, pushUnsubscribeRequestSchema, validate } from "@platform/types"
 Deno.test("push schema: accepts subscribe", () => {
   const result = validate(pushSubscribeRequestSchema, {
     deviceId: "device-1",

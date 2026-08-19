@@ -1,7 +1,6 @@
 import { UserProfileUpdatedEvent } from "@api/cqrs/events.ts"
 import { db } from "@api/services/db.ts"
-import { AuthAuditEventType } from "@shared/types"
-
+import { AuthAuditEventType } from "@domain/identity"
 export const authAuditOnUserProfileUpdatedHandler = async (
   event: UserProfileUpdatedEvent,
 ) => {

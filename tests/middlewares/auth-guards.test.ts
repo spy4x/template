@@ -7,7 +7,7 @@ import {
   isRole,
 } from "../../apps/api/middlewares/auth-guards.ts"
 import { buildAuthData, stubContext } from "../helpers/fake-auth.ts"
-import { SessionMFAStatus, UserMFAStatus, UserRole } from "../../libs/shared/types/+index.ts"
+import { SessionMFAStatus, UserMFAStatus, UserRole } from "@domain/identity"
 
 describe("auth-guards", () => {
   it("parseAuth stores auth payload", async () => {

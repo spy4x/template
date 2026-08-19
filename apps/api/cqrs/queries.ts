@@ -1,6 +1,5 @@
 import { Query } from "@platform/cqrs/types.ts"
-import { User } from "@shared/types"
-
+import { User } from "@domain/identity"
 export interface UserProfileGetPayload {
   userId: number
 }

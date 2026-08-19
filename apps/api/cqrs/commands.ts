@@ -1,6 +1,6 @@
 import { Command } from "@platform/cqrs/types.ts"
-import { RequestInfo, User } from "@shared/types"
-
+import { RequestInfo } from "@platform/types"
+import { User } from "@domain/identity"
 export interface UserProfileUpdatePayload {
   userId: number
   firstName: string

@@ -7,7 +7,7 @@ import {
   UserMFAStatus,
   UserRole,
   UserSessionStatus,
-} from "@shared/types"
+} from "@domain/identity"
 import {
   normalizeUsername,
   PasswordSignupPersistenceError,

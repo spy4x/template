@@ -9,7 +9,7 @@ import {
   UserRole,
   UserSession,
   UserSessionBase,
-} from "@shared/types"
+} from "@domain/identity"
 import type { AuthData } from "./types.ts"
 
 export interface PasswordSignupTransaction {

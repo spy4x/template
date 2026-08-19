@@ -3,13 +3,9 @@ import * as webpush from "webpush"
 import { encodeBase64Url } from "@std/encoding"
 import { db } from "@api/services/db.ts"
 import { config } from "@api/services/config.ts"
-import type {
-  PushNotificationMessage,
-  PushSubscribeRequest,
-  UserPushTokenPublic,
-} from "@shared/types"
-import { pushNotificationMessageSchema, validate } from "@shared/types"
-
+import type { PushNotificationMessage, PushSubscribeRequest } from "@platform/types"
+import type { UserPushTokenPublic } from "@domain/identity"
+import { pushNotificationMessageSchema, validate } from "@platform/types"
 type Subscriptions = { [deviceId: string]: webpush.PushSubscriber }
 
 export class WebPushService {

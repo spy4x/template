@@ -1,8 +1,7 @@
 import { Context, Next } from "hono"
 import { createMiddleware } from "hono/factory"
 import { APIContext } from "../_types.ts"
-import { SessionMFAStatus, UserMFAStatus, UserRole } from "@shared/types"
-
+import { SessionMFAStatus, UserMFAStatus, UserRole } from "@domain/identity"
 export type AuthResolver = (
   context: Context<APIContext>,
 ) => Promise<APIContext["Variables"]["auth"] | null>

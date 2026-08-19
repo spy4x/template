@@ -9,7 +9,7 @@ import {
   GroupListResult,
   parseCreateSharedGroupRequest,
 } from "@domain/groups"
-import { SessionMFAStatus, UserMFAStatus } from "@shared/types"
+import { SessionMFAStatus, UserMFAStatus } from "@domain/identity"
 import { APIContext } from "../_types.ts"
 import { groupErrorResponse, GroupFeatureError } from "../features/groups/errors.ts"
 import { createSameOriginMutationGuard } from "../middlewares/same-origin.ts"

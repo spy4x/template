@@ -17,7 +17,6 @@ export default defineConfig({
         "!../../libs/client/**",
         "!../../libs/domain/**",
         "!../../libs/platform/**",
-        "!../../libs/shared/**",
       ],
     },
   },

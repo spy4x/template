@@ -11,14 +11,15 @@ import { sessionState } from "../state/session.ts"
 import { apiFetch } from "../state/api.ts"
 import type {
   ApiIsSuccessResponse,
-  PushDevicesResponse,
   PushPublicKeyResponse,
   PushSubscribeRequest,
-  PushSubscribeResponse,
   PushUnsubscribeRequest,
+} from "@platform/types"
+import type {
+  PushDevicesResponse,
+  PushSubscribeResponse,
   UserPushTokenPublic,
-} from "@shared/types"
-
+} from "@domain/identity"
 export function ProfileView() {
   const session = sessionState.value
   const [firstName, setFirstName] = useState(session.user?.firstName || "")

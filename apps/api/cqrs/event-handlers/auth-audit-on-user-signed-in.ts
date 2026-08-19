@@ -1,7 +1,6 @@
 import { UserSignedInEvent } from "@api/cqrs/events.ts"
 import { db } from "@api/services/db.ts"
-import { AuthAuditEventType } from "@shared/types"
-
+import { AuthAuditEventType } from "@domain/identity"
 export const authAuditOnUserSignedInHandler = async (event: UserSignedInEvent) => {
   const { user, request } = event.data
   await db.authAudit.createOne({

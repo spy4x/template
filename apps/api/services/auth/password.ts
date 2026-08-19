@@ -1,4 +1,4 @@
-import { checkHash, hash } from "@shared/helpers/hash.ts"
+import { checkHash, hash } from "@platform/helpers/hash.ts"
 import {
   SessionMFAStatus,
   User,
@@ -6,7 +6,7 @@ import {
   UserKeyKind,
   UserMFAStatus,
   UserSession,
-} from "@shared/types"
+} from "@domain/identity"
 import { config } from "../config.ts"
 import { db } from "../db.ts"
 import { SessionManager } from "./session.ts"

@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
-import { authUsernameSchema, UserKeyKind, validate } from "@shared/types"
+import { validate } from "@platform/types"
+import { authUsernameSchema, UserKeyKind } from "@domain/identity"
 import { db } from "@api/services/db.ts"
 import { sql, Transaction } from "@server/db"
 

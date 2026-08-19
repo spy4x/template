@@ -1,5 +1,5 @@
 import { Context } from "hono"
-import type { RequestInfo } from "@shared/types"
+import type { RequestInfo } from "@platform/types"
 import { APIContext } from "../_types.ts"
 
 export function requestInfoFromContext(c: Context<APIContext>): RequestInfo {

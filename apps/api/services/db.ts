@@ -9,7 +9,7 @@ import {
   UserPushTokenBase,
   UserSession,
   UserSessionBase,
-} from "@shared/types"
+} from "@domain/identity"
 import { DbServiceBase } from "@server/db"
 import { publicAPICache } from "./cache.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"

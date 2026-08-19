@@ -1,6 +1,6 @@
 import { Event } from "@platform/cqrs/types.ts"
-import { RequestInfo, User, UserPushTokenPublic } from "@shared/types"
-
+import { RequestInfo } from "@platform/types"
+import { User, UserPushTokenPublic } from "@domain/identity"
 export class UserSignedUpEvent
   implements Event<{ user: User; username: string; request: RequestInfo }> {
   constructor(public data: { user: User; username: string; request: RequestInfo }) {}

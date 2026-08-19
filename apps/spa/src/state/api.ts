@@ -1,5 +1,4 @@
-import type { ApiResult } from "@shared/types"
-
+import type { ApiResult } from "@platform/types"
 export async function apiFetch<T>(
   path: string,
   init?: RequestInit,

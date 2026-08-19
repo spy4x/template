@@ -7,8 +7,8 @@ import {
   UserKeyKind,
   UserMFAStatus,
   UserSessionStatus,
-} from "@shared/types"
-import { hash } from "@shared/helpers/hash.ts"
+} from "@domain/identity"
+import { hash } from "@platform/helpers/hash.ts"
 import { config } from "../config.ts"
 import { db } from "../db.ts"
 import { SessionManager } from "./session.ts"
