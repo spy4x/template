@@ -19,9 +19,9 @@ We are implementing the **group foundation** — the first slice of the group-sc
 - `deno task test:integration`: ✅ 2 suites, 9 steps, all pass (disposable Postgres)
 - `deno task spa:build`: ✅
 - `deno task mpa:check`: ✅
-- **No commit yet** — all work is uncommitted in the worktree
+- Committed as `11d646d feat(groups): add group foundation slice` and pushed to `origin/refactor/platform-template`
 
-### Uncommitted Changes (14 modified + 21 new files, ~2600 lines)
+### Contents of the group foundation commit (14 modified + 20 new files, ~2900 lines)
 
 **New files:**
 
@@ -137,7 +137,7 @@ Rollback test fixture username exceeded 50-char validator limit. Fixed by shorte
 2. **Sync protocol not implemented yet** — manifest, bootstrap, push, pull endpoints still ahead.
 3. **No SPA Dexie local projection yet** — client-side offline cache is next major slice.
 4. **PR #4 base is `feature/github-app-oauth`** — needs eventual base branch decision (rebase to `master`?).
-5. **Some stale references** to old modules (Telegram bot, exchange rate, Financy) may remain in docs/infra.
+5. **Stale references removed** — Telegram, exchange-rate and Financy residue cleared from code, infra and docs; 14 hackathon/OpenCode-era docs deleted.
 
 ## Next Steps (Ordered)
 

@@ -17,7 +17,7 @@ function Shell() {
         <div class="mx-auto flex min-h-16 max-w-5xl items-center justify-between px-4 py-3 sm:h-16 sm:px-6 sm:py-0">
           <div class="flex items-center gap-3">
             <div class="h-8 w-8 rounded-xl bg-indigo-500"></div>
-            <div class="text-lg font-semibold">Financy</div>
+            <div class="text-lg font-semibold">Template</div>
           </div>
           <div class="flex items-center gap-4 text-sm text-slate-300">
             {session.user
