@@ -191,13 +191,20 @@ Rollback test fixture username exceeded 50-char validator limit. Fixed by shorte
 ## Environment Setup for Integration Tests
 
 ```bash
-cd /home/spy4x/sync/code/worktrees/template/refactor/platform-template
-
 NAME="template-groups-test-$$"
 PASS=$(openssl rand -hex 24)
-docker run -d --name "$NAME" -e POSTGRES_USER=tester -e POSTGRES_PASSWORD="$PASS" -e POSTGRES_DB=template_test -p 127.0.0.1::5432 postgres:16-alpine
-# Wait for ready...
+docker run -d --name "$NAME" -e POSTGRES_USER=tester -e POSTGRES_PASSWORD="$PASS" \
+  -e POSTGRES_DB=template_test -p 127.0.0.1::5432 postgres:16-alpine
 PORT=$(docker port "$NAME" 5432/tcp | cut -d: -f2)
-DB_HOST=127.0.0.1 DB_PORT="$PORT" DB_USER=tester DB_PASS="$PASS" DB_NAME=template_test deno task test:integration
+
+# Wait over TCP, not the unix socket. The postgres image runs a temporary
+# socket-only server during initdb, so `pg_isready` without -h reports ready
+# before the real server accepts TCP - the tests then connect, the temporary
+# server shuts down, and they fail with ConnectionReset at random.
+timeout 90 docker exec "$NAME" sh -c \
+  'until pg_isready -h 127.0.0.1 -U tester -d template_test -q; do sleep 0.5; done'
+
+DB_HOST=127.0.0.1 DB_PORT="$PORT" DB_USER=tester DB_PASS="$PASS" DB_NAME=template_test \
+  deno task test:integration
 docker rm -f "$NAME"
 ```

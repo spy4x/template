@@ -1,4 +1,5 @@
 import { commandBus } from "@api/services/commandBus.ts"
+import { requireSatisfiedMfa } from "@api/cqrs/require-satisfied-mfa.ts"
 import { queryBus } from "@api/services/queryBus.ts"
 import { eventBus } from "@api/services/eventBus.ts"
 import { UserProfileUpdateCommand } from "@api/cqrs/commands.ts"
@@ -22,6 +23,10 @@ import { authAuditOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/a
 import { wsOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/ws-on-user-profile-updated.ts"
 import { wsOnUserSignedOutHandler } from "@api/cqrs/event-handlers/ws-on-user-signed-out.ts"
 import { wsOnPushDevicesUpdatedHandler } from "@api/cqrs/event-handlers/ws-on-push-devices-updated.ts"
+
+// Cross-cutting, applied to every dispatch before any handler runs.
+commandBus.use(requireSatisfiedMfa)
+queryBus.use(requireSatisfiedMfa)
 
 eventBus.on(UserSignedUpEvent, authAuditOnUserSignedUpHandler)
 eventBus.on(UserSignedInEvent, authAuditOnUserSignedInHandler)

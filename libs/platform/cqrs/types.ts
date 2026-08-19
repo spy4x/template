@@ -35,3 +35,17 @@ export interface Event<TPayload> {
 
 // deno-lint-ignore no-explicit-any
 export type EventConstructor<T extends Event<unknown>> = new (...args: any[]) => T
+
+/**
+ * Cross-cutting concern that runs on every dispatch, regardless of the transport
+ * that produced the message.
+ *
+ * This is where checks belong that are neither transport mechanics nor business
+ * rules - session strength, auditing, tracing. Putting them in a transport lets a
+ * second transport skip them; putting them in handlers duplicates them once per
+ * handler and rots the moment someone forgets one.
+ */
+export type CqrsMiddleware = (
+  message: { data: unknown },
+  next: () => Promise<unknown>,
+) => Promise<unknown>

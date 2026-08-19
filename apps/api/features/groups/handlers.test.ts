@@ -1,6 +1,6 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
-import { AccessError, type Actor, SessionMFAStatus, UserMFAStatus } from "@domain/identity"
+import { type Actor, SessionMFAStatus, UserMFAStatus } from "@domain/identity"
 import {
   CreatePersonalGroupInput,
   CreateSharedGroupInput,
@@ -85,38 +85,5 @@ describe("group CQRS handlers", () => {
 
     expect(repository.listUserId).toBe(84)
     expect(result.groups).toEqual([summary])
-  })
-
-  it("refuses a command when the session has not completed MFA", async () => {
-    const repository = new FakeGroupRepository()
-    const handler = createGroupCreateHandler(repository)
-    const command = new GroupCreateCommand({
-      actor: actor(42, {
-        userMfa: UserMFAStatus.CONFIGURED,
-        sessionMfa: SessionMFAStatus.NOT_PASSED_YET,
-      }),
-      id: summary.id,
-      kind: GroupKind.SHARED,
-      name: "Team",
-    })
-
-    await expect(handler(command)).rejects.toThrow(AccessError)
-    // The repository is never reached, so no transport can dispatch past this.
-    expect(repository.createActorId).toBe(null)
-  })
-
-  it("refuses a query when the session has not completed MFA", async () => {
-    const repository = new FakeGroupRepository()
-    const handler = createGroupListHandler(repository)
-    const query = new GroupListQuery({
-      actor: actor(84, {
-        userMfa: UserMFAStatus.CONFIGURED,
-        sessionMfa: SessionMFAStatus.NOT_PASSED_YET,
-      }),
-      page: { limit: 50 },
-    })
-
-    await expect(handler(query)).rejects.toThrow(AccessError)
-    expect(repository.listUserId).toBe(null)
   })
 })

@@ -1,22 +1,20 @@
 import type { CommandHandler, QueryHandler } from "@platform/cqrs/types.ts"
 import type { GroupRepository } from "@domain/groups"
 import { GroupCreateCommand, GroupListQuery } from "@domain/groups"
-import { assertMfaSatisfied } from "@domain/identity"
 
 /**
- * Authorization runs here rather than in route middleware so every transport is
- * covered by one implementation. A WebSocket that dispatches this command gets
- * the same checks as an HTTP request without mounting anything.
+ * Business logic only. Session strength is enforced by a CQRS middleware that
+ * runs on every dispatch, so it is neither repeated here nor skippable by a
+ * transport. Group-scoped authorization - membership and role - is a business
+ * rule and stays in the repository queries, which are membership-scoped.
  */
 export function createGroupCreateHandler(
   repository: GroupRepository,
 ): CommandHandler<GroupCreateCommand> {
   return async (command) => {
-    const { actor } = command.data
-    assertMfaSatisfied(actor)
     return await repository.createShared(
       { id: command.data.id, name: command.data.name, requestId: command.data.requestId },
-      actor.userId,
+      command.data.actor.userId,
     )
   }
 }
@@ -24,9 +22,5 @@ export function createGroupCreateHandler(
 export function createGroupListHandler(
   repository: GroupRepository,
 ): QueryHandler<GroupListQuery> {
-  return async (query) => {
-    const { actor } = query.data
-    assertMfaSatisfied(actor)
-    return await repository.listForUser(actor.userId, query.data.page)
-  }
+  return async (query) => await repository.listForUser(query.data.actor.userId, query.data.page)
 }
