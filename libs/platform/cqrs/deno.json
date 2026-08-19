@@ -1,6 +1,6 @@
 {
   "tasks": {
     "check": "deno check command-bus.ts event-bus.ts query-bus.ts types.ts",
-    "test": "deno test ../../../tests/cqrs"
+    "test": "deno test command-bus.test.ts event-bus.test.ts query-bus.test.ts"
   }
 }

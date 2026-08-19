@@ -1,7 +1,7 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
-import { EventBus } from "../../libs/platform/cqrs/event-bus.ts"
-import type { Event } from "../../libs/platform/cqrs/types.ts"
+import { EventBus } from "./event-bus.ts"
+import type { Event } from "./types.ts"
 
 class PingEvent implements Event<{ value: string }> {
   constructor(public data: { value: string }) {}

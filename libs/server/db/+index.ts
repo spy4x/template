@@ -4,6 +4,9 @@ import { PublicAPICacheModel } from "@platform/cache"
 
 export const sql = postgres({
   host: getEnvVar("DB_HOST"),
+  // DB_PORT is optional so existing environments that omit it keep the 5432
+  // default, but it is honoured when set - .env.example and CI both define it.
+  port: Number(getEnvVar("DB_PORT", true) || 5432),
   user: getEnvVar("DB_USER"),
   pass: getEnvVar("DB_PASS"),
   db: getEnvVar("DB_NAME"),

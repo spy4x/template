@@ -1,7 +1,7 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { GroupError } from "@domain/groups"
-import { GroupListCursorCodec } from "@server/groups/group-list-cursor.ts"
+import { GroupListCursorCodec } from "./group-list-cursor.ts"
 
 const pageKey = {
   updatedAt: new Date("2026-08-18T10:00:00.000Z"),

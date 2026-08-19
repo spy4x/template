@@ -1,8 +1,8 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { Hono } from "hono"
-import type { APIContext } from "../../apps/api/_types.ts"
-import { createSameOriginMutationGuard } from "../../apps/api/middlewares/same-origin.ts"
+import type { APIContext } from "../_types.ts"
+import { createSameOriginMutationGuard } from "./same-origin.ts"
 
 function buildApp() {
   const app = new Hono<APIContext>()

@@ -44,6 +44,11 @@ interface ActiveUserRow extends postgres.Row {
   id: number
 }
 
+interface PersonalMembershipCountRow extends postgres.Row {
+  memberCount: number
+  ownerCount: number
+}
+
 const GROUP_CREATED_EVENT = "group.created"
 const GROUP_AGGREGATE = "group"
 
@@ -165,7 +170,38 @@ export class PostgresGroupRepository implements GroupRepository {
       INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
       VALUES (${group.id}, ${userId}, ${GroupRole.OWNER}, ${userId})
     `
+    await this.assertPersonalGroupInvariant(group.id, userId)
     return toGroup(group)
+  }
+
+  /**
+   * Enforces the personal-group invariant that a deferred constraint trigger used
+   * to enforce in the database: exactly one membership, held by the owner.
+   *
+   * Runs inside the creating transaction, so a violation rolls back the whole
+   * signup rather than leaving a half-formed personal group behind. A failure
+   * here means this repository is broken, not that the caller sent bad input,
+   * so it raises a plain Error and surfaces as a 500.
+   */
+  private async assertPersonalGroupInvariant(groupId: string, ownerUserId: number): Promise<void> {
+    const counts = (
+      await this.sql<PersonalMembershipCountRow[]>`
+        SELECT
+          COUNT(*)::int AS member_count,
+          COUNT(*) FILTER (
+            WHERE user_id = ${ownerUserId} AND role = ${GroupRole.OWNER}
+          )::int AS owner_count
+        FROM group_members
+        WHERE group_id = ${groupId}
+      `
+    )[0]
+
+    if (!counts || counts.memberCount !== 1 || counts.ownerCount !== 1) {
+      throw new Error(
+        `Personal group ${groupId} must have exactly one owner membership, ` +
+          `found ${counts?.memberCount ?? 0} member(s) and ${counts?.ownerCount ?? 0} owner(s)`,
+      )
+    }
   }
 
   async ensurePersonal(input: CreatePersonalGroupInput, userId: number): Promise<Group> {
@@ -200,6 +236,7 @@ export class PostgresGroupRepository implements GroupRepository {
           INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
           VALUES (${inserted.id}, ${userId}, ${GroupRole.OWNER}, ${userId})
         `
+        await repository.assertPersonalGroupInvariant(inserted.id, userId)
         return toGroup(inserted)
       }
 

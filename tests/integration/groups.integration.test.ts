@@ -442,10 +442,7 @@ async function groupMetadata(sql: postgres.Sql, schema: string): Promise<string[
       FROM pg_proc procedures
       INNER JOIN pg_namespace namespaces ON namespaces.oid = procedures.pronamespace
       WHERE namespaces.nspname = ${schema}
-        AND procedures.proname IN (
-          'assert_personal_group_membership',
-          'check_personal_group_membership_trigger'
-        )
+        AND procedures.prokind = 'f'
     ) metadata
     ORDER BY value
   `

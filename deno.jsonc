@@ -8,7 +8,9 @@
     "./libs/platform/types",
     "./libs/platform/cache",
     "./libs/domain/groups",
-    "./libs/domain/identity"
+    "./libs/domain/identity",
+    "./libs/server/crypto",
+    "./libs/server/groups"
   ],
   "nodeModulesDir": "auto",
   "allowScripts": ["npm:@tailwindcss/oxide@4.1.12"],
@@ -62,8 +64,8 @@
     "lint:fix": "deno lint --fix",
     "lint:check": "deno lint",
     "ts:check": "deno run --allow-read --allow-run=deno infra/scripts/type-check.ts",
-    "test": "deno test --no-prompt libs/platform libs/domain tests/auth tests/cqrs tests/groups tests/middlewares",
-    "test:integration": "ENV=test deno test --no-prompt -E -N -R=./libs/server/db/migrations,./libs/server/db/schema.sql libs/server/db tests/integration",
+    "test": "deno test --no-prompt apps/api libs",
+    "test:integration": "ENV=test deno test --no-prompt -E -N -R=./libs/server/db/migrations,./libs/server/db/schema.sql tests/integration",
     "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright test",
     "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright show-report",
     "fix": {
@@ -102,6 +104,7 @@
     "@domain/groups": "./libs/domain/groups/+lib.ts",
     "@domain/identity": "./libs/domain/identity/+lib.ts",
     "@platform/cache": "./libs/platform/cache/+index.ts",
+    "@server/crypto": "./libs/server/crypto/+index.ts",
     "@server/db": "./libs/server/db/+index.ts",
     "@server/kv": "./libs/server/kv/+index.ts",
     "@server/helpers/": "./libs/server/helpers/",

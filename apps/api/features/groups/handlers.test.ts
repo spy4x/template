@@ -12,10 +12,7 @@ import {
   GroupRole,
   GroupSummary,
 } from "@domain/groups"
-import {
-  createGroupCreateHandler,
-  createGroupListHandler,
-} from "../../apps/api/features/groups/handlers.ts"
+import { createGroupCreateHandler, createGroupListHandler } from "./handlers.ts"
 
 const now = new Date("2026-08-18T10:00:00.000Z")
 const summary: GroupSummary = {

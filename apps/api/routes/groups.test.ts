@@ -9,9 +9,9 @@ import {
   GroupRole,
 } from "@domain/groups"
 import { SessionMFAStatus, UserMFAStatus } from "@domain/identity"
-import type { APIContext } from "../../apps/api/_types.ts"
-import { createGroupsRoute, GroupsRouteDependencies } from "../../apps/api/routes/groups.ts"
-import { buildAuthData } from "../helpers/fake-auth.ts"
+import type { APIContext } from "../_types.ts"
+import { createGroupsRoute, GroupsRouteDependencies } from "./groups.ts"
+import { buildAuthData } from "../_testing/fake-auth.ts"
 
 const id = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
 const now = new Date("2026-08-18T10:00:00.000Z")

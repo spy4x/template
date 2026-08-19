@@ -16,6 +16,11 @@ import { PostgresGroupRepository } from "@server/groups/postgres-group-repositor
 // import { getLatestMetrics } from "../routes/metric.ts"
 
 export class DbService extends DbServiceBase {
+  /**
+   * Built per access on purpose. `DbServiceBase.begin()` derives the transactional
+   * service with `Object.create(this)` and rebinds `sql`, so a cached repository
+   * would keep the pool connection and silently escape the transaction.
+   */
   get group() {
     return new PostgresGroupRepository(this.sql)
   }

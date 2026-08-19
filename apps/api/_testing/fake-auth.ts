@@ -1,5 +1,5 @@
-import type { APIContext } from "../../apps/api/_types.ts"
-import type { AuthData } from "../../apps/api/services/auth/types.ts"
+import type { APIContext } from "../_types.ts"
+import type { AuthData } from "../services/auth/types.ts"
 import { SessionMFAStatus, UserMFAStatus, UserRole, UserSessionStatus } from "@domain/identity"
 
 type AuthOverrides = {

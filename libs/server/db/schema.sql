@@ -74,71 +74,10 @@ CREATE INDEX idx_group_members_user_group_role
     ON group_members (user_id, group_id) INCLUDE (role);
 CREATE INDEX idx_group_members_group_role ON group_members (group_id, role);
 
-CREATE FUNCTION assert_personal_group_membership(checked_group_id UUID)
-RETURNS VOID
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    personal_owner_user_id INT4;
-    member_count INT4;
-    owner_member_count INT4;
-BEGIN
-    SELECT owner_user_id
-    INTO personal_owner_user_id
-    FROM groups
-    WHERE id = checked_group_id AND kind = 1;
-
-    IF NOT FOUND THEN
-        RETURN;
-    END IF;
-
-    SELECT
-        COUNT(*)::INT4,
-        COUNT(*) FILTER (
-            WHERE user_id = personal_owner_user_id AND role = 4
-        )::INT4
-    INTO member_count, owner_member_count
-    FROM group_members
-    WHERE group_id = checked_group_id;
-
-    IF member_count <> 1 OR owner_member_count <> 1 THEN
-        RAISE EXCEPTION 'personal group must have exactly one owner membership'
-            USING ERRCODE = '23514', CONSTRAINT = 'personal_group_owner_membership_check';
-    END IF;
-END;
-$$;
-
-CREATE FUNCTION check_personal_group_membership_trigger()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        PERFORM assert_personal_group_membership(OLD.group_id);
-    ELSIF TG_TABLE_NAME = 'groups' THEN
-        PERFORM assert_personal_group_membership(NEW.id);
-        IF TG_OP = 'UPDATE' AND OLD.id <> NEW.id THEN
-            PERFORM assert_personal_group_membership(OLD.id);
-        END IF;
-    ELSE
-        PERFORM assert_personal_group_membership(NEW.group_id);
-        IF TG_OP = 'UPDATE' AND OLD.group_id <> NEW.group_id THEN
-            PERFORM assert_personal_group_membership(OLD.group_id);
-        END IF;
-    END IF;
-    RETURN NULL;
-END;
-$$;
-
-CREATE CONSTRAINT TRIGGER groups_personal_membership_check
-AFTER INSERT OR UPDATE ON groups
-DEFERRABLE INITIALLY DEFERRED
-FOR EACH ROW EXECUTE FUNCTION check_personal_group_membership_trigger();
-
-CREATE CONSTRAINT TRIGGER group_members_personal_membership_check
-AFTER INSERT OR UPDATE OR DELETE ON group_members
-DEFERRABLE INITIALLY DEFERRED
-FOR EACH ROW EXECUTE FUNCTION check_personal_group_membership_trigger();
+-- The personal-group invariant (exactly one member, the owner, with role 4) is
+-- enforced by the repository inside the creating transaction, not by triggers.
+-- idx_groups_one_active_personal_per_user still guarantees at most one active
+-- personal group per user declaratively.
 
 CREATE TABLE user_keys (
     id SERIAL PRIMARY KEY,
@@ -204,7 +143,10 @@ CREATE TABLE audit_events (
     CONSTRAINT audit_events_kind_check CHECK (length(btrim(event_kind)) BETWEEN 1 AND 64)
 );
 
-CREATE UNIQUE INDEX idx_audit_events_group_kind ON audit_events (group_id, event_kind);
+-- Deliberately not unique: an audit log must be able to record the same kind of
+-- event for a group more than once.
+CREATE INDEX idx_audit_events_group_kind_created
+    ON audit_events (group_id, event_kind, created_at DESC);
 CREATE INDEX idx_audit_events_actor_created
     ON audit_events (actor_user_id, created_at DESC, id DESC);
 

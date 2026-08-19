@@ -1,7 +1,7 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
-import { CommandBus } from "../../libs/platform/cqrs/command-bus.ts"
-import type { Command } from "../../libs/platform/cqrs/types.ts"
+import { CommandBus } from "./command-bus.ts"
+import type { Command } from "./types.ts"
 
 class PingCommand implements Command<{ value: string }, { value: string }> {
   __resultType?: { value: string }

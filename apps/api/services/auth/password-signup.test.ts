@@ -15,7 +15,7 @@ import {
   PasswordSignupStore,
   PasswordSignupTransaction,
   persistPasswordSignup,
-} from "../../apps/api/services/auth/password-signup.ts"
+} from "./password-signup.ts"
 
 const now = new Date("2026-08-18T10:00:00.000Z")
 const personalGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
