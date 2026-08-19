@@ -76,6 +76,24 @@ ADR 002 is recent and reverses part of ADR 001. In short:
 - Live sockets are re-evaluated on sign-out, session expiry and
   `authorization_revision` change.
 
+## Which documents to trust
+
+Documentation drifts here, so check status before believing anything.
+
+| Document                                            | Status                                                                                                                               |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `docs/decisions/001-deno-platform-template.md`      | Authoritative, except transport and sync rules, which ADR 002 replaced                                                               |
+| `docs/decisions/002-realtime-transport-and-sync.md` | Authoritative. Most recent decision                                                                                                  |
+| `docs/design/group-sync.md`                         | Superseded in part. Its change log, cursor, idempotency and conflict rules still stand; its "WebSocket is optional" framing does not |
+| `docs/prd/group-sync-platform.md`                   | Superseded in part. Read "REST" as "through the shared CQRS handlers"                                                                |
+| `docs/stack.md`                                     | Current. What is actually running and deployed                                                                                       |
+| `docs/principles.md`                                | Current, general                                                                                                                     |
+| `docs/woodpecker-ci-setup.md`                       | Aspirational. No pipeline is wired up                                                                                                |
+| `docs/financy-extraction-inventory.md`              | Working list. Delete rows as they land, delete the file when drained                                                                 |
+
+A new ADR supersedes rather than rewrites: ADR 001 keeps its text and carries a
+pointer. Do not edit accepted decisions in place.
+
 ## Traps in this codebase
 
 These cost real time to find. Do not rediscover them.

@@ -1,5 +1,19 @@
 # Group Sync Technical Design
 
+> **Status: superseded in part by [ADR 002](../decisions/002-realtime-transport-and-sync.md).**
+>
+> This document predates ADR 002 and assumes WebSockets are an optional wakeup
+> that no accepted state depends on. That is no longer true: `apps/spa` speaks
+> WebSocket for mutations, queries and realtime, and pushed changes are stamped
+> with a sequence so a client can detect a gap and fall back to a cursor pull.
+>
+> Overridden here: every claim that WebSocket is optional, that "no accepted
+> state travels only through WebSocket", and that WebSocket-only sync was
+> rejected. Still current and still the plan: the committed change log, cursor
+> semantics, idempotency and expected-version rules, conflict handling, and the
+> requirement that the protocol converge without a socket - which survives as
+> the REST pull path.
+
 - Status: approved for implementation
 - Owner: designer
 - Effort: M
