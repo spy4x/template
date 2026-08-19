@@ -22,9 +22,11 @@ Three things worth knowing before planning any of this work.
    connect is a full re-download of every model. `syncedAt` is an in-memory signal, so it would
    not survive a reload anyway.
 3. **Financy sends mutations over WebSocket.** Its WS service imports all 19 CQRS commands and
-   dispatches `CREATE`/`UPDATE`/`DELETE`/`UNDELETE`/`TRANSFER` from socket messages. ADR 001 for
-   this template says REST is the external protocol and WS carries no correctness dependency.
-   Do not port that part — see [realtime design](design/realtime-websockets.md).
+   dispatches `CREATE`/`UPDATE`/`DELETE`/`UNDELETE`/`TRANSFER` from socket messages.
+   [ADR 002](decisions/002-realtime-transport-and-sync.md) adopts that idea - the SPA speaks
+   WebSocket - but not this implementation. Financy's socket is the only path, with no sequence
+   on a push and no way to detect a gap, so a missed frame silently diverges local state. Here a
+   push is stamped with its sequence and a gap falls back to a cursor pull.
 
 ## Take as-is (small rework: import paths, `libs/shared` → `libs/platform`)
 

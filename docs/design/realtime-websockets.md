@@ -1,6 +1,7 @@
 # Realtime transport and sync-on-reconnect
 
-- Status: proposal, not yet decided. Becomes ADR 002 once the topology question is settled.
+- Status: superseded by [ADR 002](../decisions/002-realtime-transport-and-sync.md).
+  Kept as the analysis record; the decision lives in the ADR.
 - Date: 2026-08-19
 - Related: [ADR 001](../decisions/001-deno-platform-template.md), [group sync design](group-sync.md),
   [Financy inventory](../financy-extraction-inventory.md)
@@ -48,17 +49,19 @@ service every generated project must run and operate.
 
 ### Recommendation
 
-**Start in `apps/api`, behind a library boundary that makes extraction cheap.**
+**Superseded.** This section originally recommended keeping WebSockets hint-only,
+with no correctness dependency. ADR 002 decided otherwise: `apps/spa` speaks
+WebSocket for mutations, queries and realtime, and pushed changes are stamped
+with a sequence so a client can detect a gap and fall back to a cursor pull.
 
-Put the connection registry and the hint protocol in `libs/server/realtime`, and let `apps/api`
-mount it. If connection counts or deploy pain ever justify it, add a second entry point that
-imports the same library — the move is then a deployment change, not a rewrite.
+The analysis above still holds and is why the hint-only option was considered at
+all. What changed is the weighting: the template's value is in demonstrating a
+transport-agnostic CQRS core, and sequence-stamped push keeps the latency of
+direct push while confining every transport failure to a redundant pull.
 
-The reasoning is that the hint-only constraint keeps this layer small, and a small stateless layer
-is cheap to extract later but expensive to operate early. Shipping a mandatory second service in a
-template that is meant to be copied is a real cost paid by every project, in exchange for scaling
-headroom that a new project does not have yet. Deploys dropping sockets is tolerable precisely
-because clients must already handle reconnect-and-resync correctly.
+The library boundary recommended here stands. Put the connection registry and
+the message protocol in `libs/server/realtime` and mount it from `apps/api`, so
+extraction later is a deployment change rather than a rewrite.
 
 ### Naming, when it is extracted
 
@@ -68,7 +71,10 @@ which is exactly what this must not become.
 
 ## Sync on reconnect
 
-The rule: **the socket never carries data, only the fact that data exists.**
+The rule: **pushed data is an optimization; the cursor pull is the authority.**
+A push carries the change and the sequence it was committed at. The client applies
+it only when that sequence is contiguous with its cursor, and otherwise discards it
+and pulls. See [ADR 002](../decisions/002-realtime-transport-and-sync.md).
 
 Client state, persisted in Dexie so it survives reloads:
 
