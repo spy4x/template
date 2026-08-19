@@ -1,8 +1,8 @@
 import { Command } from "@platform/cqrs/types.ts"
 import { RequestInfo } from "@platform/types"
-import { User } from "@domain/identity"
+import { type Actor, User } from "@domain/identity"
 export interface UserProfileUpdatePayload {
-  userId: number
+  actor: Actor
   firstName: string
   lastName: string
   request: RequestInfo
