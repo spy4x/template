@@ -73,6 +73,7 @@ then a CLI after generation and upgrade flows stabilize.
 ## Documentation
 
 - [Architecture decision](https://github.com/spy4x/template/blob/main/docs/decisions/001-deno-platform-template.md)
+- [Realtime transport and sync protocol](https://github.com/spy4x/template/blob/main/docs/decisions/002-realtime-transport-and-sync.md)
 - [Group sync design](https://github.com/spy4x/template/blob/main/docs/design/group-sync.md)
 - [Realtime transport and sync-on-reconnect](https://github.com/spy4x/template/blob/main/docs/design/realtime-websockets.md)
 - [Contributing](https://github.com/spy4x/template/blob/main/CONTRIBUTING.md)
