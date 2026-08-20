@@ -40,6 +40,40 @@ Run repository checks:
 deno task check
 ```
 
+### Encrypted production environment
+
+Production environment workflow follows
+[ADR 003](docs/decisions/003-encrypted-environment-files.md). Install `sops` and `age`, then create
+private key outside repository:
+
+```sh
+mkdir -p ~/.config/template
+age-keygen -o ~/.config/template/age-key.txt
+age-keygen -y ~/.config/template/age-key.txt
+```
+
+Replace `REPLACE_WITH_AGE_RECIPIENT` in `.sops.yaml` with printed public recipient. Create private
+plaintext, set `ENV=prod`, replace every `REPLACE_WITH_*` value, including `SSH_TO_SERVER` and
+`PATH_ON_SERVER`, fill any empty credential assignment, then encrypt explicit manifest entry:
+
+```sh
+cp infra/envs/.env.example infra/envs/.env.prod
+chmod 600 infra/envs/.env.prod
+# Edit infra/envs/.env.prod: ENV=prod; replace placeholders and empty credential values.
+SOPS_AGE_KEY_FILE=~/.config/template/age-key.txt deno task env:encrypt
+```
+
+Decrypt explicitly when needed:
+
+```sh
+SOPS_AGE_KEY_FILE=~/.config/template/age-key.txt deno task env:decrypt
+```
+
+`deno task env:check` validates manifest, exact SOPS rule schema, examples, Git policy, and
+initialized ciphertext without needing private key. It rejects malformed ciphertext and any
+plaintext application assignment. Fresh template state exits successfully with an actionable "not
+initialized" note until recipient and ciphertext exist. No Git hook encrypts or decrypts files.
+
 Run individual app tasks with `api:*`, `spa:*`, or `mpa:*`. Deno workspace members inherit shared
 imports and tooling settings from root `deno.jsonc`.
 

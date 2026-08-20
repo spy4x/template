@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "plaintext": "infra/envs/.env.prod",
+      "ciphertext": "infra/envs/.env.prod.age",
+      "example": "infra/envs/.env.example",
+      "requiredValues": {
+        "ENV": "prod"
+      }
+    }
+  ]
+}

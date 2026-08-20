@@ -5,9 +5,13 @@
 .idea
 
 # Configs
+.age/
 .env
 .env.*
-!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+!infra/envs/.env.prod.age
 
 # Packages
 node_modules
