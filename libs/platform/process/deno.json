@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "lib": ["ES2020", "DOM", "DOM.Iterable", "deno.ns"]
+  },
+  "exports": "./+lib.ts",
+  "tasks": {
+    "check": "deno check +lib.ts +lib.test.ts",
+    "test": "PROCESS_INHERITED_TEST=inherited deno test --allow-run=deno +lib.test.ts"
+  }
+}

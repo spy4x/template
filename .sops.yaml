@@ -1,0 +1,3 @@
+creation_rules:
+  - path_regex: ^infra/envs/\.env\.prod$
+    age: REPLACE_WITH_AGE_RECIPIENT

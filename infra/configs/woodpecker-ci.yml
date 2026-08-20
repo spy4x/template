@@ -7,7 +7,7 @@ steps:
   # Step 1: Code Quality Checks
   # ============================================================================
   check:
-    image: denoland/deno:latest
+    image: denoland/deno:alpine-2.9.0@sha256:171790989a9d2397de0811c208da32597cff2624a5b3e675a5943cd6a01d4935
     when:
       event:
         - push
@@ -18,10 +18,18 @@ steps:
       - deno-cache:/deno-dir
     commands:
       - echo "Running code quality checks with Deno cache..."
+      - apk add --no-cache age=1.3.1-r5 git=2.54.0-r0
+      - wget --quiet https://github.com/getsops/sops/releases/download/v3.11.0/sops-v3.11.0.linux.amd64 --output-document /tmp/sops
+      - echo "775f1384d55decfad228e7196a3f683791914f92a473f78fc47700531c29dfef  /tmp/sops" | sha256sum -c -
+      - chmod 0755 /tmp/sops
+      - mv /tmp/sops /usr/local/bin/sops
+      - deno --version | grep "deno 2.9.0"
+      - sops --version | grep "sops 3.11.0"
+      - age --version | grep "1.3.1"
       - deno task check
-  
+
   build:
-    image: denoland/deno:latest
+    image: denoland/deno:alpine-2.9.0@sha256:171790989a9d2397de0811c208da32597cff2624a5b3e675a5943cd6a01d4935
     when:
       event:
         - push
@@ -40,7 +48,7 @@ steps:
   # Step 2: Build Docker Images (Production)
   # ============================================================================
   pre-deploy-build:
-    image: denoland/deno:latest
+    image: denoland/deno:alpine-2.9.0@sha256:171790989a9d2397de0811c208da32597cff2624a5b3e675a5943cd6a01d4935
     environment:
       ENV: prod
       DENO_VERSION:
@@ -102,14 +110,12 @@ steps:
 
   # ============================================================================
   # Step 3: Deploy to Production
+  # Note: SSH_TO_SERVER and PATH_ON_SERVER are read from .env.prod written by
+  # pre-deploy-build (the single source of truth), not injected here.
   # ============================================================================
   deploy:
-    image: denoland/deno:latest
+    image: denoland/deno:debian-2.9.0@sha256:8d24854de78a79c56e74b49aa4c5996c60e1fe3730efba8fbdd2692c582e6e29
     environment:
-      SSH_TO_SERVER:
-        from_secret: ssh_to_server
-      PATH_ON_SERVER:
-        from_secret: path_on_server
       SSH_PRIVATE_KEY:
         from_secret: ssh_private_key
     commands:

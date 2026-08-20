@@ -7,6 +7,7 @@
     "./libs/platform/cqrs",
     "./libs/platform/types",
     "./libs/platform/cache",
+    "./libs/platform/process",
     "./libs/domain/groups",
     "./libs/domain/identity",
     "./libs/server/crypto",
@@ -47,6 +48,12 @@
     "proxy:start": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env up -d",
     "proxy:stop": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env down",
     "deploy": "deno run -R=./infra --allow-run=rsync,ssh ./infra/scripts/deploy.ts",
+    "deploy:test": "deno test --no-prompt --allow-write=/tmp --allow-read=. --allow-run=deno infra/scripts/deploy infra/scripts/compose.test.ts",
+    "env:encrypt": "deno run --no-prompt -R=. -W=./infra/envs --allow-run=sops ./infra/scripts/env/+main.ts encrypt",
+    "env:decrypt": "deno run --no-prompt -R=. -W=./infra/envs --allow-run=sops ./infra/scripts/env/+main.ts decrypt",
+    "env:check": "deno run --no-prompt -R=. --allow-run=git ./infra/scripts/env/+main.ts check",
+    "env:test": "deno test --no-prompt -R=/tmp -W=/tmp -E=SOPS_AGE_KEY,SOPS_AGE_KEY_FILE,HOME,XDG_CONFIG_HOME --allow-run=sops,age-keygen,git infra/scripts/env",
+    "process:test": "PROCESS_INHERITED_TEST=inherited deno test --no-prompt --allow-run=deno libs/platform/process",
     // #endregion Scripts
 
     // #region Checks
@@ -57,6 +64,10 @@
         "lint:check",
         "fmt:check",
         "ts:check",
+        "env:check",
+        "env:test",
+        "deploy:test",
+        "process:test",
         "test"
       ]
     },
@@ -65,7 +76,7 @@
     "lint:fix": "deno lint --fix",
     "lint:check": "deno lint",
     "ts:check": "deno run --allow-read --allow-run=deno infra/scripts/type-check.ts",
-    "test": "deno test --no-prompt apps/api libs",
+    "test": "deno test --no-prompt --ignore=libs/platform/process apps/api libs",
     "test:integration": "ENV=test deno test --no-prompt -E -N -R=./libs/server/db/migrations,./libs/server/db/schema.sql tests/integration",
     "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright test",
     "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright show-report",
@@ -105,6 +116,7 @@
     "@domain/groups": "./libs/domain/groups/+lib.ts",
     "@domain/identity": "./libs/domain/identity/+lib.ts",
     "@platform/cache": "./libs/platform/cache/+index.ts",
+    "@platform/process": "./libs/platform/process/+lib.ts",
     "@server/crypto": "./libs/server/crypto/+index.ts",
     "@server/db": "./libs/server/db/+index.ts",
     "@server/outbox": "./libs/server/outbox/+index.ts",
@@ -138,6 +150,8 @@
     "@std/expect": "jsr:@std/expect@^1.0.15",
     "@std/testing": "jsr:@std/testing@^1.0.11",
     "@std/encoding": "jsr:@std/encoding@^1.0.5",
+    "@std/dotenv": "jsr:@std/dotenv@^0.225.5",
+    "@std/yaml": "jsr:@std/yaml@^1.0.10",
     "@playwright/test": "npm:@playwright/test@^1.57.0",
     "playwright": "npm:playwright@^1.57.0",
 
@@ -160,10 +174,10 @@
     "dist",
     "build",
     "docs",
-    "infra",
     "*.lock"
   ],
   "lint": {
+    "exclude": ["infra/scripts/db-backup-create.ts"],
     "rules": {
       "tags": [
         "recommended"
@@ -174,6 +188,12 @@
     }
   },
   "fmt": {
+    "exclude": [
+      "infra/compose",
+      "infra/configs",
+      "infra/scripts/db-backup-create.ts",
+      "infra/scripts/vapid-keys-create.ts"
+    ],
     "useTabs": false,
     "lineWidth": 100,
     "indentWidth": 2,
@@ -184,7 +204,7 @@
 
   // #region Preact Configs
   "compilerOptions": {
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": ["ES2020", "DOM", "DOM.Iterable", "deno.ns"],
     "jsx": "react-jsx",
     "jsxImportSource": "preact"
   }
