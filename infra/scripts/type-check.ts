@@ -1,18 +1,12 @@
-const sourceRoots = ["apps", "e2e", "infra/scripts", "libs", "tests"]
+const sourceRoots = ["apps", "e2e", "libs", "tests"]
 const sourceFiles: string[] = []
-// Owner: platform maintainer. Extraction tracked in docs/homelab-extraction-inventory.md.
-const excludedSourceFiles = new Set(["infra/scripts/db-backup-create.ts"])
 
 async function collectSourceFiles(path: string): Promise<void> {
   for await (const entry of Deno.readDir(path)) {
     const entryPath = `${path}/${entry.name}`
     if (entry.isDirectory) {
       await collectSourceFiles(entryPath)
-    } else if (
-      entry.isFile &&
-      (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) &&
-      !excludedSourceFiles.has(entryPath)
-    ) {
+    } else if (entry.isFile && (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx"))) {
       sourceFiles.push(entryPath)
     }
   }

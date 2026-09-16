@@ -2,34 +2,6 @@ import { exec } from "https://deno.land/x/exec/mod.ts";
 import { ensureDir, emptyDir } from "https://deno.land/std/fs/mod.ts";
 import { gzip } from "https://deno.land/x/compress/mod.ts";
 
-async function notifySlack(message: string) {
-    const response = await fetch(Deno.env.get("SLACK_SYSTEM_URL")!, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: message }),
-    });
-
-    if (response.ok) {
-        console.log(`📣 Slack notified about "${message}"`);
-    } else {
-        console.error("❌ Slack notification failed");
-    }
-}
-
-function getReportText(
-    backupTime: number,
-    backupSize: string,
-    compressionTime: number,
-    compressedSize: string,
-    uploadTime: number,
-    totalTime: number,
-): string {
-    return `Backup: ${backupTime} sec (${backupSize})
-Compression: ${compressionTime} sec (${compressedSize})
-Upload: ${uploadTime} sec
-Total: ${totalTime} sec`;
-}
-
 async function main() {
     const envFile = Deno.args[0];
     if (!envFile) {
@@ -58,8 +30,6 @@ async function main() {
     const s3Region = Deno.env.get("S3_BUCKET_BACKUPS_REGION")!;
     const s3AccessKey = Deno.env.get("S3_BUCKET_BACKUPS_ACCESS_KEY_ID")!;
     const s3SecretKey = Deno.env.get("S3_BUCKET_BACKUPS_SECRET_ACCESS_KEY")!;
-
-    await notifySlack("🔧 DB backup initiated.\nA successful message must appear shortly.");
 
     await emptyDir(backupFolder);
     await ensureDir(backupFolder);
@@ -115,14 +85,11 @@ async function main() {
         console.log(`✅ Uploaded. Took ${uploadTime} seconds`);
     } else {
         console.error(`❌ Upload failed after ${uploadTime} seconds`);
-        await notifySlack(`🔧❌ <!channel> DB backup upload failed\n${getReportText(backupTime, backupSize, compressionTime, compressedSize, uploadTime, backupTime + compressionTime + uploadTime)}`);
         Deno.exit(1);
     }
 
     await emptyDir(backupFolder);
 
-    const totalTime = backupTime + compressionTime + uploadTime;
-    await notifySlack(`🔧✅ DB backup successful.\n<${Deno.env.get("S3_BACKUP_BACKUPS_DASHBOARD_URL")}|${backupName}>\n${getReportText(backupTime, backupSize, compressionTime, compressedSize, uploadTime, totalTime)}`);
 }
 
 await main();

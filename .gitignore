@@ -6,12 +6,9 @@
 
 # Configs
 .age/
-.env
-.env.*
-**/.env
-**/.env.*
-!**/.env.example
-!infra/envs/.env.prod.age
+.env*
+!.env.example
+!.env*.age
 
 # Packages
 node_modules
