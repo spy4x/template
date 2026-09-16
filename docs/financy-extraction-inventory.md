@@ -53,7 +53,7 @@ Three things worth knowing before planning any of this work.
 | Reconnect/backoff client | `apps/web/src/state/ws.ts` (319 lines) | Keep the reconnect state machine and heartbeat. Replace `SYNC_START`-over-WS with a REST pull keyed by a persisted cursor. |
 | Sync checkpoint | `lastSyncAt` timestamp | Replace with the per-group monotonic `next_change_sequence` cursor already in this schema. Timestamps break on clock skew and cannot order ties. |
 | Client-side CQRS | `apps/web/src/cqrs/events.ts`, `apps/web/src/services/eventBus.ts` | The template already has `libs/platform/cqrs`; reconcile rather than copy. |
-| Secrets management | `.sops.yaml`, `.age/` | SOPS + age for encrypted env files. Genuinely useful; needs its own ADR because it changes contributor setup. |
+| Secrets management | `.age/` | Age64 per-value encryption for env files. |
 | CI pipeline | `.woodpecker.yml` | The template has `infra/configs/woodpecker-ci.yml` but no active pipeline. |
 
 ## Leave in Financy (product-specific)
@@ -85,7 +85,7 @@ Each line is intended to be one small PR.
 4. Preact signal helpers, URL filter hook, cookie helper.
 5. Realtime transport — only after the topology decision in
    [realtime design](design/realtime-websockets.md) lands as an ADR.
-6. Ops: backup and deploy scripts, then CI, then SOPS/age (its own ADR).
+6. Ops: backup and deploy scripts, then CI, then age64 env encryption.
 
 ## Maintenance
 
