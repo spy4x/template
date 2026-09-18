@@ -47,6 +47,8 @@
     "proxy:start": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env up -d",
     "proxy:stop": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env down",
     "deploy": "deno run -R=./infra --allow-run=rsync,ssh ./infra/scripts/deploy.ts",
+    "env:encrypt": "deno run --no-prompt -R=. -W=. --allow-run=age ./infra/scripts/env/+main.ts encrypt",
+    "env:decrypt": "deno run --no-prompt -R=. -W=. --allow-run=age ./infra/scripts/env/+main.ts decrypt",
     // #endregion Scripts
 
     // #region Checks
@@ -65,7 +67,7 @@
     "lint:fix": "deno lint --fix",
     "lint:check": "deno lint",
     "ts:check": "deno run --allow-read --allow-run=deno infra/scripts/type-check.ts",
-    "test": "deno test --no-prompt apps/api libs",
+    "test": "deno test --no-prompt apps/api libs && deno test --no-prompt --no-config -R=/tmp -W=/tmp infra/scripts/env/age.test.ts",
     "test:integration": "ENV=test deno test --no-prompt -E -N -R=./libs/server/db/migrations,./libs/server/db/schema.sql tests/integration",
     "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright test",
     "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright show-report",

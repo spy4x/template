@@ -5,9 +5,10 @@
 .idea
 
 # Configs
-.env
-.env.*
+.age/
+.env*
 !.env.example
+!.env*.age
 
 # Packages
 node_modules
