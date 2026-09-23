@@ -44,8 +44,8 @@ libs/platform  cqrs (buses), types (validation, API envelopes, push contracts),
                cache, helpers. Depends on nothing but arktype and std.
 libs/domain    groups (enums, policy, commands/queries), identity (user, session,
                auth, ws payload contracts). May depend on platform only.
-libs/server    db, groups (Postgres repository, cursor), outbox, crypto, kv,
-               helpers.
+libs/server    db, groups (Postgres repository, cursor), outbox, kv, helpers.
+               Field encryption is @spy4x/server/crypto (CryptoService).
 libs/client    browser, preact, vite, icons, helpers.
 ```
 
