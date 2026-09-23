@@ -10,6 +10,10 @@ import {
 const sql = createSqlFromEnv(Deno.env.toObject(), {
   transform: postgres.camel,
   applicationName: "app-backend",
+  // The driver's own default (postgres@3.4.7 src/index.js:449) was 10, not the
+  // package's default of 15; compose limits Postgres to max_connections=30 and both
+  // this pool and the api's draw from it, so the old ceiling is kept explicitly.
+  max: 10,
 })
 if (!sql) {
   console.error("❌ Missing environment variable: DB_HOST")
