@@ -69,8 +69,8 @@
     "ts:check": "deno run --allow-read --allow-run=deno infra/scripts/type-check.ts",
     "test": "deno test --no-prompt apps/api libs && deno test --no-prompt --no-config -R=/tmp -W=/tmp infra/scripts/env/age.test.ts",
     "test:integration": "ENV=test deno test --no-prompt -E -N -R=./libs/server/db/migrations,./libs/server/db/schema.sql tests/integration",
-    "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright test",
-    "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright show-report",
+    "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright@1.57.0 test",
+    "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright@1.57.0 show-report",
     "fix": {
       "command": "echo 'Fixes applied!'",
       "description": "Run all fixes",
@@ -90,7 +90,7 @@
     // #endregion Checks
 
     // #region Git Hooks
-    "hooks:install": "deno run -R=deno.json,deno.jsonc,.git/hooks/ -W=.git/hooks/ jsr:@hongminhee/deno-task-hooks",
+    "hooks:install": "deno run -R=deno.json,deno.jsonc,.git/hooks/ -W=.git/hooks/ jsr:@hongminhee/deno-task-hooks@0.1.2",
     "hooks:pre-commit": "deno task check"
     // #endregion Git Hooks
   },
