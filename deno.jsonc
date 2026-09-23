@@ -9,7 +9,6 @@
     "./libs/platform/cache",
     "./libs/domain/groups",
     "./libs/domain/identity",
-    "./libs/server/crypto",
     "./libs/server/groups",
     "./libs/server/outbox"
   ],
@@ -107,7 +106,6 @@
     "@domain/groups": "./libs/domain/groups/+lib.ts",
     "@domain/identity": "./libs/domain/identity/+lib.ts",
     "@platform/cache": "./libs/platform/cache/+index.ts",
-    "@server/crypto": "./libs/server/crypto/+index.ts",
     "@server/db": "./libs/server/db/+index.ts",
     "@server/outbox": "./libs/server/outbox/+index.ts",
     "@server/kv": "./libs/server/kv/+index.ts",
