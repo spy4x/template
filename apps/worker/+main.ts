@@ -1,6 +1,20 @@
 /// <reference lib="deno.ns" />
-import { sql } from "@server/db"
-import { LoggingOutboxPublisher, OutboxProcessor, PostgresOutboxRepository } from "@server/outbox"
+import postgres from "postgres"
+import { createSqlFromEnv } from "@spy4x/server/db"
+import {
+  LoggingOutboxPublisher,
+  OutboxProcessor,
+  PostgresOutboxRepository,
+} from "@spy4x/server/outbox"
+
+const sql = createSqlFromEnv(Deno.env.toObject(), {
+  transform: postgres.camel,
+  applicationName: "app-backend",
+})
+if (!sql) {
+  console.error("❌ Missing environment variable: DB_HOST")
+  Deno.exit(1)
+}
 
 const signals: Deno.Signal[] = ["SIGINT", "SIGTERM"]
 const controller = new AbortController()

@@ -74,6 +74,11 @@ export class WebPushService {
           p256dh: subscription.keys.p256dh,
         },
       })
+      // `updateOne` returns `undefined` only when the row vanished between the find
+      // above and this statement - a race, not a normal "not found".
+      if (!userPushToken) {
+        throw new Error("Push token not found")
+      }
     } else {
       userPushToken = await db.userPushToken.createOne({
         data: {

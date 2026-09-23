@@ -20,6 +20,11 @@ export const userProfileUpdateHandler: CommandHandler<UserProfileUpdateCommand> 
       lastName,
     },
   })
+  // `updateOne` returns `undefined` only when the row vanished between the check above
+  // and this statement - a race, not a normal "not found".
+  if (!updatedUser) {
+    throw new Error("User not found")
+  }
 
   eventBus.emit(
     new UserProfileUpdatedEvent({ user: updatedUser, request }),

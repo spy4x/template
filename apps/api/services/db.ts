@@ -10,12 +10,34 @@ import {
   UserSession,
   UserSessionBase,
 } from "@domain/identity"
-import { DbServiceBase } from "@server/db"
+import postgres from "postgres"
+import { createSqlFromEnv, DbServiceBase, type Sql } from "@spy4x/server/db"
 import { publicAPICache } from "./cache.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 // import { getLatestMetrics } from "../routes/metric.ts"
 
+/**
+ * The client every table method and the group repository run against.
+ *
+ * `DB_PORT` is optional so existing environments that omit it keep the 5432 default,
+ * but it is honoured when set - `.env.example` and CI both define it.
+ */
+export const sql: Sql = (() => {
+  const client = createSqlFromEnv(Deno.env.toObject(), {
+    transform: postgres.camel,
+    applicationName: "app-backend",
+  })
+  if (!client) {
+    throw new Error("Missing environment variable: DB_HOST")
+  }
+  return client
+})()
+
 export class DbService extends DbServiceBase {
+  constructor() {
+    super({ sql })
+  }
+
   /**
    * Built per access on purpose. `DbServiceBase.begin()` derives the transactional
    * service with `Object.create(this)` and rebinds `sql`, so a cached repository

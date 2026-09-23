@@ -6,8 +6,7 @@
     "./apps/worker",
     "./libs/domain/groups",
     "./libs/domain/identity",
-    "./libs/server/groups",
-    "./libs/server/outbox"
+    "./libs/server/groups"
   ],
   "nodeModulesDir": "auto",
   "allowScripts": ["npm:@tailwindcss/oxide@4.1.12"],
@@ -33,7 +32,7 @@
     // #endregion apps/mpa
 
     // #region Scripts
-    "db:migrate": "deno run -N=$DB_HOST:$DB_PORT -E -R=./libs/server/db/migrations ./libs/server/db/migrate.ts",
+    "db:migrate": "deno run -N=$DB_HOST:$DB_PORT -E -R=./libs/server/db/migrations ./infra/scripts/db-migrate.ts",
     "db:seed": "deno run -N=$DB_HOST:$DB_PORT,$KV_HOSTNAME:$KV_PORT -E -R=infra/envs/.env infra/scripts/seed-data.ts",
     "deps:check": "deno outdated -r",
     "deps:update": "deno outdated -r -u -i",
@@ -100,9 +99,6 @@
     "@platform/helpers/": "./libs/platform/helpers/",
     "@domain/groups": "./libs/domain/groups/+lib.ts",
     "@domain/identity": "./libs/domain/identity/+lib.ts",
-    "@server/db": "./libs/server/db/+index.ts",
-    "@server/outbox": "./libs/server/outbox/+index.ts",
-    "@server/helpers/": "./libs/server/helpers/",
     "@server/groups/": "./libs/server/groups/",
     "@client/preact/": "./libs/client/preact/",
     "@client/vite/": "./libs/client/vite/",
