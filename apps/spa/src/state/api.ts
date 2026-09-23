@@ -1,28 +1,6 @@
-import type { ApiResult } from "@platform/types"
-export async function apiFetch<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<ApiResult<T>> {
-  const response = await fetch(path, {
-    credentials: "include",
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers || {}),
-    },
-    ...init,
-  })
-  let data: unknown = null
-  try {
-    data = await response.json()
-  } catch (_error) {
-    data = null
-  }
-  if (!response.ok) {
-    const message =
-      data && typeof data === "object" && "error" in data && typeof data.error === "string"
-        ? data.error
-        : "Request failed"
-    return { ok: false, status: response.status, error: { status: response.status, message } }
-  }
-  return { ok: true, status: response.status, data: data as T }
-}
+// Moved to @spy4x/platform/api (extracted from this file, two bugs fixed there: a header-merge
+// bug that dropped `content-type` when a caller passed its own headers, and a `content-type:
+// application/json` default applied even to a FormData body). Neither bug is reachable from any
+// call site in this app today — none passes `headers` or a non-string body — so re-exporting the
+// package's version keeps behaviour identical here while picking up the fix for future callers.
+export { apiFetch } from "@spy4x/platform/api"

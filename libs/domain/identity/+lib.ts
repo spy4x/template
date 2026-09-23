@@ -1,10 +1,9 @@
-import {
-  BaseModelSchema,
-  dateSchema,
-  NAME_MAX_LENGTH,
-  type,
-  UndeletableBaseModelSchema,
-} from "@platform/types"
+import { type } from "arktype"
+import { BaseModelSchema, dateSchema, UndeletableBaseModelSchema } from "@spy4x/platform/model"
+
+// Not in @spy4x/platform/model: too template-specific (a user's name length limit) to belong in a
+// general-purpose package. Moved here from the deleted libs/platform/types/+index.ts.
+export const NAME_MAX_LENGTH = 50
 
 export enum UserRole {
   VIEWER = 1,
@@ -230,4 +229,19 @@ export type PushSubscribeResponse = {
 export type TotpConnectStartResponse = {
   qrcode: string
   secret: string
+}
+
+// The four response shapes below have no @spy4x/platform/api counterpart: they name this app's
+// own endpoint responses (a boolean success flag, a public key string), not a general envelope.
+// Moved here from the deleted libs/platform/types/+index.ts.
+export type ApiSuccessResponse = {
+  success: boolean
+}
+
+export type ApiIsSuccessResponse = {
+  isSuccess: boolean
+}
+
+export type PushPublicKeyResponse = {
+  publicKey: string
 }

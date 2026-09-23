@@ -1,6 +1,6 @@
 import { UserProfileUpdatedEvent } from "@api/cqrs/events.ts"
 import { wsHub } from "@api/services/wsHub.ts"
-import { validate } from "@platform/types"
+import { validate } from "@spy4x/validation"
 import { wsProfileUpdatedEventSchema } from "@domain/identity"
 export const wsOnUserProfileUpdatedHandler = async (event: UserProfileUpdatedEvent) => {
   const { user } = event.data

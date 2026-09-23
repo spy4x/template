@@ -42,6 +42,9 @@ services:
       - 'traefik.http.routers.api.entrypoints=websecure'
       - 'traefik.http.routers.api.tls=true'
       - 'traefik.http.routers.api.tls.certresolver=myresolver'
+      # Same CF-Connecting-IP strip as compose.shared.yml's api-${PROJECT} router, for this
+      # router's own name; see the comment there for why it is required.
+      - 'traefik.http.routers.api.middlewares=strip-cf-ip-${PROJECT}'
 
   spa:
     networks:

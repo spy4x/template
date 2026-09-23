@@ -1,6 +1,6 @@
 import { UserSignedOutEvent } from "@api/cqrs/events.ts"
 import { wsHub } from "@api/services/wsHub.ts"
-import { validate } from "@platform/types"
+import { validate } from "@spy4x/validation"
 import { wsAuthSignedOutEventSchema } from "@domain/identity"
 export const wsOnUserSignedOutHandler = async (event: UserSignedOutEvent) => {
   const { userId } = event.data

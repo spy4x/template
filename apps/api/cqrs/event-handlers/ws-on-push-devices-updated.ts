@@ -1,6 +1,6 @@
 import { PushDevicesUpdatedEvent } from "@api/cqrs/events.ts"
 import { wsHub } from "@api/services/wsHub.ts"
-import { validate } from "@platform/types"
+import { validate } from "@spy4x/validation"
 import { wsPushDevicesUpdatedEventSchema } from "@domain/identity"
 export const wsOnPushDevicesUpdatedHandler = async (event: PushDevicesUpdatedEvent) => {
   const { userId, devices } = event.data

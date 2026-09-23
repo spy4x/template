@@ -1,8 +1,8 @@
 import { Context } from "hono"
-import type { RequestInfo } from "@platform/types"
+import type { RequestInfo } from "@spy4x/platform/request-info"
 import type { WsProfileEvent } from "@domain/identity"
 import { APIContext } from "../_types.ts"
-import { validate } from "@platform/types"
+import { validate } from "@spy4x/validation"
 import { wsReadyEventSchema } from "@domain/identity"
 type WsClient = {
   userId: number

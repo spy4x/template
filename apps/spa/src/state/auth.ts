@@ -1,5 +1,4 @@
-import type { ApiSuccessResponse } from "@platform/types"
-import type { TotpConnectStartResponse, User } from "@domain/identity"
+import type { ApiSuccessResponse, TotpConnectStartResponse, User } from "@domain/identity"
 import { apiFetch } from "./api.ts"
 import { sessionState, SessionUser } from "./session.ts"
 

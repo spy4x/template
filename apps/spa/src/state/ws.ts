@@ -1,4 +1,4 @@
-import { validate } from "@platform/types"
+import { validate } from "@spy4x/validation"
 import { wsProfileEventSchema } from "@domain/identity"
 import { sessionState } from "./session.ts"
 
