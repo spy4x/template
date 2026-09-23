@@ -124,15 +124,24 @@ These cost real time to find. Do not rediscover them.
 6. **`apps/api`'s cache keys gained an `api:` prefix (PR #21).** `RedisKvStore`
    scopes every key it writes under a mandatory prefix; the app's old kv client
    wrote unprefixed keys (`user_123`, `userSession_...`, etc). Rolling back to a
-   commit before that PR makes the app read those old unprefixed keys again -
-   including session and `isSessionTokenExpired` entries a user may have since
-   signed out of under the prefixed version, which come back to life because the
-   rollback never saw them expire or get deleted. **Flush Valkey before rolling
-   back past this commit.** The forward direction has a matching one-time step:
-   on the first deploy of this PR, delete every Valkey key that does not match
-   `api:*`, so the stale unprefixed keys from before this change do not linger
-   forever (they still expire on their own TTL, but deleting them removes any
-   chance of the same rollback problem in reverse if this step is skipped).
+   commit before that PR makes the app read those old unprefixed keys again.
+   Only `userSession_*` matters here: it caches the session row itself, so a
+   stale unprefixed entry for a session a user has since signed out of - under
+   the prefixed version, which never touched that old key - makes the rollback
+   read it as still active and the session comes back to life. Stale
+   `isSessionTokenExpired_*` entries do not have this effect: that cache only
+   ever holds `true`, to short-circuit a token already known to be expired, so
+   a stale or missing entry there can only cause an extra DB check or a false
+   "expired", never revive a session. **Flush Valkey before rolling back past
+   this commit.** The forward direction has a matching one-time step: on the
+   first deploy of this PR, delete every Valkey key that does not match
+   `api:*`:
+   ```sh
+   valkey-cli --scan | grep -v '^api:' | xargs -r valkey-cli del
+   ```
+   The stale unprefixed keys expire on their own TTL regardless, but deleting
+   them up front removes any chance of the same rollback problem recurring if
+   a later rollback-then-roll-forward cycle skips this step.
 
 ## Running it
 
