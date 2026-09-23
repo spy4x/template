@@ -1,3 +1,6 @@
+// Duplicates root deno.jsonc's @std/expect pin: this file runs under `deno test --no-config`,
+// which loads no import map, so the bare `@std/expect` alias can't resolve here. Bump this
+// version whenever the root map's pin moves — nothing else keeps them in sync.
 import { expect } from "jsr:@std/expect@1.0.17"
 import { findEnvFiles, indexCiphertext, renderEncrypted, renderPlaintext } from "./age.ts"
 

@@ -1,3 +1,6 @@
+// Duplicates root deno.jsonc's @std/encoding/@std/path pins: age.test.ts imports this file under
+// `deno test --no-config`, which loads no import map, so the bare aliases can't resolve here.
+// Bump this version whenever the root map's pin moves — nothing else keeps them in sync.
 import { decodeBase64, encodeBase64 } from "jsr:@std/encoding@1.0.11"
 import { dirname, join } from "jsr:@std/path@1.1.6"
 
