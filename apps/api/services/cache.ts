@@ -1,5 +1,5 @@
 import { RedisKvStore } from "@spy4x/server/kv"
-import { ValidationSchema } from "@platform/types"
+import type { Type } from "arktype"
 import { AuthAudit, User, UserKey, UserPushToken, UserSession } from "@domain/identity"
 import { config } from "../services/config.ts"
 
@@ -14,7 +14,7 @@ const kv = await RedisKvStore.connect(config.kv.hostname, config.kv.port, "api")
 console.log(`✅ Connected to KV`) // kept from the old client's connect log
 const cacheService = createCacheService(crashOnConnectionLoss(kv))
 
-function buildMethods<T>(prefix: string, schema?: ValidationSchema) {
+function buildMethods<T>(prefix: string, schema?: Type) {
   return buildMethodsBase<T>(cacheService, prefix, CacheTTL.month, schema)
 }
 

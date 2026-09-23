@@ -9,14 +9,11 @@ import {
 } from "../state/auth.ts"
 import { sessionState } from "../state/session.ts"
 import { apiFetch } from "../state/api.ts"
+import type { PushSubscribeRequest, PushUnsubscribeRequest } from "@spy4x/platform/model"
 import type {
   ApiIsSuccessResponse,
-  PushPublicKeyResponse,
-  PushSubscribeRequest,
-  PushUnsubscribeRequest,
-} from "@platform/types"
-import type {
   PushDevicesResponse,
+  PushPublicKeyResponse,
   PushSubscribeResponse,
   UserPushTokenPublic,
 } from "@domain/identity"

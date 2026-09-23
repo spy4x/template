@@ -1,6 +1,6 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
-import { validate } from "@platform/types"
+import { validate } from "@spy4x/validation"
 import {
   UserMFAStatus,
   UserRole,

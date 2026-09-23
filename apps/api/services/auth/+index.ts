@@ -9,7 +9,7 @@ import { APIContext } from "../../_types.ts"
 import { UserMFAStatus } from "@domain/identity"
 import { eventBus } from "@api/services/eventBus.ts"
 import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
-import { requestInfoFromContext } from "@api/services/request-info.ts"
+import { requestInfoFromContext } from "@spy4x/platform/request-info"
 import { GroupError } from "@domain/groups"
 
 class Auth {
@@ -71,7 +71,8 @@ class Auth {
     eventBus.emit(
       new UserSignedInEvent({
         user: authData.user,
-        request: requestInfoFromContext(context),
+        // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
+        request: requestInfoFromContext(context, { trustedProxy: true }),
       }),
     )
     return authData
@@ -97,7 +98,8 @@ class Auth {
       new UserSignedUpEvent({
         user: authData.user,
         username,
-        request: requestInfoFromContext(context),
+        // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
+        request: requestInfoFromContext(context, { trustedProxy: true }),
       }),
     )
 
@@ -155,7 +157,8 @@ class Auth {
       eventBus.emit(
         new UserSignedOutEvent({
           userId: authData.user.id,
-          request: requestInfoFromContext(context),
+          // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
+          request: requestInfoFromContext(context, { trustedProxy: true }),
         }),
       )
     }

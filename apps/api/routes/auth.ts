@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import { validate } from "@platform/types"
+import { validate } from "@spy4x/validation"
 import {
   authOTPSchema,
   authPasswordChangeSchema,

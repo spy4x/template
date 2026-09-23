@@ -4,8 +4,9 @@ import { webPushService } from "@api/services/webPush.ts"
 import { isAuthenticated2FA } from "@api/middlewares/auth.ts"
 import { eventBus } from "@api/services/eventBus.ts"
 import { PushDevicesUpdatedEvent } from "@api/cqrs/events.ts"
-import { requestInfoFromContext } from "@api/services/request-info.ts"
-import { pushSubscribeRequestSchema, pushUnsubscribeRequestSchema, validate } from "@platform/types"
+import { requestInfoFromContext } from "@spy4x/platform/request-info"
+import { pushSubscribeRequestSchema, pushUnsubscribeRequestSchema } from "@spy4x/platform/model"
+import { validate } from "@spy4x/validation"
 export const pushNotificationRoute = new Hono<APIContext>()
   .use(isAuthenticated2FA)
   .get(`/public-key`, async (c) => {
@@ -35,7 +36,8 @@ export const pushNotificationRoute = new Hono<APIContext>()
       new PushDevicesUpdatedEvent({
         userId,
         devices,
-        request: requestInfoFromContext(c),
+        // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
+        request: requestInfoFromContext(c, { trustedProxy: true }),
       }),
     )
     return c.json({ userPushToken })
@@ -54,7 +56,8 @@ export const pushNotificationRoute = new Hono<APIContext>()
       new PushDevicesUpdatedEvent({
         userId,
         devices,
-        request: requestInfoFromContext(c),
+        // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
+        request: requestInfoFromContext(c, { trustedProxy: true }),
       }),
     )
     return c.json({ isSuccess: true })

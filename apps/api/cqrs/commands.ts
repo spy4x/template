@@ -1,5 +1,5 @@
 import { Command } from "@spy4x/platform/cqrs"
-import { RequestInfo } from "@platform/types"
+import { RequestInfo } from "@spy4x/platform/request-info"
 import { User } from "@domain/identity"
 export interface UserProfileUpdatePayload {
   userId: number

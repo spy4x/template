@@ -1,5 +1,5 @@
 import { Event } from "@spy4x/platform/cqrs"
-import { RequestInfo } from "@platform/types"
+import { RequestInfo } from "@spy4x/platform/request-info"
 import { User, UserPushTokenPublic } from "@domain/identity"
 export class UserSignedUpEvent
   implements Event<{ user: User; username: string; request: RequestInfo }> {
