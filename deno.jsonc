@@ -121,11 +121,17 @@
     // #endregion Aliases
 
     // #region Dependencies
+    // spy4x/ts-libs 1.0.0. hono, postgres and arktype below must stay on the exact versions these
+    // packages were published with, or two copies load and their types stop matching.
+    "@spy4x/validation": "jsr:@spy4x/validation@1.0.0",
+    "@spy4x/platform": "jsr:@spy4x/platform@1.0.0",
+    "@spy4x/server": "jsr:@spy4x/server@1.0.0",
+
     // apps/api
-    "hono": "jsr:@hono/hono@4.10.7",
-    "@hectorm/otpauth": "jsr:@hectorm/otpauth",
+    "hono": "jsr:@hono/hono@4.13.8",
+    "@hectorm/otpauth": "jsr:@hectorm/otpauth@9.5.2",
     "qrcode": "jsr:@libs/qrcode@3.1.0",
-    "webpush": "jsr:@negrel/webpush",
+    "webpush": "jsr:@negrel/webpush@0.5.0",
 
     // apps/tgbot
 
@@ -150,7 +156,7 @@
     "@iuioiua/redis": "jsr:@iuioiua/redis@1.1.10",
 
     // server/db
-    "postgres": "https://deno.land/x/postgresjs@v3.4.5/mod.js"
+    "postgres": "npm:postgres@3.4.7"
     // #endregion Dependencies
   },
   "exclude": [

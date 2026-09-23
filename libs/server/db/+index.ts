@@ -51,7 +51,9 @@ export class DbServiceBase {
     for (const operation of pendingCacheOperations) {
       await operation()
     }
-    return result
+    // npm:postgres types `begin` as `Promise<UnwrapPromiseArray<T>>`, which TypeScript cannot
+    // reduce to `T` for a generic `T`. `fn` returns a plain `T`, so the cast is exact.
+    return result as T
   }
 
   async connect(): Promise<void> {
