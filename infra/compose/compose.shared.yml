@@ -409,6 +409,13 @@ services:
       - 'traefik.http.routers.api-${PROJECT}.service=api-${PROJECT}'
       - 'traefik.http.services.api-${PROJECT}.loadbalancer.server.port=${API_PORT}'
       - 'traefik.docker.network=proxy'
+      # `requestInfoFromContext(c, { trustedProxy: true })` (apps/api) reads CF-Connecting-IP
+      # first. Traefik does not set that header itself and passes through whatever the client
+      # sent — unlike X-Forwarded-For/X-Real-IP, which Traefik overwrites — so a client could
+      # otherwise pick the IP written to auth_audits. This middleware strips it before the
+      # request reaches the app; an empty `customrequestheaders` value removes the header.
+      - 'traefik.http.middlewares.strip-cf-ip-${PROJECT}.headers.customrequestheaders.CF-Connecting-IP='
+      - 'traefik.http.routers.api-${PROJECT}.middlewares=strip-cf-ip-${PROJECT}'
     networks:
       - default
       - proxy
