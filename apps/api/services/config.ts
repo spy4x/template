@@ -1,29 +1,47 @@
-import { getEnvVar } from "@server/helpers/env.ts"
+import { loadConfig } from "@spy4x/server/config"
+import { type } from "arktype"
+
+const envSchema = type({
+  ENV: "'dev' | 'prod'",
+  AUTH_COOKIE_SECRET: "string > 0",
+  AUTH_PEPPER: "string > 0",
+  AUTH_TOTP: "string > 0",
+  DEV_EMAIL: "string > 0",
+  TIMEZONE: "string > 0",
+  RATE_LIMITER_WINDOW_MS: "string.integer.parse",
+  RATE_LIMITER_STRICT_LIMIT: "string.integer.parse",
+  RATE_LIMITER_LIMIT: "string.integer.parse",
+  DOMAIN: "string > 0",
+  KV_HOSTNAME: "string > 0",
+  KV_PORT: "string.integer.parse",
+})
+
+const env = loadConfig(envSchema)
 
 export class Config {
-  env = getEnvVar("ENV") as "dev" | "prod"
-  authCookieSecret = getEnvVar("AUTH_COOKIE_SECRET")
-  authPepper = getEnvVar("AUTH_PEPPER")
-  authTotp = getEnvVar("AUTH_TOTP")
-  devEmail = getEnvVar("DEV_EMAIL")
+  env = env.ENV
+  authCookieSecret = env.AUTH_COOKIE_SECRET
+  authPepper = env.AUTH_PEPPER
+  authTotp = env.AUTH_TOTP
+  devEmail = env.DEV_EMAIL
   vapidKeysPath = "./vapid.json"
-  timeZone = getEnvVar("TIMEZONE")
+  timeZone = env.TIMEZONE
   authSaltRounds = 12 // balance between security and performance
   authSessionLength = 32
   authSessionDurationMin = 60 * 24 * 30 * 2 // 2 months
   rateLimiter = {
-    windowMs: Number(getEnvVar("RATE_LIMITER_WINDOW_MS")),
-    strictLimit: Number(getEnvVar("RATE_LIMITER_STRICT_LIMIT")),
-    limit: Number(getEnvVar("RATE_LIMITER_LIMIT")),
+    windowMs: env.RATE_LIMITER_WINDOW_MS,
+    strictLimit: env.RATE_LIMITER_STRICT_LIMIT,
+    limit: env.RATE_LIMITER_LIMIT,
   }
 
   // Web App Configuration
-  domain = getEnvVar("DOMAIN")
+  domain = env.DOMAIN
   webAppUrl = `http${this.isDev ? "" : "s"}://${this.domain}`
 
   kv = {
-    hostname: getEnvVar("KV_HOSTNAME"),
-    port: Number(getEnvVar("KV_PORT")),
+    hostname: env.KV_HOSTNAME,
+    port: env.KV_PORT,
   }
 
   get isDev() {
