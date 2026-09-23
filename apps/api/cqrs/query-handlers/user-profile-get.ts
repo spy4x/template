@@ -1,4 +1,4 @@
-import { QueryHandler } from "@platform/cqrs/types.ts"
+import { QueryHandler } from "@spy4x/platform/cqrs"
 import { UserProfileGetQuery } from "@api/cqrs/queries.ts"
 import { db } from "@api/services/db.ts"
 

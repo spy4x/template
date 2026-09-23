@@ -217,4 +217,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isGroupRole(role: GroupRole): boolean {
   return Number.isInteger(role) && role >= GroupRole.VIEWER && role <= GroupRole.OWNER
 }
-import type { Command, Query } from "@platform/cqrs/types.ts"
+import type { Command, Query } from "@spy4x/platform/cqrs"
