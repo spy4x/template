@@ -1,3 +1,4 @@
+/// <reference lib="deno.ns" />
 import {
   CacheService,
   type ICacheService,
@@ -9,6 +10,13 @@ import {
   RedisKvStoreClosedError,
   RedisKvStoreConnectionError,
 } from "@spy4x/server/kv"
+
+/** The subset of `RedisKvStore` `crashOnConnectionLoss` needs — narrow enough that a test can
+ *  pass a plain object instead of a real, privately-constructed `RedisKvStore`. */
+type CrashableStore = Pick<RedisKvStore, "get" | "set" | "del" | "reset">
+
+/** `Deno.exit`'s shape, injectable so a test can observe a call without ending the test process. */
+type ExitFn = (code: number) => never
 
 /**
  * Wraps a `RedisKvStore` so a dead Valkey connection crashes the process instead of making
@@ -24,11 +32,17 @@ import {
  * forbids extracting back in. So this adapter restores the old crash-and-restart behaviour
  * explicitly: on `RedisKvStoreConnectionError` or `RedisKvStoreClosedError`, it logs one line
  * and exits the process, exactly like the old client's unhandled rejection did.
+ *
+ * `exit` defaults to `Deno.exit` and is only a parameter so `cache-service.test.ts` can assert
+ * it is called (or not) without actually ending the test process.
  */
-export function crashOnConnectionLoss(store: RedisKvStore): ICacheStorage {
+export function crashOnConnectionLoss(
+  store: CrashableStore,
+  exit: ExitFn = Deno.exit,
+): ICacheStorage {
   const die = (error: unknown): never => {
     console.error(`Valkey connection is no longer usable, exiting so Docker restarts:`, error)
-    return Deno.exit(1)
+    return exit(1)
   }
   const guard = <T>(run: () => Promise<T>): Promise<T> =>
     run().catch((error: unknown) => {
