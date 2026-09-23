@@ -1,4 +1,4 @@
-import { expect } from "jsr:@std/expect@^1.0.15"
+import { expect } from "jsr:@std/expect@1.0.17"
 import { findEnvFiles, indexCiphertext, renderEncrypted, renderPlaintext } from "./age.ts"
 
 function fakeCrypto() {

@@ -1,5 +1,5 @@
-import { decodeBase64, encodeBase64 } from "jsr:@std/encoding@^1.0.5"
-import { dirname, join } from "jsr:@std/path@^1.0.3"
+import { decodeBase64, encodeBase64 } from "jsr:@std/encoding@1.0.11"
+import { dirname, join } from "jsr:@std/path@1.1.6"
 
 const prefix = `age64:`
 
