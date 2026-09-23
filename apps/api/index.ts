@@ -2,9 +2,10 @@ import { Hono } from "hono"
 import type { Context } from "hono"
 import { contextStorage } from "hono/context-storage"
 import { requestId } from "hono/request-id"
+import { requestLog } from "@spy4x/server/request-log"
 import { db } from "@api/services/db.ts"
 import { config } from "@api/services/config.ts"
-import { logger } from "@api/middlewares/log.ts"
+import { log } from "@api/services/log.ts"
 import { parseAuth } from "@api/middlewares/auth.ts"
 import { APIContext } from "./_types.ts"
 import { getRandomString } from "@platform/helpers/random.ts"
@@ -22,7 +23,7 @@ const app = new Hono<APIContext>().basePath("/api")
 app.use(
   contextStorage(),
   requestId({ generator: () => getRandomString(8) }),
-  logger(),
+  requestLog({ write: log, skipPaths: ["/api/health"] }),
   parseAuth,
 )
 
