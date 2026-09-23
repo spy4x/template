@@ -16,9 +16,9 @@ import { requestInfoFromContext } from "@spy4x/platform/request-info"
  * `strip-cf-ip-${PROJECT}` middleware removes it at the proxy before a request ever reaches this
  * app, so `ip` below always ends up as the `X-Forwarded-For` value in production.
  *
- * This test exercises the app's own call path, not the package directly, so flipping
- * `trustedProxy` at any of those call sites — or removing the proxy's strip, which the second
- * case stands in for — turns it red.
+ * This test pins the package's header precedence for the option every app call site passes. It
+ * does not import a route, so it will not notice a call site dropping `trustedProxy: true`; the
+ * e2e suite is what exercises the real routes.
  */
 function buildApp() {
   const app = new Hono()
