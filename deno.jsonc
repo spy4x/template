@@ -69,8 +69,8 @@
     "ts:check": "deno run --allow-read --allow-run=deno infra/scripts/type-check.ts",
     "test": "deno test --no-prompt apps/api libs && deno test --no-prompt --no-config -R=/tmp -W=/tmp infra/scripts/env/age.test.ts",
     "test:integration": "ENV=test deno test --no-prompt -E -N -R=./libs/server/db/migrations,./libs/server/db/schema.sql tests/integration",
-    "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright test",
-    "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright show-report",
+    "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright@1.57.0 test",
+    "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright@1.57.0 show-report",
     "fix": {
       "command": "echo 'Fixes applied!'",
       "description": "Run all fixes",
@@ -90,7 +90,7 @@
     // #endregion Checks
 
     // #region Git Hooks
-    "hooks:install": "deno run -R=deno.json,deno.jsonc,.git/hooks/ -W=.git/hooks/ jsr:@hongminhee/deno-task-hooks",
+    "hooks:install": "deno run -R=deno.json,deno.jsonc,.git/hooks/ -W=.git/hooks/ jsr:@hongminhee/deno-task-hooks@0.1.2",
     "hooks:pre-commit": "deno task check"
     // #endregion Git Hooks
   },
@@ -122,9 +122,9 @@
 
     // #region Dependencies
     // apps/api
-    "hono": "jsr:@hono/hono@^4.7.7",
+    "hono": "jsr:@hono/hono@4.10.7",
     "@hectorm/otpauth": "jsr:@hectorm/otpauth",
-    "qrcode": "jsr:@libs/qrcode@^3.0.0",
+    "qrcode": "jsr:@libs/qrcode@3.1.0",
     "webpush": "jsr:@negrel/webpush",
 
     // apps/tgbot
@@ -136,18 +136,18 @@
     "@preact/signals-core": "npm:@preact/signals-core@1.12.1",
 
     // shared
-    "@std/path": "jsr:@std/path@^1.0.3",
-    "@std/expect": "jsr:@std/expect@^1.0.15",
-    "@std/testing": "jsr:@std/testing@^1.0.11",
-    "@std/encoding": "jsr:@std/encoding@^1.0.5",
-    "@playwright/test": "npm:@playwright/test@^1.57.0",
-    "playwright": "npm:playwright@^1.57.0",
+    "@std/path": "jsr:@std/path@1.1.6",
+    "@std/expect": "jsr:@std/expect@1.0.17",
+    "@std/testing": "jsr:@std/testing@1.0.16",
+    "@std/encoding": "jsr:@std/encoding@1.0.11",
+    "@playwright/test": "npm:@playwright/test@1.57.0",
+    "playwright": "npm:playwright@1.57.0",
 
-    // shared/types
-    "arktype": "npm:arktype@^2.1.29",
+    // shared/types — 2.2.3 matches spy4x/ts-libs and spy4x/preact-components (spy4x/preact-components#121)
+    "arktype": "npm:arktype@2.2.3",
 
     // server/kv
-    "@iuioiua/redis": "jsr:@iuioiua/redis@^1.1.10",
+    "@iuioiua/redis": "jsr:@iuioiua/redis@1.1.10",
 
     // server/db
     "postgres": "https://deno.land/x/postgresjs@v3.4.5/mod.js"
