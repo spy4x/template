@@ -9,19 +9,30 @@
     "jsr:@fresh/core@2.3.3": "2.3.3",
     "jsr:@fresh/core@^2.3.3": "2.3.3",
     "jsr:@fresh/plugin-vite@1.1.2": "1.1.2",
-    "jsr:@hectorm/otpauth@*": "9.5.1",
+    "jsr:@hectorm/otpauth@9.5.2": "9.5.2",
     "jsr:@hongminhee/deno-task-hooks@0.1.2": "0.1.2",
-    "jsr:@hono/hono@4.10.7": "4.10.7",
+    "jsr:@hono/hono@4.13.8": "4.13.8",
     "jsr:@iuioiua/redis@1.1.10": "1.1.10",
     "jsr:@libs/qrcode@3.1.0": "3.1.0",
     "jsr:@negrel/http-ece@0.7.0": "0.7.0",
-    "jsr:@negrel/webpush@*": "0.5.0",
+    "jsr:@negrel/webpush@0.5.0": "0.5.0",
+    "jsr:@spy4x/email@1": "1.0.0",
+    "jsr:@spy4x/integrations@1": "1.0.0",
+    "jsr:@spy4x/net@1": "1.0.0",
+    "jsr:@spy4x/platform@1": "1.0.0",
+    "jsr:@spy4x/platform@1.0.0": "1.0.0",
+    "jsr:@spy4x/server@1.0.0": "1.0.0",
+    "jsr:@spy4x/validation@1": "1.0.0",
+    "jsr:@spy4x/validation@1.0.0": "1.0.0",
     "jsr:@std/assert@^1.0.14": "1.0.19",
     "jsr:@std/assert@^1.0.15": "1.0.19",
     "jsr:@std/assert@~0.222.1": "0.222.1",
+    "jsr:@std/async@^1.0.15": "1.5.0",
     "jsr:@std/bytes@1": "1.0.6",
     "jsr:@std/bytes@^1.0.6": "1.0.6",
     "jsr:@std/cli@~0.222.1": "0.222.1",
+    "jsr:@std/crypto@1.1.0": "1.1.0",
+    "jsr:@std/data-structures@^1.0.9": "1.1.2",
     "jsr:@std/dotenv@~0.225.5": "0.225.8",
     "jsr:@std/encoding@1": "1.0.11",
     "jsr:@std/encoding@1.0.11": "1.0.11",
@@ -53,7 +64,9 @@
     "jsr:@std/path@~0.222.1": "0.222.1",
     "jsr:@std/semver@^1.0.6": "1.0.8",
     "jsr:@std/testing@1.0.16": "1.0.16",
+    "jsr:@std/ulid@1.0.0": "1.0.0",
     "jsr:@std/uuid@^1.0.9": "1.1.1",
+    "npm:@babel/core@^7.28.0": "7.29.7",
     "npm:@babel/preset-react@^7.27.1": "7.29.7_@babel+core@7.29.7",
     "npm:@deno/vite-plugin@1.0.6": "1.0.6_vite@7.3.6",
     "npm:@opentelemetry/api@^1.9.0": "1.9.1",
@@ -73,6 +86,7 @@
     "npm:esbuild@0.25.7": "0.25.7",
     "npm:esbuild@~0.25.5": "0.25.12",
     "npm:playwright@1.57.0": "1.57.0",
+    "npm:postgres@3.4.7": "3.4.7",
     "npm:preact-render-to-string@^6.6.3": "6.7.0_preact@10.29.8",
     "npm:preact@10.28.2": "10.28.2",
     "npm:preact@^10.28.2": "10.29.8_preact-render-to-string@6.7.0",
@@ -139,6 +153,7 @@
         "jsr:@std/fmt@^1.0.7",
         "jsr:@std/media-types@1",
         "jsr:@std/path@1",
+        "npm:@babel/core",
         "npm:@babel/preset-react",
         "npm:@prefresh/vite",
         "npm:@remix-run/node-fetch-server",
@@ -147,8 +162,8 @@
         "npm:vite@^7.1.4"
       ]
     },
-    "@hectorm/otpauth@9.5.1": {
-      "integrity": "c9db51e937a61a5859b72701d9ec74b919dddfaf16139f2c99263a37ec3c5c14"
+    "@hectorm/otpauth@9.5.2": {
+      "integrity": "efe9d019825c3262b32c144dd2316fa4c3b4537ce025e9d009948e78a28fb55e"
     },
     "@hongminhee/deno-task-hooks@0.1.2": {
       "integrity": "72e87e497264efc72ca045fcefd2cdf8b47241e5058d382de9080c2dbb805e65",
@@ -161,8 +176,8 @@
         "jsr:@std/path@~0.222.1"
       ]
     },
-    "@hono/hono@4.10.7": {
-      "integrity": "b60512559d554f20a945e07a6c5f115e57cbd4c024da9217833c8e7b2c90355d"
+    "@hono/hono@4.13.8": {
+      "integrity": "bbb566d9ebb81e74c0d7eeff1f9221ba9f3fda6f1832e5ca66cbddcecb2f7fec"
     },
     "@iuioiua/redis@1.1.10": {
       "integrity": "b743e861a77a874fb7b310e0e4e3f5077300f5c8a13c398c31844ef4fc5353bf"
@@ -185,6 +200,52 @@
         "jsr:@std/encoding@1"
       ]
     },
+    "@spy4x/email@1.0.0": {
+      "integrity": "7570e021305534a58006bfacb48543360d564c014a418092442df645aebcfa81"
+    },
+    "@spy4x/integrations@1.0.0": {
+      "integrity": "9ef213e64ef68062581d2f48567567a1c60e05fbe3e9a6166f97b93aa1801a47"
+    },
+    "@spy4x/net@1.0.0": {
+      "integrity": "91c4aa95a2d17d8ffcb19be55cf3c1b9d0bf343375fff52f41b2298bb3ad2fde"
+    },
+    "@spy4x/platform@1.0.0": {
+      "integrity": "029dc5459a1072eed151f01bb9adaa3ea4d3ee2ed41a50979dc05fb61f003702",
+      "dependencies": [
+        "jsr:@hono/hono",
+        "jsr:@spy4x/validation@1",
+        "jsr:@std/crypto",
+        "jsr:@std/encoding@1.0.11",
+        "jsr:@std/path@1.1.6",
+        "jsr:@std/ulid",
+        "npm:arktype"
+      ]
+    },
+    "@spy4x/server@1.0.0": {
+      "integrity": "b8aa70f2af20413def643e6606d7d22c767abfe0d90190cf4b86c1b503cd4a4d",
+      "dependencies": [
+        "jsr:@hectorm/otpauth",
+        "jsr:@hono/hono",
+        "jsr:@iuioiua/redis",
+        "jsr:@libs/qrcode",
+        "jsr:@spy4x/email",
+        "jsr:@spy4x/integrations",
+        "jsr:@spy4x/net",
+        "jsr:@spy4x/platform@1",
+        "jsr:@spy4x/validation@1",
+        "jsr:@std/crypto",
+        "jsr:@std/encoding@1.0.11",
+        "jsr:@std/path@1.1.6",
+        "npm:arktype",
+        "npm:postgres"
+      ]
+    },
+    "@spy4x/validation@1.0.0": {
+      "integrity": "eee57b3aba8f1cddd02413e365818ccbf8c3c60292ef36bdfacdb870ef1a5684",
+      "dependencies": [
+        "npm:arktype"
+      ]
+    },
     "@std/assert@0.222.1": {
       "integrity": "691637161ee584a9919d1f9950ddd1272feb8e0a19e83aa5b7563cedaf73d74c"
     },
@@ -194,6 +255,9 @@
         "jsr:@std/internal@^1.0.12"
       ]
     },
+    "@std/async@1.5.0": {
+      "integrity": "4c1f22d287a17ad7d8643b1952bc5a4d21e5d8b68dc8c20d8268eecc69096e82"
+    },
     "@std/bytes@1.0.6": {
       "integrity": "f6ac6adbd8ccd99314045f5703e23af0a68d7f7e58364b47d2c7f408aeb5820a"
     },
@@ -202,6 +266,12 @@
       "dependencies": [
         "jsr:@std/assert@~0.222.1"
       ]
+    },
+    "@std/crypto@1.1.0": {
+      "integrity": "b8d6d0a6377a32b213af2661ed7bf1062d94feac0c57def5526a8e74a95c3ec8"
+    },
+    "@std/data-structures@1.1.2": {
+      "integrity": "2471377c9e0051f9ec34e57d0ebd0ad133a5a889677446ec6ba9938e4e102918"
     },
     "@std/dotenv@0.225.8": {
       "integrity": "27b8c1a9d00cbf938345a5924487c04d9b27bdd7e7bd1983f54bcf76d0a0174a"
@@ -290,8 +360,15 @@
       "integrity": "a917ffdeb5924c9be436dc78bc32e511760e14d3a96e49c607fc5ecca86d0092",
       "dependencies": [
         "jsr:@std/assert@^1.0.15",
-        "jsr:@std/internal@^1.0.12"
+        "jsr:@std/async",
+        "jsr:@std/data-structures",
+        "jsr:@std/fs@^1.0.19",
+        "jsr:@std/internal@^1.0.12",
+        "jsr:@std/path@^1.1.2"
       ]
+    },
+    "@std/ulid@1.0.0": {
+      "integrity": "d41c3d27a907714413649fee864b7cde8d42ee68437d22b79d5de4f81d808780"
     },
     "@std/uuid@1.1.1": {
       "integrity": "7b49060282d90f72fec64952f8c7a2914cbe6fdba3eca665f8cedc90830154a7",
@@ -1673,6 +1750,9 @@
         "source-map-js"
       ]
     },
+    "postgres@3.4.7": {
+      "integrity": "sha512-Jtc2612XINuBjIl/QTWsV5UvE8UHuNblcO3vVADSrKsrc6RqGX6lOW1cEo3CM2v0XG4Nat8nI+YM7/f26VxXLw=="
+    },
     "preact-render-to-string@6.7.0_preact@10.29.8": {
       "integrity": "sha512-Z4WR8fmLMRpdYqJ9i7vrlXSsSrxVJydwrkEXHapexfARbWfGb7vGcnvNQnIzN0cXciMVOlz/XLoiMCi9gUsy9Q==",
       "dependencies": [
@@ -2106,11 +2186,14 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@hectorm/otpauth@*",
-      "jsr:@hono/hono@4.10.7",
+      "jsr:@hectorm/otpauth@9.5.2",
+      "jsr:@hono/hono@4.13.8",
       "jsr:@iuioiua/redis@1.1.10",
       "jsr:@libs/qrcode@3.1.0",
-      "jsr:@negrel/webpush@*",
+      "jsr:@negrel/webpush@0.5.0",
+      "jsr:@spy4x/platform@1.0.0",
+      "jsr:@spy4x/server@1.0.0",
+      "jsr:@spy4x/validation@1.0.0",
       "jsr:@std/encoding@1.0.11",
       "jsr:@std/expect@1.0.17",
       "jsr:@std/path@1.1.6",
@@ -2120,6 +2203,7 @@
       "npm:@preact/signals@2.5.1",
       "npm:arktype@2.2.3",
       "npm:playwright@1.57.0",
+      "npm:postgres@3.4.7",
       "npm:preact@10.28.2",
       "npm:wouter-preact@3.9.0"
     ],

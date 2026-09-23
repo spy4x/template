@@ -330,7 +330,8 @@ function createSignupStore(
           group: new PostgresGroupRepository(transaction),
         }
         return await fn(signupTransaction)
-      }),
+        // npm:postgres types `begin` as `Promise<UnwrapPromiseArray<T>>`; `fn` returns a plain `T`.
+      }) as ReturnType<typeof fn>,
   }
 }
 
