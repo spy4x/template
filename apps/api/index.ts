@@ -1,4 +1,3 @@
-import "@platform/helpers/arktype-config.ts"
 import { Hono } from "hono"
 import type { Context } from "hono"
 import { contextStorage } from "hono/context-storage"
