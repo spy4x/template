@@ -1,4 +1,4 @@
-import { Event } from "@platform/cqrs/types.ts"
+import { Event } from "@spy4x/platform/cqrs"
 import { RequestInfo } from "@platform/types"
 import { User, UserPushTokenPublic } from "@domain/identity"
 export class UserSignedUpEvent

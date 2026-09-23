@@ -16,7 +16,6 @@ COPY apps/api/deno.json ./apps/api/deno.json
 COPY apps/mpa/deno.json ./apps/mpa/deno.json
 COPY apps/spa/deno.json ./apps/spa/deno.json
 COPY apps/worker/deno.json ./apps/worker/deno.json
-COPY libs/platform/cqrs/deno.json ./libs/platform/cqrs/deno.json
 COPY libs/domain/groups/deno.json ./libs/domain/groups/deno.json
 
 # Install dependencies (this layer will be cached if deno.jsonc doesn't change)

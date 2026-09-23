@@ -1,4 +1,4 @@
-import { Query } from "@platform/cqrs/types.ts"
+import { Query } from "@spy4x/platform/cqrs"
 import { User } from "@domain/identity"
 export interface UserProfileGetPayload {
   userId: number

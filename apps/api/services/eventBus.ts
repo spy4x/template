@@ -1,3 +1,3 @@
-import { EventBus } from "@platform/cqrs/event-bus.ts"
+import { EventBus } from "@spy4x/platform/cqrs"
 
 export const eventBus = new EventBus()

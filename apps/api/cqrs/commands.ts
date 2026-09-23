@@ -1,4 +1,4 @@
-import { Command } from "@platform/cqrs/types.ts"
+import { Command } from "@spy4x/platform/cqrs"
 import { RequestInfo } from "@platform/types"
 import { User } from "@domain/identity"
 export interface UserProfileUpdatePayload {

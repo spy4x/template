@@ -1,4 +1,4 @@
-import type { CommandHandler, QueryHandler } from "@platform/cqrs/types.ts"
+import type { CommandHandler, QueryHandler } from "@spy4x/platform/cqrs"
 import type { GroupRepository } from "@domain/groups"
 import { GroupCreateCommand, GroupListQuery } from "@domain/groups"
 
