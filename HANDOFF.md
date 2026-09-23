@@ -41,11 +41,12 @@ apps/mpa      Fresh. SSR shell plus /health. No features yet.
 apps/worker   Drains outbox_events. Real, small.
 
 libs/platform  cqrs (buses), types (validation, API envelopes, push contracts),
-               cache, helpers. Depends on nothing but arktype and std.
+               helpers. Depends on nothing but arktype and std.
 libs/domain    groups (enums, policy, commands/queries), identity (user, session,
                auth, ws payload contracts). May depend on platform only.
-libs/server    db, groups (Postgres repository, cursor), outbox, kv, helpers.
-               Field encryption is @spy4x/server/crypto (CryptoService).
+libs/server    db, groups (Postgres repository, cursor), outbox, helpers.
+               Field encryption is @spy4x/server/crypto (CryptoService); the
+               Redis store is @spy4x/server/kv.
 libs/client    browser, preact, vite, icons, helpers.
 ```
 
@@ -120,6 +121,18 @@ These cost real time to find. Do not rediscover them.
 5. **`DbService.group` is constructed per access on purpose.** `begin()` derives
    the transactional service with `Object.create(this)` and rebinds `sql`, so
    caching the repository would silently escape the transaction.
+6. **`apps/api`'s cache keys gained an `api:` prefix (PR #21).** `RedisKvStore`
+   scopes every key it writes under a mandatory prefix; the app's old kv client
+   wrote unprefixed keys (`user_123`, `userSession_...`, etc). Rolling back to a
+   commit before that PR makes the app read those old unprefixed keys again -
+   including session and `isSessionTokenExpired` entries a user may have since
+   signed out of under the prefixed version, which come back to life because the
+   rollback never saw them expire or get deleted. **Flush Valkey before rolling
+   back past this commit.** The forward direction has a matching one-time step:
+   on the first deploy of this PR, delete every Valkey key that does not match
+   `api:*`, so the stale unprefixed keys from before this change do not linger
+   forever (they still expire on their own TTL, but deleting them removes any
+   chance of the same rollback problem in reverse if this step is skipped).
 
 ## Running it
 
