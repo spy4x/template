@@ -42,8 +42,10 @@
     "proxy:start": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env up -d",
     "proxy:stop": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env down",
     "deploy": "deno run -R=./infra --allow-run=rsync,ssh ./infra/scripts/deploy.ts",
-    "env:encrypt": "deno run --no-prompt -R=. -W=. --allow-run=age ./infra/scripts/env/+main.ts encrypt",
-    "env:decrypt": "deno run --no-prompt -R=. -W=. --allow-run=age ./infra/scripts/env/+main.ts decrypt",
+    "env:encrypt": "deno run --no-prompt -R -W=. @spy4x/server/env-age64/cli encrypt",
+    "env:decrypt": "deno run --no-prompt -R -W=. @spy4x/server/env-age64/cli decrypt",
+    "env:status": "deno run --no-prompt -R -W=. @spy4x/server/env-age64/cli status",
+    "env:keygen": "deno run --no-prompt -R -W=. @spy4x/server/env-age64/cli keygen",
     // #endregion Scripts
 
     // #region Checks
@@ -62,7 +64,7 @@
     "lint:fix": "deno lint --fix",
     "lint:check": "deno lint",
     "ts:check": "deno run --allow-read --allow-run=deno infra/scripts/type-check.ts",
-    "test": "deno test --no-prompt apps/api libs && deno test --no-prompt --no-config -R=/tmp -W=/tmp infra/scripts/env/age.test.ts",
+    "test": "deno test --no-prompt apps/api libs",
     "test:integration": "ENV=test deno test --no-prompt -E -N -R=./libs/server/db/migrations,./libs/server/db/schema.sql tests/integration",
     "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright@1.57.0 test",
     "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright@1.57.0 show-report",
