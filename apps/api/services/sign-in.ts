@@ -175,8 +175,8 @@ export function createSignIn(options: SignInOptions): SignIn {
       decide(await db.user.findOne({ id: authUser.id }) ?? null)
 
   /**
-   * The package's password provider, by username. Each instance makes one dummy hash when it is
-   * created, for the equal work of a sign-in to a missing account.
+   * The package's password provider, by username. Each instance makes one dummy hash with its
+   * hasher when it is created, for the equal work of a sign-in to a missing account.
    */
   const passwordsOver = (
     options: Pick<PasswordSignInOptions, "store" | "sessions"> & Partial<PasswordSignInOptions>,
@@ -212,6 +212,24 @@ export function createSignIn(options: SignInOptions): SignIn {
     async signUp(c, rawUsername, password, personalGroupId = crypto.randomUUID()) {
       // Checked here too, so a refused username opens no transaction and makes no provider.
       if (normalizeUsername(rawUsername) === null) return null
+      // Hashed before `db.begin()`, as before the package provider, so no pool connection is held
+      // for the length of a PBKDF2 hash. A password the hasher refuses (not a string, too long) is
+      // the same refusal the provider gives it: `invalid-password`, answered as `null`.
+      let secret: string
+      try {
+        secret = await hasher.hash(password)
+      } catch (error) {
+        if (error instanceof RangeError || error instanceof TypeError) return null
+        throw error
+      }
+      // The per-transaction provider hashes nothing itself: its `hash` returns the secret made
+      // above, both for the new key and for the dummy hash it makes at creation. Its dummy only
+      // serves its own `signIn`, which is never called; sign-in runs on `signInPasswords`, whose
+      // dummy is a real hash from the real hasher.
+      const precomputed: PasswordHasher = {
+        hash: () => Promise.resolve(secret),
+        verify: (candidate, stored) => hasher.verify(candidate, stored),
+      }
       let created
       try {
         created = await db.begin(async (tx) => {
@@ -219,6 +237,7 @@ export function createSignIn(options: SignInOptions): SignIn {
           const signedUp = await passwordsOver({
             store: tx.authStore,
             sessions: sessionsOver(tx.sessionStore),
+            hasher: precomputed,
             // The route schema is the sign-up length rule (8 to 50 UTF-16 units), as before; the
             // package's own minimum counts code points and would refuse some passwords it accepts.
             minPasswordLength: 1,
