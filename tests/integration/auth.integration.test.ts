@@ -106,6 +106,11 @@ function buildApp(signIn: SignIn) {
     const ok = await signIn.checkTotp(c.get("auth")!, otp)
     return ok ? c.json(c.get("auth")!.user) : c.json({ error: "Invalid token" }, 401)
   })
+  app.post("/password/change", signIn.auth.isAuthenticated2FA, async (c) => {
+    const { password, newPassword } = await c.req.json()
+    const ok = await signIn.changePassword(c, c.get("auth")!, password, newPassword)
+    return ok ? c.json({ success: true }) : c.json({ error: "Invalid password" }, 400)
+  })
 
   let cookies = new Map<string, string>()
   const request = async (method: string, path: string, body?: unknown): Promise<Response> => {
@@ -298,6 +303,27 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       }
     })
 
+    await t.step("an auth user without a profile row gets no session", async () => {
+      const db = new AppDbBase({ sql })
+      await db.authStore.createUserWithKey({
+        method: "password",
+        subject: "no-profile",
+        email: null,
+        secret: await createPasswordHasher({ pepper: PEPPER }).hash("Passw0rd!"),
+        provenAt: null,
+      })
+      const sessionsBefore = await sql<CountRow[]>`SELECT COUNT(*)::int AS count FROM auth_sessions`
+      const client = buildApp(signIn)
+      const response = await client.request("POST", "/sign-in", {
+        username: "no-profile",
+        password: "Passw0rd!",
+      })
+      expect(response.status).toBe(401)
+      expect(client.saveCookies().size).toBe(0)
+      const sessionsAfter = await sql<CountRow[]>`SELECT COUNT(*)::int AS count FROM auth_sessions`
+      expect(sessionsAfter[0].count).toBe(sessionsBefore[0].count)
+    })
+
     await t.step("sign-out ends the session, not only the cookie", async () => {
       const client = buildApp(signIn)
       await client.request("POST", "/sign-in", { username: "alice", password: "Passw0rd!" })
@@ -398,6 +424,23 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
       const response = await client.request("GET", "/me")
       expect(response.status).toBe(401)
       expect(await response.json()).toEqual({ error: "Need to pass 2FA" })
+    })
+
+    let password = credentials.password
+
+    await t.step("a password change keeps the second factor given on the new session", async () => {
+      const response = await enrolling.request("POST", "/password/change", {
+        password,
+        newPassword: "N3w-Passw0rd!",
+      })
+      expect(response.status).toBe(200)
+      password = "N3w-Passw0rd!"
+      const [session] = await sql<{ secondFactor: number }[]>`
+        SELECT second_factor AS "secondFactor" FROM auth_sessions
+        WHERE id = ${sessionIdOf(enrolling.saveCookies())}
+      `
+      expect(session.secondFactor).toBe(SecondFactorStatus.Completed)
+      expect((await enrolling.request("GET", "/me")).status).toBe(200)
     })
   })
 })
