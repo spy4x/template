@@ -11,9 +11,9 @@ import {
   UserSessionBase,
 } from "@domain/identity"
 import postgres from "postgres"
-import { createSqlFromEnv, DbServiceBase, type Sql } from "@spy4x/server/db"
+import { createSqlFromEnv, type Sql } from "@spy4x/server/db"
 import { publicAPICache } from "./cache.ts"
-import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
+import { AppDbBase } from "./db-base.ts"
 // import { getLatestMetrics } from "../routes/metric.ts"
 
 /**
@@ -37,18 +37,9 @@ export const sql: Sql = (() => {
   return client
 })()
 
-export class DbService extends DbServiceBase {
+export class DbService extends AppDbBase {
   constructor() {
     super({ sql })
-  }
-
-  /**
-   * Built per access on purpose. `DbServiceBase.begin()` derives the transactional
-   * service with `Object.create(this)` and rebinds `sql`, so a cached repository
-   * would keep the pool connection and silently escape the transaction.
-   */
-  get group() {
-    return new PostgresGroupRepository(this.sql)
   }
 
   get user() {
