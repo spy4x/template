@@ -1,6 +1,7 @@
 import { expect } from "@std/expect"
+import postgres from "postgres"
 import { PublicAPICacheModel } from "@spy4x/platform/cache"
-import { DbServiceBase, postgres } from "@server/db"
+import { DbServiceBase, type Sql } from "@spy4x/server/db"
 
 interface TransactionRow extends postgres.Row {
   id: number
@@ -15,10 +16,9 @@ class TransactionTestDb extends DbServiceBase {
   constructor(
     private tableName: string,
     private cache: PublicAPICacheModel<TransactionRow>,
-    testSql: postgres.Sql,
+    testSql: Sql,
   ) {
-    super()
-    this.setSql(testSql)
+    super({ sql: testSql })
   }
 
   get rows() {

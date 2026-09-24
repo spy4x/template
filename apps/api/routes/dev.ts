@@ -2,8 +2,8 @@ import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
 import { validate } from "@spy4x/validation"
 import { authUsernameSchema, UserKeyKind } from "@domain/identity"
-import { db } from "@api/services/db.ts"
-import { sql, Transaction } from "@server/db"
+import { db, sql } from "@api/services/db.ts"
+import type { Transaction } from "@spy4x/server/db"
 
 export const devRoute = new Hono<APIContext>()
   .post("/cleanup-user", async (c) => {

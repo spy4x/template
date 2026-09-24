@@ -10,19 +10,36 @@ import {
   UserSession,
   UserSessionBase,
 } from "@domain/identity"
-import { DbServiceBase } from "@server/db"
+import postgres from "postgres"
+import { createSqlFromEnv, type Sql } from "@spy4x/server/db"
 import { publicAPICache } from "./cache.ts"
-import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
+import { AppDbBase } from "./db-base.ts"
 // import { getLatestMetrics } from "../routes/metric.ts"
 
-export class DbService extends DbServiceBase {
-  /**
-   * Built per access on purpose. `DbServiceBase.begin()` derives the transactional
-   * service with `Object.create(this)` and rebinds `sql`, so a cached repository
-   * would keep the pool connection and silently escape the transaction.
-   */
-  get group() {
-    return new PostgresGroupRepository(this.sql)
+/**
+ * The client every table method and the group repository run against.
+ *
+ * `DB_PORT` is optional so existing environments that omit it keep the 5432 default,
+ * but it is honoured when set - `.env.example` and CI both define it.
+ */
+export const sql: Sql = (() => {
+  const client = createSqlFromEnv(Deno.env.toObject(), {
+    transform: postgres.camel,
+    applicationName: "app-backend",
+    // The driver's own default (postgres@3.4.7 src/index.js:449) was 10, not the
+    // package's default of 15; compose limits Postgres to max_connections=30 and both
+    // this pool and the worker's draw from it, so the old ceiling is kept explicitly.
+    max: 10,
+  })
+  if (!client) {
+    throw new Error("Missing environment variable: DB_HOST")
+  }
+  return client
+})()
+
+export class DbService extends AppDbBase {
+  constructor() {
+    super({ sql })
   }
 
   get user() {

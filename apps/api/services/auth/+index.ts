@@ -64,10 +64,16 @@ class Auth {
       authData.user.id,
       this.session.getIdTokenForCookie(authData.session),
     )
-    authData.user = await db.user.updateOne({
+    const updatedUser = await db.user.updateOne({
       id: authData.user.id,
       data: { lastLoginAt: new Date() },
     })
+    // `updateOne` returns `undefined` only when the row vanished between the check
+    // above and this statement - a race, not a normal "not found".
+    if (!updatedUser) {
+      throw new Error("User not found")
+    }
+    authData.user = updatedUser
     eventBus.emit(
       new UserSignedInEvent({
         user: authData.user,

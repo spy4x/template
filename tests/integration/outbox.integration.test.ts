@@ -1,7 +1,7 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
 import postgres from "postgres"
-import { type OutboxEvent, OutboxProcessor, PostgresOutboxRepository } from "@server/outbox"
+import { type OutboxEvent, OutboxProcessor, PostgresOutboxRepository } from "@spy4x/server/outbox"
 
 const REQUIRED_DB_ENV = ["DB_HOST", "DB_USER", "DB_PASS", "DB_NAME"]
 const hasDatabase = REQUIRED_DB_ENV.every((name) => Boolean(Deno.env.get(name)))
