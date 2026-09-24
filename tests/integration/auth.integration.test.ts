@@ -106,6 +106,10 @@ function buildApp(signIn: SignIn) {
     const ok = await signIn.checkTotp(c.get("auth")!, otp)
     return ok ? c.json(c.get("auth")!.user) : c.json({ error: "Invalid token" }, 401)
   })
+  app.post("/totp/disconnect", signIn.auth.isAuthenticated2FA, async (c) => {
+    const ok = await signIn.disconnectTotp(c.get("auth")!)
+    return ok ? c.json({ success: true }) : c.json({ error: "OTP already disabled" }, 400)
+  })
   app.post("/password/change", signIn.auth.isAuthenticated2FA, async (c) => {
     const { password, newPassword } = await c.req.json()
     const ok = await signIn.changePassword(c, c.get("auth")!, password, newPassword)
@@ -441,6 +445,51 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
       `
       expect(session.secondFactor).toBe(SecondFactorStatus.Completed)
       expect((await enrolling.request("GET", "/me")).status).toBe(200)
+    })
+
+    await t.step("disconnecting lets the user's pending sessions through", async () => {
+      const pending = buildApp(signIn)
+      const signedIn = await pending.request("POST", "/sign-in", {
+        username: credentials.username,
+        password,
+      })
+      expect(signedIn.status).toBe(202)
+      expect((await pending.request("GET", "/me")).status).toBe(401)
+      // Another user's pending session must stay pending.
+      const other = buildApp(signIn)
+      const otherCredentials = { username: "totp-bystander", password: "Passw0rd!" }
+      expect((await other.request("POST", "/sign-up", otherCredentials)).status).toBe(200)
+      const [bystander] = await sql<{ id: number }[]>`
+        SELECT id FROM auth_sessions WHERE id = ${sessionIdOf(other.saveCookies())}
+      `
+      await sql`
+        UPDATE auth_sessions SET second_factor = ${SecondFactorStatus.Pending}
+        WHERE id = ${bystander.id}
+      `
+
+      const response = await enrolling.request("POST", "/totp/disconnect")
+      expect(response.status).toBe(200)
+      const [user] = await sql<{ mfa: number }[]>`
+        SELECT mfa FROM users WHERE id = (
+          SELECT user_id FROM auth_sessions WHERE id = ${sessionIdOf(pending.saveCookies())}
+        )
+      `
+      expect(user.mfa).toBe(UserMFAStatus.NOT_CONFIGURED)
+      expect(await sql`SELECT 1 FROM user_totp`).toHaveLength(0)
+      const [cleared] = await sql<{ secondFactor: number; status: number }[]>`
+        SELECT second_factor AS "secondFactor", status FROM auth_sessions
+        WHERE id = ${sessionIdOf(pending.saveCookies())}
+      `
+      expect(cleared).toEqual({
+        secondFactor: SecondFactorStatus.NotRequired,
+        status: SessionStatus.Active,
+      })
+      expect((await pending.request("GET", "/me")).status).toBe(200)
+      const [untouched] = await sql<{ secondFactor: number }[]>`
+        SELECT second_factor AS "secondFactor" FROM auth_sessions WHERE id = ${bystander.id}
+      `
+      expect(untouched.secondFactor).toBe(SecondFactorStatus.Pending)
+      expect((await enrolling.request("POST", "/totp/disconnect")).status).toBe(400)
     })
   })
 })

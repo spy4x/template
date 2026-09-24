@@ -105,7 +105,10 @@ export interface SignIn {
   connectTotpFinish(state: AppAuthState, code: string): Promise<boolean>
   /** Gives the second factor for this session. A code is never accepted twice. */
   checkTotp(state: AppAuthState, code: string): Promise<boolean>
-  /** Removes a finished enrolment. */
+  /**
+   * Removes a finished enrolment, and lets the user's other sessions that still owed the second
+   * factor through without it.
+   */
   disconnectTotp(state: AppAuthState): Promise<boolean>
   /**
    * Replaces the password, signs out every other session and sets the new session's cookie.
@@ -335,6 +338,8 @@ export function createSignIn(options: SignInOptions): SignIn {
         return await db.begin(async (tx) => {
           if (!(await tx.userTotp.deleteConfirmed(user.id))) return false
           await tx.user.updateOne({ id: user.id, data: { mfa: UserMFAStatus.NOT_CONFIGURED } })
+          // Sessions still waiting for the removed factor would be refused for good otherwise.
+          await sessionsOver(tx.sessionStore).clearPendingSecondFactors(user.id)
           return true
         })
       } catch (error) {
