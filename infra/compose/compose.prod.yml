@@ -38,13 +38,17 @@ services:
     environment:
       - ENV=prod
     labels:
+      # These override compose.shared.yml's api-${PROJECT} router by name, so this stays one
+      # router (rule from compose.shared.yml, transport from here) instead of a second router
+      # that never matches. Overriding `entrypoints` from `web` to `websecure` drops the plain
+      # HTTP listener for this router, same as the pre-existing minio/grafana routers below.
       - "traefik.docker.network=proxy"
-      - 'traefik.http.routers.api.entrypoints=websecure'
-      - 'traefik.http.routers.api.tls=true'
-      - 'traefik.http.routers.api.tls.certresolver=myresolver'
-      # Same CF-Connecting-IP strip as compose.shared.yml's api-${PROJECT} router, for this
-      # router's own name; see the comment there for why it is required.
-      - 'traefik.http.routers.api.middlewares=strip-cf-ip-${PROJECT}'
+      - 'traefik.http.routers.api-${PROJECT}.entrypoints=websecure'
+      - 'traefik.http.routers.api-${PROJECT}.tls=true'
+      - 'traefik.http.routers.api-${PROJECT}.tls.certresolver=myresolver'
+      # Keep the CF-Connecting-IP strip from compose.shared.yml's api-${PROJECT} router; see the
+      # comment there for why it is required.
+      - 'traefik.http.routers.api-${PROJECT}.middlewares=strip-cf-ip-${PROJECT}'
 
   spa:
     networks:
@@ -53,7 +57,8 @@ services:
     build:
       dockerfile: apps/spa/dockerfile.prod
     labels:
+      # Overrides compose.shared.yml's spa-${PROJECT} router by name; see the api router above.
       - "traefik.docker.network=proxy"
-      - "traefik.http.routers.spa.entrypoints=websecure"
-      - "traefik.http.routers.spa.tls=true"
-      - "traefik.http.routers.spa.tls.certresolver=myresolver"
+      - "traefik.http.routers.spa-${PROJECT}.entrypoints=websecure"
+      - "traefik.http.routers.spa-${PROJECT}.tls=true"
+      - "traefik.http.routers.spa-${PROJECT}.tls.certresolver=myresolver"
