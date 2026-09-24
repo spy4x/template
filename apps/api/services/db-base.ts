@@ -1,4 +1,4 @@
-import { DbServiceBase, type RowCache, type Sql, type Transaction } from "@spy4x/server/db"
+import { DbServiceBase, type RowCache, type Sql } from "@spy4x/server/db"
 import type { AuthSessionRecord, AuthStore } from "@spy4x/server/auth"
 import { createPostgresAuthStore, createPostgresSessionStore } from "@spy4x/server/auth/postgres"
 import type { SessionStore } from "@spy4x/server/sign-in"
@@ -60,10 +60,11 @@ export class AppDbBase extends DbServiceBase {
 
   /**
    * The `@spy4x/server` auth store over `auth_users` and `auth_keys`. Built per access, like
-   * `group`, so inside `begin()` it writes through the transaction.
+   * `group`, so inside `begin()` it writes through the transaction: given a transaction handle, the
+   * store runs its multi-statement writes in a savepoint of it (spy4x/ts-libs#161).
    */
   get authStore(): AuthStore {
-    return createPostgresAuthStore(joinable(this.sql))
+    return createPostgresAuthStore(this.sql)
   }
 
   /** The `@spy4x/server` session store over `auth_sessions`. Built per access, like `group`. */
@@ -137,30 +138,4 @@ export class AppDbBase extends DbServiceBase {
         `).length === 1,
     }
   }
-}
-
-/**
- * The client the auth store is given. The store opens its own transaction with `sql.begin` for
- * each write. A transaction handle has no `begin`, so inside `DbServiceBase.begin()` the handle is
- * given one that opens a savepoint instead: the store's writes then commit or roll back with the
- * surrounding transaction, and a refused write rolls back only its own savepoint.
- *
- * The `begin` itself is required: without it every sign-up fails. The savepoint is a safety net no
- * current code path relies on. Every caller lets a refused store write fail the whole transaction,
- * so a `begin` that simply ran `body(transaction)` would behave the same today (the tests stay
- * green with it). It matters once a caller catches a store error and keeps using the transaction:
- * Postgres refuses every further statement in a transaction whose last statement failed, unless
- * that statement ran in a savepoint that was rolled back.
- */
-function joinable(sql: Sql): Sql {
-  if (typeof (sql as { begin?: unknown }).begin === "function") return sql
-  const transaction = sql as unknown as Transaction
-  return new Proxy(sql, {
-    get(target, property, receiver) {
-      if (property === "begin") {
-        return <T>(body: (tx: Transaction) => T | Promise<T>) => transaction.savepoint(body)
-      }
-      return Reflect.get(target, property, receiver)
-    },
-  })
 }
