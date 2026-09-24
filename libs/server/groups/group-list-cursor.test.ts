@@ -39,4 +39,13 @@ describe("group list cursor", () => {
 
     await expect(codec.decode(invalid, 7)).rejects.toThrow(GroupError)
   })
+
+  it("decodes a cursor minted by the previous encoder", async () => {
+    const codec = new GroupListCursorCodec("cursor-secret")
+    const minted =
+      "eyJ2ZXJzaW9uIjoxLCJwdXJwb3NlIjoiZ3JvdXBzLmxpc3QiLCJ1c2VySWQiOjcsInVwZGF0ZWRBdCI6IjIwMjYtMDgtMThUMTA6MDA6MDAuMDAwWiIsImlkIjoiN2I2ZDhkNmMtMWFmNS00ZjA0LThhZTQtYjFlZTVkMTExMDAxIn0.q0iweSII5DmaLK8gGjH3DWroa3GpOxT2jjEKXvW418U"
+
+    expect(await codec.encode(7, pageKey)).toBe(minted)
+    expect(await codec.decode(minted, 7)).toEqual(pageKey)
+  })
 })
