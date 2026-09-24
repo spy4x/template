@@ -31,7 +31,7 @@ across real projects, a CLI last.
 
 ## State of master
 
-Green: `deno task check` (23 tests, 33 steps),
+Green: `deno task check` (23 tests, 35 steps),
 `deno task test:integration` (13 tests, 29 steps, needs Postgres), `deno task spa:build`,
 `deno task mpa:check`, and the Playwright e2e suite (2 tests).
 
@@ -49,7 +49,7 @@ libs/domain    groups (enums, policy, commands/queries), identity (user, session
 libs/server    db (migrations and schema.sql only), groups (Postgres repository,
                cursor). Database access, outbox, key-value store, config,
                request logging, sign-in and auth come from @spy4x/server/*.
-libs/client    browser, preact, vite, icons, helpers.
+libs/client    preact, vite, icons, helpers.
 ```
 
 What genuinely works end to end: sign-up creates the auth user and password key
