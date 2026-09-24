@@ -49,7 +49,7 @@ libs/domain    groups (enums, policy, commands/queries), identity (user, session
 libs/server    db (migrations and schema.sql only), groups (Postgres repository,
                cursor). Database access, outbox, key-value store, config,
                request logging, sign-in and auth come from @spy4x/server/*.
-libs/client    browser, preact, vite, icons, helpers.
+libs/client    preact, vite, icons, helpers.
 ```
 
 What genuinely works end to end: sign-up creates the auth user and password key
