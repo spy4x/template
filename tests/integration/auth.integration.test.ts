@@ -294,6 +294,8 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
         hash: (password) => real.hash(password),
         verify: (password, stored) => {
           verifications += 1
+          // A cheap dummy would still be one call; the stored value must be a full-cost hash.
+          expect(stored).toMatch(/^pbkdf2-sha256\$600000\$/)
           return real.verify(password, stored)
         },
       }
