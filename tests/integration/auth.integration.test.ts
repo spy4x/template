@@ -4,7 +4,12 @@ import { Hono } from "hono"
 import postgres from "postgres"
 import * as OTPAuth from "@hectorm/otpauth"
 import { AUTH_POSTGRES_SCHEMA } from "@spy4x/server/auth/postgres"
-import { SecondFactorStatus, SessionStatus } from "@spy4x/server/sign-in"
+import {
+  createPasswordHasher,
+  type PasswordHasher,
+  SecondFactorStatus,
+  SessionStatus,
+} from "@spy4x/server/sign-in"
 import { UserMFAStatus } from "@domain/identity"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
@@ -143,8 +148,9 @@ function buildApp(signIn: SignIn) {
   }
 }
 
-function buildSignIn(sql: postgres.Sql): SignIn {
+function buildSignIn(sql: postgres.Sql, hasher?: PasswordHasher): SignIn {
   return createSignIn({
+    hasher,
     db: new AppDbBase({ sql }),
     pepper: PEPPER,
     cookieSecret: COOKIE_SECRET,
@@ -280,6 +286,29 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       expect(sessionsAfter[0].count).toBe(sessionsBefore[0].count)
     })
 
+    await t.step("a missing account costs one password verification too", async () => {
+      // Counts calls to the real hasher, so a refusal that skips the verification shows up.
+      const real = createPasswordHasher({ pepper: PEPPER })
+      let verifications = 0
+      const counting: PasswordHasher = {
+        hash: (password) => real.hash(password),
+        verify: (password, stored) => {
+          verifications += 1
+          return real.verify(password, stored)
+        },
+      }
+      const client = buildApp(buildSignIn(sql, counting))
+      for (const username of ["alice", "nobody", "   "]) {
+        const before = verifications
+        const password = username === "alice" ? "wrong-password" : "Passw0rd!"
+        expect((await client.request("POST", "/sign-in", { username, password })).status).toBe(401)
+        expect({ username, verifications: verifications - before }).toEqual({
+          username,
+          verifications: 1,
+        })
+      }
+    })
+
     await t.step("sign-out ends the session, not only the cookie", async () => {
       const client = buildApp(signIn)
       await client.request("POST", "/sign-in", { username: "alice", password: "Passw0rd!" })
@@ -366,6 +395,20 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
       const again = buildApp(signIn)
       expect((await again.request("POST", "/sign-in", credentials)).status).toBe(202)
       expect((await again.request("POST", "/totp/check", { otp: next })).status).toBe(401)
+    })
+
+    await t.step("a not-required session of a user with TOTP still owes the factor", async () => {
+      // A session created before enrolment, or written by hand, says the factor is not required;
+      // the user has TOTP now, so the guard must still ask for it.
+      const client = buildApp(signIn)
+      expect((await client.request("POST", "/sign-in", credentials)).status).toBe(202)
+      await sql`
+        UPDATE auth_sessions SET second_factor = ${SecondFactorStatus.NotRequired}
+        WHERE id = ${sessionIdOf(client.saveCookies())}
+      `
+      const response = await client.request("GET", "/me")
+      expect(response.status).toBe(401)
+      expect(await response.json()).toEqual({ error: "Need to pass 2FA" })
     })
   })
 })
