@@ -25,6 +25,7 @@ import {
   createAuth,
   createPasswordHasher,
   generateTotpSecret,
+  type PasswordHasher,
   SecondFactorStatus,
   SessionCookie,
   SessionManager,
@@ -38,6 +39,7 @@ import {
   PASSWORD_METHOD,
   PasswordSignInError,
 } from "@spy4x/server/auth/password"
+import { randomBase64Url } from "@spy4x/platform/tokens"
 import { GroupError } from "@domain/groups"
 import { type User, UserMFAStatus, UserRole } from "@domain/identity"
 import type { AppDbBase } from "./db-base.ts"
@@ -72,6 +74,8 @@ export interface SignInOptions {
   sessionMinutes: number
   /** Service name shown in the authenticator app. */
   totpIssuer: string
+  /** Hashes and verifies passwords. Defaults to `createPasswordHasher` with `pepper`. */
+  hasher?: PasswordHasher
 }
 
 /** The sign-in operations the routes call. */
@@ -140,7 +144,12 @@ export function createSignIn(options: SignInOptions): SignIn {
     })
   const sessions = sessionsOver(db.sessionStore)
   const cookie = new SessionCookie({ secret: options.cookieSecret, secure: options.secureCookie })
-  const hasher = createPasswordHasher({ pepper: options.pepper })
+  const hasher = options.hasher ?? createPasswordHasher({ pepper: options.pepper })
+  // Made once, never per call, so a sign-in for a missing account costs one full verification like
+  // any other (as `createPasswordSignIn` does). The catch only keeps an early failure from being
+  // reported as an unhandled rejection; awaiting `dummyHash` still rethrows it.
+  const dummyHash = hasher.hash(randomBase64Url(32))
+  dummyHash.catch(() => {})
 
   const auth = createAuth<AuthSessionRecord, User>({
     sessions,
@@ -219,9 +228,9 @@ export function createSignIn(options: SignInOptions): SignIn {
     async signIn(c, rawUsername, password) {
       const username = normalizeUsername(rawUsername)
       const key = username === null ? null : await db.authStore.findKey(PASSWORD_METHOD, username)
-      if (!key || key.secret === null) return null
-      const check = await hasher.verify(password, key.secret)
-      if (!check.valid) return null
+      // Exactly one verification on every path: the key's own hash, or the dummy one.
+      const check = await hasher.verify(password, key?.secret ?? await dummyHash)
+      if (!key || key.secret === null || !check.valid) return null
       const authUser = await db.authStore.findUser(key.userId)
       const user = await db.user.findOne({ id: key.userId })
       if (!authUser || authUser.deletedAt !== null || !user) return null
