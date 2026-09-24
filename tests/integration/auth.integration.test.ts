@@ -14,6 +14,7 @@ import { UserMFAStatus } from "@domain/identity"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
+import { requireDbConnection } from "./db-connection.ts"
 
 /**
  * Sign-up, sign-in, sign-out and the authenticator app against a real Postgres, through the exact
@@ -39,26 +40,12 @@ interface CountRow extends postgres.Row {
   count: number
 }
 
-function connection() {
-  const missing = ["DB_HOST", "DB_USER", "DB_PASS", "DB_NAME"].filter((name) => !Deno.env.get(name))
-  if (missing.length) {
-    throw new Error(`auth integration test needs ${missing.join(", ")} (see HANDOFF.md)`)
-  }
-  return {
-    host: Deno.env.get("DB_HOST")!,
-    port: Number(Deno.env.get("DB_PORT") || "5432"),
-    user: Deno.env.get("DB_USER")!,
-    pass: Deno.env.get("DB_PASS")!,
-    db: Deno.env.get("DB_NAME")!,
-  }
-}
-
 /** Runs `body` against a fresh schema with `migrations` applied, and drops the schema after. */
 async function withSchema(
   migrations: string[],
   body: (sql: postgres.Sql) => Promise<void>,
 ): Promise<void> {
-  const settings = connection()
+  const settings = requireDbConnection()
   const admin = postgres({ ...settings, max: 1 })
   const schema = `auth_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

@@ -1,7 +1,9 @@
+/// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import { PublicAPICacheModel } from "@spy4x/platform/cache"
 import { DbServiceBase, type Sql } from "@spy4x/server/db"
+import { requireDbConnection } from "./db-connection.ts"
 
 interface TransactionRow extends postgres.Row {
   id: number
@@ -45,11 +47,7 @@ Deno.test("transaction-bound repository rolls back writes and cache effects", as
     wrapMany: (_prefix, fn) => fn(),
   }
   const testSql = postgres({
-    host: Deno.env.get("DB_HOST"),
-    port: Number(Deno.env.get("DB_PORT") || "5432"),
-    user: Deno.env.get("DB_USER"),
-    pass: Deno.env.get("DB_PASS"),
-    db: Deno.env.get("DB_NAME"),
+    ...requireDbConnection(),
     max: 1,
     transform: postgres.camel,
     connection: {

@@ -2,6 +2,7 @@
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
+import { requireDbConnection } from "./db-connection.ts"
 
 /**
  * Proves HANDOFF.md trap 5 against the real class `apps/api/services/db.ts`'s `DbService`
@@ -21,8 +22,6 @@ import { AppDbBase } from "../../apps/api/services/db-base.ts"
  * repository, so it cannot catch this regression either. See the PR body for the red/green
  * run against `AppDbBase` itself that demonstrates this test now does.
  */
-const REQUIRED_DB_ENV = ["DB_HOST", "DB_USER", "DB_PASS", "DB_NAME"]
-const hasDatabase = REQUIRED_DB_ENV.every((name) => Boolean(Deno.env.get(name)))
 
 interface IdRow extends postgres.Row {
   id: number
@@ -42,15 +41,8 @@ const MIGRATIONS = [
 
 Deno.test({
   name: "a repository built through db.group rolls back with its transaction",
-  ignore: !hasDatabase,
   async fn() {
-    const connection = {
-      host: Deno.env.get("DB_HOST")!,
-      port: Number(Deno.env.get("DB_PORT") || "5432"),
-      user: Deno.env.get("DB_USER")!,
-      pass: Deno.env.get("DB_PASS")!,
-      db: Deno.env.get("DB_NAME")!,
-    }
+    const connection = requireDbConnection()
     const admin = postgres({ ...connection, max: 1 })
     const schema = `db_group_tx_test_${crypto.randomUUID().replace(/-/g, "")}`
     const sql = postgres({
