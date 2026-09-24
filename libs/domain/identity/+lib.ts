@@ -45,8 +45,12 @@ export const userProfileBaseSchema = type({
 })
 export type UserProfileBase = typeof userProfileBaseSchema.infer
 
+// A plain ASCII-digit regex, not `string.numeric`: arktype's `numeric` keyword accepts only a
+// well-formed number string, and a well-formed number has no leading zero, so any code starting
+// with `0` (about one TOTP code in ten) was refused with a 400 before verification. See
+// spy4x/template#27.
 export const authOTPSchema = type({
-  otp: "string.numeric == 6",
+  otp: "/^[0-9]{6}$/",
 })
 export type AuthOTP = typeof authOTPSchema.infer
 
