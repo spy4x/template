@@ -16,14 +16,14 @@
     "jsr:@libs/qrcode@3.1.0": "3.1.0",
     "jsr:@negrel/http-ece@0.7.0": "0.7.0",
     "jsr:@negrel/webpush@0.5.0": "0.5.0",
-    "jsr:@spy4x/email@1": "1.0.0",
-    "jsr:@spy4x/integrations@1": "1.0.0",
-    "jsr:@spy4x/net@1": "1.0.0",
-    "jsr:@spy4x/platform@1": "1.0.0",
-    "jsr:@spy4x/platform@1.0.0": "1.0.0",
-    "jsr:@spy4x/server@1.0.0": "1.0.0",
-    "jsr:@spy4x/validation@1": "1.0.0",
-    "jsr:@spy4x/validation@1.0.0": "1.0.0",
+    "jsr:@spy4x/email@^1.1.0": "1.1.0",
+    "jsr:@spy4x/integrations@^1.1.0": "1.1.0",
+    "jsr:@spy4x/net@^1.1.0": "1.1.0",
+    "jsr:@spy4x/platform@1.1.0": "1.1.0",
+    "jsr:@spy4x/platform@^1.1.0": "1.1.0",
+    "jsr:@spy4x/server@1.1.0": "1.1.0",
+    "jsr:@spy4x/validation@1.1.0": "1.1.0",
+    "jsr:@spy4x/validation@^1.1.0": "1.1.0",
     "jsr:@std/assert@^1.0.14": "1.0.19",
     "jsr:@std/assert@^1.0.15": "1.0.19",
     "jsr:@std/assert@~0.222.1": "0.222.1",
@@ -200,20 +200,20 @@
         "jsr:@std/encoding@1"
       ]
     },
-    "@spy4x/email@1.0.0": {
-      "integrity": "7570e021305534a58006bfacb48543360d564c014a418092442df645aebcfa81"
+    "@spy4x/email@1.1.0": {
+      "integrity": "bdeefc152a0166376d0ed14019c2406cca11d973a477ace8e3b8f0bf9eab7799"
     },
-    "@spy4x/integrations@1.0.0": {
-      "integrity": "9ef213e64ef68062581d2f48567567a1c60e05fbe3e9a6166f97b93aa1801a47"
+    "@spy4x/integrations@1.1.0": {
+      "integrity": "5126fea4a4482cb7ce48e453920c65c4d5d972103ad0a260359142f42ff44d43"
     },
-    "@spy4x/net@1.0.0": {
-      "integrity": "91c4aa95a2d17d8ffcb19be55cf3c1b9d0bf343375fff52f41b2298bb3ad2fde"
+    "@spy4x/net@1.1.0": {
+      "integrity": "b1bc468c108fda2a20a17c1edc3bab8867f6d3dd1d67623455a8f2ec3539705d"
     },
-    "@spy4x/platform@1.0.0": {
-      "integrity": "029dc5459a1072eed151f01bb9adaa3ea4d3ee2ed41a50979dc05fb61f003702",
+    "@spy4x/platform@1.1.0": {
+      "integrity": "0cb80d1f8d1f4ab2d5e3981284e3ff1ddb3be6bda4966d7d1fbc79c7f5452770",
       "dependencies": [
         "jsr:@hono/hono",
-        "jsr:@spy4x/validation@1",
+        "jsr:@spy4x/validation@^1.1.0",
         "jsr:@std/crypto",
         "jsr:@std/encoding@1.0.11",
         "jsr:@std/path@1.1.6",
@@ -221,8 +221,8 @@
         "npm:arktype"
       ]
     },
-    "@spy4x/server@1.0.0": {
-      "integrity": "b8aa70f2af20413def643e6606d7d22c767abfe0d90190cf4b86c1b503cd4a4d",
+    "@spy4x/server@1.1.0": {
+      "integrity": "1c72ccb6e6c6e6df2821845de9dc7f405bbe984fe63747b69ec22e087d57430e",
       "dependencies": [
         "jsr:@hectorm/otpauth",
         "jsr:@hono/hono",
@@ -231,8 +231,8 @@
         "jsr:@spy4x/email",
         "jsr:@spy4x/integrations",
         "jsr:@spy4x/net",
-        "jsr:@spy4x/platform@1",
-        "jsr:@spy4x/validation@1",
+        "jsr:@spy4x/platform@^1.1.0",
+        "jsr:@spy4x/validation@^1.1.0",
         "jsr:@std/crypto",
         "jsr:@std/encoding@1.0.11",
         "jsr:@std/path@1.1.6",
@@ -240,8 +240,8 @@
         "npm:postgres"
       ]
     },
-    "@spy4x/validation@1.0.0": {
-      "integrity": "eee57b3aba8f1cddd02413e365818ccbf8c3c60292ef36bdfacdb870ef1a5684",
+    "@spy4x/validation@1.1.0": {
+      "integrity": "652586014893096da86f55576f3a14b6cc86bb6b26cf543788bb3ee44248c0d1",
       "dependencies": [
         "npm:arktype"
       ]
@@ -2191,9 +2191,9 @@
       "jsr:@iuioiua/redis@1.1.10",
       "jsr:@libs/qrcode@3.1.0",
       "jsr:@negrel/webpush@0.5.0",
-      "jsr:@spy4x/platform@1.0.0",
-      "jsr:@spy4x/server@1.0.0",
-      "jsr:@spy4x/validation@1.0.0",
+      "jsr:@spy4x/platform@1.1.0",
+      "jsr:@spy4x/server@1.1.0",
+      "jsr:@spy4x/validation@1.1.0",
       "jsr:@std/encoding@1.0.11",
       "jsr:@std/expect@1.0.17",
       "jsr:@std/path@1.1.6",
