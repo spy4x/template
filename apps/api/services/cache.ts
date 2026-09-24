@@ -4,7 +4,7 @@ import { AuthAudit, User, UserPushToken } from "@domain/identity"
 import { config } from "../services/config.ts"
 
 import { buildMethods as buildMethodsBase } from "@spy4x/platform/cache"
-import { crashOnConnectionLoss, createCacheService } from "./cache-service.ts"
+import { createCacheService } from "./cache-service.ts"
 
 // `RedisKvStore` requires a non-empty key prefix (the template's own kv store did not scope its
 // keys at all). "api" is this app's own namespace: every key this cache writes now reads
@@ -12,7 +12,7 @@ import { crashOnConnectionLoss, createCacheService } from "./cache-service.ts"
 // not merely a rename; see the PR body and HANDOFF.md's rollback note.
 const kv = await RedisKvStore.connect(config.kv.hostname, config.kv.port, "api")
 console.log(`✅ Connected to KV`) // kept from the old client's connect log
-const cacheService = createCacheService(crashOnConnectionLoss(kv))
+const cacheService = createCacheService(kv)
 
 function buildMethods<T>(prefix: string, schema?: Type) {
   return buildMethodsBase<T>(cacheService, prefix, CacheTTL.month, schema)
