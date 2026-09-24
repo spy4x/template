@@ -163,6 +163,11 @@ function totpCode(secret: string, timestamp: number): string {
   }).generate({ timestamp })
 }
 
+/** The session id inside a jar's signed `sessionIdToken` cookie (`<id>:<token>.<signature>`). */
+function sessionIdOf(cookies: Map<string, string>): number {
+  return Number(decodeURIComponent(cookies.get("sessionIdToken")!).split(":")[0])
+}
+
 async function signUpRowCounts(sql: postgres.Sql): Promise<number[]> {
   const rows = await sql<CountRow[]>`
     SELECT COUNT(*)::int AS count FROM auth_users
@@ -288,9 +293,8 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       // The browser dropped the cookie; a copy of it must not work any more either.
       client.restoreCookies(signedIn)
       expect((await client.request("GET", "/me")).status).toBe(401)
-      const [id] = decodeURIComponent(signedIn.get("sessionIdToken")!).split(":")
       const [session] = await sql<{ status: number }[]>`
-        SELECT status FROM auth_sessions WHERE id = ${Number(id)}
+        SELECT status FROM auth_sessions WHERE id = ${sessionIdOf(signedIn)}
       `
       expect(session.status).toBe(SessionStatus.SignedOut)
     })
@@ -334,7 +338,12 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
       const [user] = await sql<{ mfa: number }[]>`SELECT mfa FROM users`
       expect(user.mfa).toBe(UserMFAStatus.CONFIGURED)
       expect((await enrolling.request("GET", "/me")).status).toBe(200)
-      expect((await other.request("GET", "/me")).status).toBe(401)
+      // The other session would owe the second factor now anyway, so look at the row itself.
+      const [otherSession] = await sql<{ status: number }[]>`
+        SELECT status FROM auth_sessions WHERE id = ${sessionIdOf(other.saveCookies())}
+      `
+      expect(otherSession.status).toBe(SessionStatus.SignedOut)
+      expect((await other.request("POST", "/totp/start")).status).toBe(401)
     })
 
     await t.step("a new sign-in owes the second factor and refuses a replayed code", async () => {
