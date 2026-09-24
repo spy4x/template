@@ -1,7 +1,8 @@
 import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
 import { validate } from "@spy4x/validation"
-import { authUsernameSchema, UserKeyKind } from "@domain/identity"
+import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
+import { authUsernameSchema } from "@domain/identity"
 import { db, sql } from "@api/services/db.ts"
 import type { Transaction } from "@spy4x/server/db"
 
@@ -21,10 +22,7 @@ export const devRoute = new Hono<APIContext>()
       return c.json({ error: validation.error.description }, 400)
     }
     const { username } = validation.data
-    const key = await db.userKey.findOne({
-      kind: UserKeyKind.USERNAME_PASSWORD,
-      identification: username,
-    })
+    const key = await db.authStore.findKey(PASSWORD_METHOD, username)
     if (!key) {
       return c.json({ success: true })
     }
@@ -32,9 +30,8 @@ export const devRoute = new Hono<APIContext>()
     await sql.begin(async (tx: Transaction) => {
       await tx`DELETE FROM auth_audits WHERE user_id = ${userId}`
       await tx`DELETE FROM user_push_tokens WHERE user_id = ${userId}`
-      await tx`DELETE FROM user_sessions WHERE user_id = ${userId}`
-      await tx`DELETE FROM user_keys WHERE user_id = ${userId}`
-      await tx`DELETE FROM users WHERE id = ${userId}`
+      // Deleting the auth user also deletes its keys, sessions, profile row and TOTP enrolment.
+      await tx`DELETE FROM auth_users WHERE id = ${userId}`
     })
     return c.json({ success: true })
   })

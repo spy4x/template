@@ -1,6 +1,6 @@
 import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
-import { isAuthenticated2FA } from "../middlewares/auth.ts"
+import { isAuthenticated2FA } from "@api/services/auth.ts"
 import { validate } from "@spy4x/validation"
 import { userProfileBaseSchema } from "@domain/identity"
 import { commandBus } from "@api/services/commandBus.ts"
@@ -12,14 +12,14 @@ import { requestInfoFromContext } from "@spy4x/platform/request-info"
 export const usersRoute = new Hono<APIContext>()
   .use(isAuthenticated2FA)
   .get(`/me`, async (c) => {
-    const authData = c.get("auth")
+    const authData = c.get("auth")!
     const result = await queryBus.execute(
       new UserProfileGetQuery({ userId: authData.user.id }),
     )
     return c.json({ user: result.user })
   })
   .patch(`/me`, async (c) => {
-    const authData = c.get("auth")
+    const authData = c.get("auth")!
     const body = await c.req.json()
     const validationResult = validate(userProfileBaseSchema, body)
     if (validationResult.error) {

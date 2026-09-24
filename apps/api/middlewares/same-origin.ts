@@ -1,6 +1,6 @@
 import type { Context, MiddlewareHandler } from "hono"
 import type { APIContext } from "../_types.ts"
-import { SESSION_ID_COOKIE_NAME } from "../services/auth/types.ts"
+import { SESSION_COOKIE_NAME } from "@spy4x/server/sign-in"
 
 export function createSameOriginMutationGuard(
   reject: (context: Context<APIContext>) => Response,
@@ -11,7 +11,7 @@ export function createSameOriginMutationGuard(
     const fetchSite = c.req.header("sec-fetch-site")
     const requestOrigin = new URL(c.req.url).origin
     const hasSessionCookie = cookie.split(";").some((part) =>
-      part.trim().startsWith(`${SESSION_ID_COOKIE_NAME}=`)
+      part.trim().startsWith(`${SESSION_COOKIE_NAME}=`)
     )
 
     if (!hasSessionCookie || origin !== requestOrigin || fetchSite !== "same-origin") {

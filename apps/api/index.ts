@@ -6,9 +6,9 @@ import { requestLog } from "@spy4x/server/request-log"
 import { db } from "@api/services/db.ts"
 import { config } from "@api/services/config.ts"
 import { log } from "@api/services/log.ts"
-import { parseAuth } from "@api/middlewares/auth.ts"
+import { parseAuth } from "@api/services/auth.ts"
 import { APIContext } from "./_types.ts"
-import { getRandomString } from "@platform/helpers/random.ts"
+import { randomBase64Url } from "@spy4x/platform/tokens"
 import { authRoute } from "./routes/auth.ts"
 import { pushNotificationRoute } from "./routes/pushNotification.ts"
 import { usersRoute } from "./routes/users.ts"
@@ -22,7 +22,7 @@ import "./cqrs/+init.ts"
 const app = new Hono<APIContext>().basePath("/api")
 app.use(
   contextStorage(),
-  requestId({ generator: () => getRandomString(8) }),
+  requestId({ generator: () => randomBase64Url(6) }),
   requestLog({ write: log, skipPaths: ["/api/health"] }),
   parseAuth,
 )
