@@ -154,9 +154,17 @@ These cost real time to find. Do not rediscover them.
    the pepper as an HMAC key, and the session cookie value has a new format.
    `AUTH_PEPPER` and `AUTH_COOKIE_SECRET` must now be at least 32 characters, or
    the API refuses to start (`openssl rand -hex 32`). `AUTH_TOTP` is no longer
-   read. Sessions are no longer cached in Valkey, so the `userSession_*` and
-   `isSessionTokenExpired_*` keys of trap 6 are never written again. Rolling
-   back past this migration needs a database restore: the old tables are gone.
+   read, but config still requires it (a follow-up removes it). Sessions are no
+   longer cached in Valkey, so the `userSession_*` and `isSessionTokenExpired_*`
+   keys of trap 6 are never written again. Rolling back past this migration
+   needs a database restore: the old tables are gone. **Deploy step:** the
+   migration resets `users.mfa` in SQL only, and the API caches `users` rows in
+   Valkey for 30 days (`api:user_<id>`), so a stale entry would still say
+   "configured" and demand a second factor the user no longer has. Delete those
+   keys once, right after the migration runs:
+   ```sh
+   valkey-cli --scan --pattern 'api:user_*' | xargs -r valkey-cli del
+   ```
 
 ## Running it
 
