@@ -219,6 +219,15 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       expect(await signUpRowCounts(sql)).toEqual(before)
     })
 
+    await t.step("accepts an eight-unit password of four code points at sign-up", async () => {
+      // Four emoji: 8 UTF-16 units, so the route rule "8 <= string" allows it; 4 code points.
+      const response = await buildApp(signIn).request("POST", "/sign-up", {
+        username: "emoji-pass",
+        password: "😀😀😀😀",
+      })
+      expect(response.status).toBe(200)
+    })
+
     await t.step("sign-up that fails half-way leaves no rows", async () => {
       // The personal group insert fails on a group id that is already taken, after the auth
       // user, the key and the profile row were written in the same transaction.
