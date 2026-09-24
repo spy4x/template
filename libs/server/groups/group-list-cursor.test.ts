@@ -30,4 +30,13 @@ describe("group list cursor", () => {
 
     await expect(codec.decode(cursor, 8)).rejects.toThrow(GroupError)
   })
+
+  it("rejects a cursor with an invalid base64url character", async () => {
+    const codec = new GroupListCursorCodec("cursor-secret")
+    const cursor = await codec.encode(7, pageKey)
+    const [payload, signature] = cursor.split(".")
+    const invalid = `${payload}.!${signature.slice(1)}`
+
+    await expect(codec.decode(invalid, 7)).rejects.toThrow(GroupError)
+  })
 })

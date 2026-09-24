@@ -1,3 +1,4 @@
+import { decodeBase64Url, encodeBase64Url } from "@std/encoding"
 import { GroupError, GroupListPageKey } from "@domain/groups"
 
 interface GroupListCursorPayload {
@@ -87,17 +88,4 @@ function isCursorPayload(value: unknown, expectedUserId: number): value is Group
   }
   const date = new Date(payload.updatedAt)
   return !Number.isNaN(date.valueOf()) && date.toISOString() === payload.updatedAt
-}
-
-function encodeBase64Url(value: Uint8Array): string {
-  return btoa(String.fromCharCode(...value))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "")
-}
-
-function decodeBase64Url(value: string): Uint8Array {
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/")
-  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")
-  return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0))
 }
