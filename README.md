@@ -58,7 +58,8 @@ Target apps:
 
 Target libraries:
 
-- `libs/platform`: reusable technical primitives and contracts.
+- `libs/platform`: reusable technical primitives and contracts. Today these come from the
+  published `@spy4x/*` packages (spy4x/ts-libs) at an exact pinned version, not from code here.
 - `libs/domain`: business rules, commands, events, and queries.
 - `libs/server`: Postgres and server-side adapters.
 - `libs/client`: browser, Dexie, Preact, and Vite adapters.
