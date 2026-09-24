@@ -3,8 +3,7 @@ import { expect } from "@std/expect"
 import postgres from "postgres"
 import { GroupError, GroupKind, GroupRole } from "@domain/groups"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
-const REQUIRED_DB_ENV = ["DB_HOST", "DB_USER", "DB_PASS", "DB_NAME"]
-const hasDatabase = REQUIRED_DB_ENV.every((name) => Boolean(Deno.env.get(name)))
+import { requireDbConnection } from "./db-connection.ts"
 
 interface IdRow extends postgres.Row {
   id: number
@@ -20,15 +19,8 @@ interface MetadataRow extends postgres.Row {
 
 Deno.test({
   name: "group core Postgres integration",
-  ignore: !hasDatabase,
   async fn(t) {
-    const connection = {
-      host: Deno.env.get("DB_HOST")!,
-      port: Number(Deno.env.get("DB_PORT") || "5432"),
-      user: Deno.env.get("DB_USER")!,
-      pass: Deno.env.get("DB_PASS")!,
-      db: Deno.env.get("DB_NAME")!,
-    }
+    const connection = requireDbConnection()
     const admin = postgres({ ...connection, max: 1 })
     const schema = `groups_test_${crypto.randomUUID().replace(/-/g, "")}`
     const snapshotSchema = `${schema}_snapshot`
