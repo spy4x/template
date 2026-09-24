@@ -1,6 +1,6 @@
 import { RedisKvStore } from "@spy4x/server/kv"
 import type { Type } from "arktype"
-import { AuthAudit, User, UserKey, UserPushToken, UserSession } from "@domain/identity"
+import { AuthAudit, User, UserPushToken } from "@domain/identity"
 import { config } from "../services/config.ts"
 
 import { buildMethods as buildMethodsBase } from "@spy4x/platform/cache"
@@ -29,15 +29,8 @@ export enum CacheTTL {
 
 export class PublicAPICache {
   user = buildMethods<User>(`user`)
-  userKey = buildMethods<UserKey>(`userKey`)
-  userSession = buildMethods<UserSession>(`userSession`)
   userPushToken = buildMethods<UserPushToken>(`userPushToken`)
   authAudit = buildMethods<AuthAudit>(`authAudit`)
-  isSessionTokenExpired = buildMethodsBase<boolean, string>(
-    cacheService,
-    `isSessionTokenExpired`,
-    CacheTTL.day,
-  )
 }
 
 export const publicAPICache = new PublicAPICache()

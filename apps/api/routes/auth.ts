@@ -1,18 +1,30 @@
 import { Hono } from "hono"
 import { validate } from "@spy4x/validation"
+import { SecondFactorStatus } from "@spy4x/server/sign-in"
+import { requestInfoFromContext } from "@spy4x/platform/request-info"
 import {
   authOTPSchema,
   authPasswordChangeSchema,
   authUsernamePasswordSchema,
-  SessionMFAStatus,
 } from "@domain/identity"
-import { auth } from "@api/services/auth/+index.ts"
+import { isAuthenticated1FA, isAuthenticated2FA, signIn } from "@api/services/auth.ts"
+import { eventBus } from "@api/services/eventBus.ts"
+import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
 import { APIContext } from "../_types.ts"
-import { isAuthenticated1FA, isAuthenticated2FA } from "../middlewares/auth.ts"
 
 export const authRoute = new Hono<APIContext>()
   .post(`/sign-out`, async (c) => {
-    await auth.signOut(c)
+    const authData = c.get("auth")
+    await signIn.signOut(c)
+    if (authData) {
+      eventBus.emit(
+        new UserSignedOutEvent({
+          userId: authData.user.id,
+          // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
+          request: requestInfoFromContext(c, { trustedProxy: true }),
+        }),
+      )
+    }
     return c.json({ success: true })
   })
   // .use(strictRateLimiter)
@@ -30,13 +42,20 @@ export const authRoute = new Hono<APIContext>()
       return c.json({ error: validationResult.error.description }, 400)
     }
     const { username, password } = validationResult.data
-    const authData = await auth.signInWithPassword(username, password, c)
-    if (!authData) {
+    const signedIn = await signIn.signIn(c, username, password)
+    if (!signedIn) {
       return c.json({ error: "Invalid username or password" }, 401)
     }
+    eventBus.emit(
+      new UserSignedInEvent({
+        user: signedIn.user,
+        // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
+        request: requestInfoFromContext(c, { trustedProxy: true }),
+      }),
+    )
     return c.json(
-      authData.user,
-      authData.session.mfa === SessionMFAStatus.NOT_PASSED_YET ? 202 : 200,
+      signedIn.user,
+      signedIn.session.secondFactor === SecondFactorStatus.Pending ? 202 : 200,
     )
   })
   .post(`/password/sign-up`, async (c) => {
@@ -46,13 +65,21 @@ export const authRoute = new Hono<APIContext>()
       return c.json({ error: validationResult.error.description }, 400)
     }
     const { username, password } = validationResult.data
-    const authData = await auth.signUpWithPassword(username, password, c)
-    if (!authData) {
+    const signedUp = await signIn.signUp(c, username, password)
+    if (!signedUp) {
       return c.json({ error: "Invalid username or password" }, 401)
     }
+    eventBus.emit(
+      new UserSignedUpEvent({
+        user: signedUp.user,
+        username,
+        // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
+        request: requestInfoFromContext(c, { trustedProxy: true }),
+      }),
+    )
     return c.json(
-      authData.user,
-      authData.session.mfa === SessionMFAStatus.NOT_PASSED_YET ? 202 : 200,
+      signedUp.user,
+      signedUp.session.secondFactor === SecondFactorStatus.Pending ? 202 : 200,
     )
   })
   .use(isAuthenticated1FA)
@@ -67,7 +94,7 @@ export const authRoute = new Hono<APIContext>()
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
       }
-      const isSuccess = await auth.checkTOTP(authData, validationResult.data.otp)
+      const isSuccess = await signIn.checkTotp(authData, validationResult.data.otp)
       if (!isSuccess) {
         return c.json({ error: "Invalid token" }, 401)
       }
@@ -77,24 +104,19 @@ export const authRoute = new Hono<APIContext>()
     }
   })
   .post(`/totp/connect/start`, async (c) => {
-    const authData = c.get("auth")
-    const { error, qrcode, secret } = await auth.connectTOTPStart(authData)
+    const { error, qrcode, secret } = await signIn.connectTotpStart(c.get("auth")!)
     if (error) {
       return c.json({ error }, 400)
     }
     return c.json({ qrcode, secret })
   })
   .post(`/totp/connect/finish`, async (c) => {
-    const authData = c.get("auth")
     const body = await c.req.json()
     const validationResult = validate(authOTPSchema, body)
     if (validationResult.error) {
       return c.json({ error: validationResult.error.description }, 400)
     }
-    const isSuccess = await auth.connectTOTPFinish(
-      authData,
-      validationResult.data.otp,
-    )
+    const isSuccess = await signIn.connectTotpFinish(c.get("auth")!, validationResult.data.otp)
     if (!isSuccess) {
       return c.json({ error: "Code is incorrect" }, 400)
     }
@@ -103,7 +125,7 @@ export const authRoute = new Hono<APIContext>()
   // .use(rateLimiter)
   .use(isAuthenticated2FA)
   .post(`/totp/disconnect`, async (c) => {
-    const isSuccess = await auth.disconnectTOTP(c.get("auth"))
+    const isSuccess = await signIn.disconnectTotp(c.get("auth")!)
     if (!isSuccess) {
       return c.json({ error: "OTP already disabled for your account" }, 400)
     }
@@ -116,7 +138,7 @@ export const authRoute = new Hono<APIContext>()
       return c.json({ error: validationResult.error.description }, 400)
     }
     const { password, newPassword } = validationResult.data
-    const isSuccess = await auth.changePassword(password, newPassword, c)
+    const isSuccess = await signIn.changePassword(c, c.get("auth")!, password, newPassword)
     if (!isSuccess) {
       return c.json({ error: "Invalid password" }, 400)
     }
@@ -128,5 +150,5 @@ export const authRoute = new Hono<APIContext>()
 // This should be done in a more efficient way, like using a cron job or similar
 const SESSION_EXPIRE_INTERVAL = 60 * 60 * 1000
 setInterval(async () => {
-  await auth.expireSessions()
+  await signIn.expireSessions()
 }, SESSION_EXPIRE_INTERVAL)

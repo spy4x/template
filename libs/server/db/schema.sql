@@ -13,8 +13,89 @@ CREATE TABLE migrations (
     created_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
+-- Sign-in tables: AUTH_POSTGRES_SCHEMA of @spy4x/server 1.0.0 (auth/postgres).
+CREATE TABLE auth_users (
+  id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz
+);
+
+-- One row per proven address: the user who owns it. The primary key is the one-owner rule.
+CREATE TABLE auth_email_owners (
+  email text PRIMARY KEY,
+  user_id integer NOT NULL REFERENCES auth_users (id) ON DELETE CASCADE,
+  CONSTRAINT auth_email_owners_email_user_key UNIQUE (email, user_id)
+);
+
+CREATE INDEX auth_email_owners_user_id_idx ON auth_email_owners (user_id);
+
+CREATE TABLE auth_keys (
+  id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id integer NOT NULL REFERENCES auth_users (id) ON DELETE CASCADE,
+  method text NOT NULL,
+  subject text NOT NULL,
+  email text,
+  secret text,
+  proven_at timestamptz,
+  -- The address, only while the key is proven. Referenced below, so a proven key's address is
+  -- always owned by the key's own user.
+  proven_email text GENERATED ALWAYS AS (CASE WHEN proven_at IS NULL THEN NULL ELSE email END) STORED,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT auth_keys_method_subject_key UNIQUE (method, subject),
+  CONSTRAINT auth_keys_id_user_key UNIQUE (id, user_id),
+  CONSTRAINT auth_keys_proven_email_owner_fkey FOREIGN KEY (proven_email, user_id)
+    REFERENCES auth_email_owners (email, user_id),
+  CONSTRAINT auth_keys_method_check CHECK (length(method) BETWEEN 1 AND 64),
+  CONSTRAINT auth_keys_subject_check CHECK (length(subject) BETWEEN 1 AND 255),
+  CONSTRAINT auth_keys_email_check CHECK (email = lower(btrim(email)) AND length(email) <= 254),
+  CONSTRAINT auth_keys_secret_check CHECK (length(secret) BETWEEN 1 AND 1024),
+  CONSTRAINT auth_keys_proven_email_check CHECK (proven_at IS NULL OR email IS NOT NULL)
+);
+
+CREATE INDEX auth_keys_user_id_idx ON auth_keys (user_id);
+CREATE INDEX auth_keys_email_idx ON auth_keys (email) WHERE email IS NOT NULL;
+
+-- Status: 1 = active, 2 = expired, 3 = signed out. Second factor: 1 = not required, 2 = pending,
+-- 3 = completed. The values of SessionStatus and SecondFactorStatus in @spy4x/server/sign-in.
+CREATE TABLE auth_sessions (
+  id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id integer NOT NULL,
+  key_id integer NOT NULL,
+  token_hash text NOT NULL,
+  status smallint NOT NULL,
+  second_factor smallint NOT NULL,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT auth_sessions_key_fkey FOREIGN KEY (key_id, user_id)
+    REFERENCES auth_keys (id, user_id) ON DELETE CASCADE,
+  CONSTRAINT auth_sessions_status_check CHECK (status IN (1, 2, 3)),
+  CONSTRAINT auth_sessions_second_factor_check CHECK (second_factor IN (1, 2, 3))
+);
+
+CREATE INDEX auth_sessions_user_id_idx ON auth_sessions (user_id);
+CREATE INDEX auth_sessions_key_id_idx ON auth_sessions (key_id);
+CREATE INDEX auth_sessions_active_expires_at_idx ON auth_sessions (expires_at) WHERE status = 1;
+
+-- Guess-counted challenges. Expired rows are harmless and may be deleted at any time:
+-- DELETE FROM auth_challenges WHERE expires_at <= now()
+CREATE TABLE auth_challenges (
+  purpose text NOT NULL,
+  subject text NOT NULL,
+  secret_hash text NOT NULL,
+  attempts integer NOT NULL DEFAULT 0,
+  expires_at timestamptz NOT NULL,
+  PRIMARY KEY (purpose, subject),
+  CONSTRAINT auth_challenges_purpose_check CHECK (length(purpose) BETWEEN 1 AND 64),
+  CONSTRAINT auth_challenges_subject_check CHECK (length(subject) BETWEEN 1 AND 255),
+  CONSTRAINT auth_challenges_secret_hash_check CHECK (length(secret_hash) BETWEEN 1 AND 1024),
+  CONSTRAINT auth_challenges_attempts_check CHECK (attempts >= 0)
+);
+
+CREATE INDEX auth_challenges_expires_at_idx ON auth_challenges (expires_at);
+
 CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
+    id INT4 PRIMARY KEY,
     first_name VARCHAR(50),
     last_name VARCHAR(50),
     role INT2 DEFAULT 1 NOT NULL,
@@ -24,7 +105,9 @@ CREATE TABLE users (
     deleted_at TIMESTAMPTZ,
     mfa INT2 DEFAULT 1 NOT NULL,
     CONSTRAINT users_role_check CHECK (role >= 1 AND role <= 4),
-    CONSTRAINT users_mfa_check CHECK (mfa = ANY (ARRAY[1, 2, 3]))
+    CONSTRAINT users_mfa_check CHECK (mfa = ANY (ARRAY[1, 2, 3])),
+    CONSTRAINT users_id_auth_users_fkey FOREIGN KEY (id) REFERENCES auth_users (id)
+        ON DELETE CASCADE
 );
 
 COMMENT ON COLUMN users.role IS '1=viewer, 2=operator, 3=supervisor, 4=administrator';
@@ -79,43 +162,16 @@ CREATE INDEX idx_group_members_group_role ON group_members (group_id, role);
 -- idx_groups_one_active_personal_per_user still guarantees at most one active
 -- personal group per user declaratively.
 
-CREATE TABLE user_keys (
-    id SERIAL PRIMARY KEY,
-    user_id INT4 NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    kind INT2 NOT NULL,
-    identification VARCHAR(50) NOT NULL,
-    secret VARCHAR(256),
+CREATE TABLE user_totp (
+    user_id INT4 PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    secret TEXT NOT NULL,
+    confirmed_at TIMESTAMPTZ,
+    last_accepted_step INT4,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT user_keys_kind_check CHECK (kind = ANY (ARRAY[1, 2, 3]))
+    CONSTRAINT user_totp_secret_check CHECK (length(secret) BETWEEN 1 AND 256),
+    CONSTRAINT user_totp_last_accepted_step_check CHECK (last_accepted_step >= 0)
 );
-
-COMMENT ON COLUMN user_keys.kind IS '1=login_password, 2=username_2fa_connecting, 3=username_2fa_completed';
-
-CREATE INDEX idx_user_keys_by_user_id ON user_keys (user_id);
-CREATE INDEX idx_user_keys_by_identification ON user_keys (identification);
-CREATE UNIQUE INDEX idx_user_keys_kind_identification
-    ON user_keys (kind, identification);
-
-CREATE TABLE user_sessions (
-    id SERIAL PRIMARY KEY,
-    token VARCHAR(256) NOT NULL,
-    user_id INT4 NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    key_id INT4 NOT NULL REFERENCES user_keys(id) ON DELETE CASCADE,
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    mfa INT2 DEFAULT 1 NOT NULL,
-    status INT2 DEFAULT 1 NOT NULL,
-    CONSTRAINT user_sessions_mfa_check CHECK (mfa = ANY (ARRAY[1, 2, 3])),
-    CONSTRAINT user_sessions_status_check CHECK (status = ANY (ARRAY[1, 2, 3]))
-);
-
-COMMENT ON COLUMN user_sessions.mfa IS '1=not_required, 2=not_passed_yet, 3=completed';
-COMMENT ON COLUMN user_sessions.status IS '1=active, 2=expired, 3=signed_out';
-
-CREATE INDEX idx_user_sessions_by_user_id ON user_sessions (user_id);
-CREATE INDEX idx_user_sessions_by_expires_at ON user_sessions (expires_at);
 
 CREATE TABLE user_push_tokens (
     id SERIAL PRIMARY KEY,

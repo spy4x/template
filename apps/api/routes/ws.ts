@@ -1,6 +1,6 @@
 import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
-import { isAuthenticated2FA } from "../middlewares/auth.ts"
+import { isAuthenticated2FA } from "@api/services/auth.ts"
 import { wsHub } from "@api/services/wsHub.ts"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
 

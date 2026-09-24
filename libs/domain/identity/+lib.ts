@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { BaseModelSchema, dateSchema, UndeletableBaseModelSchema } from "@spy4x/platform/model"
+import { BaseModelSchema, dateSchema } from "@spy4x/platform/model"
 
 // Not in @spy4x/platform/model: too template-specific (a user's name length limit) to belong in a
 // general-purpose package. Moved here from the deleted libs/platform/types/+index.ts.
@@ -69,64 +69,6 @@ export const authPasswordChangeSchema = authPasswordSchema.and({
   newPassword: "8 <= string <= 50",
 })
 export type AuthPasswordChange = typeof authPasswordChangeSchema.infer
-
-export enum UserKeyKind {
-  USERNAME_PASSWORD = 1,
-  USERNAME_2FA_CONNECTING = 2,
-  USERNAME_2FA_COMPLETED = 3,
-}
-export const userKeyKindValues = Object.values(UserKeyKind) as UserKeyKind[]
-
-export enum SessionMFAStatus {
-  NOT_REQUIRED = 1,
-  NOT_PASSED_YET = 2,
-  COMPLETED = 3,
-}
-
-export enum UserSessionStatus {
-  ACTIVE = 1,
-  EXPIRED = 2,
-  SIGNED_OUT = 3,
-}
-
-export const userSessionStatusValues = Object.values(UserSessionStatus) as UserSessionStatus[]
-export const userKeyBaseSchema = type({
-  userId: "number = 0",
-  kind: type.enumerated(...userKeyKindValues).default(
-    UserKeyKind.USERNAME_PASSWORD,
-  ),
-  identification: "string <= 50 = ''",
-  secret: "string <= 60 | null = null",
-})
-export type UserKeyBase = typeof userKeyBaseSchema.infer
-
-export const userKeySchema = BaseModelSchema.and(userKeyBaseSchema)
-export type UserKey = typeof userKeySchema.infer
-
-export const userKeyPublicSchema = userKeySchema.omit("secret")
-export type UserKeyPublic = typeof userKeyPublicSchema.infer
-
-export const userSessionBaseSchema = type({
-  token: "string <= 32 = ''",
-  userId: "number = 0",
-  keyId: "number = 0",
-  status: type.enumerated(...userSessionStatusValues).default(
-    UserSessionStatus.ACTIVE,
-  ),
-  mfa: type.enumerated(...Object.values(SessionMFAStatus) as SessionMFAStatus[]).default(
-    SessionMFAStatus.NOT_REQUIRED,
-  ),
-  expiresAt: dateSchema.default(() => new Date()),
-})
-export type UserSessionBase = typeof userSessionBaseSchema.infer
-
-export const userSessionSchema = UndeletableBaseModelSchema.and(
-  userSessionBaseSchema,
-)
-export type UserSession = typeof userSessionSchema.infer
-
-export const userSessionPublicSchema = userSessionSchema.omit("token", "keyId")
-export type UserSessionPublic = typeof userSessionPublicSchema.infer
 
 export const userPushTokenSchemaBase = type({
   userId: "number = 0",

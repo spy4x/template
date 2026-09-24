@@ -50,8 +50,9 @@ libs/server    db, groups (Postgres repository, cursor), outbox, helpers.
 libs/client    browser, preact, vite, icons, helpers.
 ```
 
-What genuinely works end to end: sign-up creates user, key, personal group and
-session in one transaction; `GET/POST /api/groups` with MFA-aware auth, CSRF
+What genuinely works end to end: sign-up creates the auth user and password key
+(`@spy4x/server` auth tables), the `users` profile row, the personal group and
+the session in one transaction; `GET/POST /api/groups` with MFA-aware auth, CSRF
 guard and signed keyset pagination; the worker claims and publishes outbox rows.
 
 ## What is decided (and must not be quietly re-litigated)
@@ -142,6 +143,28 @@ These cost real time to find. Do not rediscover them.
    The stale unprefixed keys expire on their own TTL regardless, but deleting
    them up front removes any chance of the same rollback problem recurring if
    a later rollback-then-roll-forward cycle skips this step.
+7. **Sign-in moved to the `@spy4x/server` auth tables (migration
+   `2026_09_24_0001_auth_package_tables.sql`).** Deploying it signs every
+   existing user out for good: `user_keys` and `user_sessions` are dropped, so
+   every password hash, session and authenticator-app secret is gone, and every
+   `users.mfa` is reset to not configured. Each `users` row is kept (profile,
+   groups, audit rows) under an `auth_users` row with the same id, but nothing
+   can sign in to it any more; signing up again with the same username creates
+   a new user. New password hashes are PBKDF2-SHA-256 at 600 000 iterations with
+   the pepper as an HMAC key, and the session cookie value has a new format.
+   `AUTH_PEPPER` and `AUTH_COOKIE_SECRET` must now be at least 32 characters, or
+   the API refuses to start (`openssl rand -hex 32`). `AUTH_TOTP` is no longer
+   read, but config still requires it (a follow-up removes it). Sessions are no
+   longer cached in Valkey, so the `userSession_*` and `isSessionTokenExpired_*`
+   keys of trap 6 are never written again. Rolling back past this migration
+   needs a database restore: the old tables are gone. **Deploy step:** the
+   migration resets `users.mfa` in SQL only, and the API caches `users` rows in
+   Valkey for 30 days (`api:user_<id>`), so a stale entry would still say
+   "configured" and demand a second factor the user no longer has. Delete those
+   keys once, right after the migration runs:
+   ```sh
+   valkey-cli --scan --pattern 'api:user_*' | xargs -r valkey-cli del
+   ```
 
 ## Running it
 

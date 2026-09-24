@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
 import { webPushService } from "@api/services/webPush.ts"
-import { isAuthenticated2FA } from "@api/middlewares/auth.ts"
+import { isAuthenticated2FA } from "@api/services/auth.ts"
 import { eventBus } from "@api/services/eventBus.ts"
 import { PushDevicesUpdatedEvent } from "@api/cqrs/events.ts"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
@@ -14,12 +14,12 @@ export const pushNotificationRoute = new Hono<APIContext>()
     return c.json({ publicKey })
   })
   .get(`/devices`, async (c) => {
-    const userId = c.get("auth").user.id
+    const userId = c.get("auth")!.user.id
     const deviceList = await webPushService.deviceList(userId)
     return c.json({ data: deviceList })
   })
   .post(`/`, async (c) => {
-    const userId = c.get("auth").user.id
+    const userId = c.get("auth")!.user.id
     const body = await c.req.json()
     const validationResult = validate(pushSubscribeRequestSchema, body)
     if (validationResult.error) {
@@ -43,7 +43,7 @@ export const pushNotificationRoute = new Hono<APIContext>()
     return c.json({ userPushToken })
   })
   .delete("/", async (c) => {
-    const userId = c.get("auth").user.id
+    const userId = c.get("auth")!.user.id
     const body = await c.req.json()
     const validationResult = validate(pushUnsubscribeRequestSchema, body)
     if (validationResult.error) {

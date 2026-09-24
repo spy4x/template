@@ -9,7 +9,8 @@ import {
   GroupListResult,
   parseCreateSharedGroupRequest,
 } from "@domain/groups"
-import { SessionMFAStatus, UserMFAStatus } from "@domain/identity"
+import { SecondFactorStatus } from "@spy4x/server/sign-in"
+import { UserMFAStatus } from "@domain/identity"
 import { APIContext } from "../_types.ts"
 import { groupErrorResponse, GroupFeatureError } from "../features/groups/errors.ts"
 import { createSameOriginMutationGuard } from "../middlewares/same-origin.ts"
@@ -28,7 +29,7 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
     .onError((error, c) => groupErrorResponse(c, error))
     .use(requireGroupAuthentication)
     .get("/", async (c) => {
-      const userId = c.get("auth").user.id
+      const userId = c.get("auth")!.user.id
       const limit = parseLimit(c.req.query("limit"))
       const cursor = c.req.query("cursor")
       const after = cursor ? await dependencies.cursor.decode(cursor, userId) : undefined
@@ -53,7 +54,7 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
       const input = parseCreateSharedGroupRequest(body)
       const result = await dependencies.create(
         new GroupCreateCommand({
-          userId: c.get("auth").user.id,
+          userId: c.get("auth")!.user.id,
           id: input.id,
           kind: GroupKind.SHARED,
           name: input.name,
@@ -78,7 +79,7 @@ const requireGroupAuthentication: MiddlewareHandler<APIContext> = async (c, next
   }
   if (
     auth.user.mfa === UserMFAStatus.CONFIGURED &&
-    auth.session.mfa !== SessionMFAStatus.COMPLETED
+    auth.session.secondFactor !== SecondFactorStatus.Completed
   ) {
     return groupErrorResponse(c, new GroupFeatureError("MFA_REQUIRED", "MFA is incomplete"))
   }

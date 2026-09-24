@@ -96,7 +96,6 @@
     "@api/cqrs/": "./apps/api/cqrs/",
     "@spa/state/": "./apps/spa/src/state/",
     "@spa/components/": "./apps/spa/src/components/",
-    "@platform/helpers/": "./libs/platform/helpers/",
     "@domain/groups": "./libs/domain/groups/+lib.ts",
     "@domain/identity": "./libs/domain/identity/+lib.ts",
     "@server/groups/": "./libs/server/groups/",

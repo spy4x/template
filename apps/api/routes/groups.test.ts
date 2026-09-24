@@ -8,7 +8,8 @@ import {
   GroupListQuery,
   GroupRole,
 } from "@domain/groups"
-import { SessionMFAStatus, UserMFAStatus } from "@domain/identity"
+import { SecondFactorStatus } from "@spy4x/server/sign-in"
+import { UserMFAStatus } from "@domain/identity"
 import type { APIContext } from "../_types.ts"
 import { createGroupsRoute, GroupsRouteDependencies } from "./groups.ts"
 import { buildAuthData } from "../_testing/fake-auth.ts"
@@ -154,7 +155,7 @@ describe("groups route", () => {
       deps,
       buildAuthData({
         user: { mfa: UserMFAStatus.CONFIGURED },
-        session: { mfa: SessionMFAStatus.NOT_REQUIRED },
+        session: { secondFactor: SecondFactorStatus.NotRequired },
       }),
     )
     const response = await app.request("http://local/groups")

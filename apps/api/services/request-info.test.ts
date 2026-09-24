@@ -5,9 +5,8 @@ import { requestInfoFromContext } from "@spy4x/platform/request-info"
 
 /**
  * Pins which header wins when this app calls `requestInfoFromContext(c, { trustedProxy: true })`
- * — every call site in apps/api (routes/{users,ws,pushNotification}.ts,
- * services/auth/+index.ts) passes this option to keep the template's old behaviour of trusting a
- * forwarding header.
+ * — every call site in apps/api (routes/{auth,users,ws,pushNotification}.ts) passes this option
+ * to keep the template's old behaviour of trusting a forwarding header.
  *
  * `trustedProxy: true` makes the package check `CF-Connecting-IP` before `X-Forwarded-For` and
  * `X-Real-IP`. This app's Traefik does not set `CF-Connecting-IP` itself — it only overwrites
