@@ -32,7 +32,7 @@ across real projects, a CLI last.
 ## State of master
 
 Green: `deno task check` (23 tests, 33 steps),
-`deno task test:integration` (8 tests, 25 steps, needs Postgres), `deno task spa:build`,
+`deno task test:integration` (13 tests, 29 steps, needs Postgres), `deno task spa:build`,
 `deno task mpa:check`, and the Playwright e2e suite (2 tests).
 
 ```
