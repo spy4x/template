@@ -3,12 +3,13 @@
  * session cookie, the guards, password hashing and authenticator-app codes all come from the
  * package; this file decides what the template adds on top of them.
  *
- * - **Usernames, not addresses.** The template signs in with a free username. The package's
- *   `createPasswordSignIn` accepts only email addresses for sign-up and sign-in, so those two are
- *   built here on the package's `AuthStore` and `PasswordHasher`: one `password` key per user,
- *   subject = the normalised username. Password change uses the package provider as it is.
- * - **One sign-up transaction.** The auth user and key, the `users` profile row (same id), the
- *   personal group and the session are written in one `db.begin()`.
+ * - **Usernames, not addresses.** The template signs in with a free username: the package's
+ *   `createPasswordSignIn` with `normalizeSubject: normalizeUsername` writes one `password` key per
+ *   user whose subject is the normalised username. Password reset is not wired; the package refuses
+ *   it in this mode, because it mails the subject.
+ * - **One sign-up transaction.** The auth user and key, the session, the `users` profile row (same
+ *   id) and the personal group are written in one `db.begin()`: the sign-up provider is built over
+ *   that transaction's stores.
  * - **Authenticator app.** Secret and last accepted time step live in `user_totp`; `users.mfa`
  *   keeps its three states.
  *
@@ -33,13 +34,13 @@ import {
   totpEnrolment,
   verifyTotp,
 } from "@spy4x/server/sign-in"
-import { AuthConflictError, type AuthSessionRecord, type NewAuthKey } from "@spy4x/server/auth"
+import type { AuthSessionRecord } from "@spy4x/server/auth"
 import {
   createPasswordSignIn,
-  PASSWORD_METHOD,
+  type PasswordSignIn,
   PasswordSignInError,
+  type PasswordSignInOptions,
 } from "@spy4x/server/auth/password"
-import { randomBase64Url } from "@spy4x/platform/tokens"
 import { GroupError } from "@domain/groups"
 import { type User, UserMFAStatus, UserRole } from "@domain/identity"
 import type { AppDbBase } from "./db-base.ts"
@@ -104,7 +105,10 @@ export interface SignIn {
   connectTotpFinish(state: AppAuthState, code: string): Promise<boolean>
   /** Gives the second factor for this session. A code is never accepted twice. */
   checkTotp(state: AppAuthState, code: string): Promise<boolean>
-  /** Removes a finished enrolment. */
+  /**
+   * Removes a finished enrolment, and lets the user's other sessions that still owed the second
+   * factor through without it.
+   */
   disconnectTotp(state: AppAuthState): Promise<boolean>
   /**
    * Replaces the password, signs out every other session and sets the new session's cookie.
@@ -121,11 +125,12 @@ export interface SignIn {
 }
 
 /**
- * Lower-cases and trims a username, as the template always did. `null` when the result is empty,
- * longer than {@link USERNAME_MAX_LENGTH}, or holds text Postgres cannot store as given (NUL, a
- * lone surrogate).
+ * Lower-cases and trims a username, as the template always did. `null` when it is not a string, or
+ * the result is empty, longer than {@link USERNAME_MAX_LENGTH}, or holds text Postgres cannot store
+ * as given (NUL, a lone surrogate). Never throws: the package's `normalizeSubject` must not.
  */
-export function normalizeUsername(raw: string): string | null {
+export function normalizeUsername(raw: unknown): string | null {
+  if (typeof raw !== "string") return null
   const username = raw.trim().toLowerCase()
   const length = Array.from(username).length
   if (length < 1 || length > USERNAME_MAX_LENGTH) return null
@@ -145,11 +150,6 @@ export function createSignIn(options: SignInOptions): SignIn {
   const sessions = sessionsOver(db.sessionStore)
   const cookie = new SessionCookie({ secret: options.cookieSecret, secure: options.secureCookie })
   const hasher = options.hasher ?? createPasswordHasher({ pepper: options.pepper })
-  // Made once, never per call, so a sign-in for a missing account costs one full verification like
-  // any other (as `createPasswordSignIn` does). The catch only keeps an early failure from being
-  // reported as an unhandled rejection; awaiting `dummyHash` still rethrows it.
-  const dummyHash = hasher.hash(randomBase64Url(32))
-  dummyHash.catch(() => {})
 
   const auth = createAuth<AuthSessionRecord, User>({
     sessions,
@@ -168,41 +168,81 @@ export function createSignIn(options: SignInOptions): SignIn {
     hasSecondFactor: (user) => user.mfa === UserMFAStatus.CONFIGURED,
   })
 
-  // Only `changePassword` of the package provider is used; see the module comment.
-  const passwords = createPasswordSignIn({
+  /** What `secondFactorFor` answers for the auth user's `users` row, or `null` without one. */
+  const secondFactorFrom =
+    (decide: (user: User | null) => SecondFactorStatus) =>
+    async (authUser: { id: number }): Promise<SecondFactorStatus> =>
+      decide(await db.user.findOne({ id: authUser.id }) ?? null)
+
+  /**
+   * The package's password provider, by username. Each instance makes one dummy hash with its
+   * hasher when it is created, for the equal work of a sign-in to a missing account.
+   */
+  const passwordsOver = (
+    options: Pick<PasswordSignInOptions, "store" | "sessions"> & Partial<PasswordSignInOptions>,
+  ): PasswordSignIn =>
+    createPasswordSignIn({ hasher, normalizeSubject: normalizeUsername, ...options })
+
+  // Sign-in: a user with an authenticator app owes it. A user without a profile row gets no
+  // session at all, as before: the throw stops the provider before `sessions.create`.
+  const signInPasswords = passwordsOver({
     store: db.authStore,
     sessions,
-    hasher,
-    async secondFactorFor(authUser) {
-      const user = await db.user.findOne({ id: authUser.id })
-      return user?.mfa === UserMFAStatus.CONFIGURED
+    secondFactorFor: secondFactorFrom((user) => {
+      if (!user) throw new MissingProfileError()
+      return user.mfa === UserMFAStatus.CONFIGURED
+        ? SecondFactorStatus.Pending
+        : SecondFactorStatus.NotRequired
+    }),
+  })
+  // Password change: the session that changed it already gave the second factor.
+  const changePasswords = passwordsOver({
+    store: db.authStore,
+    sessions,
+    secondFactorFor: secondFactorFrom((user) =>
+      user?.mfa === UserMFAStatus.CONFIGURED
         ? SecondFactorStatus.Completed
         : SecondFactorStatus.NotRequired
-    },
-  })
-
-  const passwordKey = (username: string, secret: string): NewAuthKey => ({
-    method: PASSWORD_METHOD,
-    subject: username,
-    email: null,
-    secret,
-    provenAt: null,
+    ),
   })
 
   return {
     auth,
 
     async signUp(c, rawUsername, password, personalGroupId = crypto.randomUUID()) {
-      const username = normalizeUsername(rawUsername)
-      if (username === null) return null
-      const secret = await hasher.hash(password)
+      // Checked here too, so a refused username opens no transaction and makes no provider.
+      if (normalizeUsername(rawUsername) === null) return null
+      // Hashed before `db.begin()`, as before the package provider, so no pool connection is held
+      // for the length of a PBKDF2 hash. A password the hasher refuses (not a string, too long) is
+      // the same refusal the provider gives it: `invalid-password`, answered as `null`.
+      let secret: string
+      try {
+        secret = await hasher.hash(password)
+      } catch (error) {
+        if (error instanceof RangeError || error instanceof TypeError) return null
+        throw error
+      }
+      // The per-transaction provider hashes nothing itself: its `hash` returns the secret made
+      // above, both for the new key and for the dummy hash it makes at creation. Its dummy only
+      // serves its own `signIn`, which is never called; sign-in runs on `signInPasswords`, whose
+      // dummy is a real hash from the real hasher.
+      const precomputed: PasswordHasher = {
+        hash: () => Promise.resolve(secret),
+        verify: (candidate, stored) => hasher.verify(candidate, stored),
+      }
       let created
       try {
         created = await db.begin(async (tx) => {
-          const { user: authUser, key } = await tx.authStore.createUserWithKey(
-            passwordKey(username, secret),
-          )
-          const user = await tx.user.createForAuthUser(authUser.id, {
+          // Built over the transaction's stores, so the auth user, key and session join it.
+          const signedUp = await passwordsOver({
+            store: tx.authStore,
+            sessions: sessionsOver(tx.sessionStore),
+            hasher: precomputed,
+            // The route schema is the sign-up length rule (8 to 50 UTF-16 units), as before; the
+            // package's own minimum counts code points and would refuse some passwords it accepts.
+            minPasswordLength: 1,
+          }).signUp({ email: rawUsername, password })
+          const user = await tx.user.createForAuthUser(signedUp.user.id, {
             firstName: "",
             lastName: "",
             mfa: UserMFAStatus.NOT_CONFIGURED,
@@ -210,15 +250,10 @@ export function createSignIn(options: SignInOptions): SignIn {
             lastLoginAt: new Date(),
           })
           await tx.group.createPersonal({ id: personalGroupId, name: "Personal" }, user.id)
-          const { session, cookieValue } = await sessionsOver(tx.sessionStore).create({
-            userId: user.id,
-            keyId: key.id,
-            secondFactor: SecondFactorStatus.NotRequired,
-          })
-          return { user, session, cookieValue }
+          return { user, ...signedUp.session }
         })
       } catch (error) {
-        if (error instanceof AuthConflictError && error.reason === "key-exists") return null
+        if (error instanceof PasswordSignInError) return null
         throw error
       }
       await cookie.set(c, created.session, created.cookieValue)
@@ -226,26 +261,23 @@ export function createSignIn(options: SignInOptions): SignIn {
     },
 
     async signIn(c, rawUsername, password) {
-      const username = normalizeUsername(rawUsername)
-      const key = username === null ? null : await db.authStore.findKey(PASSWORD_METHOD, username)
-      // Exactly one verification on every path: the key's own hash, or the dummy one.
-      const check = await hasher.verify(password, key?.secret ?? await dummyHash)
-      if (!key || key.secret === null || !check.valid) return null
-      const authUser = await db.authStore.findUser(key.userId)
-      const user = await db.user.findOne({ id: key.userId })
-      if (!authUser || authUser.deletedAt !== null || !user) return null
-      if (check.needsRehash) await db.authStore.updateKeySecret(key.id, await hasher.hash(password))
-
-      const session = await auth.startSession(c, {
-        userId: user.id,
-        keyId: key.id,
-        secondFactor: user.mfa === UserMFAStatus.CONFIGURED
-          ? SecondFactorStatus.Pending
-          : SecondFactorStatus.NotRequired,
+      let result
+      try {
+        result = await signInPasswords.signIn({ email: rawUsername, password })
+      } catch (error) {
+        if (error instanceof PasswordSignInError || error instanceof MissingProfileError) {
+          return null
+        }
+        throw error
+      }
+      const { session, cookieValue } = result.session
+      await cookie.set(c, session, cookieValue)
+      const updated = await db.user.updateOne({
+        id: result.user.id,
+        data: { lastLoginAt: new Date() },
       })
-      const updated = await db.user.updateOne({ id: user.id, data: { lastLoginAt: new Date() } })
-      // `updateOne` returns `undefined` only when the row vanished between the check above and
-      // this statement - a race, not a normal "not found".
+      // `updateOne` returns `undefined` only when the row vanished after the provider read it - a
+      // race, not a normal "not found".
       if (!updated) throw new Error("User not found")
       return { user: updated, session }
     },
@@ -325,6 +357,8 @@ export function createSignIn(options: SignInOptions): SignIn {
         return await db.begin(async (tx) => {
           if (!(await tx.userTotp.deleteConfirmed(user.id))) return false
           await tx.user.updateOne({ id: user.id, data: { mfa: UserMFAStatus.NOT_CONFIGURED } })
+          // Sessions still waiting for the removed factor would be refused for good otherwise.
+          await sessionsOver(tx.sessionStore).clearPendingSecondFactors(user.id)
           return true
         })
       } catch (error) {
@@ -336,7 +370,7 @@ export function createSignIn(options: SignInOptions): SignIn {
     async changePassword(c, { user }, password, newPassword) {
       let result
       try {
-        result = await passwords.changePassword({
+        result = await changePasswords.changePassword({
           userId: user.id,
           currentPassword: password,
           newPassword,
@@ -352,6 +386,14 @@ export function createSignIn(options: SignInOptions): SignIn {
     async expireSessions() {
       await sessions.expireStale()
     },
+  }
+}
+
+/** Thrown by sign-in's `secondFactorFor` when the auth user has no `users` row: a refusal. */
+class MissingProfileError extends Error {
+  constructor() {
+    super("the auth user has no profile row")
+    this.name = "MissingProfileError"
   }
 }
 

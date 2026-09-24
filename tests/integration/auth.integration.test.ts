@@ -106,6 +106,15 @@ function buildApp(signIn: SignIn) {
     const ok = await signIn.checkTotp(c.get("auth")!, otp)
     return ok ? c.json(c.get("auth")!.user) : c.json({ error: "Invalid token" }, 401)
   })
+  app.post("/totp/disconnect", signIn.auth.isAuthenticated2FA, async (c) => {
+    const ok = await signIn.disconnectTotp(c.get("auth")!)
+    return ok ? c.json({ success: true }) : c.json({ error: "OTP already disabled" }, 400)
+  })
+  app.post("/password/change", signIn.auth.isAuthenticated2FA, async (c) => {
+    const { password, newPassword } = await c.req.json()
+    const ok = await signIn.changePassword(c, c.get("auth")!, password, newPassword)
+    return ok ? c.json({ success: true }) : c.json({ error: "Invalid password" }, 400)
+  })
 
   let cookies = new Map<string, string>()
   const request = async (method: string, path: string, body?: unknown): Promise<Response> => {
@@ -210,6 +219,15 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       expect(await signUpRowCounts(sql)).toEqual(before)
     })
 
+    await t.step("accepts an eight-unit password of four code points at sign-up", async () => {
+      // Four emoji: 8 UTF-16 units, so the route rule "8 <= string" allows it; 4 code points.
+      const response = await buildApp(signIn).request("POST", "/sign-up", {
+        username: "emoji-pass",
+        password: "😀😀😀😀",
+      })
+      expect(response.status).toBe(200)
+    })
+
     await t.step("sign-up that fails half-way leaves no rows", async () => {
       // The personal group insert fails on a group id that is already taken, after the auth
       // user, the key and the profile row were written in the same transaction.
@@ -296,6 +314,27 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
           verifications: 1,
         })
       }
+    })
+
+    await t.step("an auth user without a profile row gets no session", async () => {
+      const db = new AppDbBase({ sql })
+      await db.authStore.createUserWithKey({
+        method: "password",
+        subject: "no-profile",
+        email: null,
+        secret: await createPasswordHasher({ pepper: PEPPER }).hash("Passw0rd!"),
+        provenAt: null,
+      })
+      const sessionsBefore = await sql<CountRow[]>`SELECT COUNT(*)::int AS count FROM auth_sessions`
+      const client = buildApp(signIn)
+      const response = await client.request("POST", "/sign-in", {
+        username: "no-profile",
+        password: "Passw0rd!",
+      })
+      expect(response.status).toBe(401)
+      expect(client.saveCookies().size).toBe(0)
+      const sessionsAfter = await sql<CountRow[]>`SELECT COUNT(*)::int AS count FROM auth_sessions`
+      expect(sessionsAfter[0].count).toBe(sessionsBefore[0].count)
     })
 
     await t.step("sign-out ends the session, not only the cookie", async () => {
@@ -398,6 +437,68 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
       const response = await client.request("GET", "/me")
       expect(response.status).toBe(401)
       expect(await response.json()).toEqual({ error: "Need to pass 2FA" })
+    })
+
+    let password = credentials.password
+
+    await t.step("a password change keeps the second factor given on the new session", async () => {
+      const response = await enrolling.request("POST", "/password/change", {
+        password,
+        newPassword: "N3w-Passw0rd!",
+      })
+      expect(response.status).toBe(200)
+      password = "N3w-Passw0rd!"
+      const [session] = await sql<{ secondFactor: number }[]>`
+        SELECT second_factor AS "secondFactor" FROM auth_sessions
+        WHERE id = ${sessionIdOf(enrolling.saveCookies())}
+      `
+      expect(session.secondFactor).toBe(SecondFactorStatus.Completed)
+      expect((await enrolling.request("GET", "/me")).status).toBe(200)
+    })
+
+    await t.step("disconnecting lets the user's pending sessions through", async () => {
+      const pending = buildApp(signIn)
+      const signedIn = await pending.request("POST", "/sign-in", {
+        username: credentials.username,
+        password,
+      })
+      expect(signedIn.status).toBe(202)
+      expect((await pending.request("GET", "/me")).status).toBe(401)
+      // Another user's pending session must stay pending.
+      const other = buildApp(signIn)
+      const otherCredentials = { username: "totp-bystander", password: "Passw0rd!" }
+      expect((await other.request("POST", "/sign-up", otherCredentials)).status).toBe(200)
+      const [bystander] = await sql<{ id: number }[]>`
+        SELECT id FROM auth_sessions WHERE id = ${sessionIdOf(other.saveCookies())}
+      `
+      await sql`
+        UPDATE auth_sessions SET second_factor = ${SecondFactorStatus.Pending}
+        WHERE id = ${bystander.id}
+      `
+
+      const response = await enrolling.request("POST", "/totp/disconnect")
+      expect(response.status).toBe(200)
+      const [user] = await sql<{ mfa: number }[]>`
+        SELECT mfa FROM users WHERE id = (
+          SELECT user_id FROM auth_sessions WHERE id = ${sessionIdOf(pending.saveCookies())}
+        )
+      `
+      expect(user.mfa).toBe(UserMFAStatus.NOT_CONFIGURED)
+      expect(await sql`SELECT 1 FROM user_totp`).toHaveLength(0)
+      const [cleared] = await sql<{ secondFactor: number; status: number }[]>`
+        SELECT second_factor AS "secondFactor", status FROM auth_sessions
+        WHERE id = ${sessionIdOf(pending.saveCookies())}
+      `
+      expect(cleared).toEqual({
+        secondFactor: SecondFactorStatus.NotRequired,
+        status: SessionStatus.Active,
+      })
+      expect((await pending.request("GET", "/me")).status).toBe(200)
+      const [untouched] = await sql<{ secondFactor: number }[]>`
+        SELECT second_factor AS "secondFactor" FROM auth_sessions WHERE id = ${bystander.id}
+      `
+      expect(untouched.secondFactor).toBe(SecondFactorStatus.Pending)
+      expect((await enrolling.request("POST", "/totp/disconnect")).status).toBe(400)
     })
   })
 })
