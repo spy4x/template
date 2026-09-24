@@ -31,8 +31,9 @@ across real projects, a CLI last.
 
 ## State of master
 
-Green: `deno task check` (30 tests, 59 steps), `deno task test:integration`
-(3 suites, 14 steps, needs Postgres), `deno task spa:build`, `deno task mpa:check`.
+Green: `deno task check` (17 tests, 32 steps, plus 8 in `age.test.ts`),
+`deno task test:integration` (8 tests, 25 steps, needs Postgres), `deno task spa:build`,
+`deno task mpa:check`, and the Playwright e2e suite (2 tests).
 
 ```
 apps/api      REST, auth, CQRS dispatch. The only app with real behaviour.
@@ -40,13 +41,14 @@ apps/spa      Preact + Vite PWA. Auth and profile UI only.
 apps/mpa      Fresh. SSR shell plus /health. No features yet.
 apps/worker   Drains outbox_events. Real, small.
 
-libs/platform  cqrs (buses), types (validation, API envelopes, push contracts),
-               helpers. Depends on nothing but arktype and std.
+libs/platform  empty. Its primitives come from spy4x/ts-libs on JSR:
+               @spy4x/validation, @spy4x/platform/{cqrs,cache,api,model,
+               request-info,tokens}.
 libs/domain    groups (enums, policy, commands/queries), identity (user, session,
                auth, ws payload contracts). May depend on platform only.
-libs/server    db, groups (Postgres repository, cursor), outbox, helpers.
-               Field encryption is @spy4x/server/crypto (CryptoService); the
-               Redis store is @spy4x/server/kv.
+libs/server    db (migrations and schema.sql only), groups (Postgres repository,
+               cursor). Database access, outbox, key-value store, config,
+               request logging, sign-in and auth come from @spy4x/server/*.
 libs/client    browser, preact, vite, icons, helpers.
 ```
 
