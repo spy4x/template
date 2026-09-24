@@ -144,6 +144,13 @@ export class AppDbBase extends DbServiceBase {
  * each write. A transaction handle has no `begin`, so inside `DbServiceBase.begin()` the handle is
  * given one that opens a savepoint instead: the store's writes then commit or roll back with the
  * surrounding transaction, and a refused write rolls back only its own savepoint.
+ *
+ * The `begin` itself is required: without it every sign-up fails. The savepoint is a safety net no
+ * current code path relies on. Every caller lets a refused store write fail the whole transaction,
+ * so a `begin` that simply ran `body(transaction)` would behave the same today (the tests stay
+ * green with it). It matters once a caller catches a store error and keeps using the transaction:
+ * Postgres refuses every further statement in a transaction whose last statement failed, unless
+ * that statement ran in a savepoint that was rolled back.
  */
 function joinable(sql: Sql): Sql {
   if (typeof (sql as { begin?: unknown }).begin === "function") return sql
