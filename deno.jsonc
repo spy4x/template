@@ -94,7 +94,6 @@
   "imports": {
     // #region Aliases
     "@api/services/": "./apps/api/services/",
-    "@api/middlewares/": "./apps/api/middlewares/",
     "@api/cqrs/": "./apps/api/cqrs/",
     "@spa/state/": "./apps/spa/src/state/",
     "@spa/components/": "./apps/spa/src/components/",
@@ -108,11 +107,11 @@
     // #endregion Aliases
 
     // #region Dependencies
-    // spy4x/ts-libs 1.2.0. hono, postgres and arktype below must stay on the exact versions these
+    // spy4x/ts-libs 1.4.0. hono, postgres and arktype below must stay on the exact versions these
     // packages were published with, or two copies load and their types stop matching.
-    "@spy4x/validation": "jsr:@spy4x/validation@1.2.0",
-    "@spy4x/platform": "jsr:@spy4x/platform@1.2.0",
-    "@spy4x/server": "jsr:@spy4x/server@1.2.0",
+    "@spy4x/validation": "jsr:@spy4x/validation@1.4.0",
+    "@spy4x/platform": "jsr:@spy4x/platform@1.4.0",
+    "@spy4x/server": "jsr:@spy4x/server@1.4.0",
 
     // apps/api
     "hono": "jsr:@hono/hono@4.13.8",

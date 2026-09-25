@@ -19,7 +19,7 @@ const now = new Date("2026-08-18T10:00:00.000Z")
 
 function buildApp(
   dependencies: GroupsRouteDependencies,
-  auth = buildAuthData({ user: { id: 7 } }),
+  auth: APIContext["Variables"]["auth"] = buildAuthData({ user: { id: 7 } }),
 ) {
   const app = new Hono<APIContext>()
   app.use("*", async (c, next) => {
@@ -207,6 +207,137 @@ describe("groups route", () => {
         message: "Internal server error",
         requestId: "req-groups-1",
       },
+    })
+  })
+})
+
+describe("groups route same-origin guard", () => {
+  const originRefused = {
+    error: {
+      code: "REQUEST_ORIGIN_INVALID",
+      message: "Request origin is invalid",
+      requestId: "req-groups-1",
+    },
+  }
+
+  async function post(
+    headers: Record<string, string>,
+    auth: APIContext["Variables"]["auth"] = buildAuthData({ user: { id: 7 } }),
+  ) {
+    const deps = dependencies()
+    const response = await buildApp(deps, auth).request("http://local/groups", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id, kind: GroupKind.SHARED, name: "Team" }),
+    })
+    return { deps, response }
+  }
+
+  it("accepts a same-origin POST with the session cookie", async () => {
+    const { deps, response } = await post(mutationHeaders)
+
+    expect(response.status).toBe(201)
+    expect(deps.createCommand).not.toBe(null)
+  })
+
+  it("refuses a cross-site POST with the group error envelope", async () => {
+    const { deps, response } = await post({
+      ...mutationHeaders,
+      origin: "https://evil.example.net",
+      "sec-fetch-site": "cross-site",
+    })
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual(originRefused)
+    expect(deps.createCommand).toBe(null)
+  })
+
+  it("refuses a same-site sibling origin", async () => {
+    const { deps, response } = await post({
+      ...mutationHeaders,
+      origin: "http://admin.local",
+      "sec-fetch-site": "same-site",
+    })
+
+    expect(response.status).toBe(403)
+    expect(deps.createCommand).toBe(null)
+  })
+
+  it("refuses a POST without browser fetch metadata", async () => {
+    const { deps, response } = await post({
+      "content-type": mutationHeaders["content-type"],
+      cookie: mutationHeaders.cookie,
+    })
+
+    expect(response.status).toBe(403)
+    expect(deps.createCommand).toBe(null)
+  })
+
+  it("refuses a same-origin POST without the session cookie", async () => {
+    const { cookie: _cookie, ...headers } = mutationHeaders
+    const { deps, response } = await post(headers)
+
+    expect(response.status).toBe(403)
+    expect(deps.createCommand).toBe(null)
+  })
+
+  it("refuses a same-origin POST whose session cookie is empty", async () => {
+    const { deps, response } = await post({ ...mutationHeaders, cookie: "sessionIdToken=" })
+
+    expect(response.status).toBe(403)
+    expect(deps.createCommand).toBe(null)
+  })
+
+  it("accepts Origin null when Sec-Fetch-Site is same-origin", async () => {
+    const { deps, response } = await post({ ...mutationHeaders, origin: "null" })
+
+    expect(response.status).toBe(201)
+    expect(deps.createCommand).not.toBe(null)
+  })
+
+  it("answers a cross-site POST without a session with 401, not 403", async () => {
+    const { deps, response } = await post({
+      ...mutationHeaders,
+      origin: "https://evil.example.net",
+      "sec-fetch-site": "cross-site",
+    }, null)
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({
+      error: {
+        code: "AUTH_REQUIRED",
+        message: "Authentication required",
+        requestId: "req-groups-1",
+      },
+    })
+    expect(deps.createCommand).toBe(null)
+  })
+
+  describe("behind a TLS-terminating proxy", () => {
+    async function proxiedPost(origin: string) {
+      const deps = { ...dependencies(), expectedOrigin: "https://app.example.com" }
+      const response = await buildApp(deps).request("http://app.example.com/groups", {
+        method: "POST",
+        headers: { ...mutationHeaders, origin },
+        body: JSON.stringify({ id, kind: GroupKind.SHARED, name: "Team" }),
+      })
+      return { deps, response }
+    }
+
+    it("accepts the configured https origin on an http request URL", async () => {
+      const { deps, response } = await proxiedPost("https://app.example.com")
+
+      expect(response.status).toBe(201)
+      expect(deps.createCommand).not.toBe(null)
+    })
+
+    it("refuses any other origin, including the request URL's own", async () => {
+      for (const origin of ["http://app.example.com", "https://evil.example.net"]) {
+        const { deps, response } = await proxiedPost(origin)
+
+        expect(response.status).toBe(403)
+        expect(deps.createCommand).toBe(null)
+      }
     })
   })
 })

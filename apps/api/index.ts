@@ -40,13 +40,14 @@ app.route("/auth", authRoute) // has some public routes and some more protected
 app.route("/users", usersRoute)
 app.route("/push", pushNotificationRoute)
 app.route("/ws", wsRoute)
-const groupListCursor = new GroupListCursorCodec(config.authCookieSecret)
+const groupListCursor = await GroupListCursorCodec.fromCookieSecret(config.authCookieSecret)
 app.route(
   "/groups",
   createGroupsRoute({
     create: (command) => commandBus.execute(command),
     list: (query) => queryBus.execute(query),
     cursor: groupListCursor,
+    expectedOrigin: new URL(config.webAppUrl).origin,
   }),
 )
 if (config.isDev) {
