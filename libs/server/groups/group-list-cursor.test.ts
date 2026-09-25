@@ -111,6 +111,14 @@ describe("group list cursor", () => {
     await expectInvalidCursor(codec.decode(`${payload}.!${signature.slice(1)}`, 7))
   })
 
+  it("rejects a cursor minted before the signed-payload codec", async () => {
+    // The previous hand-rolled format: base64url JSON with userId and purpose, HMAC over it alone.
+    const minted =
+      "eyJ2ZXJzaW9uIjoxLCJwdXJwb3NlIjoiZ3JvdXBzLmxpc3QiLCJ1c2VySWQiOjcsInVwZGF0ZWRBdCI6IjIwMjYtMDgtMThUMTA6MDA6MDAuMDAwWiIsImlkIjoiN2I2ZDhkNmMtMWFmNS00ZjA0LThhZTQtYjFlZTVkMTExMDAxIn0.q0iweSII5DmaLK8gGjH3DWroa3GpOxT2jjEKXvW418U"
+
+    await expectInvalidCursor(new GroupListCursorCodec(secret).decode(minted, 7))
+  })
+
   it("refuses a secret shorter than 32 characters", () => {
     expect(() => new GroupListCursorCodec("cursor-secret")).toThrow("at least 32 characters")
   })
