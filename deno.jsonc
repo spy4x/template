@@ -94,7 +94,6 @@
   "imports": {
     // #region Aliases
     "@api/services/": "./apps/api/services/",
-    "@api/middlewares/": "./apps/api/middlewares/",
     "@api/cqrs/": "./apps/api/cqrs/",
     "@spa/state/": "./apps/spa/src/state/",
     "@spa/components/": "./apps/spa/src/components/",

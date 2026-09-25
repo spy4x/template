@@ -10,10 +10,10 @@ import {
   parseCreateSharedGroupRequest,
 } from "@domain/groups"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
+import { createSameOriginMutationGuard } from "@spy4x/server/http/same-origin"
 import { UserMFAStatus } from "@domain/identity"
 import { APIContext } from "../_types.ts"
 import { groupErrorResponse, GroupFeatureError } from "../features/groups/errors.ts"
-import { createSameOriginMutationGuard } from "../middlewares/same-origin.ts"
 
 export interface GroupsRouteDependencies {
   create(command: GroupCreateCommand): Promise<GroupCreateResult>
@@ -65,12 +65,13 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
     })
 }
 
-const requireSameOrigin = createSameOriginMutationGuard((c) =>
-  groupErrorResponse(
-    c,
-    new GroupFeatureError("REQUEST_ORIGIN_INVALID", "Mutation origin check failed"),
-  )
-)
+const requireSameOrigin = createSameOriginMutationGuard<APIContext>({
+  onReject: (c) =>
+    groupErrorResponse(
+      c,
+      new GroupFeatureError("REQUEST_ORIGIN_INVALID", "Mutation origin check failed"),
+    ),
+})
 
 const requireGroupAuthentication: MiddlewareHandler<APIContext> = async (c, next) => {
   const auth = c.get("auth")
