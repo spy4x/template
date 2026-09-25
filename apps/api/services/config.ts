@@ -3,7 +3,7 @@ import { type } from "arktype"
 
 const envSchema = type({
   ENV: "'dev' | 'prod'",
-  AUTH_COOKIE_SECRET: "string >= 32",
+  AUTH_COOKIE_SECRET: "string > 0",
   AUTH_PEPPER: "string > 0",
   AUTH_TOTP: "string > 0",
   DEV_EMAIL: "string > 0",
@@ -17,6 +17,10 @@ const envSchema = type({
 })
 
 const env = loadConfig(envSchema)
+// loadConfig names a failing variable but not the rule it broke, so this one says it outright.
+if (env.AUTH_COOKIE_SECRET.length < 32) {
+  throw new Error("AUTH_COOKIE_SECRET must be at least 32 characters (openssl rand -hex 32)")
+}
 
 export class Config {
   env = env.ENV
