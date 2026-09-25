@@ -95,7 +95,7 @@
     "npm:playwright@1.57.0": "1.57.0",
     "npm:postgres@3.4.7": "3.4.7",
     "npm:preact-render-to-string@^6.6.3": "6.7.0_preact@10.29.8",
-    "npm:preact@10.28.2": "10.28.2",
+    "npm:preact@10.29.8": "10.29.8_preact-render-to-string@6.7.0",
     "npm:preact@^10.28.2": "10.29.8_preact-render-to-string@6.7.0",
     "npm:preact@^10.29.1": "10.29.8_preact-render-to-string@6.7.0",
     "npm:rollup@^4.55.1": "4.62.4",
@@ -1077,7 +1077,7 @@
       "integrity": "sha512-VPjk5YFt7i11Fi4UK0tzaEe5xLwfhUxXL3l89ocxQ5aPz7bRo8M5+N73LjBMPklyXKYKz6YsNo4Smp8n6nplng==",
       "dependencies": [
         "@preact/signals-core",
-        "preact@10.29.8_preact-render-to-string@6.7.0"
+        "preact"
       ]
     },
     "@prefresh/babel-plugin@0.5.3": {
@@ -1086,7 +1086,7 @@
     "@prefresh/core@1.5.10_preact@10.29.8_preact-render-to-string@6.7.0": {
       "integrity": "sha512-7yPTFbG56sutaFu8krp3B4a200KOFUvrtlllKWRuLjsYXo9UUucHOZRcer+gtgMkFTpv6ob8TGcTwA32bSwa1w==",
       "dependencies": [
-        "preact@10.29.8_preact-render-to-string@6.7.0"
+        "preact"
       ]
     },
     "@prefresh/utils@1.2.1": {
@@ -1100,7 +1100,7 @@
         "@prefresh/core",
         "@prefresh/utils",
         "@rollup/pluginutils",
-        "preact@10.29.8_preact-render-to-string@6.7.0",
+        "preact",
         "vite"
       ]
     },
@@ -1802,11 +1802,8 @@
     "preact-render-to-string@6.7.0_preact@10.29.8": {
       "integrity": "sha512-Z4WR8fmLMRpdYqJ9i7vrlXSsSrxVJydwrkEXHapexfARbWfGb7vGcnvNQnIzN0cXciMVOlz/XLoiMCi9gUsy9Q==",
       "dependencies": [
-        "preact@10.29.8_preact-render-to-string@6.7.0"
+        "preact"
       ]
-    },
-    "preact@10.28.2": {
-      "integrity": "sha512-lbteaWGzGHdlIuiJ0l2Jq454m6kcpI1zNje6d8MlGAFlYvP2GO4ibnat7P74Esfz4sPTdM6UxtTwh/d3pwM9JA=="
     },
     "preact@10.29.8_preact-render-to-string@6.7.0": {
       "integrity": "sha512-ej2aVZ+vZ8WO7tvlQWRM9N63A0KzF9q4mWJfDUHgYaIofWY9hu74QdnQrjoPMmZi2/nZ5gN0bJCQF49xQqx09Q==",
@@ -1938,7 +1935,7 @@
       "integrity": "sha512-rldHdAwygx1yTn8zdopPy7v1uJyYTOF9WFuRg2GYT3zJGUSQZ2d97HfpQQezlxhWxpSEpWFl1YM9EwzekCXIUw==",
       "dependencies": [
         "mitt",
-        "preact@10.29.8_preact-render-to-string@6.7.0",
+        "preact",
         "regexparam"
       ]
     },
@@ -2250,7 +2247,7 @@
       "npm:arktype@2.2.3",
       "npm:playwright@1.57.0",
       "npm:postgres@3.4.7",
-      "npm:preact@10.28.2",
+      "npm:preact@10.29.8",
       "npm:wouter-preact@3.9.0"
     ],
     "members": {
@@ -2259,7 +2256,7 @@
           "jsr:@fresh/core@2.3.3",
           "jsr:@fresh/plugin-vite@1.1.2",
           "npm:@types/babel__core@7.20.5",
-          "npm:preact@10.28.2",
+          "npm:preact@10.29.8",
           "npm:vite@7.3.6"
         ]
       },
