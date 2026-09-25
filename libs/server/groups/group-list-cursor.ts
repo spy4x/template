@@ -1,6 +1,10 @@
 import { type } from "arktype"
 import { createSignedPayloadCodec, type SignedPayloadCodec } from "@spy4x/platform/signed-payload"
+import { encodeHex } from "@std/encoding"
 import { GroupError, GroupListPageKey } from "@domain/groups"
+
+/** Label the cursor key is derived under. Changing it invalidates every issued cursor. */
+const KEY_LABEL = "template:group-list-cursor:v1"
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
@@ -26,6 +30,17 @@ const cursorPayload = type({
 export class GroupListCursorCodec {
   private readonly codec: SignedPayloadCodec<typeof cursorPayload>
 
+  /**
+   * Builds the codec on a key derived from the session-cookie secret: the hex HMAC-SHA-256 of a
+   * fixed label under that secret. Hono's signed cookie is an HMAC of the bare cookie value under
+   * the raw secret, so signing cursors with the raw secret would let a cursor's MAC input and
+   * signature pass as a signed cookie. The derived key keeps the two apart without a second
+   * environment variable.
+   */
+  static async fromCookieSecret(cookieSecret: string): Promise<GroupListCursorCodec> {
+    return new GroupListCursorCodec(await deriveCursorSecret(cookieSecret))
+  }
+
   /** @throws {TokenError} When the secret is shorter than 32 printable characters. */
   constructor(secret: string) {
     this.codec = createSignedPayloadCodec({
@@ -50,4 +65,17 @@ export class GroupListCursorCodec {
     }
     return { updatedAt: new Date(result.value.updatedAt), id: result.value.id }
   }
+}
+
+/** Hex HMAC-SHA-256 of {@link KEY_LABEL} under `cookieSecret`: 64 printable characters. */
+export async function deriveCursorSecret(cookieSecret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(cookieSecret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  )
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(KEY_LABEL))
+  return encodeHex(new Uint8Array(mac))
 }

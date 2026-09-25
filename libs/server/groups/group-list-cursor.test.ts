@@ -4,7 +4,7 @@ import { type } from "arktype"
 import { decodeBase64Url } from "@std/encoding"
 import { createSignedPayloadCodec } from "@spy4x/platform/signed-payload"
 import { GroupError } from "@domain/groups"
-import { GroupListCursorCodec } from "./group-list-cursor.ts"
+import { deriveCursorSecret, GroupListCursorCodec } from "./group-list-cursor.ts"
 
 const secret = "group-list-cursor-test-secret-0123456789"
 const pageKey = {
@@ -76,6 +76,15 @@ describe("group list cursor", () => {
     await expectInvalidCursor(new GroupListCursorCodec(secret).decode(cursor, 7))
   })
 
+  it("decodes a well-formed payload signed outside the encoder", async () => {
+    const cursor = await rawCodec().sign(
+      { updatedAt: "2026-08-18T10:00:00.000Z", id: pageKey.id },
+      { context: "7" },
+    )
+
+    expect(await new GroupListCursorCodec(secret).decode(cursor, 7)).toEqual(pageKey)
+  })
+
   it("rejects a signed updatedAt that does not round-trip through toISOString", async () => {
     const cursor = await rawCodec().sign(
       { updatedAt: "2026-08-18T10:00:00Z", id: pageKey.id },
@@ -112,14 +121,29 @@ describe("group list cursor", () => {
   })
 
   it("rejects a cursor minted before the signed-payload codec", async () => {
-    // The previous hand-rolled format: base64url JSON with userId and purpose, HMAC over it alone.
+    // The previous hand-rolled format, signed with this test's own secret: base64url JSON carrying
+    // userId and purpose, then HMAC-SHA-256 over that segment alone.
     const minted =
-      "eyJ2ZXJzaW9uIjoxLCJwdXJwb3NlIjoiZ3JvdXBzLmxpc3QiLCJ1c2VySWQiOjcsInVwZGF0ZWRBdCI6IjIwMjYtMDgtMThUMTA6MDA6MDAuMDAwWiIsImlkIjoiN2I2ZDhkNmMtMWFmNS00ZjA0LThhZTQtYjFlZTVkMTExMDAxIn0.q0iweSII5DmaLK8gGjH3DWroa3GpOxT2jjEKXvW418U"
+      "eyJ2ZXJzaW9uIjoxLCJwdXJwb3NlIjoiZ3JvdXBzLmxpc3QiLCJ1c2VySWQiOjcsInVwZGF0ZWRBdCI6IjIwMjYtMDgtMThUMTA6MDA6MDAuMDAwWiIsImlkIjoiN2I2ZDhkNmMtMWFmNS00ZjA0LThhZTQtYjFlZTVkMTExMDAxIn0.s9ykeqv9qaIjt1GTl1mb8GL1o7Gz8v1sgq2LiiTJKhs"
 
     await expectInvalidCursor(new GroupListCursorCodec(secret).decode(minted, 7))
   })
 
   it("refuses a secret shorter than 32 characters", () => {
     expect(() => new GroupListCursorCodec("cursor-secret")).toThrow("at least 32 characters")
+  })
+
+  it("round-trips through a codec keyed from the cookie secret", async () => {
+    const codec = await GroupListCursorCodec.fromCookieSecret(secret)
+    const cursor = await codec.encode(7, pageKey)
+
+    expect(await codec.decode(cursor, 7)).toEqual(pageKey)
+  })
+
+  it("signs with a key that is not the raw cookie secret", async () => {
+    const cursor = await (await GroupListCursorCodec.fromCookieSecret(secret)).encode(7, pageKey)
+
+    expect(await deriveCursorSecret(secret)).not.toBe(secret)
+    await expectInvalidCursor(new GroupListCursorCodec(secret).decode(cursor, 7))
   })
 })
