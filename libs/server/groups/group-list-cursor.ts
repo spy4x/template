@@ -1,91 +1,53 @@
-import { decodeBase64Url, encodeBase64Url } from "@std/encoding"
+import { type } from "arktype"
+import { createSignedPayloadCodec, type SignedPayloadCodec } from "@spy4x/platform/signed-payload"
 import { GroupError, GroupListPageKey } from "@domain/groups"
 
-interface GroupListCursorPayload {
-  version: 1
-  purpose: "groups.list"
-  userId: number
-  updatedAt: string
-  id: string
-}
-
-const CURSOR_KEYS = ["id", "purpose", "updatedAt", "userId", "version"]
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
-export class GroupListCursorCodec {
-  private readonly key: Promise<CryptoKey>
+/**
+ * The signed page key. `updatedAt` must be exactly what `Date.prototype.toISOString` prints, so
+ * a decoded cursor names the same instant the encoder saw. No other keys are accepted.
+ */
+const cursorPayload = type({
+  updatedAt: type("string").narrow((value) => {
+    const date = new Date(value)
+    return !Number.isNaN(date.valueOf()) && date.toISOString() === value
+  }),
+  id: type(UUID_PATTERN),
+  "+": "reject",
+})
 
+/**
+ * Opaque group-list pagination cursor, signed with HMAC-SHA-256 under the purpose `groups.list`.
+ * The signed-in user id is bound as the codec's context, not carried in the token, so a cursor
+ * copied to another account fails its signature check. Every refusal is
+ * `GroupError("INVALID_CURSOR")`.
+ */
+export class GroupListCursorCodec {
+  private readonly codec: SignedPayloadCodec<typeof cursorPayload>
+
+  /** @throws {TokenError} When the secret is shorter than 32 printable characters. */
   constructor(secret: string) {
-    this.key = crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign", "verify"],
-    )
+    this.codec = createSignedPayloadCodec({
+      secret,
+      purpose: "groups.list",
+      version: 1,
+      schema: cursorPayload,
+    })
   }
 
-  async encode(userId: number, pageKey: GroupListPageKey): Promise<string> {
-    const payload: GroupListCursorPayload = {
-      version: 1,
-      purpose: "groups.list",
-      userId,
-      updatedAt: pageKey.updatedAt.toISOString(),
-      id: pageKey.id,
-    }
-    const encodedPayload = encodeBase64Url(new TextEncoder().encode(JSON.stringify(payload)))
-    const signature = await crypto.subtle.sign(
-      "HMAC",
-      await this.key,
-      new TextEncoder().encode(encodedPayload),
+  encode(userId: number, pageKey: GroupListPageKey): Promise<string> {
+    return this.codec.sign(
+      { updatedAt: pageKey.updatedAt.toISOString(), id: pageKey.id },
+      { context: String(userId) },
     )
-    return `${encodedPayload}.${encodeBase64Url(new Uint8Array(signature))}`
   }
 
   async decode(cursor: string, expectedUserId: number): Promise<GroupListPageKey> {
-    try {
-      const [encodedPayload, encodedSignature, extra] = cursor.split(".")
-      if (!encodedPayload || !encodedSignature || extra) {
-        throw new Error("Malformed cursor")
-      }
-      const valid = await crypto.subtle.verify(
-        "HMAC",
-        await this.key,
-        decodeBase64Url(encodedSignature).buffer as ArrayBuffer,
-        new TextEncoder().encode(encodedPayload),
-      )
-      if (!valid) {
-        throw new Error("Invalid signature")
-      }
-      const payload = JSON.parse(new TextDecoder().decode(decodeBase64Url(encodedPayload)))
-      if (!isCursorPayload(payload, expectedUserId)) {
-        throw new Error("Invalid payload")
-      }
-      return { updatedAt: new Date(payload.updatedAt), id: payload.id }
-    } catch (error) {
-      if (error instanceof GroupError) {
-        throw error
-      }
+    const result = await this.codec.verify(cursor, { context: String(expectedUserId) })
+    if (!result.ok) {
       throw new GroupError("INVALID_CURSOR", "Group list cursor is invalid")
     }
+    return { updatedAt: new Date(result.value.updatedAt), id: result.value.id }
   }
-}
-
-function isCursorPayload(value: unknown, expectedUserId: number): value is GroupListCursorPayload {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false
-  }
-  const payload = value as Record<string, unknown>
-  if (Object.keys(payload).sort().join(",") !== CURSOR_KEYS.join(",")) {
-    return false
-  }
-  if (
-    payload.version !== 1 || payload.purpose !== "groups.list" ||
-    payload.userId !== expectedUserId || typeof payload.updatedAt !== "string" ||
-    typeof payload.id !== "string" || !UUID_PATTERN.test(payload.id)
-  ) {
-    return false
-  }
-  const date = new Date(payload.updatedAt)
-  return !Number.isNaN(date.valueOf()) && date.toISOString() === payload.updatedAt
 }

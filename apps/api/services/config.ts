@@ -3,7 +3,7 @@ import { type } from "arktype"
 
 const envSchema = type({
   ENV: "'dev' | 'prod'",
-  AUTH_COOKIE_SECRET: "string > 0",
+  AUTH_COOKIE_SECRET: "string >= 32",
   AUTH_PEPPER: "string > 0",
   AUTH_TOTP: "string > 0",
   DEV_EMAIL: "string > 0",
