@@ -47,6 +47,7 @@ app.route(
     create: (command) => commandBus.execute(command),
     list: (query) => queryBus.execute(query),
     cursor: groupListCursor,
+    expectedOrigin: new URL(config.webAppUrl).origin,
   }),
 )
 if (config.isDev) {

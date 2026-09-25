@@ -312,4 +312,32 @@ describe("groups route same-origin guard", () => {
     })
     expect(deps.createCommand).toBe(null)
   })
+
+  describe("behind a TLS-terminating proxy", () => {
+    async function proxiedPost(origin: string) {
+      const deps = { ...dependencies(), expectedOrigin: "https://app.example.com" }
+      const response = await buildApp(deps).request("http://app.example.com/groups", {
+        method: "POST",
+        headers: { ...mutationHeaders, origin },
+        body: JSON.stringify({ id, kind: GroupKind.SHARED, name: "Team" }),
+      })
+      return { deps, response }
+    }
+
+    it("accepts the configured https origin on an http request URL", async () => {
+      const { deps, response } = await proxiedPost("https://app.example.com")
+
+      expect(response.status).toBe(201)
+      expect(deps.createCommand).not.toBe(null)
+    })
+
+    it("refuses any other origin, including the request URL's own", async () => {
+      for (const origin of ["http://app.example.com", "https://evil.example.net"]) {
+        const { deps, response } = await proxiedPost(origin)
+
+        expect(response.status).toBe(403)
+        expect(deps.createCommand).toBe(null)
+      }
+    })
+  })
 })

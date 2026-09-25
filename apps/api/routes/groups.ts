@@ -22,9 +22,23 @@ export interface GroupsRouteDependencies {
     encode(userId: number, pageKey: GroupListPageKey): Promise<string>
     decode(cursor: string, expectedUserId: number): Promise<GroupListPageKey>
   }
+  /**
+   * The origin the browser sends, such as `https://app.example.com`. Behind the TLS-terminating
+   * proxy the API sees `http://…`, so without it every mutation is refused. Defaults to the request
+   * URL's own origin.
+   */
+  expectedOrigin?: string
 }
 
 export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<APIContext> {
+  const requireSameOrigin = createSameOriginMutationGuard<APIContext>({
+    expectedOrigin: dependencies.expectedOrigin,
+    onReject: (c) =>
+      groupErrorResponse(
+        c,
+        new GroupFeatureError("REQUEST_ORIGIN_INVALID", "Mutation origin check failed"),
+      ),
+  })
   return new Hono<APIContext>()
     .onError((error, c) => groupErrorResponse(c, error))
     .use(requireGroupAuthentication)
@@ -64,14 +78,6 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
       return c.json({ group: result.group }, result.created ? 201 : 200)
     })
 }
-
-const requireSameOrigin = createSameOriginMutationGuard<APIContext>({
-  onReject: (c) =>
-    groupErrorResponse(
-      c,
-      new GroupFeatureError("REQUEST_ORIGIN_INVALID", "Mutation origin check failed"),
-    ),
-})
 
 const requireGroupAuthentication: MiddlewareHandler<APIContext> = async (c, next) => {
   const auth = c.get("auth")
