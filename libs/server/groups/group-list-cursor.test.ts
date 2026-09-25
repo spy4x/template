@@ -146,4 +146,19 @@ describe("group list cursor", () => {
     expect(await deriveCursorSecret(secret)).not.toBe(secret)
     await expectInvalidCursor(new GroupListCursorCodec(secret).decode(cursor, 7))
   })
+
+  it("derives different keys from different cookie secrets", async () => {
+    const cursor = await (await GroupListCursorCodec.fromCookieSecret(secret)).encode(7, pageKey)
+    const other = await GroupListCursorCodec.fromCookieSecret(
+      "another-group-list-cursor-secret-9876",
+    )
+
+    await expectInvalidCursor(other.decode(cursor, 7))
+  })
+
+  it("refuses a cookie secret shorter than 32 characters before deriving a key", async () => {
+    await expect(GroupListCursorCodec.fromCookieSecret("cursor-secret")).rejects.toThrow(
+      "at least 32 characters",
+    )
+  })
 })

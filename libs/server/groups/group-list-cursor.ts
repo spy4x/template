@@ -36,8 +36,13 @@ export class GroupListCursorCodec {
    * the raw secret, so signing cursors with the raw secret would let a cursor's MAC input and
    * signature pass as a signed cookie. The derived key keeps the two apart without a second
    * environment variable.
+   *
+   * @throws {TokenError} When the cookie secret is shorter than 32 printable characters. The
+   * derived key always passes that rule, so the cookie secret is checked first, by the same codec
+   * rule.
    */
   static async fromCookieSecret(cookieSecret: string): Promise<GroupListCursorCodec> {
+    new GroupListCursorCodec(cookieSecret)
     return new GroupListCursorCodec(await deriveCursorSecret(cookieSecret))
   }
 
