@@ -34,12 +34,23 @@ test.describe("auth profile ws push flow", () => {
       await page.waitForURL("/")
       await page.locator("[data-e2e=ws-status]", { hasText: "open" }).waitFor()
 
+      // The signed-in layout: the skip link is the first thing Tab reaches, and the navigation
+      // marks the page you are on as the current one.
+      await page.keyboard.press("Tab")
+      await expect(page.locator("[data-e2e=shell-skip-link]")).toBeFocused()
+      const nav = page.getByRole("navigation", { name: "Main navigation" })
+      await expect(nav.getByRole("link", { name: "Profile" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      )
+
       await page.locator("[data-e2e=profile-first-name]").fill(firstName)
       await page.locator("[data-e2e=profile-last-name]").fill(lastName)
       await page.locator("[data-e2e=profile-save]").click()
       await page.locator("[data-e2e=profile-saved]").waitFor()
 
-      await page.locator("[data-e2e=signout]").click()
+      await page.locator("[data-e2e=shell-user-menu-button]").click()
+      await page.getByRole("menuitem", { name: "Sign out" }).click()
       await page.locator("[data-e2e=signin-required]").waitFor()
 
       const me = await page.request.get("/api/auth/me")
