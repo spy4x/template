@@ -59,7 +59,7 @@ function preactComponentsCss(): Plugin {
       for (const [specifier, text] of Object.entries(THEME_STYLESHEETS)) {
         const line = `@import "${specifier}";`
         if (!css.includes(line)) throw new Error(`src/app.css must contain ${line}`)
-        css = css.replace(line, text)
+        css = css.replace(line, () => text)
       }
       const sources = await librarySourceFiles(new URL("./src/main.tsx", import.meta.url).href)
       if (sources.length === 0) {
@@ -70,24 +70,51 @@ function preactComponentsCss(): Plugin {
   }
 }
 
+/** Thrown when a library module pins an npm package at a version the app does not have. */
+export class NpmVersionMismatchError extends Error {
+  override name = "NpmVersionMismatchError"
+  constructor(specifier: string, resolvedVersion: string, importer: string | undefined) {
+    super(
+      `${specifier} (imported by ${
+        importer ?? "unknown"
+      }) resolved to version ${resolvedVersion}. ` +
+        "Pin the same version in the root deno.jsonc, or use a library release pinned to the app's.",
+    )
+  }
+}
+
+/** The `version` of the package whose `node_modules/<name>/` directory holds `file`. */
+async function installedVersion(name: string, file: string): Promise<string> {
+  const marker = `/node_modules/${name}/`
+  const at = file.lastIndexOf(marker)
+  if (at === -1) throw new Error(`Cannot find the package directory of ${name} in ${file}`)
+  const manifest = await Deno.readTextFile(`${file.slice(0, at + marker.length)}package.json`)
+  return (JSON.parse(manifest) as { version: string }).version
+}
+
 /**
  * Resolves the `npm:` specifiers inside `@spy4x/preact-*` modules to the app's own copy of that
- * package.
+ * package, and refuses one whose pinned version differs from the app's.
  *
  * `@deno/vite-plugin` 1.0.6 turns `npm:@preact/signals@2.5.1` into an empty module id (it cuts a
  * scoped name at its first `@`) and drops the subpath of `npm:/preact@10.29.8/hooks`, so the build
- * fails. The library pins the same preact and signals versions as the root import map, and a page
- * must load exactly one preact anyway, so each specifier resolves to the bare package plus its
- * subpath. Listed before `deno()` so it runs first.
+ * fails. A page must load exactly one preact anyway, so each specifier resolves to the bare package
+ * plus its subpath, and the build fails with {@link NpmVersionMismatchError} when the app's copy is
+ * not the version the specifier names. Listed before `deno()` so it runs first.
  */
 function npmSpecifiers(): Plugin {
   return {
     name: "npm-specifiers",
     enforce: "pre",
-    resolveId(id, importer) {
-      const match = /^npm:\/?((?:@[^/@]+\/)?[^/@]+)(?:@[^/]+)?(\/.*)?$/.exec(id)
+    async resolveId(id, importer) {
+      const match = /^npm:\/?((?:@[^/@]+\/)?[^/@]+)(?:@([^/]+))?(\/.*)?$/.exec(id)
       if (!match) return
-      return this.resolve(`${match[1]}${match[2] ?? ""}`, importer, { skipSelf: true })
+      const [, name, version, subpath = ""] = match
+      const resolved = await this.resolve(`${name}${subpath}`, importer, { skipSelf: true })
+      if (!resolved || version === undefined) return resolved
+      const actual = await installedVersion(name, resolved.id.split("?")[0])
+      if (actual !== version) throw new NpmVersionMismatchError(id, actual, importer)
+      return resolved
     },
   }
 }
