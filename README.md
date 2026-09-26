@@ -1,85 +1,99 @@
-# Deno Platform Template
+<div align="center">
 
-Reusable Deno repository baseline for products that need API, SPA, MPA, worker, persistence, and
-offline sync foundations without product-specific business logic.
+# template
 
-> **Migration status: WIP.** App boundaries, group core persistence, signup personal groups,
-> basic group REST/CQRS, and the `libs/shared` split into `libs/platform` and `libs/domain` now
-> exist. Notes/sync, group administration, MPA, and worker behavior stay incomplete. Target
-> architecture below and ADR 001 are authoritative.
+**The foundation I build SaaS MVPs on: auth, groups, an API, web clients, a worker and Postgres,
+already wired together.**
 
-Database evolution is forward-additive. Group-core DDL and personal-group backfill use separate
-migrations; backfill is idempotent and safe to rerun during rollout.
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-## Deno policy
+[Architecture](docs/architecture.md) · [ADR 001](docs/decisions/001-deno-platform-template.md) ·
+[ADR 002](docs/decisions/002-realtime-transport-and-sync.md) · [Stack](docs/stack.md) ·
+[Deno policy](docs/deno-policy.md)
 
-- Use Deno runtime and `deno task` for development, checks, builds, and operations.
-- Do not use Node.js, npm, pnpm, Yarn, or Bun commands.
-- Selected `npm:` dependencies may run through Deno when required by Vite, Preact, or Dexie.
-  This exception does not permit another runtime or task runner.
+<img src="docs/architecture.svg" alt="Architecture diagram. Clients: apps/spa, a Preact and Vite PWA with sign-up, sign-in, TOTP and profile, talks to apps/api over REST and WebSocket; a Dexie offline store with group sync is planned. apps/mpa is a Fresh page shell with /health; its REST calls are planned. Servers: apps/api on Hono (auth, groups, CQRS dispatch, web push) and apps/worker, which drains outbox_events. Data: Postgres is authoritative and Valkey caches for the API; Docker Compose also runs Traefik, MinIO, Loki, Prometheus and Grafana. Shared code: libs/domain, libs/server, libs/client and the @spy4x packages on JSR." width="860">
+
+</div>
+
+Fork it, fill in the env file, and you start with a product that already has accounts, a second
+factor, tenancy and a place for background work. A new user signs up and gets an account, a
+session and a personal group in one database transaction. Groups are the only tenancy boundary, so
+the same membership checks and roles cover personal data and shared workspaces.
+
+It exists because every SaaS MVP needs the same groundwork before its first feature, and that
+groundwork is where security and data mistakes are cheapest to avoid. The reusable parts live here
+and in the published [`@spy4x/*`](https://jsr.io/@spy4x) packages; product rules stay out.
+
+**Status:** in migration. Sign-up, sign-in with TOTP, groups over REST and the outbox worker work
+today; offline sync, notes, group administration and the MPA's pages do not yet. Details in
+[docs/architecture.md](docs/architecture.md#migration-status) and
+[ADR 001](docs/decisions/001-deno-platform-template.md).
+
+## Why template
+
+- **Tenancy from day one.** Every user gets a `PERSONAL` group at sign-up; `SHARED` groups use the
+  same IDs, membership checks and roles, from viewer to owner.
+- **Auth that is done.** Sign-up, sign-in, sessions and an authenticator-app second factor, with
+  PBKDF2-SHA-256 password hashes. Web push subscriptions are built in too.
+- **CQRS with an outbox.** Commands, queries and events go through one bus. Group changes write
+  their event to `outbox_events`, and the worker drains that table.
+- **Safe API defaults.** Every mutation must come from the web app's own origin, and group lists
+  page with HMAC-signed cursors.
+- **Web standards.** Hono handlers take a `Request` and return a `Response`; ES modules, Preact
+  and Fresh throughout, with Deno as the runtime.
+- **Operations included.** Docker Compose for development and single-node production: Traefik,
+  Postgres, Valkey, MinIO, Loki, Prometheus and Grafana.
+
+**Use it if** you are starting a multi-user web product and want auth, tenancy and operations
+settled before the first feature. **Skip it if** you need offline sync today, or you deploy to
+serverless functions rather than a server you run.
 
 ## Quick start
 
-Current tasks come from
-[`deno.jsonc`](https://github.com/spy4x/template/blob/main/deno.jsonc).
-
 ```sh
-deno task proxy:start
-deno task dev
+cp infra/envs/.env.example infra/envs/.env   # then fill in the secrets
+deno task vapid-key:create                   # web push keys → infra/configs/vapid.json
+deno task proxy:start                        # Traefik in front of the stack
+deno task dev                                # the whole stack in Compose
 ```
 
-Stop local proxy:
+Stop the proxy with `deno task proxy:stop`. Apply migrations with `deno task db:migrate`, which
+reads `DB_HOST` and `DB_PORT` from the environment.
 
-```sh
-deno task proxy:stop
-```
+## Tasks
 
-Run repository checks:
+Current tasks come from [`deno.jsonc`](deno.jsonc).
 
-```sh
-deno task check
-```
+| Task                         | What it does                                           |
+| ---------------------------- | ------------------------------------------------------ |
+| `deno task check`            | Lint, format check, type check and unit tests          |
+| `deno task test:integration` | Integration tests against a throwaway Postgres         |
+| `deno task e2e`              | Playwright end-to-end tests                            |
+| `deno task db:migrate`       | Apply the SQL migrations in `libs/server/db`           |
+| `deno task spa:build`        | Build the SPA                                          |
+| `deno task deploy`           | Copy the production files to the server and start them |
 
 Run individual app tasks with `api:*`, `spa:*`, or `mpa:*`. Deno workspace members inherit shared
 imports and tooling settings from root `deno.jsonc`.
 
-## Target architecture
+## Development
 
-Apps compose bounded domain and platform libraries: Postgres is authoritative, browser data is
-a Dexie projection, and REST endpoints dispatch CQRS flows with versioned, cursor-based,
-idempotent sync.
+```sh
+deno task check
+deno task hooks:install   # runs the checks before every commit
+```
 
-Target apps:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules, and [HANDOFF.md](HANDOFF.md) for the state
+of the migration and the traps in this codebase.
 
-- `apps/api`: REST, auth, authorization, CQRS dispatch, and sync transport.
-- `apps/spa`: offline-capable Preact/Vite client backed by Dexie.
-- `apps/mpa`: server-rendered multipage client for flows that do not need offline state.
-- `apps/worker`: asynchronous event handlers, projections, and integrations.
+## Built by
 
-Target libraries:
+I'm [Anton Shubin](https://antonshubin.com), a senior full-stack engineer and tech lead. This
+template is the foundation I build client SaaS MVPs on. Need an MVP built for your product?
+[That's my day job →](https://antonshubin.com/catalog/zero-to-production-saas-mvp)
 
-- `libs/platform`: reusable technical primitives and contracts. Today these come from the
-  published `@spy4x/*` packages (spy4x/ts-libs) at an exact pinned version, not from code here.
-- `libs/domain`: business rules, commands, events, and queries.
-- `libs/server`: Postgres and server-side adapters.
-- `libs/client`: Vite adapters. Preact UI comes from the `@spy4x/preact-*` packages.
+Licensed under [MIT](LICENSE). Copyright (c) 2026 Anton Shubin.
 
-`PERSONAL` and `SHARED` groups use one authorization and sync model. Full boundary and sync rules
-are recorded in
-[ADR 001](https://github.com/spy4x/template/blob/main/docs/decisions/001-deno-platform-template.md).
+---
 
-Distribution proceeds in stages: Git template first, proven generic libraries on JSR second,
-then a CLI after generation and upgrade flows stabilize.
-
-## Documentation
-
-- [Architecture decision](https://github.com/spy4x/template/blob/main/docs/decisions/001-deno-platform-template.md)
-- [Realtime transport and sync protocol](https://github.com/spy4x/template/blob/main/docs/decisions/002-realtime-transport-and-sync.md)
-- [Group sync design](https://github.com/spy4x/template/blob/main/docs/design/group-sync.md)
-- [Realtime transport and sync-on-reconnect](https://github.com/spy4x/template/blob/main/docs/design/realtime-websockets.md)
-- [Contributing](https://github.com/spy4x/template/blob/main/CONTRIBUTING.md)
-
-## Maintenance
-
-Maintainer: docs owner. This file lives at repository root. Update it when target architecture,
-migration status, valid `deno task` commands, distribution stages, or documentation links change.
+Made by Anton Shubin · [antonshubin.com/tools](https://antonshubin.com/tools)
