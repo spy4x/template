@@ -103,7 +103,6 @@
     "@client/preact/": "./libs/client/preact/",
     "@client/vite/": "./libs/client/vite/",
     "@client/helpers": "./libs/client/helpers/+index.ts",
-    "@client/icons": "./libs/client/icons/+index.tsx",
     // #endregion Aliases
 
     // #region Dependencies
