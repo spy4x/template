@@ -44,6 +44,16 @@ test.describe("auth profile ws push flow", () => {
         "page",
       )
 
+      // Nav links go through the router: a click keeps the page instead of reloading it, and a
+      // Ctrl-click (Cmd on macOS) is left to the browser, which opens the link in a new tab.
+      await page.evaluate(() => Object.assign(globalThis, { e2ePageMarker: true }))
+      await nav.getByRole("link", { name: "Profile" }).click()
+      await page.locator("[data-e2e=ws-status]", { hasText: "open" }).waitFor()
+      expect(await page.evaluate(() => "e2ePageMarker" in globalThis)).toBe(true)
+      const newTab = page.context().waitForEvent("page", { timeout: 5_000 })
+      await nav.getByRole("link", { name: "Profile" }).click({ modifiers: ["ControlOrMeta"] })
+      await (await newTab).close()
+
       await page.locator("[data-e2e=profile-first-name]").fill(firstName)
       await page.locator("[data-e2e=profile-last-name]").fill(lastName)
       await page.locator("[data-e2e=profile-save]").click()
