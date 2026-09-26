@@ -1,6 +1,7 @@
 import type { ComponentChildren, JSX } from "preact"
 import { Link, useLocation } from "wouter-preact"
 import { Shell, type ShellNavItem } from "@spy4x/preact-system/shell"
+import { Page } from "@spy4x/preact-ui/layout"
 import { signOut } from "../state/auth.ts"
 import type { SessionState, SessionUser } from "../state/session.ts"
 
@@ -109,7 +110,7 @@ export function PublicFrame(
           )}
         </div>
       </header>
-      <main class="mx-auto w-full max-w-5xl px-6 py-10">{children}</main>
+      <Page as="main" class="py-8">{children}</Page>
     </div>
   )
 }
