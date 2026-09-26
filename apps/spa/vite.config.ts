@@ -4,7 +4,7 @@ import { dirname } from "@std/path"
 import deno from "@deno/vite-plugin"
 import preact from "@preact/preset-vite"
 import tailwindcss from "@tailwindcss/vite"
-import { PRESET_CSS, TOKENS_CSS } from "@spy4x/preact-theme"
+import { COMPONENT_CLASSES, PRESET_CSS, TOKENS_CSS } from "@spy4x/preact-theme"
 
 /** The `@import` lines in `src/app.css` this plugin answers, and the text each one stands for. */
 const THEME_STYLESHEETS: Record<string, string> = {
@@ -12,49 +12,23 @@ const THEME_STYLESHEETS: Record<string, string> = {
   "@spy4x/preact-theme/preset.css": PRESET_CSS,
 }
 
-/** Modules whose class names Tailwind must see: every `@spy4x/preact-*` package on JSR. */
-const LIBRARY_PREFIX = "https://jsr.io/@spy4x/preact-"
-
-/**
- * Lists the on-disk copies Deno keeps of every `@spy4x/preact-*` module `entry` imports, directly
- * or through another package, so Tailwind can scan them for class names.
- *
- * Tailwind finds classes by scanning files, and a JSR package has no directory in the project to
- * point `@source` at: Deno stores each module under a hashed file name in its own cache. `deno info`
- * is how `@deno/vite-plugin` finds those files too.
- */
-async function librarySourceFiles(entry: string): Promise<string[]> {
-  const output = await new Deno.Command(Deno.execPath(), {
-    args: ["info", "--json", entry],
-    stdout: "piped",
-    stderr: "piped",
-  }).output()
-  if (!output.success) {
-    throw new Error(`deno info ${entry} failed: ${new TextDecoder().decode(output.stderr)}`)
-  }
-  const graph = JSON.parse(new TextDecoder().decode(output.stdout)) as {
-    modules: { specifier: string; local?: string }[]
-  }
-  return graph.modules
-    .filter((module) => module.specifier.startsWith(LIBRARY_PREFIX) && module.local)
-    .map((module) => module.local as string)
-    .sort()
-}
-
 /**
  * Gives `src/app.css` the `@spy4x/preact-*` design system before Tailwind compiles it.
  *
  * JSR cannot publish a CSS file as an importable module, so `@spy4x/preact-theme` exports each
- * stylesheet's text instead (its README, "Install"). This replaces each theme `@import` line with
- * that text and adds one `@source` per library module the app imports, so the classes the library's
- * components render are emitted. It runs before `@tailwindcss/vite`, which has to be listed after
+ * stylesheet's text instead, and the class names its components render as `COMPONENT_CLASSES` (its
+ * README, "Install"). This replaces each theme `@import` line with that text and appends one
+ * `@source inline(...)` line with the class names. Tailwind cannot scan the library's files: Deno
+ * keeps them in its cache, and inside the Alpine image Tailwind's scanner reads none of them
+ * (spy4x/preact-components#323). It runs before `@tailwindcss/vite`, which has to be listed after
  * it.
  */
 function preactComponentsCss(): Plugin {
   return {
     name: "preact-components-css",
     enforce: "pre",
-    async transform(code, id) {
+    transform(code, id) {
+      // The dev server asks for a linked stylesheet as `app.css?direct`, so drop the query first.
       if (!id.split("?")[0].endsWith("/src/app.css")) return
       let css = code
       for (const [specifier, text] of Object.entries(THEME_STYLESHEETS)) {
@@ -62,11 +36,34 @@ function preactComponentsCss(): Plugin {
         if (!css.includes(line)) throw new Error(`src/app.css must contain ${line}`)
         css = css.replace(line, () => text)
       }
-      const sources = await librarySourceFiles(new URL("./src/main.tsx", import.meta.url).href)
-      if (sources.length === 0) {
-        throw new Error("src/main.tsx imports no @spy4x/preact-* module; nothing to scan")
+      return `${css}\n@source inline("${COMPONENT_CLASSES}");\n`
+    },
+  }
+}
+
+/** Selectors only the library's components produce; the built CSS must contain every one. */
+const REQUIRED_SELECTORS = [".lg\\:w-64", ".sr-only", ".focus\\:not-sr-only"]
+
+/**
+ * Fails the build when the CSS it wrote lacks the library's classes.
+ *
+ * Without them the signed-in layout renders unstyled, yet Tailwind still exits 0: that is how the
+ * Alpine image once shipped without them. Checking a few selectors only `Shell` renders catches a
+ * build where the library's class names never reached Tailwind.
+ */
+function requireComponentCss(): Plugin {
+  return {
+    name: "require-component-css",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const css = Object.values(bundle)
+        .filter((file) => file.type === "asset" && file.fileName.endsWith(".css"))
+        .map((file) => file.type === "asset" ? String(file.source) : "")
+        .join("\n")
+      const missing = REQUIRED_SELECTORS.filter((selector) => !css.includes(selector))
+      if (missing.length > 0) {
+        this.error(`The built CSS lacks the library's classes: ${missing.join(", ")}`)
       }
-      return `${css}\n${sources.map((path) => `@source "${path}";`).join("\n")}\n`
     },
   }
 }
@@ -151,6 +148,7 @@ export default defineConfig({
     preact(),
     preactComponentsCss(),
     tailwindcss(),
+    requireComponentCss(),
   ],
   server: {
     host: "0.0.0.0",
