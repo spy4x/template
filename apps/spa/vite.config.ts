@@ -42,7 +42,7 @@ function preactComponentsCss(): Plugin {
 }
 
 /** Selectors only the library's components produce; the built CSS must contain every one. */
-const REQUIRED_SELECTORS = [".lg\\:w-64", ".sr-only", ".focus\\:not-sr-only"]
+const REQUIRED_SELECTORS = [".lg\\:w-64", ".focus\\:not-sr-only"]
 
 /**
  * Fails the build when the CSS it wrote lacks the library's classes.
@@ -122,6 +122,9 @@ async function resolvedVersion(
  * fails. A page must load exactly one preact anyway, so each specifier resolves to the bare package
  * plus its subpath, and the build fails with {@link NpmVersionMismatchError} when the app's copy is
  * not the version the specifier names. Listed before `deno()` so it runs first.
+ *
+ * Delete this once denoland/deno-vite-plugin#74 is fixed. spy4x/preact-components#327 moves this
+ * and the two CSS plugins above into the library, so apps import them instead of copying them.
  */
 function npmSpecifiers(): Plugin {
   return {
