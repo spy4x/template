@@ -10,17 +10,21 @@ import {
 import type { SignIn } from "@api/services/sign-in.ts"
 import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
 import { APIContext } from "../_types.ts"
+import type { MutationGuards } from "../middlewares/mutation-guards.ts"
 
 /** What the auth routes call. `index.ts` passes the app's singletons; tests pass fakes. */
 export interface AuthRouteDependencies {
   signIn: SignIn
   emit(event: UserSignedInEvent | UserSignedOutEvent | UserSignedUpEvent): void
+  mutationGuards: MutationGuards
 }
 
-export function createAuthRoute({ signIn, emit }: AuthRouteDependencies): Hono<APIContext> {
+export function createAuthRoute(
+  { signIn, emit, mutationGuards }: AuthRouteDependencies,
+): Hono<APIContext> {
   const { isAuthenticated1FA, isAuthenticated2FA } = signIn.auth
   return new Hono<APIContext>()
-    .post(`/sign-out`, async (c) => {
+    .post(`/sign-out`, mutationGuards.anonymous, async (c) => {
       const authData = c.get("auth")
       await signIn.signOut(c)
       if (authData) {
@@ -42,7 +46,7 @@ export function createAuthRoute({ signIn, emit }: AuthRouteDependencies): Hono<A
       }
       return c.json(authData.user)
     })
-    .post(`password/check`, async (c) => {
+    .post(`password/check`, mutationGuards.anonymous, async (c) => {
       const body = await c.req.json()
       const validationResult = validate(authUsernamePasswordSchema, body)
       if (validationResult.error) {
@@ -65,7 +69,7 @@ export function createAuthRoute({ signIn, emit }: AuthRouteDependencies): Hono<A
         signedIn.session.secondFactor === SecondFactorStatus.Pending ? 202 : 200,
       )
     })
-    .post(`/password/sign-up`, async (c) => {
+    .post(`/password/sign-up`, mutationGuards.anonymous, async (c) => {
       const body = await c.req.json()
       const validationResult = validate(authUsernamePasswordSchema, body)
       if (validationResult.error) {
@@ -90,6 +94,7 @@ export function createAuthRoute({ signIn, emit }: AuthRouteDependencies): Hono<A
       )
     })
     .use(isAuthenticated1FA)
+    .use(mutationGuards.signedIn)
     .post(`/totp/check`, async (c) => {
       const authData = c.get("auth")
       if (!authData) {

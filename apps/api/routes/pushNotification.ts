@@ -1,5 +1,6 @@
 import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
+import type { MutationGuards } from "../middlewares/mutation-guards.ts"
 import type { WebPushService } from "@api/services/webPush.ts"
 import type { SignIn } from "@api/services/sign-in.ts"
 import { PushDevicesUpdatedEvent } from "@api/cqrs/events.ts"
@@ -10,15 +11,17 @@ import { validate } from "@spy4x/validation"
 /** What the push routes call. `index.ts` passes the app's singletons; tests pass fakes. */
 export interface PushNotificationRouteDependencies {
   auth: Pick<SignIn["auth"], "isAuthenticated2FA">
+  mutationGuards: MutationGuards
   webPush: Pick<WebPushService, "getPublicKey" | "deviceList" | "subscribe" | "unsubscribe">
   emit(event: PushDevicesUpdatedEvent): void
 }
 
 export function createPushNotificationRoute(
-  { auth, webPush, emit }: PushNotificationRouteDependencies,
+  { auth, webPush, emit, mutationGuards }: PushNotificationRouteDependencies,
 ): Hono<APIContext> {
   return new Hono<APIContext>()
     .use(auth.isAuthenticated2FA)
+    .use(mutationGuards.signedIn)
     .get(`/public-key`, async (c) => {
       const publicKey = await webPush.getPublicKey()
       return c.json({ publicKey })

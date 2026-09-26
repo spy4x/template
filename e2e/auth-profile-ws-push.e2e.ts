@@ -21,7 +21,9 @@ test.describe("auth profile ws push flow", () => {
 
     await cleanup()
     try {
+      // The API refuses a mutation without the headers a browser sends from the app's own page.
       const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
+        headers: { origin: apiBase, "sec-fetch-site": "same-origin" },
         data: { username, password },
       })
       expect(signUp.ok()).toBe(true)

@@ -16,6 +16,7 @@ import { createPushNotificationRoute } from "./routes/pushNotification.ts"
 import { createUsersRoute } from "./routes/users.ts"
 import { wsRoute } from "./routes/ws.ts"
 import { createGroupsRoute } from "./routes/groups.ts"
+import { createMutationGuards } from "./middlewares/mutation-guards.ts"
 import { commandBus } from "./services/commandBus.ts"
 import { queryBus } from "./services/queryBus.ts"
 import { GroupListCursorCodec } from "@server/groups/group-list-cursor.ts"
@@ -38,20 +39,24 @@ app.get(
       date: Date.now(),
     }),
 )
+// The browser sends the web app's origin; behind the TLS-terminating proxy the API sees `http://`.
+const expectedOrigin = new URL(config.webAppUrl).origin
+const mutationGuards = createMutationGuards(config.webAppUrl)
 const emit = (event: Parameters<typeof eventBus.emit>[0]) => eventBus.emit(event)
 // has some public routes and some more protected
-app.route("/auth", createAuthRoute({ signIn, emit }))
+app.route("/auth", createAuthRoute({ signIn, emit, mutationGuards }))
 app.route(
   "/users",
   createUsersRoute({
     auth: signIn.auth,
+    mutationGuards,
     getProfile: (query) => queryBus.execute(query),
     updateProfile: (command) => commandBus.execute(command),
   }),
 )
 app.route(
   "/push",
-  createPushNotificationRoute({ auth: signIn.auth, webPush: webPushService, emit }),
+  createPushNotificationRoute({ auth: signIn.auth, webPush: webPushService, emit, mutationGuards }),
 )
 app.route("/ws", wsRoute)
 const groupListCursor = await GroupListCursorCodec.fromCookieSecret(config.authCookieSecret)
@@ -61,7 +66,7 @@ app.route(
     create: (command) => commandBus.execute(command),
     list: (query) => queryBus.execute(query),
     cursor: groupListCursor,
-    expectedOrigin: new URL(config.webAppUrl).origin,
+    expectedOrigin,
   }),
 )
 if (config.isDev) {

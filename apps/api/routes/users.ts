@@ -1,5 +1,6 @@
 import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
+import type { MutationGuards } from "../middlewares/mutation-guards.ts"
 import type { SignIn } from "@api/services/sign-in.ts"
 import { validate } from "@spy4x/validation"
 import { userProfileBaseSchema } from "@domain/identity"
@@ -10,6 +11,7 @@ import { requestInfoFromContext } from "@spy4x/platform/request-info"
 /** What the users routes call. `index.ts` passes the app's singletons; tests pass fakes. */
 export interface UsersRouteDependencies {
   auth: Pick<SignIn["auth"], "isAuthenticated2FA">
+  mutationGuards: MutationGuards
   getProfile(query: UserProfileGetQuery): Promise<UserProfileGetResult>
   updateProfile(command: UserProfileUpdateCommand): Promise<UserProfileUpdateResult>
 }
@@ -17,6 +19,7 @@ export interface UsersRouteDependencies {
 export function createUsersRoute(dependencies: UsersRouteDependencies): Hono<APIContext> {
   return new Hono<APIContext>()
     .use(dependencies.auth.isAuthenticated2FA)
+    .use(dependencies.mutationGuards.signedIn)
     .get(`/me`, async (c) => {
       const authData = c.get("auth")!
       const result = await dependencies.getProfile(
