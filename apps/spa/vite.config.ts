@@ -1,5 +1,6 @@
 /// <reference lib="deno.ns" />
-import { defineConfig, type Plugin } from "vite"
+import { defineConfig, type DevEnvironment, type Environment, type Plugin } from "vite"
+import { dirname } from "@std/path"
 import deno from "@deno/vite-plugin"
 import preact from "@preact/preset-vite"
 import tailwindcss from "@tailwindcss/vite"
@@ -83,13 +84,36 @@ export class NpmVersionMismatchError extends Error {
   }
 }
 
-/** The `version` of the package whose `node_modules/<name>/` directory holds `file`. */
-async function installedVersion(name: string, file: string): Promise<string> {
-  const marker = `/node_modules/${name}/`
-  const at = file.lastIndexOf(marker)
-  if (at === -1) throw new Error(`Cannot find the package directory of ${name} in ${file}`)
-  const manifest = await Deno.readTextFile(`${file.slice(0, at + marker.length)}package.json`)
-  return (JSON.parse(manifest) as { version: string }).version
+/**
+ * The version of npm package `name` that Vite resolved as `resolvedId`, read from the package's
+ * own `package.json`. In the dev server `resolvedId` is Vite's pre-bundled copy under
+ * `.vite/deps/`, which carries no version, so the original file comes from the dependency
+ * optimizer's record of it (`key` is the import it was bundled for, such as `preact/hooks`).
+ */
+async function resolvedVersion(
+  environment: Environment,
+  name: string,
+  key: string,
+  resolvedId: string,
+): Promise<string> {
+  let file = resolvedId.split("?")[0]
+  if (file.includes("/.vite/deps/")) {
+    const metadata = (environment as DevEnvironment).depsOptimizer?.metadata
+    const source = metadata?.optimized[key]?.src ?? metadata?.discovered[key]?.src
+    if (!source) throw new Error(`Cannot find the source of Vite's pre-bundled ${key}`)
+    file = source
+  }
+  for (let dir = dirname(file); dir !== dirname(dir); dir = dirname(dir)) {
+    let manifest: { name?: string; version?: string }
+    try {
+      manifest = JSON.parse(await Deno.readTextFile(`${dir}/package.json`))
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) continue
+      throw error
+    }
+    if (manifest.name === name && manifest.version) return manifest.version
+  }
+  throw new Error(`Cannot find the package.json of ${name} above ${file}`)
 }
 
 /**
@@ -112,7 +136,7 @@ function npmSpecifiers(): Plugin {
       const [, name, version, subpath = ""] = match
       const resolved = await this.resolve(`${name}${subpath}`, importer, { skipSelf: true })
       if (!resolved || version === undefined) return resolved
-      const actual = await installedVersion(name, resolved.id.split("?")[0])
+      const actual = await resolvedVersion(this.environment, name, `${name}${subpath}`, resolved.id)
       if (actual !== version) throw new NpmVersionMismatchError(id, actual, importer)
       return resolved
     },
