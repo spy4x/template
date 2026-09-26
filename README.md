@@ -62,7 +62,7 @@ Target libraries:
   published `@spy4x/*` packages (spy4x/ts-libs) at an exact pinned version, not from code here.
 - `libs/domain`: business rules, commands, events, and queries.
 - `libs/server`: Postgres and server-side adapters.
-- `libs/client`: browser, Dexie, Preact, and Vite adapters.
+- `libs/client`: Vite adapters. Preact UI comes from the `@spy4x/preact-*` packages.
 
 `PERSONAL` and `SHARED` groups use one authorization and sync model. Full boundary and sync rules
 are recorded in

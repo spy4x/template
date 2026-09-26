@@ -49,8 +49,8 @@ libs/domain    groups (enums, policy, commands/queries), identity (user, session
 libs/server    db (migrations and schema.sql only), groups (Postgres repository,
                cursor). Database access, outbox, key-value store, config,
                request logging, sign-in and auth come from @spy4x/server/*.
-libs/client    preact, vite, helpers. Icons and useUrlFilters come from
-               @spy4x/preact-icons and @spy4x/preact-signals.
+libs/client    vite. Icons, useUrlFilters and the signed-in Shell come from
+               @spy4x/preact-icons, @spy4x/preact-signals and @spy4x/preact-system.
 ```
 
 What genuinely works end to end: sign-up creates the auth user and password key
