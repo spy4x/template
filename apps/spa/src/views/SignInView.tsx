@@ -39,7 +39,7 @@ export function SignInView() {
   }
 
   return (
-    <div class="mx-auto grid max-w-4xl gap-6 lg:grid-cols-2">
+    <div class="mx-auto grid w-full max-w-4xl gap-6 lg:grid-cols-2">
       <div class="rounded-2xl border border-slate-800 bg-slate-900 p-6 sm:p-8">
         <h1 class="text-2xl font-semibold sm:text-3xl">Welcome back</h1>
         <p class="mt-2 text-slate-300">Sign in to manage your profile and push devices.</p>

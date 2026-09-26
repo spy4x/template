@@ -1,6 +1,7 @@
 import type { ComponentChildren, JSX } from "preact"
 import { Link, useLocation } from "wouter-preact"
 import { Shell, type ShellNavItem } from "@spy4x/preact-system/shell"
+import { Page } from "@spy4x/preact-ui/layout"
 import { signOut } from "../state/auth.ts"
 import type { SessionState, SessionUser } from "../state/session.ts"
 
@@ -95,7 +96,7 @@ export function PublicFrame(
   return (
     <div class="min-h-screen bg-slate-950 text-slate-100">
       <header class="border-b border-slate-800">
-        <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
+        <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Brand />
           {canSignOut && (
             <button
@@ -109,7 +110,7 @@ export function PublicFrame(
           )}
         </div>
       </header>
-      <main class="mx-auto w-full max-w-5xl px-6 py-10">{children}</main>
+      <Page as="main" class="py-8">{children}</Page>
     </div>
   )
 }

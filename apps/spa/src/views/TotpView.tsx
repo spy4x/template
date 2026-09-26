@@ -34,7 +34,7 @@ export function TotpView() {
   }
 
   return (
-    <div class="mx-auto max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6 sm:p-8">
+    <div class="mx-auto w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6 sm:p-8">
       <h2 class="text-xl font-semibold">2FA verification</h2>
       <p class="mt-2 text-sm text-slate-300">Enter 6-digit code.</p>
       <form class="mt-6 space-y-4" onSubmit={submit}>

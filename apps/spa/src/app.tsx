@@ -1,5 +1,6 @@
 import "./app.css"
 import { useEffect, useState } from "preact/hooks"
+import { Page } from "@spy4x/preact-ui/layout"
 import { Route, Switch } from "wouter-preact"
 import { sessionState } from "./state/session.ts"
 import { bootstrapSession } from "./state/auth.ts"
@@ -59,11 +60,11 @@ export function App() {
   if (!ready || !sessionState.value.isReady) {
     return (
       <div class="min-h-screen bg-slate-950 text-slate-100">
-        <div class="mx-auto max-w-5xl px-6 py-10">
+        <Page class="py-8">
           <div class="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-slate-300">
             Loading...
           </div>
-        </div>
+        </Page>
       </div>
     )
   }

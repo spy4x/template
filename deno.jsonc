@@ -64,7 +64,8 @@
     "lint:fix": "deno lint --fix",
     "lint:check": "deno lint",
     "ts:check": "deno run --allow-read --allow-run=deno infra/scripts/type-check.ts",
-    "test": "deno test --no-prompt apps/api libs",
+    // tests/spacing.test.ts reads the apps' and libs' sources, so it runs on its own with that grant.
+    "test": "deno test --no-prompt apps/api libs && deno test --no-prompt --allow-read=apps,libs tests/spacing.test.ts",
     "test:integration": "ENV=test deno test --no-prompt -E -N -R=./libs/server/db/migrations,./libs/server/db/schema.sql tests/integration",
     "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright@1.57.0 test",
     "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright@1.57.0 show-report",
@@ -119,13 +120,14 @@
     // apps/tgbot
 
     // client
-    // spy4x/preact-components 0.1.1. Every package is published at one version together, so all
-    // four move in one change. preact, @preact/signals, @preact/signals-core and wouter-preact
+    // spy4x/preact-components 0.1.2. Every package is published at one version together, so all
+    // five move in one change. preact, @preact/signals, @preact/signals-core and wouter-preact
     // must stay on the versions these packages pin, or two copies load.
-    "@spy4x/preact-icons": "jsr:@spy4x/preact-icons@0.1.1",
-    "@spy4x/preact-signals": "jsr:@spy4x/preact-signals@0.1.1",
-    "@spy4x/preact-system": "jsr:@spy4x/preact-system@0.1.1",
-    "@spy4x/preact-theme": "jsr:@spy4x/preact-theme@0.1.1",
+    "@spy4x/preact-icons": "jsr:@spy4x/preact-icons@0.1.2",
+    "@spy4x/preact-signals": "jsr:@spy4x/preact-signals@0.1.2",
+    "@spy4x/preact-system": "jsr:@spy4x/preact-system@0.1.2",
+    "@spy4x/preact-theme": "jsr:@spy4x/preact-theme@0.1.2",
+    "@spy4x/preact-ui": "jsr:@spy4x/preact-ui@0.1.2",
     "preact": "npm:preact@10.29.8",
     "wouter-preact": "npm:wouter-preact@3.9.0",
     "@preact/signals": "npm:@preact/signals@2.5.1",
@@ -133,6 +135,7 @@
 
     // shared
     "@std/path": "jsr:@std/path@1.1.6",
+    "@std/fs": "jsr:@std/fs@1.0.24",
     "@std/expect": "jsr:@std/expect@1.0.17",
     "@std/testing": "jsr:@std/testing@1.0.16",
     "@std/encoding": "jsr:@std/encoding@1.0.11",
