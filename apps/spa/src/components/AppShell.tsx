@@ -96,7 +96,7 @@ export function PublicFrame(
   return (
     <div class="min-h-screen bg-slate-950 text-slate-100">
       <header class="border-b border-slate-800">
-        <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
+        <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Brand />
           {canSignOut && (
             <button
