@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* Not real files: vite.config.ts replaces both lines with the text @spy4x/preact-theme exports, and
+   adds an @source for every @spy4x/preact-* module the app imports. */
+@import "@spy4x/preact-theme/tokens.css";
+@import "@spy4x/preact-theme/preset.css";
 
 :root {
   font-family: "Inter", system-ui, sans-serif;
