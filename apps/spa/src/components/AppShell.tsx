@@ -66,8 +66,7 @@ export function AppShell(
   const onClick = useRouterLinks()
 
   return (
-    // `dark` scopes the library's dark palette to the app, which is dark throughout.
-    <div class="dark min-h-screen bg-slate-950 text-slate-100" onClick={onClick}>
+    <div class="min-h-screen bg-slate-950 text-slate-100" onClick={onClick}>
       <Shell
         brand={<Brand />}
         navItems={NAV_ITEMS}
