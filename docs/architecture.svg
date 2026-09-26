@@ -93,7 +93,7 @@
   <text class="t tier" x="40" y="402">DATA</text>
   <rect class="box data" x="40" y="412" width="190" height="76" rx="8"/>
   <text class="t h" x="56" y="438">Valkey</text>
-  <text class="t m" x="56" y="460">API cache (user rows)</text>
+  <text class="t m" x="56" y="460">API cache</text>
 
   <rect class="box data" x="250" y="412" width="360" height="76" rx="8"/>
   <text class="t h" x="266" y="438">Postgres 16</text>

@@ -11,7 +11,7 @@ already wired together.**
 [ADR 002](docs/decisions/002-realtime-transport-and-sync.md) · [Stack](docs/stack.md) ·
 [Deno policy](docs/deno-policy.md)
 
-<img src="docs/architecture.svg" alt="Architecture diagram. Clients: apps/spa, a Preact and Vite PWA with sign-up, sign-in, TOTP and profile, talks to apps/api over REST and WebSocket; a Dexie offline store with group sync is planned. apps/mpa is a Fresh page shell with /health; its REST calls are planned. Servers: apps/api on Hono (auth, groups, CQRS dispatch, web push) and apps/worker, which drains outbox_events. Data: Postgres is authoritative and Valkey caches for the API; Docker Compose also runs Traefik, MinIO, Loki, Prometheus and Grafana. Shared code: libs/domain, libs/server, libs/client and the @spy4x packages on JSR." width="860">
+<img src="docs/architecture.svg" alt="Architecture diagram. Clients: apps/spa, a Preact and Vite PWA with sign-up, sign-in, TOTP and profile, talks to apps/api over REST and WebSocket; a Dexie offline store with group sync is planned. apps/mpa is a Fresh page shell with /health; its REST calls are planned. Servers: apps/api on Hono (auth, groups, CQRS dispatch, web push) and apps/worker, which drains outbox_events. Data: Postgres is authoritative and Valkey is the API cache; Docker Compose also runs Traefik, MinIO, Loki, Prometheus and Grafana. Shared code: libs/domain, libs/server, libs/client and the @spy4x packages on JSR." width="860">
 
 </div>
 
@@ -20,9 +20,9 @@ factor, tenancy and a place for background work. A new user signs up and gets an
 session and a personal group in one database transaction. Groups are the only tenancy boundary, so
 the same membership checks and roles cover personal data and shared workspaces.
 
-It exists because every SaaS MVP needs the same groundwork before its first feature, and that
-groundwork is where security and data mistakes are cheapest to avoid. The reusable parts live here
-and in the published [`@spy4x/*`](https://jsr.io/@spy4x) packages; product rules stay out.
+It exists because every SaaS MVP needs the same groundwork before its first feature. The reusable
+parts live here and in the published [`@spy4x/*`](https://jsr.io/@spy4x) packages; product rules
+stay out.
 
 **Status:** in migration. Sign-up, sign-in with TOTP, groups over REST and the outbox worker work
 today; offline sync, notes, group administration and the MPA's pages do not yet. Details in
@@ -35,8 +35,8 @@ today; offline sync, notes, group administration and the MPA's pages do not yet.
   same IDs, membership checks and roles, from viewer to owner.
 - **Auth that is done.** Sign-up, sign-in, sessions and an authenticator-app second factor, with
   PBKDF2-SHA-256 password hashes. Web push subscriptions are built in too.
-- **CQRS with an outbox.** Commands, queries and events go through one bus. Group changes write
-  their event to `outbox_events`, and the worker drains that table.
+- **CQRS with an outbox.** Commands, queries and events go through one bus. Creating a shared
+  group writes its event to `outbox_events`, and the worker drains that table.
 - **Safe API defaults.** Every mutation must come from the web app's own origin, and group lists
   page with HMAC-signed cursors.
 - **Web standards.** Hono handlers take a `Request` and return a `Response`; ES modules, Preact
@@ -51,14 +51,27 @@ serverless functions rather than a server you run.
 ## Quick start
 
 ```sh
-cp infra/envs/.env.example infra/envs/.env   # then fill in the secrets
-deno task vapid-key:create                   # web push keys → infra/configs/vapid.json
-deno task proxy:start                        # Traefik in front of the stack
-deno task dev                                # the whole stack in Compose
+cp infra/envs/.env.example infra/envs/.env
 ```
 
-Stop the proxy with `deno task proxy:stop`. Apply migrations with `deno task db:migrate`, which
-reads `DB_HOST` and `DB_PORT` from the environment.
+Before going on, edit `infra/envs/.env`: fill in the secrets, delete the comment after `ENV=dev` so
+the line reads exactly `ENV=dev`, and add the line `CONTAINER_PROVIDER=docker`. The Compose script
+keeps inline comments as part of the value and otherwise runs Podman, while `proxy:start` runs
+Docker.
+
+```sh
+deno task vapid-key:create   # web push keys → infra/configs/vapid.json
+deno task proxy:start        # Traefik
+deno task dev                # Postgres, Valkey, MinIO, API, SPA, logs and metrics
+```
+
+The worker and the MPA are not in Compose; run them on the host. Stop the proxy with
+`deno task proxy:stop`. Apply migrations from the host with the values from your `.env`, pointing
+at the port Compose publishes:
+
+```sh
+DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=<user> DB_PASS=<password> DB_NAME=<name> deno task db:migrate
+```
 
 ## Tasks
 
@@ -67,7 +80,7 @@ Current tasks come from [`deno.jsonc`](deno.jsonc).
 | Task                         | What it does                                           |
 | ---------------------------- | ------------------------------------------------------ |
 | `deno task check`            | Lint, format check, type check and unit tests          |
-| `deno task test:integration` | Integration tests against a throwaway Postgres         |
+| `deno task test:integration` | Integration tests against a Postgres you provide       |
 | `deno task e2e`              | Playwright end-to-end tests                            |
 | `deno task db:migrate`       | Apply the SQL migrations in `libs/server/db`           |
 | `deno task spa:build`        | Build the SPA                                          |
