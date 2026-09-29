@@ -1,3 +1,6 @@
+import type { Command, Query } from "@spy4x/platform/cqrs"
+import type { Actor } from "@domain/identity"
+
 export enum GroupKind {
   PERSONAL = 1,
   SHARED = 2,
@@ -217,5 +220,3 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isGroupRole(role: GroupRole): boolean {
   return Number.isInteger(role) && role >= GroupRole.VIEWER && role <= GroupRole.OWNER
 }
-import type { Command, Query } from "@spy4x/platform/cqrs"
-import type { Actor } from "@domain/identity"
