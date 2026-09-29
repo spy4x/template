@@ -61,7 +61,11 @@ export function App() {
   return (
     <>
       {!ready || !sessionState.value.isReady
-        ? <LoadingSpinner size="lg" label="Loading..." class="min-h-dvh bg-canvas" />
+        ? (
+          <main>
+            <LoadingSpinner size="lg" label="Loading..." class="min-h-dvh bg-canvas" />
+          </main>
+        )
         : <Frame />}
       <Toastr
         toasts={toasts.list.value}
