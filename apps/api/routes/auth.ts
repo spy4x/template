@@ -11,6 +11,7 @@ import type { SignIn } from "@api/services/sign-in.ts"
 import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
 import { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
+import { readApiJson } from "@api/services/json-body.ts"
 
 /** What the auth routes call. `index.ts` passes the app's singletons; tests pass fakes. */
 export interface AuthRouteDependencies {
@@ -47,7 +48,7 @@ export function createAuthRoute(
       return c.json(authData.user)
     })
     .post(`password/check`, mutationGuards.anonymous, async (c) => {
-      const body = await c.req.json()
+      const body = await readApiJson(c)
       const validationResult = validate(authUsernamePasswordSchema, body)
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
@@ -70,7 +71,7 @@ export function createAuthRoute(
       )
     })
     .post(`/password/sign-up`, mutationGuards.anonymous, async (c) => {
-      const body = await c.req.json()
+      const body = await readApiJson(c)
       const validationResult = validate(authUsernamePasswordSchema, body)
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
@@ -100,8 +101,8 @@ export function createAuthRoute(
       if (!authData) {
         return c.json({ error: "User not signed in" }, 401)
       }
+      const body = await readApiJson(c)
       try {
-        const body = await c.req.json()
         const validationResult = validate(authOTPSchema, body)
         if (validationResult.error) {
           return c.json({ error: validationResult.error.description }, 400)
@@ -123,7 +124,7 @@ export function createAuthRoute(
       return c.json({ qrcode, secret })
     })
     .post(`/totp/connect/finish`, async (c) => {
-      const body = await c.req.json()
+      const body = await readApiJson(c)
       const validationResult = validate(authOTPSchema, body)
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
@@ -144,7 +145,7 @@ export function createAuthRoute(
       return c.json({ success: true })
     })
     .post(`/password/change`, async (c) => {
-      const body = await c.req.json()
+      const body = await readApiJson(c)
       const validationResult = validate(authPasswordChangeSchema, body)
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)

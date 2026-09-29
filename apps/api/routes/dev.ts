@@ -5,6 +5,7 @@ import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import { authUsernameSchema } from "@domain/identity"
 import { db, sql } from "@api/services/db.ts"
 import type { Transaction } from "@spy4x/server/db"
+import { readApiJson } from "@api/services/json-body.ts"
 
 export const devRoute = new Hono<APIContext>()
   .post("/cleanup-user", async (c) => {
@@ -13,7 +14,7 @@ export const devRoute = new Hono<APIContext>()
     }
     let body: unknown = null
     try {
-      body = await c.req.json()
+      body = await readApiJson(c)
     } catch (_error) {
       body = null
     }

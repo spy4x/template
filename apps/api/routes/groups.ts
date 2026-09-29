@@ -13,6 +13,7 @@ import { createSameOriginMutationGuard } from "@spy4x/server/http/same-origin"
 import { actorFromAuth } from "../cqrs/actor.ts"
 import { APIContext } from "../_types.ts"
 import { groupErrorResponse, GroupFeatureError } from "../features/groups/errors.ts"
+import { readApiJson } from "@api/services/json-body.ts"
 
 export interface GroupsRouteDependencies {
   create(command: GroupCreateCommand): Promise<GroupCreateResult>
@@ -60,7 +61,7 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
       }
       let body: unknown
       try {
-        body = await c.req.json()
+        body = await readApiJson(c)
       } catch {
         throw new GroupFeatureError("INVALID_REQUEST", "Request body must be JSON")
       }

@@ -13,6 +13,7 @@ import {
   testMutationGuards,
   testSessionGuards,
 } from "../_testing/mutation-requests.ts"
+import { MALFORMED_JSON, oversizedJson } from "../_testing/json-bodies.ts"
 import { createAuthRoute } from "./auth.ts"
 
 /** A sign-in whose operations only record that the route called them. */
@@ -131,6 +132,38 @@ describe("auth routes behind a session", () => {
       const response = await send(app, route, sameOriginWithoutCookieHeaders)
 
       expect(response.status).toBe(401)
+      expect(calls).toEqual([])
+    })
+  }
+})
+
+describe("auth routes cap the JSON body", () => {
+  const bodyRoutes = [...anonymousRoutes, ...sessionRoutes].filter((route) => route.body)
+  for (const route of bodyRoutes) {
+    const headers = anonymousRoutes.includes(route)
+      ? sameOriginWithoutCookieHeaders
+      : sameOriginHeaders
+    it(`answers an oversized body on ${route.method} ${route.path} with 413`, async () => {
+      const { app, calls } = buildApp(anonymousRoutes.includes(route) ? null : undefined)
+      const response = await app.request(`${API_URL}${route.path}`, {
+        method: route.method,
+        headers: { ...headers },
+        body: oversizedJson(route.body),
+      })
+
+      expect(response.status).toBe(413)
+      expect(calls).toEqual([])
+    })
+
+    it(`answers malformed JSON on ${route.method} ${route.path} with 400`, async () => {
+      const { app, calls } = buildApp(anonymousRoutes.includes(route) ? null : undefined)
+      const response = await app.request(`${API_URL}${route.path}`, {
+        method: route.method,
+        headers: { ...headers },
+        body: MALFORMED_JSON,
+      })
+
+      expect(response.status).toBe(400)
       expect(calls).toEqual([])
     })
   }

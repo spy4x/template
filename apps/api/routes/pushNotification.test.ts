@@ -12,6 +12,7 @@ import {
   testMutationGuards,
   testSessionGuards,
 } from "../_testing/mutation-requests.ts"
+import { MALFORMED_JSON, oversizedJson } from "../_testing/json-bodies.ts"
 import { createPushNotificationRoute } from "./pushNotification.ts"
 
 function buildApp(auth: APIContext["Variables"]["auth"] = buildAuthData()) {
@@ -87,5 +88,28 @@ describe("push routes", () => {
       expect(response.status).toBe(401)
       expect(calls).toEqual([])
     })
+  }
+})
+
+describe("push routes cap the JSON body", () => {
+  for (const route of routes) {
+    for (
+      const [name, body, status] of [
+        ["an oversized body", oversizedJson(route.body), 413],
+        ["malformed JSON", MALFORMED_JSON, 400],
+      ] as const
+    ) {
+      it(`answers ${name} on ${route.method} ${route.path} with ${status}`, async () => {
+        const { app, calls } = buildApp()
+        const response = await app.request(`${API_URL}${route.path}`, {
+          method: route.method,
+          headers: { ...sameOriginHeaders },
+          body,
+        })
+
+        expect(response.status).toBe(status)
+        expect(calls).toEqual([])
+      })
+    }
   }
 })

@@ -10,6 +10,7 @@ import { UserProfileUpdateCommand, UserProfileUpdateResult } from "@api/cqrs/com
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
 import { NOT_AUTHENTICATED, SECOND_FACTOR_REQUIRED } from "@spy4x/server/sign-in"
 import type { ErrorHandler } from "hono"
+import { readApiJson } from "@api/services/json-body.ts"
 
 /** What the users routes call. `index.ts` passes the app's singletons; tests pass fakes. */
 export interface UsersRouteDependencies {
@@ -33,7 +34,7 @@ export function createUsersRoute(dependencies: UsersRouteDependencies): Hono<API
     })
     .patch(`/me`, async (c) => {
       const authData = c.get("auth")!
-      const body = await c.req.json()
+      const body = await readApiJson(c)
       const validationResult = validate(userProfileBaseSchema, body)
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)

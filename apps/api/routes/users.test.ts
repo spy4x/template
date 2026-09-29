@@ -11,6 +11,7 @@ import {
   testMutationGuards,
   testSessionGuards,
 } from "../_testing/mutation-requests.ts"
+import { MALFORMED_JSON, oversizedJson } from "../_testing/json-bodies.ts"
 import { createUsersRoute } from "./users.ts"
 import { AccessError } from "@domain/identity"
 import { SECOND_FACTOR_REQUIRED } from "@spy4x/server/sign-in"
@@ -89,4 +90,25 @@ describe("users routes", () => {
 
     expect(response.status).toBe(500)
   })
+})
+
+describe("users routes cap the JSON body", () => {
+  for (
+    const [name, body, status] of [
+      ["an oversized body", oversizedJson({ firstName: "Ada", lastName: "Lovelace" }), 413],
+      ["malformed JSON", MALFORMED_JSON, 400],
+    ] as const
+  ) {
+    it(`answers ${name} on PATCH /users/me with ${status}`, async () => {
+      const { app, calls } = buildApp()
+      const response = await app.request(`${API_URL}/users/me`, {
+        method: "PATCH",
+        headers: { ...sameOriginHeaders },
+        body,
+      })
+
+      expect(response.status).toBe(status)
+      expect(calls).toEqual([])
+    })
+  }
 })
