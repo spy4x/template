@@ -11,6 +11,7 @@ import type { SignIn } from "@api/services/sign-in.ts"
 import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
 import { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
+import type { AuthRateLimits } from "../middlewares/auth-rate-limits.ts"
 import { readApiJson } from "@api/services/json-body.ts"
 
 /** What the auth routes call. `index.ts` passes the app's singletons; tests pass fakes. */
@@ -18,14 +19,15 @@ export interface AuthRouteDependencies {
   signIn: SignIn
   emit(event: UserSignedInEvent | UserSignedOutEvent | UserSignedUpEvent): void
   mutationGuards: MutationGuards
+  rateLimits: AuthRateLimits
 }
 
 export function createAuthRoute(
-  { signIn, emit, mutationGuards }: AuthRouteDependencies,
+  { signIn, emit, mutationGuards, rateLimits }: AuthRouteDependencies,
 ): Hono<APIContext> {
   const { isAuthenticated1FA, isAuthenticated2FA } = signIn.auth
   return new Hono<APIContext>()
-    .post(`/sign-out`, mutationGuards.anonymous, async (c) => {
+    .post(`/sign-out`, mutationGuards.anonymous, rateLimits.normal, async (c) => {
       const authData = c.get("auth")
       await signIn.signOut(c)
       if (authData) {
@@ -39,15 +41,14 @@ export function createAuthRoute(
       }
       return c.json({ success: true })
     })
-    // .use(strictRateLimiter)
-    .get(`/me`, async (c) => {
+    .get(`/me`, rateLimits.normal, async (c) => {
       const authData = c.get("auth")
       if (!authData) {
         return c.json({ error: "User not signed in" }, 401)
       }
       return c.json(authData.user)
     })
-    .post(`password/check`, mutationGuards.anonymous, async (c) => {
+    .post(`password/check`, mutationGuards.anonymous, rateLimits.strictByIp, async (c) => {
       const body = await readApiJson(c)
       const validationResult = validate(authUsernamePasswordSchema, body)
       if (validationResult.error) {
@@ -70,7 +71,7 @@ export function createAuthRoute(
         signedIn.session.secondFactor === SecondFactorStatus.Pending ? 202 : 200,
       )
     })
-    .post(`/password/sign-up`, mutationGuards.anonymous, async (c) => {
+    .post(`/password/sign-up`, mutationGuards.anonymous, rateLimits.strictByIp, async (c) => {
       const body = await readApiJson(c)
       const validationResult = validate(authUsernamePasswordSchema, body)
       if (validationResult.error) {
@@ -96,7 +97,7 @@ export function createAuthRoute(
     })
     .use(isAuthenticated1FA)
     .use(mutationGuards.signedIn)
-    .post(`/totp/check`, async (c) => {
+    .post(`/totp/check`, rateLimits.strictByUser, async (c) => {
       const authData = c.get("auth")
       if (!authData) {
         return c.json({ error: "User not signed in" }, 401)
@@ -116,14 +117,14 @@ export function createAuthRoute(
         return c.json({ error: "Invalid request format" }, 400)
       }
     })
-    .post(`/totp/connect/start`, async (c) => {
+    .post(`/totp/connect/start`, rateLimits.normal, async (c) => {
       const { error, qrcode, secret } = await signIn.connectTotpStart(c.get("auth")!)
       if (error) {
         return c.json({ error }, 400)
       }
       return c.json({ qrcode, secret })
     })
-    .post(`/totp/connect/finish`, async (c) => {
+    .post(`/totp/connect/finish`, rateLimits.strictByUser, async (c) => {
       const body = await readApiJson(c)
       const validationResult = validate(authOTPSchema, body)
       if (validationResult.error) {
@@ -135,16 +136,15 @@ export function createAuthRoute(
       }
       return c.json({ success: true })
     })
-    // .use(rateLimiter)
     .use(isAuthenticated2FA)
-    .post(`/totp/disconnect`, async (c) => {
+    .post(`/totp/disconnect`, rateLimits.normal, async (c) => {
       const isSuccess = await signIn.disconnectTotp(c.get("auth")!)
       if (!isSuccess) {
         return c.json({ error: "OTP already disabled for your account" }, 400)
       }
       return c.json({ success: true })
     })
-    .post(`/password/change`, async (c) => {
+    .post(`/password/change`, rateLimits.strictByUser, async (c) => {
       const body = await readApiJson(c)
       const validationResult = validate(authPasswordChangeSchema, body)
       if (validationResult.error) {
