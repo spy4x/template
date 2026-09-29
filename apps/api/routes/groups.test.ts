@@ -9,7 +9,7 @@ import {
   GroupRole,
 } from "@domain/groups"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
-import { UserMFAStatus } from "@domain/identity"
+import { AccessError, UserMFAStatus } from "@domain/identity"
 import type { APIContext } from "../_types.ts"
 import { createGroupsRoute, GroupsRouteDependencies } from "./groups.ts"
 import { buildAuthData } from "../_testing/fake-auth.ts"
@@ -82,7 +82,11 @@ describe("groups route", () => {
 
     expect(response.status).toBe(201)
     expect(deps.createCommand?.data).toEqual({
-      userId: 7,
+      actor: {
+        userId: 7,
+        userMfa: UserMFAStatus.NOT_CONFIGURED,
+        sessionSecondFactor: SecondFactorStatus.NotRequired,
+      },
       id,
       kind: GroupKind.SHARED,
       name: "Team",
@@ -116,7 +120,7 @@ describe("groups route", () => {
     const response = await app.request("http://local/groups")
 
     expect(response.status).toBe(200)
-    expect(deps.listQuery?.data.userId).toBe(19)
+    expect(deps.listQuery?.data.actor.userId).toBe(19)
     expect(deps.listQuery?.data.page).toEqual({ limit: 50, after: undefined })
   })
 
@@ -149,7 +153,7 @@ describe("groups route", () => {
     expect(deps.listQuery).toBe(null)
   })
 
-  it("requires completed configured MFA", async () => {
+  it("passes the session's second-factor state on rather than deciding here", async () => {
     const deps = dependencies()
     const app = buildApp(
       deps,
@@ -158,6 +162,22 @@ describe("groups route", () => {
         session: { secondFactor: SecondFactorStatus.NotRequired },
       }),
     )
+    const response = await app.request("http://local/groups")
+
+    // The route no longer rejects: session strength is checked by the session gate on the buses,
+    // so a WebSocket transport is covered by the same check.
+    expect(response.status).toBe(200)
+    expect(deps.listQuery?.data.actor).toEqual({
+      userId: 1,
+      userMfa: UserMFAStatus.CONFIGURED,
+      sessionSecondFactor: SecondFactorStatus.NotRequired,
+    })
+  })
+
+  it("maps an access error from the dispatch to a 401 envelope", async () => {
+    const deps = dependencies()
+    deps.list = () => Promise.reject(new AccessError("MFA_REQUIRED", "Second factor missing"))
+    const app = buildApp(deps)
     const response = await app.request("http://local/groups")
 
     expect(response.status).toBe(401)

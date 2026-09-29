@@ -9,9 +9,8 @@ import {
   GroupListResult,
   parseCreateSharedGroupRequest,
 } from "@domain/groups"
-import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { createSameOriginMutationGuard } from "@spy4x/server/http/same-origin"
-import { UserMFAStatus } from "@domain/identity"
+import { actorFromAuth } from "../cqrs/actor.ts"
 import { APIContext } from "../_types.ts"
 import { groupErrorResponse, GroupFeatureError } from "../features/groups/errors.ts"
 
@@ -43,15 +42,15 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
     .onError((error, c) => groupErrorResponse(c, error))
     .use(requireGroupAuthentication)
     .get("/", async (c) => {
-      const userId = c.get("auth")!.user.id
+      const actor = actorFromAuth(c.get("auth")!)
       const limit = parseLimit(c.req.query("limit"))
       const cursor = c.req.query("cursor")
-      const after = cursor ? await dependencies.cursor.decode(cursor, userId) : undefined
+      const after = cursor ? await dependencies.cursor.decode(cursor, actor.userId) : undefined
       const result = await dependencies.list(
-        new GroupListQuery({ userId, page: { limit, after } }),
+        new GroupListQuery({ actor, page: { limit, after } }),
       )
       const nextCursor = result.nextPageKey
-        ? await dependencies.cursor.encode(userId, result.nextPageKey)
+        ? await dependencies.cursor.encode(actor.userId, result.nextPageKey)
         : null
       return c.json({ groups: result.groups, nextCursor })
     })
@@ -68,7 +67,7 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
       const input = parseCreateSharedGroupRequest(body)
       const result = await dependencies.create(
         new GroupCreateCommand({
-          userId: c.get("auth")!.user.id,
+          actor: actorFromAuth(c.get("auth")!),
           id: input.id,
           kind: GroupKind.SHARED,
           name: input.name,
@@ -79,16 +78,14 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
     })
 }
 
+/**
+ * Authentication only: is there a session at all. Whether the session is strong enough is decided
+ * by the session gate on the CQRS buses (`apps/api/cqrs/session-gate.ts`), so every transport gets
+ * the same answer without repeating the check.
+ */
 const requireGroupAuthentication: MiddlewareHandler<APIContext> = async (c, next) => {
-  const auth = c.get("auth")
-  if (!auth) {
+  if (!c.get("auth")) {
     return groupErrorResponse(c, new GroupFeatureError("AUTH_REQUIRED", "Missing session"))
-  }
-  if (
-    auth.user.mfa === UserMFAStatus.CONFIGURED &&
-    auth.session.secondFactor !== SecondFactorStatus.Completed
-  ) {
-    return groupErrorResponse(c, new GroupFeatureError("MFA_REQUIRED", "MFA is incomplete"))
   }
   return await next()
 }
