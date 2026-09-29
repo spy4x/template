@@ -36,8 +36,8 @@ function actorOf(data: unknown): Actor | null {
  * anonymous message fails loudly the first time it runs. Forgetting to guard a user-facing one
  * fails silently, in production, as a missing authorization check.
  *
- * Exemptions are listed at the single place where handlers are registered, so the whole
- * authorization posture can be read in one screen and reviewed as a diff when it changes.
+ * Exemptions are listed in one place, the app's `sessionGate` below, so the whole authorization
+ * posture can be read in one screen and reviewed as a diff when it changes.
  *
  * Exempted messages are anonymous by construction: sign-in before a session exists, or a worker
  * draining the outbox. A guarded message that arrives without an actor is a wiring bug, not an
@@ -62,3 +62,14 @@ export function createSessionGate(
     return next()
   }
 }
+
+/**
+ * The app's gate, attached to both bus singletons where they are built (`services/commandBus.ts`
+ * and `services/queryBus.ts`), so no dispatch can reach a handler without passing it.
+ *
+ * Deny by default: a message only skips the gate by being listed here, and the list is empty
+ * because every message currently carries an actor. Anonymous flows - sign-in, sign-up, password
+ * reset - are REST services rather than CQRS messages today; if they become messages, add them
+ * here.
+ */
+export const sessionGate: CqrsMiddleware = createSessionGate([])
