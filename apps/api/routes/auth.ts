@@ -97,7 +97,7 @@ export function createAuthRoute(
     })
     .use(isAuthenticated1FA)
     .use(mutationGuards.signedIn)
-    .post(`/totp/check`, rateLimits.strictByUser, async (c) => {
+    .post(`/totp/check`, rateLimits.otpByUser, async (c) => {
       const authData = c.get("auth")
       if (!authData) {
         return c.json({ error: "User not signed in" }, 401)
@@ -124,7 +124,7 @@ export function createAuthRoute(
       }
       return c.json({ qrcode, secret })
     })
-    .post(`/totp/connect/finish`, rateLimits.strictByUser, async (c) => {
+    .post(`/totp/connect/finish`, rateLimits.otpByUser, async (c) => {
       const body = await readApiJson(c)
       const validationResult = validate(authOTPSchema, body)
       if (validationResult.error) {

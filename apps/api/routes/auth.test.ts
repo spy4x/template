@@ -43,7 +43,13 @@ function fakeSignIn(calls: string[], succeed = true): SignIn {
 }
 
 /** Limits no test outside the rate-limit block reaches. */
-const generousLimits = { windowMs: 60_000, strictLimit: 1_000, limit: 1_000 }
+const generousLimits = {
+  windowMs: 60_000,
+  strictLimit: 1_000,
+  limit: 1_000,
+  otpWindowMs: 900_000,
+  otpLimit: 1_000,
+}
 
 function buildApp(
   auth: APIContext["Variables"]["auth"] = buildAuthData(),
@@ -184,11 +190,24 @@ describe("auth routes cap the JSON body", () => {
 })
 
 describe("auth routes rate-limit", () => {
-  /** Three attempts per window on the strict limit, two on the normal one. */
-  const tightLimits = { windowMs: 60_000, strictLimit: 3, limit: 2 }
+  /**
+   * Three attempts per minute on the strict limit, two on the normal one, and the shipped five per
+   * 15 minutes on the one-time-code limit.
+   */
+  const tightLimits = {
+    windowMs: 60_000,
+    strictLimit: 3,
+    limit: 2,
+    otpWindowMs: 900_000,
+    otpLimit: 5,
+  }
 
+  const otpPaths = ["/auth/totp/check", "/auth/totp/connect/finish"]
   const strictByIpRoutes = anonymousRoutes.filter((route) => route.body)
-  const strictByUserRoutes = sessionRoutes.filter((route) => route.body)
+  const otpRoutes = sessionRoutes.filter((route) => otpPaths.includes(route.path))
+  const strictByUserRoutes = sessionRoutes.filter((route) =>
+    route.body && !otpPaths.includes(route.path)
+  )
   const normalRoutes = [
     ...anonymousRoutes.filter((route) => !route.body),
     ...sessionRoutes.filter((route) => !route.body),
@@ -268,12 +287,63 @@ describe("auth routes rate-limit", () => {
     })
   }
 
+  for (const route of otpRoutes) {
+    it(`answers the 6th failed ${route.path} in 15 minutes from one user with 429, whatever the IP`, async () => {
+      const { app, calls } = buildApp(undefined, {
+        rateLimits: createAuthRateLimits(tightLimits),
+        succeed: false,
+      })
+      const statuses = []
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const headers = { ...sameOriginHeaders, "x-real-ip": `192.0.2.${attempt + 1}` }
+        statuses.push((await send(app, route, headers)).status)
+      }
+
+      expect(statuses.slice(5)).toEqual([429])
+      expect(statuses.slice(0, 5)).not.toContain(429)
+      expect(calls).toEqual(Array(5).fill(route.operation))
+    })
+  }
+
+  it("counts totp/check and totp/connect/finish against one one-time-code budget", async () => {
+    const { app, calls } = buildApp(undefined, {
+      rateLimits: createAuthRateLimits(tightLimits),
+      succeed: false,
+    })
+    const statuses = []
+    for (let attempt = 0; attempt < 6; attempt++) {
+      statuses.push((await send(app, otpRoutes[attempt % 2], sameOriginHeaders)).status)
+    }
+
+    expect(statuses.slice(5)).toEqual([429])
+    expect(calls).toHaveLength(5)
+  })
+
+  it("keeps refusing one-time codes after the one-minute window, until 15 minutes pass", async () => {
+    let now = 0
+    const { app } = buildApp(undefined, {
+      rateLimits: createAuthRateLimits({ ...tightLimits, clock: () => now }),
+      succeed: false,
+    })
+    const route = otpRoutes[0]
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await send(app, route, sameOriginHeaders)
+    }
+    now = 14 * 60_000
+    const beforeWindowEnds = await send(app, route, sameOriginHeaders)
+    now = 15 * 60_000 + 1
+    const afterWindowEnds = await send(app, route, sameOriginHeaders)
+
+    expect(beforeWindowEnds.status).toBe(429)
+    expect(afterWindowEnds.status).toBe(401)
+  })
+
   it("gives another user their own budget for totp/check", async () => {
     const rateLimits = createAuthRateLimits(tightLimits)
     const first = buildApp(buildAuthData({ user: { id: 1 } }), { rateLimits, succeed: false })
     const second = buildApp(buildAuthData({ user: { id: 2 } }), { rateLimits, succeed: false })
-    const route = strictByUserRoutes[0]
-    for (let attempt = 0; attempt < 4; attempt++) {
+    const route = otpRoutes[0]
+    for (let attempt = 0; attempt < 6; attempt++) {
       await send(first.app, route, sameOriginHeaders)
     }
     const other = await send(second.app, route, sameOriginHeaders)
@@ -291,6 +361,25 @@ describe("auth routes rate-limit", () => {
 
       expect(statuses).toEqual([200, 200, 429])
       expect(calls).toEqual([route.operation, route.operation])
+    })
+  }
+
+  for (const route of [...anonymousRoutes, ...sessionRoutes]) {
+    it(`spends no budget on a refused cross-site ${route.method} ${route.path}`, async () => {
+      const { app, calls } = buildApp(anonymousRoutes.includes(route) ? null : undefined, {
+        rateLimits: createAuthRateLimits(tightLimits),
+        succeed: false,
+      })
+      const headers = anonymousRoutes.includes(route)
+        ? sameOriginWithoutCookieHeaders
+        : sameOriginHeaders
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await send(app, route, crossSiteHeaders)
+      }
+      const sameOrigin = await send(app, route, headers)
+
+      expect(sameOrigin.status).not.toBe(429)
+      expect(calls).toEqual([route.operation])
     })
   }
 
