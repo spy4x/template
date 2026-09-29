@@ -200,6 +200,10 @@ export type PushPublicKeyResponse = {
  * at upgrade and reuses it per message. Every user-facing CQRS message carries one, and the session
  * gate on the buses reads it, so one check covers every transport.
  *
+ * An actor is a snapshot of the session when it was built. A long-lived transport such as a
+ * WebSocket must re-validate the session (sign-out, expiry, a second factor completed or removed)
+ * rather than keep trusting an actor it built at upgrade.
+ *
  * `sessionSecondFactor` holds a `SecondFactorStatus` from `@spy4x/server/sign-in`. It is typed
  * with a type-only import so this module, which the SPA also imports, pulls in no server code.
  */
