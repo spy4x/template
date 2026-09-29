@@ -1,22 +1,24 @@
 import "./app.css"
 import { useEffect, useState } from "preact/hooks"
+import { SWUpdater } from "@spy4x/preact-system/sw-updater"
+import { LoadingSpinner } from "@spy4x/preact-ui/loading-spinner"
 import { Page } from "@spy4x/preact-ui/layout"
+import { Toastr } from "@spy4x/preact-ui/toastr"
 import { Route, Switch } from "wouter-preact"
 import { sessionState } from "./state/session.ts"
 import { bootstrapSession } from "./state/auth.ts"
 import { wsClient } from "./state/ws.ts"
-import { SignInView } from "./views/SignInView.tsx"
-import { SignUpView } from "./views/SignUpView.tsx"
-import { TotpView } from "./views/TotpView.tsx"
+import { toasts } from "./state/toasts.ts"
+import { AuthView } from "./views/AuthView.tsx"
 import { ProfileView } from "./views/ProfileView.tsx"
 import { AppShell, PublicFrame } from "./components/AppShell.tsx"
 
 function Routes() {
   return (
     <Switch>
-      <Route path="/sign-up" component={SignUpView} />
-      <Route path="/sign-in" component={SignInView} />
-      <Route path="/totp" component={TotpView} />
+      <Route path="/sign-up">{() => <AuthView key="sign-up" screen="sign-up" />}</Route>
+      <Route path="/sign-in">{() => <AuthView key="sign-in" screen="sign-in" />}</Route>
+      <Route path="/totp">{() => <AuthView key="one-time-code" screen="one-time-code" />}</Route>
       <Route path="/" component={ProfileView} />
     </Switch>
   )
@@ -57,16 +59,21 @@ export function App() {
     sessionState.value.isMfaRequired,
   ])
 
-  if (!ready || !sessionState.value.isReady) {
-    return (
-      <div class="min-h-screen bg-slate-950 text-slate-100">
-        <Page class="py-8">
-          <div class="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-slate-300">
-            Loading...
-          </div>
-        </Page>
-      </div>
-    )
-  }
-  return <Frame />
+  return (
+    <>
+      {!ready || !sessionState.value.isReady
+        ? (
+          <Page as="main" class="py-8">
+            <LoadingSpinner label="Loading..." size="lg" />
+          </Page>
+        )
+        : <Frame />}
+      <Toastr
+        toasts={toasts.list.value}
+        onDismiss={(id) => toasts.remove(String(id))}
+        dataE2E="toasts"
+      />
+      <SWUpdater />
+    </>
+  )
 }

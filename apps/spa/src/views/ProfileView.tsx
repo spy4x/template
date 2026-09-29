@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "preact/hooks"
 import { Link } from "wouter-preact"
+import { decodeBase64Url, encodeBase64 } from "@std/encoding"
+import { Button, buttonClasses } from "@spy4x/preact-ui/button"
+import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
+import { EmptyState } from "@spy4x/preact-ui/empty-state"
+import { ErrorState } from "@spy4x/preact-ui/error-state"
+import { Field } from "@spy4x/preact-ui/field"
+import { Input } from "@spy4x/preact-ui/input"
+import { Grid, Stack } from "@spy4x/preact-ui/layout"
 import {
   changePassword,
   profileUpdate,
@@ -9,6 +17,7 @@ import {
 } from "../state/auth.ts"
 import { sessionState } from "../state/session.ts"
 import { apiFetch } from "../state/api.ts"
+import { toasts } from "../state/toasts.ts"
 import type { PushSubscribeRequest, PushUnsubscribeRequest } from "@spy4x/platform/model"
 import type {
   ApiIsSuccessResponse,
@@ -22,7 +31,6 @@ export function ProfileView() {
   const [firstName, setFirstName] = useState(session.user?.firstName || "")
   const [lastName, setLastName] = useState(session.user?.lastName || "")
   const [profileError, setProfileError] = useState<string | null>(null)
-  const [profileSaved, setProfileSaved] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -65,46 +73,46 @@ export function ProfileView() {
 
   if (!session.user) {
     return (
-      <div
-        data-e2e="signin-required"
-        class="mx-auto max-w-xl rounded-2xl border border-slate-800 bg-slate-900 p-6 sm:p-8"
-      >
-        <h2 class="text-xl font-semibold">Sign in required</h2>
-        <p class="mt-2 text-slate-300">Access your profile after sign in.</p>
-        <div class="mt-6 flex flex-col gap-3 sm:flex-row">
-          <Link
-            href="/sign-in"
-            class="w-full rounded-lg bg-indigo-500 px-4 py-3 text-center text-sm text-white sm:w-auto"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/sign-up"
-            class="w-full rounded-lg border border-slate-700 px-4 py-3 text-center text-sm text-slate-200 sm:w-auto"
-          >
-            Sign up
-          </Link>
-        </div>
-      </div>
+      <Card data-e2e="signin-required" class="mx-auto max-w-xl">
+        <CardHeader>
+          <h1 class="text-lg font-semibold">Sign in required</h1>
+        </CardHeader>
+        <CardBody>
+          <Stack>
+            <p>Access your profile after sign in.</p>
+            <div class="flex flex-col gap-3 sm:flex-row">
+              <Link href="/sign-in" class={buttonClasses("primary", "md", "text-center")}>
+                Sign in
+              </Link>
+              <Link href="/sign-up" class={buttonClasses("outline", "md", "text-center")}>
+                Sign up
+              </Link>
+            </div>
+          </Stack>
+        </CardBody>
+      </Card>
     )
   }
 
   if (session.isMfaRequired) {
     return (
-      <div class="mx-auto max-w-xl rounded-2xl border border-slate-800 bg-slate-900 p-6 sm:p-8">
-        <h2 class="text-xl font-semibold">Finish MFA</h2>
-        <p class="mt-2 text-slate-300">Verify OTP to access profile.</p>
-        <div class="mt-6">
-          <Link href="/totp" class="text-indigo-400 hover:text-indigo-300">Go to OTP</Link>
-        </div>
-      </div>
+      <Card class="mx-auto max-w-xl">
+        <CardHeader>
+          <h1 class="text-lg font-semibold">Finish MFA</h1>
+        </CardHeader>
+        <CardBody>
+          <Stack>
+            <p>Verify OTP to access profile.</p>
+            <Link href="/totp" class="link">Go to OTP</Link>
+          </Stack>
+        </CardBody>
+      </Card>
     )
   }
 
   const submitProfile = async (event: Event) => {
     event.preventDefault()
     setProfileError(null)
-    setProfileSaved(false)
     setBusyProfile(true)
     const result = await profileUpdate(firstName, lastName)
     setBusyProfile(false)
@@ -112,7 +120,7 @@ export function ProfileView() {
       setProfileError(result.error || "Update failed")
       return
     }
-    setProfileSaved(true)
+    toasts.success({ title: "Saved", body: "Your profile was updated." })
   }
 
   const submitPassword = async (event: Event) => {
@@ -171,7 +179,7 @@ export function ProfileView() {
       const registration = await navigator.serviceWorker.ready
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(pushPublicKey) as unknown as BufferSource,
+        applicationServerKey: decodeBase64Url(pushPublicKey),
       })
       const deviceId = crypto.randomUUID()
       const result = await apiFetch<PushSubscribeResponse>("/api/push", {
@@ -203,237 +211,210 @@ export function ProfileView() {
   }
 
   return (
-    <div class="space-y-6">
-      <section class="rounded-2xl border border-slate-800 bg-slate-900 p-6 sm:p-8">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 class="text-xl font-semibold">Profile</h2>
-          <span data-e2e="ws-status" class="text-xs text-slate-400">WS: {session.wsStatus}</span>
-        </div>
-        <form class="mt-6 space-y-4" onSubmit={submitProfile}>
-          <label class="block text-sm">
-            <span class="text-slate-300">First name</span>
-            <input
-              data-e2e="profile-first-name"
-              class="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-base text-slate-100"
-              value={firstName}
-              onInput={(e) => setFirstName((e.target as HTMLInputElement).value)}
-              required
-            />
-          </label>
-          <label class="block text-sm">
-            <span class="text-slate-300">Last name</span>
-            <input
-              data-e2e="profile-last-name"
-              class="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-base text-slate-100"
-              value={lastName}
-              onInput={(e) => setLastName((e.target as HTMLInputElement).value)}
-              required
-            />
-          </label>
-          {profileError
-            ? (
-              <div class="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-                {profileError}
+    <Stack gap="lg">
+      <Card>
+        <CardHeader>
+          <h1 class="text-lg font-semibold">Profile</h1>
+          <span data-e2e="ws-status" class="text-xs text-muted">WS: {session.wsStatus}</span>
+        </CardHeader>
+        <CardBody>
+          <form onSubmit={submitProfile}>
+            <Stack>
+              <Field id="profile-first-name" label="First name" required>
+                <Input
+                  data-e2e="profile-first-name"
+                  autocomplete="given-name"
+                  value={firstName}
+                  onInput={(e) => setFirstName(e.currentTarget.value)}
+                  required
+                />
+              </Field>
+              <Field id="profile-last-name" label="Last name" required>
+                <Input
+                  data-e2e="profile-last-name"
+                  autocomplete="family-name"
+                  value={lastName}
+                  onInput={(e) => setLastName(e.currentTarget.value)}
+                  required
+                />
+              </Field>
+              <ErrorState message={profileError} />
+              <div>
+                <Button
+                  type="submit"
+                  data-e2e="profile-save"
+                  busy={busyProfile}
+                  busyLabel="Saving..."
+                >
+                  Save
+                </Button>
               </div>
-            )
-            : null}
-          {profileSaved
-            ? (
-              <div
-                data-e2e="profile-saved"
-                class="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200"
-              >
-                Saved
-              </div>
-            )
-            : null}
-          <button
-            type="submit"
-            data-e2e="profile-save"
-            class="w-full rounded-lg bg-indigo-500 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60 sm:w-auto"
-            disabled={busyProfile}
-          >
-            {busyProfile ? "Saving..." : "Save"}
-          </button>
-        </form>
-      </section>
-
-      <section class="grid gap-6 lg:grid-cols-2">
-        <div class="rounded-2xl border border-slate-800 bg-slate-900 p-6 sm:p-8">
-          <h3 class="text-lg font-semibold">Change password</h3>
-          <form class="mt-6 space-y-4" onSubmit={submitPassword}>
-            <label class="block text-sm">
-              <span class="text-slate-300">Current password</span>
-              <input
-                data-e2e="password-current"
-                type="password"
-                class="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-base text-slate-100"
-                value={currentPassword}
-                onInput={(e) => setCurrentPassword((e.target as HTMLInputElement).value)}
-                required
-              />
-            </label>
-            <label class="block text-sm">
-              <span class="text-slate-300">New password</span>
-              <input
-                data-e2e="password-new"
-                type="password"
-                class="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-base text-slate-100"
-                value={newPassword}
-                onInput={(e) => setNewPassword((e.target as HTMLInputElement).value)}
-                required
-              />
-            </label>
-            {passwordError
-              ? (
-                <div class="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-                  {passwordError}
-                </div>
-              )
-              : null}
-            <button
-              type="submit"
-              data-e2e="password-save"
-              class="w-full rounded-lg bg-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-white disabled:opacity-60 sm:w-auto"
-              disabled={busyPassword}
-            >
-              {busyPassword ? "Updating..." : "Update password"}
-            </button>
+            </Stack>
           </form>
-        </div>
-        <div class="rounded-2xl border border-slate-800 bg-slate-900 p-6 sm:p-8">
-          <h3 class="text-lg font-semibold">Two-factor auth</h3>
-          <p class="mt-2 text-sm text-slate-300">
-            Use an authenticator app.
-          </p>
-          <div class="mt-4 space-y-4">
-            {!totpQr
-              ? (
-                <button
-                  type="button"
-                  data-e2e="totp-start"
-                  class="w-full rounded-lg border border-slate-700 px-4 py-3 text-sm text-slate-100 hover:border-slate-500 disabled:opacity-60 sm:w-auto"
-                  onClick={startTotp}
+        </CardBody>
+      </Card>
+
+      <Grid gap="lg" minColumnWidth="lg">
+        <Card>
+          <CardHeader>
+            <h2 class="text-lg font-semibold">Change password</h2>
+          </CardHeader>
+          <CardBody>
+            <form onSubmit={submitPassword}>
+              <Stack>
+                <Field id="password-current" label="Current password" required>
+                  <Input
+                    data-e2e="password-current"
+                    type="password"
+                    autocomplete="current-password"
+                    value={currentPassword}
+                    onInput={(e) => setCurrentPassword(e.currentTarget.value)}
+                    required
+                  />
+                </Field>
+                <Field id="password-new" label="New password" required>
+                  <Input
+                    data-e2e="password-new"
+                    type="password"
+                    autocomplete="new-password"
+                    value={newPassword}
+                    onInput={(e) => setNewPassword(e.currentTarget.value)}
+                    required
+                  />
+                </Field>
+                <ErrorState message={passwordError} />
+                <div>
+                  <Button
+                    type="submit"
+                    variant="secondary"
+                    data-e2e="password-save"
+                    busy={busyPassword}
+                    busyLabel="Updating..."
+                  >
+                    Update password
+                  </Button>
+                </div>
+              </Stack>
+            </form>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardHeader>
+            <h2 class="text-lg font-semibold">Two-factor auth</h2>
+          </CardHeader>
+          <CardBody>
+            <Stack>
+              <p class="text-sm">Use an authenticator app.</p>
+              {!totpQr
+                ? (
+                  <div>
+                    <Button
+                      variant="outline"
+                      data-e2e="totp-start"
+                      onClick={startTotp}
+                      busy={totpBusy}
+                      busyLabel="Preparing..."
+                    >
+                      Enable 2FA
+                    </Button>
+                  </div>
+                )
+                : (
+                  <Stack>
+                    {totpQrSrc
+                      ? (
+                        <div class="max-w-full overflow-auto rounded-primary border border-control bg-white p-4">
+                          <img src={totpQrSrc} alt="TOTP QR code" class="mx-auto" />
+                        </div>
+                      )
+                      : null}
+                    <div class="text-xs text-muted">Secret: {totpSecret}</div>
+                    <Field id="totp-connect-otp" label="Code from your app" required>
+                      <Input
+                        data-e2e="totp-connect-otp"
+                        inputMode="numeric"
+                        autocomplete="one-time-code"
+                        placeholder="Enter 6-digit code"
+                        value={totpOtp}
+                        onInput={(e) => setTotpOtp(e.currentTarget.value)}
+                      />
+                    </Field>
+                    <div>
+                      <Button
+                        data-e2e="totp-connect-finish"
+                        onClick={finishTotp}
+                        busy={totpBusy}
+                        busyLabel="Enabling..."
+                      >
+                        Finish enable
+                      </Button>
+                    </div>
+                  </Stack>
+                )}
+              <div>
+                <Button
+                  variant="danger"
+                  data-e2e="totp-disable"
+                  onClick={disableTotp}
                   disabled={totpBusy}
                 >
-                  {totpBusy ? "Preparing..." : "Enable 2FA"}
-                </button>
-              )
-              : (
-                <div class="space-y-4">
-                  {totpQrSrc
-                    ? (
-                      <div class="max-w-full overflow-auto rounded-lg border border-slate-700 bg-white p-4">
-                        <img src={totpQrSrc} alt="TOTP QR code" class="mx-auto" />
-                      </div>
-                    )
-                    : null}
-                  <div class="text-xs text-slate-400">Secret: {totpSecret}</div>
-                  <input
-                    data-e2e="totp-connect-otp"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-3 text-base text-slate-100"
-                    placeholder="Enter 6-digit code"
-                    value={totpOtp}
-                    onInput={(e) => setTotpOtp((e.target as HTMLInputElement).value)}
-                  />
-                  <button
-                    type="button"
-                    data-e2e="totp-connect-finish"
-                    class="w-full rounded-lg bg-indigo-500 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60 sm:w-auto"
-                    onClick={finishTotp}
-                    disabled={totpBusy}
-                  >
-                    {totpBusy ? "Enabling..." : "Finish enable"}
-                  </button>
-                </div>
-              )}
-            <button
-              type="button"
-              data-e2e="totp-disable"
-              class="w-full rounded-lg border border-rose-500/50 px-4 py-3 text-sm text-rose-200 hover:border-rose-400 disabled:opacity-60 sm:w-auto"
-              onClick={disableTotp}
-              disabled={totpBusy}
-            >
-              Disable 2FA
-            </button>
-          </div>
-        </div>
-      </section>
+                  Disable 2FA
+                </Button>
+              </div>
+            </Stack>
+          </CardBody>
+        </Card>
+      </Grid>
 
-      <section class="rounded-2xl border border-slate-800 bg-slate-900 p-6 sm:p-8">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h3 class="text-lg font-semibold">Push devices</h3>
-          <button
-            type="button"
+      <Card>
+        <CardHeader>
+          <h2 class="text-lg font-semibold">Push devices</h2>
+          <Button
             data-e2e="push-register"
-            class="w-full rounded-lg bg-indigo-500 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-60 sm:w-auto"
             onClick={registerPush}
-            disabled={pushBusy}
+            busy={pushBusy}
+            busyLabel="Working..."
           >
-            {pushBusy ? "Working..." : "Add device"}
-          </button>
-        </div>
-        {pushError
-          ? (
-            <div class="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-              {pushError}
-            </div>
-          )
-          : null}
-        <div class="mt-4 space-y-3">
-          {pushDevices.length === 0
-            ? <div class="text-sm text-slate-400">No devices registered.</div>
-            : (
+            Add device
+          </Button>
+        </CardHeader>
+        <CardBody>
+          <Stack>
+            <ErrorState message={pushError} />
+            {pushDevices.length === 0 ? <EmptyState title="No devices registered." /> : (
               pushDevices.map((device) => (
                 <div
                   key={device.id}
-                  class="flex flex-col gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                  class="flex flex-col gap-2 rounded-primary border border-subtle px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
                   data-e2e={`push-device-${device.deviceId}`}
                 >
-                  <div class="text-slate-300">
+                  <div>
                     <div class="font-medium">Device {device.deviceId.slice(0, 8)}</div>
-                    <div class="text-xs text-slate-500">
+                    <div class="text-xs text-muted">
                       {new Date(device.createdAt).toLocaleString()}
                     </div>
                   </div>
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
+                    size="sm"
                     data-e2e={`push-remove-${device.deviceId}`}
-                    class="text-xs text-rose-300 hover:text-rose-200"
                     onClick={() => removePush(device.deviceId)}
                     disabled={pushBusy}
                   >
                     Remove
-                  </button>
+                  </Button>
                 </div>
               ))
             )}
-        </div>
-      </section>
-    </div>
+          </Stack>
+        </CardBody>
+      </Card>
+    </Stack>
   )
 }
 
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4)
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/")
-  const rawData = globalThis.atob(base64)
-  const output = new Uint8Array(rawData.length)
-  for (let i = 0; i < rawData.length; i += 1) {
-    output[i] = rawData.charCodeAt(i)
-  }
-  return output
-}
-
 function svgToDataUrl(svg: string): string {
-  const bytes = new TextEncoder().encode(svg)
-  let binary = ""
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte)
-  }
-  return `data:image/svg+xml;base64,${btoa(binary)}`
+  return `data:image/svg+xml;base64,${encodeBase64(new TextEncoder().encode(svg))}`
 }
 
 function subscriptionToPayload(

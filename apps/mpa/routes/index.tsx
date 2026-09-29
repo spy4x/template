@@ -1,4 +1,5 @@
 import { Head } from "fresh/runtime"
+import { SEOHead } from "@spy4x/preact-system/seo-head"
 import { define } from "../utils.ts"
 
 const title = "Deno Platform Template"
@@ -10,9 +11,7 @@ export default define.page(function Home(ctx) {
   return (
     <>
       <Head>
-        <title>{title}</title>
-        <meta name="description" content={description} />
-        <link rel="canonical" href={canonicalUrl} />
+        <SEOHead title={title} description={description} canonical={canonicalUrl} />
       </Head>
       <main>
         <h1>{title}</h1>

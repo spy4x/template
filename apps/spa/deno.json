@@ -7,7 +7,6 @@
   "imports": {
     "@deno/vite-plugin": "npm:@deno/vite-plugin@1.0.6",
     "@preact/preset-vite": "npm:@preact/preset-vite@2.10.2",
-    "@tailwindcss/forms": "npm:@tailwindcss/forms@0.5.10",
     "@tailwindcss/vite": "npm:@tailwindcss/vite@4.1.12",
     "tailwindcss": "npm:tailwindcss@4.1.12",
     "tailwindcss/": "npm:/tailwindcss@4.1.12/",
