@@ -106,12 +106,12 @@ export function AuthView({ screen }: { screen: AuthScreen }) {
           onSignUp={({ login, password }: AuthCredentials) =>
             attempt(() => signUp(login, password))}
           onOneTimeCode={(code) => attempt(() => checkTotp(code))}
+          footer={screen === "one-time-code" && (
+            <p class="text-sm">
+              Need help? <Link href="/sign-in" class="link">Back to sign in</Link>
+            </p>
+          )}
         />
-        {screen === "one-time-code" && (
-          <p class="mt-4 text-sm">
-            Need help? <Link href="/sign-in" class="link">Back to sign in</Link>
-          </p>
-        )}
       </CardBody>
     </Card>
   )
