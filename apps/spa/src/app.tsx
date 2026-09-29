@@ -2,7 +2,6 @@ import "./app.css"
 import { useEffect, useState } from "preact/hooks"
 import { SWUpdater } from "@spy4x/preact-system/sw-updater"
 import { LoadingSpinner } from "@spy4x/preact-ui/loading-spinner"
-import { Page } from "@spy4x/preact-ui/layout"
 import { Toastr } from "@spy4x/preact-ui/toastr"
 import { Route, Switch } from "wouter-preact"
 import { sessionState } from "./state/session.ts"
@@ -63,14 +62,14 @@ export function App() {
     <>
       {!ready || !sessionState.value.isReady
         ? (
-          <Page as="main" class="py-8">
-            <LoadingSpinner label="Loading..." size="lg" />
-          </Page>
+          <main>
+            <LoadingSpinner size="lg" label="Loading..." class="min-h-dvh bg-canvas" />
+          </main>
         )
         : <Frame />}
       <Toastr
         toasts={toasts.list.value}
-        onDismiss={(id) => toasts.remove(String(id))}
+        onDismiss={toasts.remove}
         dataE2E="toasts"
       />
       <SWUpdater />

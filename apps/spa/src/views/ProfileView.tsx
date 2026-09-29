@@ -120,7 +120,7 @@ export function ProfileView() {
       setProfileError(result.error || "Update failed")
       return
     }
-    toasts.success({ title: "Saved", body: "Your profile was updated." })
+    toasts.success({ title: "Saved", body: "Your profile was updated.", dataE2E: "profile-saved" })
   }
 
   const submitPassword = async (event: Event) => {
@@ -256,9 +256,7 @@ export function ProfileView() {
 
       <Grid gap="lg" minColumnWidth="lg">
         <Card>
-          <CardHeader>
-            <h2 class="text-lg font-semibold">Change password</h2>
-          </CardHeader>
+          <CardHeader title="Change password" headingLevel={2} />
           <CardBody>
             <form onSubmit={submitPassword}>
               <Stack>
@@ -299,9 +297,7 @@ export function ProfileView() {
           </CardBody>
         </Card>
         <Card>
-          <CardHeader>
-            <h2 class="text-lg font-semibold">Two-factor auth</h2>
-          </CardHeader>
+          <CardHeader title="Two-factor auth" headingLevel={2} />
           <CardBody>
             <Stack>
               <p class="text-sm">Use an authenticator app.</p>
@@ -367,17 +363,20 @@ export function ProfileView() {
       </Grid>
 
       <Card>
-        <CardHeader>
-          <h2 class="text-lg font-semibold">Push devices</h2>
-          <Button
-            data-e2e="push-register"
-            onClick={registerPush}
-            busy={pushBusy}
-            busyLabel="Working..."
-          >
-            Add device
-          </Button>
-        </CardHeader>
+        <CardHeader
+          title="Push devices"
+          headingLevel={2}
+          action={
+            <Button
+              data-e2e="push-register"
+              onClick={registerPush}
+              busy={pushBusy}
+              busyLabel="Working..."
+            >
+              Add device
+            </Button>
+          }
+        />
         <CardBody>
           <Stack>
             <ErrorState message={pushError} />

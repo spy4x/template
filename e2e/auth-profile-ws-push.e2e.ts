@@ -62,7 +62,7 @@ test.describe("auth profile ws push flow", () => {
       await page.locator("[data-e2e=profile-first-name]").fill(firstName)
       await page.locator("[data-e2e=profile-last-name]").fill(lastName)
       await page.locator("[data-e2e=profile-save]").click()
-      await page.locator("[data-e2e=toasts]").getByText("Saved", { exact: true }).waitFor()
+      await page.locator("[data-e2e=profile-saved]").getByText("Saved", { exact: true }).waitFor()
 
       await page.locator("[data-e2e=shell-user-menu-button]").click()
       await page.getByRole("menuitem", { name: "Sign out" }).click()
