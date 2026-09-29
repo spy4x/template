@@ -364,6 +364,25 @@ describe("auth routes rate-limit", () => {
     })
   }
 
+  for (const route of [...anonymousRoutes, ...sessionRoutes]) {
+    it(`spends no budget on a refused cross-site ${route.method} ${route.path}`, async () => {
+      const { app, calls } = buildApp(anonymousRoutes.includes(route) ? null : undefined, {
+        rateLimits: createAuthRateLimits(tightLimits),
+        succeed: false,
+      })
+      const headers = anonymousRoutes.includes(route)
+        ? sameOriginWithoutCookieHeaders
+        : sameOriginHeaders
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await send(app, route, crossSiteHeaders)
+      }
+      const sameOrigin = await send(app, route, headers)
+
+      expect(sameOrigin.status).not.toBe(429)
+      expect(calls).toEqual([route.operation])
+    })
+  }
+
   it("answers the 3rd GET /auth/me in one window with 429", async () => {
     const { app } = buildApp(undefined, { rateLimits: createAuthRateLimits(tightLimits) })
     const statuses = []
