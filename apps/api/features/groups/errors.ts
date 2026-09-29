@@ -1,6 +1,7 @@
 import type { Context } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { GroupError, GroupErrorCode } from "@domain/groups"
+import { AccessError } from "@domain/identity"
 import { APIContext } from "../../_types.ts"
 
 export type GroupFeatureErrorCode =
@@ -41,7 +42,8 @@ const ERROR_DEFINITIONS: Record<GroupFeatureErrorCode, ErrorDefinition> = {
 }
 
 export function groupErrorResponse(c: Context<APIContext>, error: unknown): Response {
-  const code = error instanceof GroupFeatureError || error instanceof GroupError
+  const code = error instanceof GroupFeatureError || error instanceof GroupError ||
+      error instanceof AccessError
     ? error.code
     : "INTERNAL_ERROR"
   const definition = ERROR_DEFINITIONS[code]

@@ -1,8 +1,8 @@
 import { Command } from "@spy4x/platform/cqrs"
 import { RequestInfo } from "@spy4x/platform/request-info"
-import { User } from "@domain/identity"
+import { type Actor, User } from "@domain/identity"
 export interface UserProfileUpdatePayload {
-  userId: number
+  actor: Actor
   firstName: string
   lastName: string
   request: RequestInfo

@@ -69,6 +69,17 @@ ADR 002 is recent and reverses part of ADR 001. In short:
   synchronous is what makes it a distinct reference architecture.
 - Both are thin adapters over **one set of CQRS handlers**. A transport parses,
   authenticates and dispatches; it holds no business rule.
+- **Session strength is checked on the buses, not in a transport.** Every
+  command and query carries an `Actor` (`libs/domain/identity`), which a
+  transport builds from its session (`apps/api/cqrs/actor.ts`). The session gate
+  (`apps/api/cqrs/session-gate.ts`) is attached to both bus singletons where they
+  are built (`apps/api/services/commandBus.ts` and `queryBus.ts`), and refuses a
+  message whose session still owes a second factor. It denies by default: a
+  message without an actor is refused unless it is listed as anonymous in
+  `session-gate.ts`. A new transport gets the check by dispatching
+  through the buses; it must not add its own. An `Actor` is a snapshot of the
+  session: a long-lived transport such as the WebSocket must re-validate the
+  session instead of trusting an actor it built at upgrade.
 - **Push with sequence, pull as the authority.** A pushed change carries the
   sequence it was committed at. The client applies it only if that sequence is
   contiguous with its cursor; on any gap it discards the payload and pulls.

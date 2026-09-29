@@ -1,5 +1,6 @@
 import { type } from "arktype"
 import { BaseModelSchema, dateSchema } from "@spy4x/platform/model"
+import type { SecondFactorStatus } from "@spy4x/server/sign-in"
 
 // Not in @spy4x/platform/model: too template-specific (a user's name length limit) to belong in a
 // general-purpose package. Moved here from the deleted libs/platform/types/+index.ts.
@@ -190,4 +191,37 @@ export type ApiIsSuccessResponse = {
 
 export type PushPublicKeyResponse = {
   publicKey: string
+}
+
+/**
+ * Who is acting, in a form no transport owns.
+ *
+ * REST builds this from the session cookie on each request; a WebSocket transport builds it once
+ * at upgrade and reuses it per message. Every user-facing CQRS message carries one, and the session
+ * gate on the buses reads it, so one check covers every transport.
+ *
+ * An actor is a snapshot of the session when it was built. A long-lived transport such as a
+ * WebSocket must re-validate the session (sign-out, expiry, a second factor completed or removed)
+ * rather than keep trusting an actor it built at upgrade.
+ *
+ * `sessionSecondFactor` holds a `SecondFactorStatus` from `@spy4x/server/sign-in`. It is typed
+ * with a type-only import so this module, which the SPA also imports, pulls in no server code.
+ */
+export interface Actor {
+  userId: number
+  userMfa: UserMFAStatus
+  sessionSecondFactor: SecondFactorStatus
+}
+
+export type AccessErrorCode = "AUTH_REQUIRED" | "MFA_REQUIRED"
+
+/** Thrown when a dispatch is refused for who is acting; `code` maps to an HTTP status. */
+export class AccessError extends Error {
+  constructor(
+    public readonly code: AccessErrorCode,
+    message: string,
+  ) {
+    super(message)
+    this.name = "AccessError"
+  }
 }

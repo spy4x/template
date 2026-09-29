@@ -9,7 +9,9 @@ import {
   GroupRole,
 } from "@domain/groups"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
-import { UserMFAStatus } from "@domain/identity"
+import { AccessError, UserMFAStatus } from "@domain/identity"
+import { CommandBus } from "@spy4x/platform/cqrs"
+import { createSessionGate } from "../cqrs/session-gate.ts"
 import type { APIContext } from "../_types.ts"
 import { createGroupsRoute, GroupsRouteDependencies } from "./groups.ts"
 import { buildAuthData } from "../_testing/fake-auth.ts"
@@ -82,7 +84,11 @@ describe("groups route", () => {
 
     expect(response.status).toBe(201)
     expect(deps.createCommand?.data).toEqual({
-      userId: 7,
+      actor: {
+        userId: 7,
+        userMfa: UserMFAStatus.NOT_CONFIGURED,
+        sessionSecondFactor: SecondFactorStatus.NotRequired,
+      },
       id,
       kind: GroupKind.SHARED,
       name: "Team",
@@ -116,7 +122,7 @@ describe("groups route", () => {
     const response = await app.request("http://local/groups")
 
     expect(response.status).toBe(200)
-    expect(deps.listQuery?.data.userId).toBe(19)
+    expect(deps.listQuery?.data.actor.userId).toBe(19)
     expect(deps.listQuery?.data.page).toEqual({ limit: 50, after: undefined })
   })
 
@@ -149,7 +155,7 @@ describe("groups route", () => {
     expect(deps.listQuery).toBe(null)
   })
 
-  it("requires completed configured MFA", async () => {
+  it("passes the session's second-factor state on rather than deciding here", async () => {
     const deps = dependencies()
     const app = buildApp(
       deps,
@@ -160,6 +166,22 @@ describe("groups route", () => {
     )
     const response = await app.request("http://local/groups")
 
+    // The route no longer rejects: session strength is checked by the session gate on the buses,
+    // so a WebSocket transport is covered by the same check.
+    expect(response.status).toBe(200)
+    expect(deps.listQuery?.data.actor).toEqual({
+      userId: 1,
+      userMfa: UserMFAStatus.CONFIGURED,
+      sessionSecondFactor: SecondFactorStatus.NotRequired,
+    })
+  })
+
+  it("maps an access error from the dispatch to a 401 envelope", async () => {
+    const deps = dependencies()
+    deps.list = () => Promise.reject(new AccessError("MFA_REQUIRED", "Second factor missing"))
+    const app = buildApp(deps)
+    const response = await app.request("http://local/groups")
+
     expect(response.status).toBe(401)
     expect(await response.json()).toEqual({
       error: {
@@ -167,6 +189,54 @@ describe("groups route", () => {
         message: "Complete MFA to access groups",
         requestId: "req-groups-1",
       },
+    })
+  })
+
+  describe("a session that still owes a second factor", () => {
+    /** Dispatches through a real bus carrying the session gate, as the app does. */
+    function gatedDependencies() {
+      const deps = dependencies()
+      const bus = new CommandBus()
+      bus.use(createSessionGate([]))
+      bus.register(GroupCreateCommand, (command) => {
+        deps.createCommand = command
+        return Promise.reject(new Error("the gate should have stopped this command"))
+      })
+      deps.create = (command) => bus.execute(command)
+      return deps
+    }
+    const pendingAuth = () =>
+      buildAuthData({
+        user: { mfa: UserMFAStatus.CONFIGURED },
+        session: { secondFactor: SecondFactorStatus.Pending },
+      })
+
+    it("gets 400 for a malformed body, because the route validates before it dispatches", async () => {
+      const deps = gatedDependencies()
+      const app = buildApp(deps, pendingAuth())
+      const response = await app.request("http://local/groups", {
+        method: "POST",
+        headers: mutationHeaders,
+        body: JSON.stringify({ id: "not-a-uuid", kind: GroupKind.SHARED, name: "Team" }),
+      })
+
+      expect(response.status).toBe(400)
+      expect((await response.json()).error.code).toBe("INVALID_REQUEST")
+      expect(deps.createCommand).toBe(null)
+    })
+
+    it("gets 401 MFA_REQUIRED for a valid body, from the gate on dispatch", async () => {
+      const deps = gatedDependencies()
+      const app = buildApp(deps, pendingAuth())
+      const response = await app.request("http://local/groups", {
+        method: "POST",
+        headers: mutationHeaders,
+        body: JSON.stringify({ id, kind: GroupKind.SHARED, name: "Team" }),
+      })
+
+      expect(response.status).toBe(401)
+      expect((await response.json()).error.code).toBe("MFA_REQUIRED")
+      expect(deps.createCommand).toBe(null)
     })
   })
 
