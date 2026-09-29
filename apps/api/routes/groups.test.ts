@@ -13,6 +13,7 @@ import { AccessError, UserMFAStatus } from "@domain/identity"
 import { CommandBus } from "@spy4x/platform/cqrs"
 import { createSessionGate } from "../cqrs/session-gate.ts"
 import type { APIContext } from "../_types.ts"
+import { oversizedJson } from "../_testing/json-bodies.ts"
 import { createGroupsRoute, GroupsRouteDependencies } from "./groups.ts"
 import { buildAuthData } from "../_testing/fake-auth.ts"
 
@@ -409,5 +410,26 @@ describe("groups route same-origin guard", () => {
         expect(deps.createCommand).toBe(null)
       }
     })
+  })
+})
+
+describe("groups route caps the JSON body", () => {
+  it("answers an oversized body with the INVALID_REQUEST envelope", async () => {
+    const deps = dependencies()
+    const response = await buildApp(deps).request("http://local/groups", {
+      method: "POST",
+      headers: mutationHeaders,
+      body: oversizedJson({ id, kind: GroupKind.SHARED, name: "Team" }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Request is invalid",
+        requestId: "req-groups-1",
+      },
+    })
+    expect(deps.createCommand).toBe(null)
   })
 })

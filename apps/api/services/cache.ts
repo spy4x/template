@@ -4,6 +4,7 @@ import { AuthAudit, User, UserPushToken } from "@domain/identity"
 import { config } from "../services/config.ts"
 
 import { buildMethods as buildMethodsBase } from "@spy4x/platform/cache"
+import { ONE_MONTH_IN_SECONDS } from "@spy4x/platform/universal/time-constants"
 import { createCacheService } from "./cache-service.ts"
 
 // `RedisKvStore` requires a non-empty key prefix (the template's own kv store did not scope its
@@ -15,16 +16,7 @@ console.log(`✅ Connected to KV`) // kept from the old client's connect log
 const cacheService = createCacheService(kv)
 
 function buildMethods<T>(prefix: string, schema?: Type) {
-  return buildMethodsBase<T>(cacheService, prefix, CacheTTL.month, schema)
-}
-
-export enum CacheTTL {
-  threeMin = 180,
-  fiveMin = 300,
-  oneHour = 3600,
-  day = 86400,
-  week = 604800,
-  month = 2592000,
+  return buildMethodsBase<T>(cacheService, prefix, ONE_MONTH_IN_SECONDS, schema)
 }
 
 export class PublicAPICache {

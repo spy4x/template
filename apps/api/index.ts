@@ -11,12 +11,14 @@ import { eventBus } from "@api/services/eventBus.ts"
 import { webPushService } from "@api/services/webPush.ts"
 import { APIContext } from "./_types.ts"
 import { randomBase64Url } from "@spy4x/platform/tokens"
+import { ONE_HOUR_IN_MILLISECONDS } from "@spy4x/platform/universal/time-constants"
 import { createAuthRoute } from "./routes/auth.ts"
 import { createPushNotificationRoute } from "./routes/pushNotification.ts"
 import { createUsersRoute } from "./routes/users.ts"
 import { wsRoute } from "./routes/ws.ts"
 import { createGroupsRoute } from "./routes/groups.ts"
 import { createMutationGuards } from "./middlewares/mutation-guards.ts"
+import { createAuthRateLimits } from "./middlewares/auth-rate-limits.ts"
 import { commandBus } from "./services/commandBus.ts"
 import { queryBus } from "./services/queryBus.ts"
 import { GroupListCursorCodec } from "@server/groups/group-list-cursor.ts"
@@ -44,7 +46,8 @@ const expectedOrigin = new URL(config.webAppUrl).origin
 const mutationGuards = createMutationGuards(config.webAppUrl)
 const emit = (event: Parameters<typeof eventBus.emit>[0]) => eventBus.emit(event)
 // has some public routes and some more protected
-app.route("/auth", createAuthRoute({ signIn, emit, mutationGuards }))
+const rateLimits = createAuthRateLimits(config.rateLimiter)
+app.route("/auth", createAuthRoute({ signIn, emit, mutationGuards, rateLimits }))
 app.route(
   "/users",
   createUsersRoute({
@@ -77,7 +80,7 @@ if (config.isDev) {
 // TODO: move this to a better place
 // This is a temporary solution to expire sessions every hour
 // This should be done in a more efficient way, like using a cron job or similar
-const SESSION_EXPIRE_INTERVAL = 60 * 60 * 1000
+const SESSION_EXPIRE_INTERVAL = ONE_HOUR_IN_MILLISECONDS
 setInterval(async () => {
   await signIn.expireSessions()
 }, SESSION_EXPIRE_INTERVAL)

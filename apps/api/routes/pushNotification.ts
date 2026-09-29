@@ -7,6 +7,7 @@ import { PushDevicesUpdatedEvent } from "@api/cqrs/events.ts"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
 import { pushSubscribeRequestSchema, pushUnsubscribeRequestSchema } from "@spy4x/platform/model"
 import { validate } from "@spy4x/validation"
+import { readApiJson } from "@api/services/json-body.ts"
 
 /** What the push routes call. `index.ts` passes the app's singletons; tests pass fakes. */
 export interface PushNotificationRouteDependencies {
@@ -33,7 +34,7 @@ export function createPushNotificationRoute(
     })
     .post(`/`, async (c) => {
       const userId = c.get("auth")!.user.id
-      const body = await c.req.json()
+      const body = await readApiJson(c)
       const validationResult = validate(pushSubscribeRequestSchema, body)
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
@@ -57,7 +58,7 @@ export function createPushNotificationRoute(
     })
     .delete("/", async (c) => {
       const userId = c.get("auth")!.user.id
-      const body = await c.req.json()
+      const body = await readApiJson(c)
       const validationResult = validate(pushUnsubscribeRequestSchema, body)
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)

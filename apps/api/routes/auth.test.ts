@@ -13,36 +13,51 @@ import {
   testMutationGuards,
   testSessionGuards,
 } from "../_testing/mutation-requests.ts"
+import { MALFORMED_JSON, oversizedJson } from "../_testing/json-bodies.ts"
+import { type AuthRateLimits, createAuthRateLimits } from "../middlewares/auth-rate-limits.ts"
 import { createAuthRoute } from "./auth.ts"
 
-/** A sign-in whose operations only record that the route called them. */
-function fakeSignIn(calls: string[]): SignIn {
+/**
+ * A sign-in whose operations only record that the route called them. With `succeed: false`, every
+ * check of a password or a one-time code fails.
+ */
+function fakeSignIn(calls: string[], succeed = true): SignIn {
   const signedIn = (): Promise<SignedIn> => {
     const { user, session } = buildAuthData()
     return Promise.resolve({ user, session })
   }
   return {
     auth: testSessionGuards(),
-    signUp: () => (calls.push("signUp"), signedIn()),
-    signIn: () => (calls.push("signIn"), signedIn()),
+    signUp: () => (calls.push("signUp"), succeed ? signedIn() : Promise.resolve(null)),
+    signIn: () => (calls.push("signIn"), succeed ? signedIn() : Promise.resolve(null)),
     signOut: () => (calls.push("signOut"), Promise.resolve()),
     connectTotpStart: () => (
       calls.push("connectTotpStart"), Promise.resolve({ error: null, qrcode: "qr", secret: "s" })
     ),
-    connectTotpFinish: () => (calls.push("connectTotpFinish"), Promise.resolve(true)),
-    checkTotp: () => (calls.push("checkTotp"), Promise.resolve(true)),
+    connectTotpFinish: () => (calls.push("connectTotpFinish"), Promise.resolve(succeed)),
+    checkTotp: () => (calls.push("checkTotp"), Promise.resolve(succeed)),
     disconnectTotp: () => (calls.push("disconnectTotp"), Promise.resolve(true)),
-    changePassword: () => (calls.push("changePassword"), Promise.resolve(true)),
+    changePassword: () => (calls.push("changePassword"), Promise.resolve(succeed)),
     expireSessions: () => Promise.resolve(),
   }
 }
 
-function buildApp(auth: APIContext["Variables"]["auth"] = buildAuthData()) {
+/** Limits no test outside the rate-limit block reaches. */
+const generousLimits = { windowMs: 60_000, strictLimit: 1_000, limit: 1_000 }
+
+function buildApp(
+  auth: APIContext["Variables"]["auth"] = buildAuthData(),
+  { rateLimits = createAuthRateLimits(generousLimits), succeed = true }: {
+    rateLimits?: AuthRateLimits
+    succeed?: boolean
+  } = {},
+) {
   const calls: string[] = []
   const route = createAuthRoute({
-    signIn: fakeSignIn(calls),
+    signIn: fakeSignIn(calls, succeed),
     emit: () => {},
     mutationGuards: testMutationGuards,
+    rateLimits,
   })
   return { app: mountRoute("/auth", route, auth), calls }
 }
@@ -134,4 +149,160 @@ describe("auth routes behind a session", () => {
       expect(calls).toEqual([])
     })
   }
+})
+
+describe("auth routes cap the JSON body", () => {
+  const bodyRoutes = [...anonymousRoutes, ...sessionRoutes].filter((route) => route.body)
+  for (const route of bodyRoutes) {
+    const headers = anonymousRoutes.includes(route)
+      ? sameOriginWithoutCookieHeaders
+      : sameOriginHeaders
+    it(`answers an oversized body on ${route.method} ${route.path} with 413`, async () => {
+      const { app, calls } = buildApp(anonymousRoutes.includes(route) ? null : undefined)
+      const response = await app.request(`${API_URL}${route.path}`, {
+        method: route.method,
+        headers: { ...headers },
+        body: oversizedJson(route.body),
+      })
+
+      expect(response.status).toBe(413)
+      expect(calls).toEqual([])
+    })
+
+    it(`answers malformed JSON on ${route.method} ${route.path} with 400`, async () => {
+      const { app, calls } = buildApp(anonymousRoutes.includes(route) ? null : undefined)
+      const response = await app.request(`${API_URL}${route.path}`, {
+        method: route.method,
+        headers: { ...headers },
+        body: MALFORMED_JSON,
+      })
+
+      expect(response.status).toBe(400)
+      expect(calls).toEqual([])
+    })
+  }
+})
+
+describe("auth routes rate-limit", () => {
+  /** Three attempts per window on the strict limit, two on the normal one. */
+  const tightLimits = { windowMs: 60_000, strictLimit: 3, limit: 2 }
+
+  const strictByIpRoutes = anonymousRoutes.filter((route) => route.body)
+  const strictByUserRoutes = sessionRoutes.filter((route) => route.body)
+  const normalRoutes = [
+    ...anonymousRoutes.filter((route) => !route.body),
+    ...sessionRoutes.filter((route) => !route.body),
+  ]
+
+  for (const route of strictByIpRoutes) {
+    it(`answers the 4th failed ${route.path} from one IP with 429 and Retry-After`, async () => {
+      const { app, calls } = buildApp(null, {
+        rateLimits: createAuthRateLimits(tightLimits),
+        succeed: false,
+      })
+      const headers = { ...sameOriginWithoutCookieHeaders, "x-real-ip": "192.0.2.1" }
+      const responses = []
+      for (let attempt = 0; attempt < 4; attempt++) {
+        responses.push(await send(app, route, headers))
+      }
+
+      expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 429])
+      expect(Number(responses[3].headers.get("retry-after"))).toBeGreaterThan(0)
+      expect(calls).toEqual([route.operation, route.operation, route.operation])
+    })
+  }
+
+  it("gives another IP its own budget for password/check", async () => {
+    const { app } = buildApp(null, {
+      rateLimits: createAuthRateLimits(tightLimits),
+      succeed: false,
+    })
+    const route = strictByIpRoutes[0]
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await send(app, route, { ...sameOriginWithoutCookieHeaders, "x-real-ip": "192.0.2.1" })
+    }
+    const other = await send(app, route, {
+      ...sameOriginWithoutCookieHeaders,
+      "x-real-ip": "192.0.2.2",
+    })
+
+    expect(other.status).toBe(401)
+  })
+
+  it("keys password/check on X-Real-IP, not on a forged CF-Connecting-IP or X-Forwarded-For", async () => {
+    const { app } = buildApp(null, {
+      rateLimits: createAuthRateLimits(tightLimits),
+      succeed: false,
+    })
+    const route = strictByIpRoutes[0]
+    const statuses = []
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const forged = `198.51.100.${attempt + 1}`
+      const response = await send(app, route, {
+        ...sameOriginWithoutCookieHeaders,
+        "x-real-ip": "192.0.2.1",
+        "cf-connecting-ip": forged,
+        "x-forwarded-for": forged,
+      })
+      statuses.push(response.status)
+    }
+
+    expect(statuses).toEqual([401, 401, 401, 429])
+  })
+
+  for (const route of strictByUserRoutes) {
+    it(`answers the 4th failed ${route.path} from one user with 429, whatever the IP`, async () => {
+      const { app, calls } = buildApp(undefined, {
+        rateLimits: createAuthRateLimits(tightLimits),
+        succeed: false,
+      })
+      const statuses = []
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const headers = { ...sameOriginHeaders, "x-real-ip": `192.0.2.${attempt + 1}` }
+        statuses.push((await send(app, route, headers)).status)
+      }
+
+      expect(statuses.slice(3)).toEqual([429])
+      expect(statuses.slice(0, 3)).not.toContain(429)
+      expect(calls).toEqual([route.operation, route.operation, route.operation])
+    })
+  }
+
+  it("gives another user their own budget for totp/check", async () => {
+    const rateLimits = createAuthRateLimits(tightLimits)
+    const first = buildApp(buildAuthData({ user: { id: 1 } }), { rateLimits, succeed: false })
+    const second = buildApp(buildAuthData({ user: { id: 2 } }), { rateLimits, succeed: false })
+    const route = strictByUserRoutes[0]
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await send(first.app, route, sameOriginHeaders)
+    }
+    const other = await send(second.app, route, sameOriginHeaders)
+
+    expect(other.status).toBe(401)
+  })
+
+  for (const route of normalRoutes) {
+    it(`answers the 3rd ${route.method} ${route.path} in one window with 429`, async () => {
+      const { app, calls } = buildApp(undefined, { rateLimits: createAuthRateLimits(tightLimits) })
+      const statuses = []
+      for (let attempt = 0; attempt < 3; attempt++) {
+        statuses.push((await send(app, route, sameOriginHeaders)).status)
+      }
+
+      expect(statuses).toEqual([200, 200, 429])
+      expect(calls).toEqual([route.operation, route.operation])
+    })
+  }
+
+  it("answers the 3rd GET /auth/me in one window with 429", async () => {
+    const { app } = buildApp(undefined, { rateLimits: createAuthRateLimits(tightLimits) })
+    const statuses = []
+    for (let attempt = 0; attempt < 3; attempt++) {
+      statuses.push(
+        (await app.request(`${API_URL}/auth/me`, { headers: sameOriginHeaders })).status,
+      )
+    }
+
+    expect(statuses).toEqual([200, 200, 429])
+  })
 })
