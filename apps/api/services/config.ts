@@ -11,6 +11,8 @@ const envSchema = type({
   RATE_LIMITER_WINDOW_MS: "string.integer.parse",
   RATE_LIMITER_STRICT_LIMIT: "string.integer.parse",
   RATE_LIMITER_LIMIT: "string.integer.parse",
+  RATE_LIMITER_OTP_WINDOW_MS: "string.integer.parse",
+  RATE_LIMITER_OTP_LIMIT: "string.integer.parse",
   DOMAIN: "string > 0",
   KV_HOSTNAME: "string > 0",
   KV_PORT: "string.integer.parse",
@@ -37,6 +39,8 @@ export class Config {
     windowMs: env.RATE_LIMITER_WINDOW_MS,
     strictLimit: env.RATE_LIMITER_STRICT_LIMIT,
     limit: env.RATE_LIMITER_LIMIT,
+    otpWindowMs: env.RATE_LIMITER_OTP_WINDOW_MS,
+    otpLimit: env.RATE_LIMITER_OTP_LIMIT,
   }
 
   // Web App Configuration
