@@ -46,7 +46,12 @@ export function createAuthRoute(
       if (!authData) {
         return c.json({ error: "User not signed in" }, 401)
       }
-      return c.json(authData.user)
+      // 202, like `password/check`: the session still owes its second factor. A reloaded page
+      // learns that here, since it has no memory of the sign-in response.
+      return c.json(
+        authData.user,
+        authData.session.secondFactor === SecondFactorStatus.Pending ? 202 : 200,
+      )
     })
     .post(`password/check`, mutationGuards.anonymous, rateLimits.strictByIp, async (c) => {
       const body = await readApiJson(c)

@@ -16,6 +16,7 @@ export async function bootstrapSession(): Promise<void> {
   sessionState.value = {
     ...sessionState.value,
     user: me.data,
+    isMfaRequired: me.status === 202,
     isReady: true,
   }
 }

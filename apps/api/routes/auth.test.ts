@@ -2,6 +2,7 @@ import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import type { APIContext } from "../_types.ts"
 import type { SignedIn, SignIn } from "../services/sign-in.ts"
+import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { buildAuthData } from "../_testing/fake-auth.ts"
 import {
   API_URL,
@@ -382,6 +383,37 @@ describe("auth routes rate-limit", () => {
       expect(calls).toEqual([route.operation])
     })
   }
+
+  it("answers GET /auth/me with 202 while the session owes its second factor", async () => {
+    const { app } = buildApp(
+      buildAuthData({ session: { secondFactor: SecondFactorStatus.Pending } }),
+    )
+
+    const response = await app.request(`${API_URL}/auth/me`, { headers: sameOriginHeaders })
+
+    expect(response.status).toBe(202)
+    expect((await response.json()).id).toBe(1)
+  })
+
+  for (
+    const secondFactor of [SecondFactorStatus.NotRequired, SecondFactorStatus.Completed]
+  ) {
+    it(`answers GET /auth/me with 200 when the second factor is ${SecondFactorStatus[secondFactor]}`, async () => {
+      const { app } = buildApp(buildAuthData({ session: { secondFactor } }))
+
+      const response = await app.request(`${API_URL}/auth/me`, { headers: sameOriginHeaders })
+
+      expect(response.status).toBe(200)
+    })
+  }
+
+  it("answers GET /auth/me with 401 without a session", async () => {
+    const { app } = buildApp(null)
+
+    const response = await app.request(`${API_URL}/auth/me`, { headers: sameOriginHeaders })
+
+    expect(response.status).toBe(401)
+  })
 
   it("answers the 3rd GET /auth/me in one window with 429", async () => {
     const { app } = buildApp(undefined, { rateLimits: createAuthRateLimits(tightLimits) })
