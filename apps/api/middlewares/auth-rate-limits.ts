@@ -48,6 +48,10 @@ export interface AuthRateLimitSettings {
  *
  * The one-time-code limit is separate because a six-digit code is a small secret: one random guess
  * succeeds about once in 333,000 tries, so it needs far fewer attempts per day than a password.
+ * Every check counts, a correct code included: the ts-libs middleware cannot skip successful
+ * requests. So a user who signs in six times in one window gets 429, and anyone who has the
+ * password can spend the budget with wrong codes and keep the owner out of the code step. A lockout
+ * counter that counts failures only (#73) is the follow-up.
  *
  * Proxy assumption: the client IP comes from `X-Real-IP` because Traefik alone sits in front of the
  * API and overwrites that header on every request. The connection's own address, which
