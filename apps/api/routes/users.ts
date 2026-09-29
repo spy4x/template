@@ -4,10 +4,12 @@ import { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
 import type { SignIn } from "@api/services/sign-in.ts"
 import { validate } from "@spy4x/validation"
-import { userProfileBaseSchema } from "@domain/identity"
+import { AccessError, userProfileBaseSchema } from "@domain/identity"
 import { UserProfileGetQuery, UserProfileGetResult } from "@api/cqrs/queries.ts"
 import { UserProfileUpdateCommand, UserProfileUpdateResult } from "@api/cqrs/commands.ts"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
+import { NOT_AUTHENTICATED, SECOND_FACTOR_REQUIRED } from "@spy4x/server/sign-in"
+import type { ErrorHandler } from "hono"
 
 /** What the users routes call. `index.ts` passes the app's singletons; tests pass fakes. */
 export interface UsersRouteDependencies {
@@ -19,6 +21,7 @@ export interface UsersRouteDependencies {
 
 export function createUsersRoute(dependencies: UsersRouteDependencies): Hono<APIContext> {
   return new Hono<APIContext>()
+    .onError(accessErrorAs401)
     .use(dependencies.auth.isAuthenticated2FA)
     .use(dependencies.mutationGuards.signedIn)
     .get(`/me`, async (c) => {
@@ -47,4 +50,16 @@ export function createUsersRoute(dependencies: UsersRouteDependencies): Hono<API
       )
       return c.json({ user: result.user })
     })
+}
+
+/**
+ * A dispatch the session gate refuses answers 401 with the same body `isAuthenticated2FA` uses,
+ * rather than surfacing as a 500. Any other error goes on to the default handler.
+ */
+const accessErrorAs401: ErrorHandler<APIContext> = (error, c) => {
+  if (error instanceof AccessError) {
+    const message = error.code === "MFA_REQUIRED" ? SECOND_FACTOR_REQUIRED : NOT_AUTHENTICATED
+    return c.json({ error: message }, 401)
+  }
+  throw error
 }

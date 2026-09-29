@@ -12,13 +12,23 @@ import {
   testSessionGuards,
 } from "../_testing/mutation-requests.ts"
 import { createUsersRoute } from "./users.ts"
+import { AccessError } from "@domain/identity"
+import { SECOND_FACTOR_REQUIRED } from "@spy4x/server/sign-in"
 
-function buildApp(auth: APIContext["Variables"]["auth"] = buildAuthData()) {
+function buildApp(
+  auth: APIContext["Variables"]["auth"] = buildAuthData(),
+  getProfileError: Error | null = null,
+) {
   const calls: string[] = []
   const route = createUsersRoute({
     auth: testSessionGuards(),
     mutationGuards: testMutationGuards,
-    getProfile: () => (calls.push("getProfile"), Promise.resolve({ user: buildAuthData().user })),
+    getProfile: () => (
+      calls.push("getProfile"),
+        getProfileError
+          ? Promise.reject(getProfileError)
+          : Promise.resolve({ user: buildAuthData().user })
+    ),
     updateProfile: () => (
       calls.push("updateProfile"), Promise.resolve({ user: buildAuthData().user })
     ),
@@ -60,5 +70,23 @@ describe("users routes", () => {
 
     expect(response.status).toBe(401)
     expect(calls).toEqual([])
+  })
+
+  it("answers GET /users/me with 401 when the session gate refuses the query", async () => {
+    const { app } = buildApp(
+      buildAuthData(),
+      new AccessError("MFA_REQUIRED", "Second factor has not been completed for this session"),
+    )
+    const response = await app.request(`${API_URL}/users/me`)
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ error: SECOND_FACTOR_REQUIRED })
+  })
+
+  it("still answers GET /users/me with 500 for any other failure", async () => {
+    const { app } = buildApp(buildAuthData(), new Error("database down"))
+    const response = await app.request(`${API_URL}/users/me`)
+
+    expect(response.status).toBe(500)
   })
 })
