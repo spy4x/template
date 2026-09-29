@@ -6,6 +6,7 @@ import {
   OutboxProcessor,
   PostgresOutboxRepository,
 } from "@spy4x/server/outbox"
+import { shutdownSignal, ShutdownSignalError } from "@spy4x/platform/server/shutdown-signal"
 
 const sql = createSqlFromEnv(Deno.env.toObject(), {
   transform: postgres.camel,
@@ -20,19 +21,8 @@ if (!sql) {
   Deno.exit(1)
 }
 
-const signals: Deno.Signal[] = ["SIGINT", "SIGTERM"]
-const controller = new AbortController()
-
-const stop = () => {
-  for (const signal of signals) {
-    Deno.removeSignalListener(signal, stop)
-  }
-  controller.abort()
-}
-
-for (const signal of signals) {
-  Deno.addSignalListener(signal, stop)
-}
+// Aborts once, on the first SIGINT or SIGTERM, and removes both listeners itself.
+const signal = shutdownSignal()
 
 console.log("Worker started")
 
@@ -42,9 +32,9 @@ const processor = new OutboxProcessor(
 )
 
 try {
-  await processor.run(controller.signal)
+  await processor.run(signal)
 } finally {
-  stop()
   await sql.end({ timeout: 5 })
-  console.log("Worker stopped")
+  const reason = signal.reason instanceof ShutdownSignalError ? ` on ${signal.reason.signal}` : ""
+  console.log(`Worker stopped${reason}`)
 }
