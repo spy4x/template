@@ -29,9 +29,10 @@ test.describe("auth profile ws push flow", () => {
       expect(signUp.ok()).toBe(true)
 
       await page.goto("/sign-in")
-      await page.locator("[data-e2e=signin-username]").fill(username)
-      await page.locator("[data-e2e=signin-password]").fill(password)
-      await page.locator("[data-e2e=signin-submit]").click()
+      await expect(page.getByRole("heading", { level: 1, name: "Welcome back" })).toBeVisible()
+      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-password]").fill(password)
+      await page.locator("[data-e2e=auth-form-submit]").click()
 
       await page.waitForURL("/")
       await page.locator("[data-e2e=ws-status]", { hasText: "open" }).waitFor()
@@ -56,10 +57,12 @@ test.describe("auth profile ws push flow", () => {
       await nav.getByRole("link", { name: "Profile" }).click({ modifiers: ["ControlOrMeta"] })
       await (await newTab).close()
 
+      await expect(page.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible()
+      await expect(page.getByRole("heading", { level: 2, name: "Push devices" })).toBeVisible()
       await page.locator("[data-e2e=profile-first-name]").fill(firstName)
       await page.locator("[data-e2e=profile-last-name]").fill(lastName)
       await page.locator("[data-e2e=profile-save]").click()
-      await page.locator("[data-e2e=profile-saved]").waitFor()
+      await page.locator("[data-e2e=toasts]").getByText("Saved", { exact: true }).waitFor()
 
       await page.locator("[data-e2e=shell-user-menu-button]").click()
       await page.getByRole("menuitem", { name: "Sign out" }).click()
