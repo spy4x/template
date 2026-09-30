@@ -2,8 +2,8 @@ import { RealtimeRequestError } from "@spy4x/realtime"
 import type { NoteItem, NotePage, NotesDependencies } from "../state/notes.ts"
 import type { OfflineLayer } from "./index.ts"
 
-/** More pages than a group has notes in this template: a stop for a cursor loop. */
-const MAX_PAGES = 100
+/** The notes store's own cap on pages, so a runaway cursor stops the same way in both. */
+const MAX_PAGES = 20
 
 /**
  * Whether a call failed because the network is down, not because the server answered. `fetch`

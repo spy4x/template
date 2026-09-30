@@ -3,7 +3,8 @@ import { RealtimeRequestError } from "@spy4x/realtime"
 import { isRealtimeOpen, realtimeCommand, realtimeQuery } from "../state/realtime.ts"
 import type { NoteItem } from "../state/notes.ts"
 import { type LocalStore, openDexieStore } from "./local-store.ts"
-import { createOutbox, type Outbox } from "./outbox.ts"
+import type { OutboxPorts } from "./outbox.ts"
+import { createOutbox, createPromiseLock, type Outbox } from "./outbox.ts"
 
 /**
  * The offline layer's entry point: what the rest of the SPA imports. `docs/offline.md` lists every
@@ -18,6 +19,15 @@ export interface OfflineLayer {
 }
 
 let layer: OfflineLayer | null = null
+
+/** One lock per user across all tabs of the browser; one tab's chain where locks are missing. */
+function withBrowserLock(userId: number): OutboxPorts["lock"] {
+  const oneTab = createPromiseLock()
+  return <T>(work: () => Promise<T>) =>
+    typeof navigator !== "undefined" && navigator.locks
+      ? navigator.locks.request(`offline-outbox:${userId}`, work)
+      : oneTab(work)
+}
 
 /** The running layer as a signal, so a screen that shows the queue redraws when it starts. */
 export const activeLayer = signal<OfflineLayer | null>(null)
@@ -35,7 +45,8 @@ export function startOffline(userId: number): OfflineLayer {
   const outbox = createOutbox({
     store,
     userId,
-    isOnline: isRealtimeOpen,
+    lock: withBrowserLock(userId),
+    isOnline: () => isRealtimeOpen(userId),
     newKey: () => crypto.randomUUID(),
     now: () => new Date().toISOString(),
     send: (name, payload, key) =>

@@ -83,7 +83,8 @@ A write made online that the server refuses is not queued: the notes store shows
 - every other request, the page itself included, goes to the network first and is answered from
   the cache only when the network fails, so a deploy, and an edit under the dev server, show at
   once. Every route is the same page, so any page load is stored and served under `/`;
-- `/api` is never touched.
+- `/api` and `/ws` (the route Traefik sends to the API) are never touched; an e2e test checks that
+  no cached URL starts with either.
 
 Files of old builds stay in the cache until the cache name in the file changes.
 
@@ -95,13 +96,18 @@ after the worker installed, which is after that first load.
 
 Signing out drops the cached notes and groups and the remembered user. The outbox stays: a write
 that never reached the server is the person's work, and goes out the next time the same user
-signs in on this browser.
+signs in on this browser. Those unsent note texts stay in IndexedDB on a shared device until that
+user signs in again, so on a shared browser use the browser's own "clear site data". Signing out
+with no network still signs the page out; the server's session then ends on its own expiry.
 
 ## What is not offline
 
-Creating a group, the profile, two-factor set-up and sign-in need the server. Two tabs of one
-browser each run the queue; the idempotency keys make that safe, and a note edited in both shows
-as a conflict in the second.
+Creating a group, the profile, two-factor set-up and sign-in need the server. Every tab of one browser shares one queue in IndexedDB. Each step on the queue (saving an edit,
+sending one entry) holds a `navigator.locks` lock named for the user, so tabs take turns. After a
+send, the entry is removed, or marked a conflict, only if it still carries the key that was sent;
+an edit another tab made meanwhile has a new key and stays queued. The queue sends only while the
+socket is open and the page is signed in as the queue's user: the socket's reconnect check
+refuses a cookie that now belongs to someone else.
 
 ## Removing the layer
 

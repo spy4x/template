@@ -87,7 +87,12 @@ export async function signUp(username: string, password: string): Promise<{
 }
 
 export async function signOut(): Promise<void> {
-  await apiFetch<ApiSuccessResponse>("/api/auth/sign-out", { method: "POST" })
+  try {
+    await apiFetch<ApiSuccessResponse>("/api/auth/sign-out", { method: "POST" })
+  } catch (_unreachable) {
+    // Offline: the page still signs out, so the person is not left signed in on a shared device.
+    // The server's session ends on its own expiry.
+  }
   sessionState.value = {
     ...sessionState.value,
     user: null,

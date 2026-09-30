@@ -69,6 +69,14 @@ export function OfflineStatus(
               )}
               <Button
                 type="button"
+                variant="ghost"
+                data-e2e="conflict-copy"
+                onClick={() => void navigator.clipboard?.writeText(mySide(entry)).catch(() => {})}
+              >
+                Copy my text
+              </Button>
+              <Button
+                type="button"
                 variant="outline"
                 data-e2e="conflict-use-theirs"
                 onClick={async () => {

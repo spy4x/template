@@ -3,7 +3,7 @@ import { describe, it } from "@std/testing/bdd"
 import { ConnectionLostError, RealtimeRequestError } from "@spy4x/realtime"
 import type { NoteItem } from "../state/notes.ts"
 import { createMemoryStore } from "./memory-store.ts"
-import { createOutbox } from "./outbox.ts"
+import { createOutbox, createPromiseLock } from "./outbox.ts"
 
 const groupId = "g-1"
 
@@ -48,6 +48,7 @@ function harness() {
   const outbox = createOutbox({
     store,
     userId: 1,
+    lock: createPromiseLock(),
     isOnline: () => state.online,
     newKey: () => `key-${++keys}`,
     now: () => "2026-10-03T00:00:00.000Z",
@@ -91,6 +92,7 @@ describe("outbox while the socket is down", () => {
     const again = createOutbox({
       store,
       userId: 1,
+      lock: createPromiseLock(),
       isOnline: () => true,
       newKey: () => "other",
       now: () => "",
@@ -388,5 +390,91 @@ describe("outbox conflicts found after a reconnect", () => {
     const [entry] = h.outbox.entries.value
     expect(entry.status).toBe("conflict")
     expect(entry.conflict).toMatchObject({ reason: "rejected", message: "refused" })
+  })
+})
+
+describe("outbox shared by two tabs", () => {
+  it("keeps an edit made in one tab while another tab's send of the same note is running", async () => {
+    const store = createMemoryStore()
+    let finishSend: () => void = () => {}
+    const sending = new Promise<void>((resolve) => (finishSend = resolve))
+    let started: () => void = () => {}
+    const sendStarted = new Promise<void>((resolve) => (started = resolve))
+    let keys = 0
+    const tab = (online: boolean, prefix: string) =>
+      createOutbox({
+        store,
+        userId: 1,
+        // No lock shared between the two: the worst case for the queue's own checks.
+        lock: createPromiseLock(),
+        isOnline: () => online,
+        newKey: () => `${prefix}-${++keys}`,
+        now: () => "2026-10-03T00:00:00.000Z",
+        async send() {
+          started()
+          await sending
+          return { note: note("n", 2, "From tab B") }
+        },
+        fetchNote: () => Promise.resolve(null),
+      })
+    const tabA = tab(false, "key-a")
+    const tabB = tab(true, "key-b")
+    await tabA.submit({ kind: "update", groupId, noteId: "n", title: "Old", body: "", version: 1 })
+    const flushing = tabB.flush()
+    await sendStarted
+    // Tab A, offline, edits the same note while tab B's send is in flight.
+    await tabA.submit({
+      kind: "update",
+      groupId,
+      noteId: "n",
+      title: "Edit in A",
+      body: "",
+      version: 1,
+    })
+    finishSend()
+    await flushing
+    const [kept] = await store.readOutbox()
+    expect(kept?.title).toBe("Edit in A")
+  })
+
+  it("keeps an edit made in one tab when another tab's send of the same note is refused", async () => {
+    const store = createMemoryStore()
+    let refuse: () => void = () => {}
+    const refusal = new Promise<void>((resolve) => (refuse = resolve))
+    let started: () => void = () => {}
+    const sendStarted = new Promise<void>((resolve) => (started = resolve))
+    let keys = 0
+    const tab = (online: boolean, prefix: string) =>
+      createOutbox({
+        store,
+        userId: 1,
+        lock: createPromiseLock(),
+        isOnline: () => online,
+        newKey: () => `${prefix}-${++keys}`,
+        now: () => "2026-10-03T00:00:00.000Z",
+        async send() {
+          started()
+          await refusal
+          throw refused("VERSION_CONFLICT")
+        },
+        fetchNote: () => Promise.resolve(note("n", 2, "Theirs")),
+      })
+    const tabA = tab(false, "key-a")
+    const tabB = tab(true, "key-b")
+    await tabA.submit({ kind: "update", groupId, noteId: "n", title: "Old", body: "", version: 1 })
+    const flushing = tabB.flush()
+    await sendStarted
+    await tabA.submit({
+      kind: "update",
+      groupId,
+      noteId: "n",
+      title: "Edit in A",
+      body: "",
+      version: 1,
+    })
+    refuse()
+    await flushing
+    const [kept] = await store.readOutbox()
+    expect([kept?.title, kept?.status]).toEqual(["Edit in A", "pending"])
   })
 })

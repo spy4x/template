@@ -1,7 +1,7 @@
 import { expect } from "@std/expect"
 import { afterEach, describe, it } from "@std/testing/bdd"
 import { type User, UserMFAStatus } from "@domain/identity"
-import { bootstrapSession, totpConnectFinish, totpDisconnect } from "./auth.ts"
+import { bootstrapSession, signOut, totpConnectFinish, totpDisconnect } from "./auth.ts"
 import { sessionState } from "./session.ts"
 
 const realFetch = globalThis.fetch
@@ -82,6 +82,22 @@ describe("bootstrapSession", () => {
     meAnswers(401)
 
     await bootstrapSession(() => ({ id: 5 } as User))
+
+    expect(sessionState.value.user).toBeNull()
+  })
+})
+
+describe("signOut", () => {
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    sessionState.value = { ...sessionState.value, user: null }
+  })
+
+  it("signs the page out even when the server cannot be reached", async () => {
+    sessionState.value = { ...sessionState.value, user: { id: 1 } as User }
+    globalThis.fetch = () => Promise.reject(new TypeError("Failed to fetch"))
+
+    await signOut()
 
     expect(sessionState.value.user).toBeNull()
   })

@@ -5,7 +5,7 @@ import type { GroupItem, GroupsDependencies } from "../state/groups.ts"
 import { GroupKind, GroupRole } from "@domain/groups"
 import type { OfflineLayer } from "./index.ts"
 import { createMemoryStore } from "./memory-store.ts"
-import { createOutbox } from "./outbox.ts"
+import { createOutbox, createPromiseLock } from "./outbox.ts"
 import { offlineNotes } from "./notes-offline.ts"
 import { offlineGroups } from "./groups-offline.ts"
 
@@ -31,6 +31,7 @@ function layerWith(online: { socket: boolean }): OfflineLayer {
   const outbox = createOutbox({
     store,
     userId: 1,
+    lock: createPromiseLock(),
     isOnline: () => online.socket,
     newKey: () => crypto.randomUUID(),
     now: () => "2026-10-03T00:00:00.000Z",

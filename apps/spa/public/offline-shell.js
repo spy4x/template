@@ -4,11 +4,16 @@
 // from the offline layer's IndexedDB store, not from this cache.
 const SHELL_CACHE = "shell-v1"
 
+/** Paths the worker leaves alone: the API and the socket route Traefik sends to it. */
+function isApiPath(pathname) {
+  return ["/api", "/ws"].some((base) => pathname === base || pathname.startsWith(`${base}/`))
+}
+
 /** Whether the worker may answer this request from the cache. */
 function isShellRequest(request) {
   const url = new URL(request.url)
   return request.method === "GET" && url.origin === self.location.origin &&
-    !url.pathname.startsWith("/api/")
+    !isApiPath(url.pathname)
 }
 
 /** Stores the page and every script, style and image it names, for the first offline start. */

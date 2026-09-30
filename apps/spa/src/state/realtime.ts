@@ -57,16 +57,20 @@ function browserStorage(): KeyValueStore {
  * its second factor) stops the reconnect and signs the page out; a network error or a server error
  * says nothing about the session, so the transport keeps trying.
  */
-async function gate(): Promise<{ allowed: boolean; reason?: string }> {
-  try {
-    const me = await apiFetch("/api/auth/me")
-    if (me.ok && me.status !== 202) return { allowed: true }
-    if (!me.ok && me.status !== 401 && me.status !== 403) return { allowed: true }
-  } catch (_error) {
-    return { allowed: true }
+export function sessionGate(userId: number) {
+  return async (): Promise<{ allowed: boolean; reason?: string }> => {
+    try {
+      const me = await apiFetch<{ id?: number }>("/api/auth/me")
+      // The cookie must still belong to the user this page shows: a page left open across a
+      // sign-out and another person's sign-in would otherwise send its data as them.
+      if (me.ok && me.status !== 202 && me.data?.id === userId) return { allowed: true }
+      if (!me.ok && me.status !== 401 && me.status !== 403) return { allowed: true }
+    } catch (_error) {
+      return { allowed: true }
+    }
+    sessionState.value = { ...sessionState.value, user: null, isMfaRequired: false }
+    return { allowed: false, reason: "The session ended" }
   }
-  sessionState.value = { ...sessionState.value, user: null, isMfaRequired: false }
-  return { allowed: false, reason: "The session ended" }
 }
 
 interface Connection {
@@ -107,7 +111,7 @@ export function connectRealtime(userId: number, pull: (gap: GapReport) => void |
     clock: createSystemClock(),
     cursors,
     pull,
-    gate,
+    gate: sessionGate(userId),
   })
   const stopStatus = transport.onStatus((snapshot) => {
     sessionState.value = { ...sessionState.value, wsStatus: STATUS_TEXT[snapshot.status] }
@@ -133,9 +137,12 @@ export function advanceGroupCursor(groupId: string, sequence: number): void {
   current?.cursors.advanceTo(groupId, sequence)
 }
 
-/** Whether the socket is open now, so a call made this moment can reach the server. */
-export function isRealtimeOpen(): boolean {
-  return sessionState.value.wsStatus === "open"
+/**
+ * Whether the socket is open now and this page is signed in as `userId`, so a call made this moment
+ * reaches the server as that user. A tab whose cookie now belongs to someone else is not.
+ */
+export function isRealtimeOpen(userId: number): boolean {
+  return sessionState.value.wsStatus === "open" && sessionState.value.user?.id === userId
 }
 
 /** Calls over the open socket. Without one, every call fails as a dropped connection. */

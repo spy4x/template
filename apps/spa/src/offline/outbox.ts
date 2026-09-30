@@ -47,6 +47,12 @@ export interface OutboxPorts {
   ): Promise<unknown>
   /** The server's note as it is now, or `null` when it is gone. Rejects when unreachable. */
   fetchNote(groupId: string, noteId: string): Promise<NoteItem | null>
+  /**
+   * Runs `work` while no other caller holds the queue, in this tab or any other tab of the same
+   * user: every tab shares one IndexedDB queue. Browsers use `navigator.locks`
+   * (see `createPromiseLock` for one tab).
+   */
+  lock<T>(work: () => Promise<T>): Promise<T>
   /** Whether the socket is open. A write is not started while it is not: nothing left the device. */
   isOnline(): boolean
   userId: number
@@ -65,6 +71,16 @@ function codeOf(error: RealtimeRequestError): string | null {
   return typeof code === "string" ? code : null
 }
 
+/** A lock for one tab: runs the work one piece at a time, in the order asked. */
+export function createPromiseLock(): OutboxPorts["lock"] {
+  let tail: Promise<unknown> = Promise.resolve()
+  return <T>(work: () => Promise<T>) => {
+    const run = tail.then(work)
+    tail = run.catch(() => {})
+    return run
+  }
+}
+
 /**
  * The queue of writes made while offline. It keeps at most one entry per note: a second edit of a
  * note that has not been sent yet replaces the first, so the queue holds what the person wants
@@ -81,13 +97,12 @@ export function createOutbox(ports: OutboxPorts) {
   const entries = signal<readonly OutboxEntry[]>([])
   const interactive = new Set<number>()
   const outcomes = new Map<number, Outcome>()
-  let tail: Promise<unknown> = Promise.resolve()
+  const locked = ports.lock
 
-  /** Runs one step of work on the queue at a time, in the order asked. */
-  function locked<T>(work: () => Promise<T>): Promise<T> {
-    const run = tail.then(work)
-    tail = run.catch(() => {})
-    return run
+  /** Whether the queue still holds the entry as it was sent: same note, same idempotency key. */
+  async function unchanged(sent: OutboxEntry): Promise<boolean> {
+    const stored = (await store.readOutbox()).find((entry) => entry.seq === sent.seq)
+    return stored?.key === sent.key
   }
 
   async function reload(): Promise<OutboxEntry[]> {
@@ -188,7 +203,9 @@ export function createOutbox(ports: OutboxPorts) {
       const note = (result as { note?: NoteItem } | undefined)?.note
       if (sending.kind === "delete") await store.removeNote(sending.noteId)
       else if (note) await store.putNote(note)
-      await drop(seq)
+      // Another tab may have replaced the entry with a newer edit while this send ran: that edit
+      // has its own key and must stay queued.
+      if (await unchanged(sending)) await drop(seq)
       if (wants) {
         outcomes.set(seq, { kind: "sent", note: sending.kind === "delete" ? undefined : note })
       }
@@ -205,6 +222,7 @@ export function createOutbox(ports: OutboxPorts) {
     error: RealtimeRequestError,
     wants: boolean,
   ): Promise<boolean> {
+    if (!await unchanged(entry)) return true
     const code = codeOf(error)
     if (code === "NOTE_NOT_FOUND" && entry.kind === "delete") {
       await store.removeNote(entry.noteId)

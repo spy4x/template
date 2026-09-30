@@ -87,6 +87,20 @@ test.describe("offline notes", () => {
       const { groupId } = await groupWithNote(page, "Offline team", "Written online")
       await openNotesAndCacheShell(page, groupId)
 
+      // The worker caches the app's files, never the API's answers or the socket route.
+      const cachedPaths = async () =>
+        await page.evaluate(async () => {
+          const paths: string[] = []
+          for (const name of await caches.keys()) {
+            for (const request of await (await caches.open(name)).keys()) {
+              paths.push(new URL(request.url).pathname)
+            }
+          }
+          return paths
+        })
+      await expect.poll(cachedPaths).toContain("/")
+      expect((await cachedPaths()).filter((path) => /^\/(api|ws)(\/|$)/.test(path))).toEqual([])
+
       await reloadOffline(context, page)
       const titles = page.locator("[data-e2e=note-item-title]")
       await expect(titles).toHaveText(["Written online"])
