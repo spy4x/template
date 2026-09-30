@@ -150,6 +150,54 @@ test.describe("groups over the socket", () => {
       await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
     }
   })
+  test("a group created in one tab appears in the other tab without a reload or reconnect", async ({ page, request }) => {
+    const username = "e2e_groups_socket_live"
+    const password = "Passw0rd!"
+    await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+    try {
+      const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
+        headers,
+        data: { username, password },
+      })
+      expect(signUp.ok()).toBe(true)
+
+      await page.goto("/sign-in")
+      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-password]").fill(password)
+      await page.locator("[data-e2e=auth-form-submit]").click()
+      await page.waitForURL("/")
+
+      // The second tab counts the sockets it opens and the documents it loads, so a reconnect or
+      // a reload, which would pull the list on its own, fails the test instead of passing it.
+      const other = await page.context().newPage()
+      let otherSockets = 0
+      other.on("websocket", (socket) => {
+        // Vite's dev server opens its own socket; only the app's one counts.
+        if (new URL(socket.url()).pathname === "/api/ws") otherSockets++
+      })
+      let otherLoads = 0
+      other.on("load", () => otherLoads++)
+      await other.goto("/groups")
+      await expect(other.getByRole("heading", { level: 1, name: "Groups" })).toBeVisible()
+      await expect(other.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+      const otherNames = other.locator("[data-e2e=group-item-name]")
+      await expect(otherNames).toHaveCount(1)
+      expect({ otherSockets, otherLoads }).toEqual({ otherSockets: 1, otherLoads: 1 })
+
+      await page.goto("/groups")
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+      await page.locator("[data-e2e=group-name]").fill("Seen live")
+      await page.locator("[data-e2e=group-create]").click()
+      await expect(page.locator("[data-e2e=group-item-name]").filter({ hasText: "Seen live" }))
+        .toHaveCount(1)
+
+      // Only the worker's announcement, turned into a hint on the socket, can bring it here.
+      await expect(otherNames.filter({ hasText: "Seen live" })).toHaveCount(1, { timeout: 3_000 })
+      expect({ otherSockets, otherLoads }).toEqual({ otherSockets: 1, otherLoads: 1 })
+    } finally {
+      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+    }
+  })
   test("a periodic sweep signs a tab out when its user is removed", async ({ page, request }) => {
     // No sign-out event fires here, so only the 15 second revalidation can close the socket.
     test.setTimeout(60_000)
