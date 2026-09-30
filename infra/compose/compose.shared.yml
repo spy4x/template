@@ -65,7 +65,9 @@ services:
       # Postgres on 0.0.0.0; set DB_HOST_PORT=127.0.0.1:<port> to pick the host port.
       - ${DB_HOST_PORT:-127.0.0.1:${DB_PORT}}:5432
     healthcheck:
-      test: [ 'CMD', 'pg_isready', '-d', '${DB_NAME}', '-U', '${DB_USER}' ]
+      # Over TCP: initdb's temporary server listens on the socket only, answers ready, then shuts
+      # down, and `migrate` (never restarted) would fail on that first boot.
+      test: [ 'CMD', 'pg_isready', '-h', '127.0.0.1', '-d', '${DB_NAME}', '-U', '${DB_USER}' ]
     security_opt:
       - no-new-privileges:true
 
@@ -385,6 +387,12 @@ services:
       args:
         - DENO_VERSION=${DENO_VERSION}
     command: [ 'deno', 'task', 'db:migrate' ]
+    deploy:
+      resources:
+        limits:
+          # Defaults, so an env file written before this service existed still deploys.
+          cpus: '${MIGRATE_CPU_LIMIT:-0.5}'
+          memory: '${MIGRATE_MEM_LIMIT:-256M}'
     volumes:
       - ../../apps:/app/apps:z
       - ../../libs:/app/libs:z
