@@ -1,4 +1,4 @@
-# Continuous integration: runs on every pull request and every push to master.
+# Continuous integration: runs on every pull request and every push to main.
 #
 # Woodpecker reads every `*.yml` in this folder as its own workflow. Deploys are not wired up: see
 # `deploy.yml.example` and docs/woodpecker-ci-setup.md.
@@ -10,7 +10,7 @@
 when:
   - event: pull_request
   - event: push
-    branch: master
+    branch: main
 
 steps:
   check:

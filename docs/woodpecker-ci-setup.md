@@ -7,7 +7,7 @@ folder at the repository root as its own workflow, with no setting to change in 
 Every product copied from the template gets the pipeline the moment its repository is activated in
 Woodpecker.
 
-It runs on every pull request and every push to `master`, in this order:
+It runs on every pull request and every push to `main`, in this order:
 
 ```
 check ──┬── build
@@ -137,7 +137,7 @@ Or via the Web UI:
 ## Pipeline Behavior
 
 - Pull request: `check`, then `build`, `integration` and `e2e` in parallel.
-- Push to `master`: the same steps.
+- Push to `main`: the same steps.
 - Push to any other branch: nothing. Open a pull request to run the pipeline.
 
 ## Customization

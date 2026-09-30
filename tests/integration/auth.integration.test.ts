@@ -529,9 +529,9 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
   })
 })
 
-Deno.test("the auth migration applies on top of a database master migrated", async () => {
+Deno.test("the auth migration applies on top of the previous schema", async () => {
   await withSchema(MASTER_MIGRATIONS, async (sql) => {
-    // A user signed up the way master did: profile, password key, a TOTP key, a session, the
+    // A user signed up under the previous schema: profile, password key, a TOTP key, a session, the
     // personal group, an audit row and a push token.
     const [old] = await sql<{ id: number; createdAt: Date }[]>`
       INSERT INTO users (first_name, last_name, mfa) VALUES ('Old', 'User', 3)

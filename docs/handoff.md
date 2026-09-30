@@ -1,7 +1,7 @@
 # Handoff: Deno platform template
 
 > Written 2026-08-19 for whoever picks this up next, human or AI. It describes the
-> state of `master`, the decisions already made and why, the traps this codebase
+> state of `main`, the decisions already made and why, the traps this codebase
 > has, and what to do next. Read [ADR 001](decisions/001-deno-platform-template.md)
 > and [ADR 002](decisions/002-realtime-transport-and-sync.md) first - they are
 > authoritative and this file is not.
@@ -29,7 +29,7 @@ across real projects, a CLI last.
 - Postgres is authoritative. The browser's local store is a disposable projection
   and never resolves a conflict.
 
-## State of master
+## State of main
 
 Green: `deno task check` (110 tests in six runs), `deno task test:integration` (29 tests, 58
 steps, needs Postgres), `deno task spa:build`, `deno task mpa:check`, and the Playwright e2e suite
@@ -108,7 +108,7 @@ Documentation drifts here, so check status before believing anything.
 | `docs/prd/group-sync-platform.md`                   | Superseded in part. Read "REST" as "through the shared CQRS handlers"                                                                |
 | `docs/stack.md`                                     | Current. What is actually running and deployed                                                                                       |
 | `docs/principles.md`                                | Current, general                                                                                                                     |
-| `docs/woodpecker-ci-setup.md`                       | Current. `.woodpecker/ci.yml` runs check, build, integration and e2e on every pull request and push to `master`                      |
+| `docs/woodpecker-ci-setup.md`                       | Current. `.woodpecker/ci.yml` runs check, build, integration and e2e on every pull request and push to `main`                        |
 | `docs/financy-extraction-inventory.md`              | Working list. Delete rows as they land, delete the file when drained                                                                 |
 
 A new ADR supersedes rather than rewrites: ADR 001 keeps its text and carries a
