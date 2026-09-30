@@ -31,6 +31,11 @@ Defined in `infra/compose/`:
   (`--requirepass`; the API sends it with `AUTH` on every connect and reconnect, and neither the API
   nor Valkey starts without it). The password reaches the container through its environment, so it
   is not in the command line; the healthcheck reads it from `REDISCLI_AUTH`.
+- **Migrate** - one-shot: runs `deno task db:migrate` in the API's image on every `compose up`,
+  then exits. The API and the worker wait for it to exit with 0 (`service_completed_successfully`),
+  so a deploy never serves traffic on the old schema, and a failed migration fails the deploy. With
+  nothing pending it changes nothing; the runner in `@spy4x/server/db` locks and checksums.
+  `tests/compose-migrate.test.ts` holds that order.
 - **Worker** - `apps/worker` in the API's image (same Dockerfile and build context) with its own
   command. It drains `outbox_events`, announces committed group changes with `pg_notify` (the API
   turns each into a live hint for other tabs) and sweeps expired idempotency keys hourly. No

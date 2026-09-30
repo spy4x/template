@@ -31,7 +31,7 @@ across real projects, a CLI last.
 
 ## State of master
 
-Green: `deno task check` (107 tests in five runs), `deno task test:integration` (29 tests, 58
+Green: `deno task check` (109 tests in six runs), `deno task test:integration` (29 tests, 58
 steps, needs Postgres), `deno task spa:build`, `deno task mpa:check`, and the Playwright e2e suite
 (9 tests).
 
@@ -211,9 +211,14 @@ DB_HOST=127.0.0.1 DB_PORT="$PORT" DB_USER=tester DB_PASS="$PASS" DB_NAME=templat
 docker rm -f "$NAME"
 ```
 
-To run the API for real you also need Valkey (`valkey-server --requirepass <KV_PASSWORD>`; the API
-refuses to start without `KV_PASSWORD` and sends it with `AUTH`), migrations applied
-(`deno task db:migrate`), and `infra/configs/vapid.json` present
+Compose, and so `deno task deploy`, applies migrations itself: the one-shot `migrate` service runs
+`deno task db:migrate` on every `up`, and the API and the worker start only after it exits with 0.
+There is no manual migration step in production. A failed migration fails `compose up` and leaves
+the new API and worker created but not started; fix the migration and deploy again.
+
+To run the API for real outside compose you also need Valkey (`valkey-server --requirepass
+<KV_PASSWORD>`; the API refuses to start without `KV_PASSWORD` and sends it with `AUTH`),
+migrations applied (`deno task db:migrate`), and `infra/configs/vapid.json` present
 (`deno task vapid-key:create`) copied to `./vapid.json`, since the API reads it
 from the working directory while compose bind-mounts it. Compose fails the start when the file is
 missing; `deno task deploy` generates it on the server.

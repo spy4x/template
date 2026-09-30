@@ -21,7 +21,8 @@
  * and the chosen env file itself) and the web push keys; copy the chosen env file to
  * `infra/envs/.env` on the server, readable by its owner only; create `infra/configs/vapid.json`
  * on the server when it is missing (never sent from this machine, never overwritten, mode 600);
- * then run `deno task compose up -d --build` there.
+ * then run `deno task compose up -d --build` there. Compose's one-shot `migrate` service applies
+ * pending migrations before the API and the worker start, and a failed migration fails this step.
  *
  * @module
  */
