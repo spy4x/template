@@ -171,6 +171,10 @@ async function withValkeyApp(
       )
     })
     app.get("/me", signIn.auth.isAuthenticated2FA, (c) => c.json(c.get("auth")!.user))
+    // The profile display is what still reads the cache.
+    app.get("/profile", signIn.auth.isAuthenticated2FA, async (c) => {
+      return c.json(await db.user.findOneCached({ id: c.get("auth")!.user.id }))
+    })
     await body({
       sql,
       db,
@@ -200,7 +204,7 @@ Deno.test("a signed-in request survives a Valkey outage and recovers after it", 
     expect(signUp.status).toBe(200)
     const cookie = cookieOf(signUp)
     const userId = (await signUp.json()).id as number
-    const me = () => app.request("http://local/me", { headers: { cookie } })
+    const me = () => app.request("http://local/profile", { headers: { cookie } })
 
     expect((await me()).status).toBe(200)
     expect(reports).toEqual([])
