@@ -37,7 +37,7 @@ Green: `deno task check` (23 tests, 35 steps),
 
 ```
 apps/api      REST, auth, CQRS dispatch. The only app with real behaviour.
-apps/spa      Preact + Vite PWA. Auth and profile UI only.
+apps/spa      Preact + Vite PWA. Wires the libs/ui auth and profile screens.
 apps/mpa      Fresh. SSR shell plus /health. No features yet.
 apps/worker   Drains outbox_events. Real, small.
 
@@ -51,6 +51,8 @@ libs/server    db (migrations and schema.sql only), groups (Postgres repository,
                request logging, sign-in and auth come from @spy4x/server/*.
 libs/client    vite. Icons, useUrlFilters and the signed-in Shell come from
                @spy4x/preact-icons, @spy4x/preact-signals and @spy4x/preact-system.
+libs/ui        Product screens shared by the SPA and the MPA (alias @ui/): auth,
+               profile and the two frames. Props in, callbacks out; see AGENTS.md.
 ```
 
 What genuinely works end to end: sign-up creates the auth user and password key
