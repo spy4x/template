@@ -1,95 +1,159 @@
-import { exec } from "https://deno.land/x/exec/mod.ts";
-import { ensureDir, emptyDir } from "https://deno.land/std/fs/mod.ts";
-import { gzip } from "https://deno.land/x/compress/mod.ts";
+/// <reference lib="deno.ns" />
+/**
+ * Dumps the Compose Postgres database, gzips it and uploads it to S3.
+ *
+ * Usage, on the server, from the app's directory:
+ * `deno run -R -W --allow-run=docker infra/scripts/db-backup-create.ts infra/envs/.env`
+ *
+ * It reads `PROJECT`, `DB_NAME`, `DB_USER`, `DB_PASS` and the `S3_BUCKET_BACKUPS_*` variables
+ * from the env file. `pg_dump` runs in the `<PROJECT>-db` container and its output is gzipped
+ * while it streams, into a temporary directory that is removed at the end. The upload runs the
+ * `amazon/aws-cli` image. Passwords and keys reach `docker` through its environment, never its
+ * arguments, so they do not show in the process list.
+ *
+ * @module
+ */
 
-async function main() {
-    const envFile = Deno.args[0];
-    if (!envFile) {
-        console.error("❌ Environment file not provided. Usage: deno run --allow-all db-backup-create.ts path/to/envfile");
-        Deno.exit(1);
-    }
+import { error, log, success } from "./+lib.ts"
+import { readEnvFile, requireEnvVar } from "./env-file.ts"
 
-    const env = await Deno.readTextFile(envFile);
-    const envVars = Object.fromEntries(env.split("\n").map(line => line.split("=").map(part => part.trim())));
-    Object.entries(envVars).forEach(([key, value]) => Deno.env.set(key, value));
-
-    const date = new Date().toISOString().replace(/[:.]/g, "_");
-    const project = Deno.env.get("PROJECT")!;
-    const dbName = Deno.env.get("DB_NAME")!;
-    const dbUser = Deno.env.get("DB_USER")!;
-    const dbPass = Deno.env.get("DB_PASS")!;
-    const backupDbContainer = `${project}-db`;
-    const backupFolder = `/tmp/${project}-db-backups`;
-    const backupNameUnzipped = `${dbName}-${date}.sql`;
-    const backupPathUnzipped = `${backupFolder}/${backupNameUnzipped}`;
-    const backupName = `${backupNameUnzipped}.gz`;
-    const backupPath = `${backupFolder}/${backupName}`;
-    const s3BucketFolder = Deno.env.get("S3_BUCKET_BACKUPS_DB_FOLDER")!;
-    const s3BucketName = Deno.env.get("S3_BUCKET_BACKUPS_NAME")!;
-    const s3Endpoint = Deno.env.get("S3_BUCKET_BACKUPS_ENDPOINT")!;
-    const s3Region = Deno.env.get("S3_BUCKET_BACKUPS_REGION")!;
-    const s3AccessKey = Deno.env.get("S3_BUCKET_BACKUPS_ACCESS_KEY_ID")!;
-    const s3SecretKey = Deno.env.get("S3_BUCKET_BACKUPS_SECRET_ACCESS_KEY")!;
-
-    await emptyDir(backupFolder);
-    await ensureDir(backupFolder);
-
-    console.log(`⚡ Generating backup [${dbUser}@${backupDbContainer}:${dbName}]`);
-    const backupStartTime = Date.now();
-    const backupCommand = [
-        "docker", "exec", "-i",
-        "-e", `PGPASSWORD=${dbPass}`,
-        backupDbContainer, "pg_dump",
-        "-h", backupDbContainer,
-        "-U", dbUser,
-        dbName,
-    ];
-    const backupProcess = exec(backupCommand.join(" "), { output: "piped" });
-    const backupFile = await Deno.open(backupPathUnzipped, { write: true, create: true });
-    await backupProcess.stdout.pipeTo(backupFile.writable);
-    const backupTime = (Date.now() - backupStartTime) / 1000;
-
-    const backupStats = await Deno.stat(backupPathUnzipped);
-    const backupSize = `${(backupStats.size / 1024 / 1024).toFixed(2)} MB`;
-
-    console.log(`📦 Backup generated. Took ${backupTime} seconds. Size: ${backupSize}`);
-    console.log("🔒 Compressing backup");
-
-    const compressionStartTime = Date.now();
-    const compressedData = await gzip(new Uint8Array(await Deno.readFile(backupPathUnzipped)));
-    await Deno.writeFile(backupPath, compressedData);
-    const compressionTime = (Date.now() - compressionStartTime) / 1000;
-
-    const compressedStats = await Deno.stat(backupPath);
-    const compressedSize = `${(compressedStats.size / 1024 / 1024).toFixed(2)} MB`;
-
-    console.log(`🔒 Compressed. Took ${compressionTime} seconds. Size: ${compressedSize}`);
-
-    console.log(`🚀 Uploading [${s3Endpoint}/${s3BucketName}/${s3BucketFolder}]`);
-    const uploadStartTime = Date.now();
-    const uploadCommand = [
-        "docker", "run", "--rm",
-        "-v", `${backupFolder}:${backupFolder}`,
-        "-e", `AWS_ACCESS_KEY_ID=${s3AccessKey}`,
-        "-e", `AWS_SECRET_ACCESS_KEY=${s3SecretKey}`,
-        "-e", `AWS_DEFAULT_REGION=${s3Region}`,
-        "-e", `AWS_ENDPOINT_URL=${s3Endpoint}`,
-        "amazon/aws-cli", "s3", "cp", backupPath,
-        `s3://${s3BucketName}/${s3BucketFolder}/${backupName}`,
-        "--region", s3Region,
-    ];
-    const uploadProcess = await exec(uploadCommand.join(" "));
-    const uploadTime = (Date.now() - uploadStartTime) / 1000;
-
-    if (uploadProcess.status.success) {
-        console.log(`✅ Uploaded. Took ${uploadTime} seconds`);
-    } else {
-        console.error(`❌ Upload failed after ${uploadTime} seconds`);
-        Deno.exit(1);
-    }
-
-    await emptyDir(backupFolder);
-
+/** One `docker` invocation: its arguments and the variables it passes into the container. */
+export interface DockerRun {
+  args: string[]
+  env: Record<string, string>
 }
 
-await main();
+/** What {@link planBackup} decides; running it is `main`'s job. */
+export interface BackupPlan {
+  /** `<DB_NAME>-<timestamp>.sql.gz`. */
+  fileName: string
+  dump: DockerRun
+  /** Uploads `<directory>/<fileName>`. */
+  upload(directory: string): DockerRun
+}
+
+/**
+ * Builds the dump and upload commands from the env file's values. Runs nothing.
+ *
+ * @throws {import("./env-file.ts").MissingEnvVarError} When a required variable is missing.
+ */
+export function planBackup(
+  values: Record<string, string>,
+  envFilePath: string,
+  now: Date,
+): BackupPlan {
+  const read = (name: string) => requireEnvVar(values, name, envFilePath)
+  const container = `${read("PROJECT")}-db`
+  const dbName = read("DB_NAME")
+  const dbUser = read("DB_USER")
+  const dbPass = read("DB_PASS")
+  const bucket = read("S3_BUCKET_BACKUPS_NAME")
+  const folder = read("S3_BUCKET_BACKUPS_DB_FOLDER")
+  const region = read("S3_BUCKET_BACKUPS_REGION")
+  const s3Env = {
+    AWS_ACCESS_KEY_ID: read("S3_BUCKET_BACKUPS_ACCESS_KEY_ID"),
+    AWS_SECRET_ACCESS_KEY: read("S3_BUCKET_BACKUPS_SECRET_ACCESS_KEY"),
+    AWS_DEFAULT_REGION: region,
+    AWS_ENDPOINT_URL: read("S3_BUCKET_BACKUPS_ENDPOINT"),
+  }
+  const fileName = `${dbName}-${now.toISOString().replace(/[:.]/g, "_")}.sql.gz`
+  /** `-e NAME` with no value: docker copies the value from its own environment. */
+  const passEnv = (env: Record<string, string>) => Object.keys(env).flatMap((name) => ["-e", name])
+
+  const dumpEnv = { PGPASSWORD: dbPass }
+  return {
+    fileName,
+    dump: {
+      args: [
+        "exec",
+        "-i",
+        ...passEnv(dumpEnv),
+        container,
+        "pg_dump",
+        "-h",
+        container,
+        "-U",
+        dbUser,
+        dbName,
+      ],
+      env: dumpEnv,
+    },
+    upload: (directory) => ({
+      args: [
+        "run",
+        "--rm",
+        "-v",
+        `${directory}:${directory}:ro`,
+        ...passEnv(s3Env),
+        "amazon/aws-cli",
+        "s3",
+        "cp",
+        `${directory}/${fileName}`,
+        `s3://${bucket}/${folder}/${fileName}`,
+        "--region",
+        region,
+      ],
+      env: s3Env,
+    }),
+  }
+}
+
+/** Runs `pg_dump` and writes its output, gzipped, to `path`. Returns docker's exit code. */
+async function dumpTo(run: DockerRun, path: string): Promise<number> {
+  const child = new Deno.Command("docker", {
+    args: run.args,
+    env: run.env,
+    stdin: "null",
+    stdout: "piped",
+    stderr: "inherit",
+  }).spawn()
+  const file = await Deno.open(path, { write: true, createNew: true, mode: 0o600 })
+  await child.stdout.pipeThrough(new CompressionStream("gzip")).pipeTo(file.writable)
+  return (await child.status).code
+}
+
+async function main(): Promise<void> {
+  const envFilePath = Deno.args[0]
+  if (!envFilePath) {
+    error("Usage: deno run -R -W --allow-run=docker db-backup-create.ts <env file>")
+    Deno.exit(1)
+  }
+  let plan: BackupPlan
+  try {
+    plan = planBackup(await readEnvFile(envFilePath), envFilePath, new Date())
+  } catch (err) {
+    error(err instanceof Error ? err.message : err)
+    Deno.exit(1)
+  }
+
+  const directory = await Deno.makeTempDir({ prefix: "db-backup-" })
+  let code = 0
+  try {
+    const path = `${directory}/${plan.fileName}`
+    log(`Dumping and compressing to ${plan.fileName}...`)
+    let started = Date.now()
+    code = await dumpTo(plan.dump, path)
+    if (code !== 0) {
+      error(`pg_dump failed (docker exited with ${code})`)
+      return
+    }
+    const size = (await Deno.stat(path)).size / 1024 / 1024
+    log(`Dumped in ${(Date.now() - started) / 1000} s, ${size.toFixed(2)} MB.`)
+
+    log("Uploading...")
+    started = Date.now()
+    const upload = plan.upload(directory)
+    code = (await new Deno.Command("docker", { args: upload.args, env: upload.env }).spawn()
+      .status).code
+    if (code !== 0) {
+      error(`Upload failed (docker exited with ${code})`)
+      return
+    }
+    success(`Uploaded in ${(Date.now() - started) / 1000} s.`)
+  } finally {
+    await Deno.remove(directory, { recursive: true })
+    if (code !== 0) Deno.exit(code)
+  }
+}
+
+if (import.meta.main) await main()

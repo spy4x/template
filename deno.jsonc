@@ -33,7 +33,7 @@
 
     // #region Scripts
     "db:migrate": "deno run -N=$DB_HOST:$DB_PORT -E -R=./libs/server/db/migrations ./infra/scripts/db-migrate.ts",
-    "db:seed": "deno run -N=$DB_HOST:$DB_PORT,$KV_HOSTNAME:$KV_PORT -E -R=infra/envs/.env infra/scripts/seed-data.ts",
+    "db:seed": "deno run -N=$DB_HOST:$DB_PORT -E ./infra/scripts/seed-data.ts", // demo user and group, see the script
     "deps:check": "deno outdated -r",
     "deps:update": "deno outdated -r -u -i",
     "update:ubuntu": "sudo apt update && sudo apt full-upgrade -y && sudo apt autoremove -y && sudo apt clean && sudo apt --fix-broken install && sudo do-release-upgrade",
@@ -65,7 +65,8 @@
     "lint:check": "deno lint",
     "ts:check": "deno run --allow-read --allow-run=deno infra/scripts/type-check.ts",
     // tests/spacing.test.ts and tests/dockerfile-base.test.ts read files, so each runs on its own with its own read grant.
-    "test": "deno test --no-prompt apps/api apps/spa/src libs && deno test --no-prompt --allow-read=apps,libs tests/spacing.test.ts && deno test --no-prompt --allow-read=deno.jsonc,Dockerfile.base tests/dockerfile-base.test.ts",
+    // infra/scripts is excluded from the other tools; the "test" block below lets its tests run.
+    "test": "deno test --no-prompt apps/api apps/spa/src libs && deno test --no-prompt --allow-read=apps,libs tests/spacing.test.ts && deno test --no-prompt --allow-read=deno.jsonc,Dockerfile.base tests/dockerfile-base.test.ts && deno test --no-prompt --allow-read=infra/envs infra/scripts",
     "test:integration": "ENV=test deno test --no-prompt -E -N -R=./libs/server/db/migrations,./libs/server/db/schema.sql tests/integration",
     "e2e": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright@1.57.0 test",
     "e2e:report": "PLAYWRIGHT_HTML_OUTPUT_DIR=./e2e/report deno run -A --node-modules-dir npm:playwright@1.57.0 show-report",
@@ -165,6 +166,10 @@
     "infra",
     "*.lock"
   ],
+  // Everything under infra stays out of fmt, lint and type checks; only infra/scripts' tests run.
+  "test": {
+    "exclude": ["!infra/scripts"]
+  },
   "lint": {
     "rules": {
       "tags": [

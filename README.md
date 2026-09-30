@@ -54,10 +54,8 @@ serverless functions rather than a server you run.
 cp infra/envs/.env.example infra/envs/.env
 ```
 
-Before going on, edit `infra/envs/.env`: fill in the secrets, delete the comment after `ENV=dev` so
-the line reads exactly `ENV=dev`, and add the line `CONTAINER_PROVIDER=docker`. The Compose script
-keeps inline comments as part of the value and otherwise runs Podman, while `proxy:start` runs
-Docker.
+Before going on, fill in the secrets in `infra/envs/.env`. It runs on Docker; to use Podman, set
+`CONTAINER_PROVIDER=podman` (`proxy:start` and `proxy:stop` still call Docker).
 
 ```sh
 deno task vapid-key:create   # web push keys → infra/configs/vapid.json
@@ -72,6 +70,9 @@ at the port Compose publishes:
 ```sh
 DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=<user> DB_PASS=<password> DB_NAME=<name> deno task db:migrate
 ```
+
+To add a demo user `demo` who owns a shared group, run `deno task db:seed` with the same values plus
+`AUTH_PEPPER` (the API's) and `SEED_PASSWORD` (the demo user's password, 8 to 50 characters).
 
 ## Production certificates
 

@@ -1,8 +1,8 @@
+/// <reference lib="deno.ns" />
+import { readEnvFile } from "./env-file.ts";
+
 const envFilePath = `./infra/envs/.env`;
-const env = await Deno.readTextFile(envFilePath);
-const envVars = Object.fromEntries(
-  env.split("\n").map((line) => line.split("=").map((part) => part.trim())),
-);
+const envVars = await readEnvFile(envFilePath);
 const envName = envVars["ENV"];
 
 const args = Deno.args;
