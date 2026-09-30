@@ -1,46 +1,22 @@
-# Woodpecker CI Pipeline Configuration
-# This pipeline runs quality checks, builds Docker images, and deploys to production
+# Production build and deploy, kept out of the active pipeline.
+#
+# Woodpecker reads only `*.yml` and `*.yaml` in this folder, so this file does nothing. To turn
+# deploys on, rename it to `deploy.yml` and fix the known problems first:
+#   1. `pre-deploy-build` runs `deno task compose ... build` inside the Deno image, which has no
+#      Docker client and no Docker socket. It needs an image with Docker and access to the socket.
+#   2. It should wait for `ci.yml`: add a top-level `depends_on: [ci]` to the workflow.
+# The branch is `master`, the default branch of this repository.
 
-# Pipeline steps
+when:
+  event: push
+  branch: master
+
 steps:
-  # ============================================================================
-  # Step 1: Code Quality Checks
-  # ============================================================================
-  check:
-    image: denoland/deno:latest
-    when:
-      event:
-        - push
-        - pull_request
-    environment:
-      DENO_DIR: /deno-dir
-    volumes:
-      - deno-cache:/deno-dir
-    commands:
-      - echo "Running code quality checks with Deno cache..."
-      - deno task check
-  
-  build:
-    image: denoland/deno:latest
-    when:
-      event:
-        - push
-        - pull_request
-    environment:
-      DENO_DIR: /deno-dir
-    volumes:
-      - deno-cache:/deno-dir
-    commands:
-      - echo "Building the project with Deno cache..."
-      - deno task build
-    depends_on:
-      - check
-
   # ============================================================================
   # Step 2: Build Docker Images (Production)
   # ============================================================================
   pre-deploy-build:
-    image: denoland/deno:latest
+    image: denoland/deno:2.9.0
     environment:
       ENV: prod
       DENO_VERSION:
@@ -94,17 +70,13 @@ steps:
         EOF
       - echo "Building Docker images..."
       - deno task compose --env-file=./infra/envs/.env.prod build
-    when:
-      event: push
-      branch: main
-    depends_on:
-      - build
+    depends_on: []
 
   # ============================================================================
   # Step 3: Deploy to Production
   # ============================================================================
   deploy:
-    image: denoland/deno:latest
+    image: denoland/deno:2.9.0
     environment:
       SSH_TO_SERVER:
         from_secret: ssh_to_server
@@ -124,34 +96,5 @@ steps:
       - ssh-keyscan -H $(echo $SSH_TO_SERVER | cut -d'@' -f2) >> ~/.ssh/known_hosts
       - echo "Deploying to production..."
       - deno task deploy
-    when:
-      event: push
-      branch: main
     depends_on:
       - pre-deploy-build
-
-# ============================================================================
-# Service Definitions (if needed for testing)
-# ============================================================================
-# services:
-#   postgres:
-#     image: postgres:16-alpine
-#     environment:
-#       - POSTGRES_DB=template_test
-#       - POSTGRES_USER=test
-#       - POSTGRES_PASSWORD=test
-#     when:
-#       - event: pull_request
-
-# ============================================================================
-# Labels and Metadata
-# ============================================================================
-labels:
-  platform: linux/amd64
-
-# ============================================================================
-# Volumes for Caching
-# ============================================================================
-volumes:
-  - name: deno-cache
-    temp: {}
