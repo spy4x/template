@@ -80,8 +80,11 @@ services:
       - ${KV_HOST_PORT:-127.0.0.1:${KV_PORT}}:6379
     # The password reaches Valkey through the environment and is expanded by the shell inside the
     # container ($$ stops Compose expanding it), so it is not in the command line that
-    # `docker inspect` prints under Config.Cmd. `docker inspect` still shows Config.Env, like every
-    # other secret in this file; `valkey-cli` reads the same value from REDISCLI_AUTH.
+    # `docker inspect` prints under Config.Cmd. The command goes through the image's own
+    # `docker-entrypoint.sh`: it drops root to the `valkey` user only when its first argument is
+    # `valkey-server`, which a bare `sh -c` would skip (Valkey would run as root). `docker inspect`
+    # still shows Config.Env, like every other secret in this file; `valkey-cli` reads the same
+    # value from REDISCLI_AUTH.
     environment:
       - KV_PASSWORD=${KV_PASSWORD:?KV_PASSWORD is required, Valkey will not start without it}
       - REDISCLI_AUTH=${KV_PASSWORD}
@@ -89,7 +92,7 @@ services:
       - sh
       - -c
       - >-
-        exec valkey-server
+        exec docker-entrypoint.sh valkey-server
         --requirepass "$$KV_PASSWORD"
         --maxmemory ${KV_MEM_INNER_LIMIT}
         --maxmemory-policy allkeys-lru
