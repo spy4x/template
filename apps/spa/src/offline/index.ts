@@ -1,0 +1,86 @@
+import { signal } from "@preact/signals"
+import { RealtimeRequestError } from "@spy4x/realtime"
+import { isRealtimeOpen, realtimeCommand, realtimeQuery } from "../state/realtime.ts"
+import type { NoteItem } from "../state/notes.ts"
+import { type LocalStore, openDexieStore } from "./local-store.ts"
+import { createOutbox, type Outbox } from "./outbox.ts"
+
+/**
+ * The offline layer's entry point: what the rest of the SPA imports. `docs/offline.md` lists every
+ * import of this folder, which is also the list of what to remove to build without it.
+ */
+
+/** The local store and the queue of one signed-in user. */
+export interface OfflineLayer {
+  userId: number
+  store: LocalStore
+  outbox: Outbox
+}
+
+let layer: OfflineLayer | null = null
+
+/** The running layer as a signal, so a screen that shows the queue redraws when it starts. */
+export const activeLayer = signal<OfflineLayer | null>(null)
+
+/** The running layer, or `null` before sign-in: the stores then talk to the server alone. */
+export function currentLayer(): OfflineLayer | null {
+  return layer
+}
+
+/** Opens the user's local store and queue. Calling it again for the same user does nothing. */
+export function startOffline(userId: number): OfflineLayer {
+  if (layer?.userId === userId) return layer
+  stopOffline()
+  const store = openDexieStore(userId)
+  const outbox = createOutbox({
+    store,
+    userId,
+    isOnline: isRealtimeOpen,
+    newKey: () => crypto.randomUUID(),
+    now: () => new Date().toISOString(),
+    send: (name, payload, key) =>
+      realtimeCommand(name, payload, { attempts: 1, newKey: () => key }),
+    async fetchNote(groupId, id) {
+      try {
+        const { note } = await realtimeQuery<{ note: NoteItem }>("note.get", { groupId, id }, {
+          attempts: 1,
+        })
+        return note
+      } catch (error) {
+        const code = error instanceof RealtimeRequestError
+          ? (error.details as { code?: unknown } | undefined)?.code
+          : null
+        if (code === "NOTE_NOT_FOUND") return null
+        throw error
+      }
+    },
+  })
+  layer = { userId, store, outbox }
+  activeLayer.value = layer
+  void outbox.reload()
+  return layer
+}
+
+/**
+ * Closes the local store. `forget` also drops the cached notes and groups, as signing out must;
+ * the queue stays, because a write that never reached the server is the person's work and goes
+ * out the next time they sign in on this browser.
+ */
+export async function stopOffline({ forget = false } = {}): Promise<void> {
+  const closing = layer
+  layer = null
+  activeLayer.value = null
+  if (!closing) return
+  if (forget) await closing.store.clearCache().catch(() => {})
+  closing.outbox.entries.value = []
+  closing.store.close()
+}
+
+/** Sends the queued writes. Never rejects: what could not be sent stays queued. */
+export async function flushOutbox(): Promise<void> {
+  try {
+    await layer?.outbox.flush()
+  } catch (_error) {
+    // The queue keeps the writes; the next reconnect or push tries again.
+  }
+}

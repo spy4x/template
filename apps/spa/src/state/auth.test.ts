@@ -59,6 +59,32 @@ describe("bootstrapSession", () => {
     expect(sessionState.value.isMfaRequired).toBe(false)
     expect(sessionState.value.isReady).toBe(true)
   })
+
+  it("opens as the remembered user when the server cannot be reached", async () => {
+    globalThis.fetch = () => Promise.reject(new TypeError("Failed to fetch"))
+
+    await bootstrapSession(() => ({ id: 5 } as User))
+
+    expect(sessionState.value.user?.id).toBe(5)
+    expect(sessionState.value.isReady).toBe(true)
+  })
+
+  it("signs the person out when the server cannot be reached and nobody is remembered", async () => {
+    globalThis.fetch = () => Promise.reject(new TypeError("Failed to fetch"))
+
+    await bootstrapSession(() => null)
+
+    expect(sessionState.value.user).toBeNull()
+    expect(sessionState.value.isReady).toBe(true)
+  })
+
+  it("ignores the remembered user when the server answers 401", async () => {
+    meAnswers(401)
+
+    await bootstrapSession(() => ({ id: 5 } as User))
+
+    expect(sessionState.value.user).toBeNull()
+  })
 })
 
 /** Makes every request answer 200 with `{ success: true }`. */

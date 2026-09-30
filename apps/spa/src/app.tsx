@@ -9,6 +9,8 @@ import { bootstrapSession } from "./state/auth.ts"
 import { groupsStore } from "./state/groups.ts"
 import { notesStore } from "./state/notes.ts"
 import { connectRealtime, disconnectRealtime } from "./state/realtime.ts"
+import { flushOutbox, startOffline, stopOffline } from "./offline/index.ts"
+import { forgetUser, recallUser, rememberUser } from "./offline/session-cache.ts"
 import { toasts } from "./state/toasts.ts"
 import { AuthView } from "./views/AuthView.tsx"
 import { GroupsView } from "./views/GroupsView.tsx"
@@ -54,14 +56,22 @@ function Frame() {
 export function App() {
   const [ready, setReady] = useState(false)
   useEffect(() => {
-    bootstrapSession().finally(() => setReady(true))
+    bootstrapSession(recallUser).finally(() => setReady(true))
   }, [])
+
+  useEffect(() => {
+    // The user is remembered for the next start with no network, and forgotten on sign-out.
+    const { user, isReady, isMfaRequired } = sessionState.value
+    if (user && !isMfaRequired) rememberUser(user)
+    else if (isReady && !user) forgetUser()
+  }, [sessionState.value.user, sessionState.value.isReady, sessionState.value.isMfaRequired])
 
   useEffect(() => {
     const userId = sessionState.value.user?.id
     if (userId === undefined || sessionState.value.isMfaRequired) {
       // Signed out, or the second factor is still owed: drop the socket, the cursors and the data.
       disconnectRealtime({ forget: true })
+      void stopOffline({ forget: true })
       groupsStore.reset()
       notesStore.reset()
       return
@@ -70,12 +80,15 @@ export function App() {
     // that is news, so a missed frame costs one read and never leaves the list wrong. A note
     // change moves its group's sequence, so the open group's notes are read again too.
     const pull = async (gap?: { groupId: string }) => {
+      // Writes made offline go out before anything is read, so the read shows their result.
+      await flushOutbox()
       const openGroup = notesStore.groupId.value
       await Promise.all([
         groupsStore.refresh(),
         openGroup && (!gap || gap.groupId === openGroup) ? notesStore.refresh() : undefined,
       ])
     }
+    startOffline(userId)
     void pull().catch(() => {})
     connectRealtime(userId, pull)
     return () => disconnectRealtime()

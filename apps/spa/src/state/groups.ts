@@ -3,6 +3,8 @@ import { RealtimeRequestError } from "@spy4x/realtime"
 import { GroupKind, type GroupRole } from "@domain/groups"
 import { apiFetch } from "./api.ts"
 import { advanceGroupCursor, realtimeCommand, realtimeQuery } from "./realtime.ts"
+import { offlineGroups } from "../offline/groups-offline.ts"
+import { currentLayer } from "../offline/index.ts"
 
 /** A group as the API sends it: dates are ISO strings, the sequence a decimal string. */
 export interface GroupItem {
@@ -30,6 +32,8 @@ export interface GroupsDependencies {
   /** Records that this page holds a group up to a sequence. */
   advance(groupId: string, sequence: number): void
   newId(): string
+  /** What the device already holds of the list, shown before the read answers. */
+  readLocal?(): Promise<readonly GroupItem[]>
 }
 
 /** How a read reaches the API. */
@@ -71,8 +75,15 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
     for (const group of all) dependencies.advance(group.id, Number(group.changeSequence))
   }
 
+  /** Shows what the device holds while the first read runs, unless the read answered first. */
+  async function showLocal(): Promise<void> {
+    const local = await dependencies.readLocal?.().catch(() => undefined)
+    if (local && inFlight && groups.value.length === 0) groups.value = local
+  }
+
   function start(via: ReadChannel): Promise<void> {
     loading.value = true
+    if (groups.value.length === 0) void showLocal()
     inFlight = readAll(via).finally(() => {
       inFlight = null
       loading.value = false
@@ -138,8 +149,8 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
   return { groups, name, loading, creating, error, refresh, refreshFromUser, create, reset }
 }
 
-/** The page's own store: reads over REST (start-up and after a missed push), writes over the socket. */
-export const groupsStore = createGroupsStore({
+/** The groups as the server serves them: reads over REST, writes over the socket. */
+const onlineGroups: GroupsDependencies = {
   async fetchPage(cursor, via) {
     if (via === "socket") {
       return await realtimeQuery<GroupPage>("group.list", {
@@ -156,4 +167,10 @@ export const groupsStore = createGroupsStore({
   create: (input) => realtimeCommand("group.create", input),
   advance: advanceGroupCursor,
   newId: () => crypto.randomUUID(),
-})
+}
+
+/**
+ * The page's own store: reads over REST (start-up and after a missed push), writes over the
+ * socket, and with the offline layer running, served from the device when the network is down.
+ */
+export const groupsStore = createGroupsStore(offlineGroups(onlineGroups, currentLayer))

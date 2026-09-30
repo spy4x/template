@@ -133,6 +133,11 @@ export function advanceGroupCursor(groupId: string, sequence: number): void {
   current?.cursors.advanceTo(groupId, sequence)
 }
 
+/** Whether the socket is open now, so a call made this moment can reach the server. */
+export function isRealtimeOpen(): boolean {
+  return sessionState.value.wsStatus === "open"
+}
+
 /** Calls over the open socket. Without one, every call fails as a dropped connection. */
 export const realtimePort: CallPort = {
   command(name, payload, options) {

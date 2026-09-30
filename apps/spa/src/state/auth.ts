@@ -7,8 +7,26 @@ import {
 import { apiFetch } from "./api.ts"
 import { PendingSecondFactor, sessionState, SessionUser } from "./session.ts"
 
-export async function bootstrapSession(): Promise<void> {
-  const me = await apiFetch<User | PendingSecondFactor>("/api/auth/me")
+/**
+ * Asks the server who is signed in. When the server cannot be reached at all, `recall` may name
+ * the user this browser last saw signed in, so the app opens offline; without it, or with none
+ * remembered, the person is signed out.
+ */
+export async function bootstrapSession(
+  recall?: () => SessionUser | null,
+): Promise<void> {
+  let me: Awaited<ReturnType<typeof apiFetch<User | PendingSecondFactor>>>
+  try {
+    me = await apiFetch<User | PendingSecondFactor>("/api/auth/me")
+  } catch (_unreachable) {
+    sessionState.value = {
+      ...sessionState.value,
+      isReady: true,
+      user: recall?.() ?? null,
+      isMfaRequired: false,
+    }
+    return
+  }
   if (!me.ok) {
     sessionState.value = {
       ...sessionState.value,
