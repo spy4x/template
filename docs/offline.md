@@ -76,10 +76,16 @@ A write made online that the server refuses is not queued: the notes store shows
 ### The app shell
 
 `public/offline-shell.js` is loaded by `public/sw.js` with `importScripts`. On install it stores
-`/` and every script, style and image the page names; afterwards it answers page loads from the
-network first, falling back to the stored page, and everything else from the cache first,
-refreshing it behind the answer. It never touches `/api`. The hashed file names of a build make a
-cached script never stale. Old builds' files stay in the cache until the cache name changes.
+`/` and every script, style and image the page names. After that:
+
+- files under `/assets/` (a build names them by content hash, so a copy is never stale) are
+  answered from the cache first;
+- every other request, the page itself included, goes to the network first and is answered from
+  the cache only when the network fails, so a deploy, and an edit under the dev server, show at
+  once. Every route is the same page, so any page load is stored and served under `/`;
+- `/api` is never touched.
+
+Files of old builds stay in the cache until the cache name in the file changes.
 
 `SWUpdater` from `@spy4x/preact-system` already registered `/sw.js` for push notifications, so no
 registration was added. A person's first visit is online by definition; the app can go offline

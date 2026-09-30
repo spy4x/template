@@ -40,31 +40,26 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const { request } = event
   if (!isShellRequest(request)) return
+  const url = new URL(request.url)
   event.respondWith((async () => {
     const cache = await caches.open(SHELL_CACHE)
-    if (request.mode === "navigate") {
-      // Every route is the same page: network first so a deploy shows at once, cache when offline.
-      try {
-        const response = await fetch(request)
-        if (response.ok) await cache.put("/", response.clone())
-        return response
-      } catch (error) {
-        const page = await cache.match("/")
-        if (page) return page
-        throw error
-      }
+    // A build names its scripts and styles by content hash, so a cached copy is never stale.
+    if (url.pathname.startsWith("/assets/")) {
+      const cached = await cache.match(request)
+      if (cached) return cached
     }
-    // Scripts and styles carry a hash in their name, so a cached copy is never stale: answer from
-    // the cache and refresh it behind the answer.
-    const cached = await cache.match(request)
-    const refresh = fetch(request).then(async (response) => {
-      if (response.ok) await cache.put(request, response.clone())
+    // Everything else (the page, the manifest, and every file of a dev server) is asked of the
+    // network first, so a deploy or an edit shows at once; the cache answers only when it fails.
+    // Every route is the same page, so a page load is stored and served under `/`.
+    const key = request.mode === "navigate" ? "/" : request
+    try {
+      const response = await fetch(request)
+      if (response.ok) await cache.put(key, response.clone())
       return response
-    })
-    if (cached) {
-      refresh.catch(() => {})
-      return cached
+    } catch (error) {
+      const cached = await cache.match(key)
+      if (cached) return cached
+      throw error
     }
-    return await refresh
   })())
 })
