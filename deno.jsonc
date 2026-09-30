@@ -33,7 +33,7 @@
 
     // #region Scripts
     "db:migrate": "deno run -N=$DB_HOST:$DB_PORT -E -R=./libs/server/db/migrations ./infra/scripts/db-migrate.ts",
-    "db:seed": "deno run -N=$DB_HOST:$DB_PORT,$KV_HOSTNAME:$KV_PORT -E -R=infra/envs/.env infra/scripts/seed-data.ts",
+    "db:seed": "deno run -N=$DB_HOST:$DB_PORT -E ./infra/scripts/seed-data.ts", // demo user and group, see the script
     "deps:check": "deno outdated -r",
     "deps:update": "deno outdated -r -u -i",
     "update:ubuntu": "sudo apt update && sudo apt full-upgrade -y && sudo apt autoremove -y && sudo apt clean && sudo apt --fix-broken install && sudo do-release-upgrade",

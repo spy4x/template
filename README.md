@@ -71,6 +71,9 @@ at the port Compose publishes:
 DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=<user> DB_PASS=<password> DB_NAME=<name> deno task db:migrate
 ```
 
+To add a demo user `demo` who owns a shared group, run `deno task db:seed` with the same values plus
+`AUTH_PEPPER` (the API's) and `SEED_PASSWORD` (the demo user's password, 8 to 50 characters).
+
 ## Production certificates
 
 The production routers ask Traefik for certificates from the resolver named by
