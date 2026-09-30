@@ -40,12 +40,15 @@ Deno.test("cache service revives a cached expiresAt as a Date", async () => {
 /** A storage that keeps its data across an outage, like Valkey restarted from a snapshot. */
 class FlakyCacheStorage extends MemoryCacheStorage {
   down = false
+  /** Only `set` fails, like a write that times out while reads still work. */
+  failSet = false
   calls = 0
 
   override get(key: string): Promise<string | null> {
     return this.guard(() => super.get(key))
   }
   override set(key: string, value: string): Promise<void> {
+    if (this.failSet) return Promise.reject(new Error("valkey write timed out"))
     return this.guard(() => super.set(key, value))
   }
   override del(key: string): Promise<void> {
@@ -112,6 +115,22 @@ Deno.test("a row cached before an outage is not served after it when its delete 
 
   expect(await cache.get("user_1")).toBeNull()
   advance(5_000)
+  expect(await cache.get("user_1")).toBeNull()
+})
+
+Deno.test("a failed cache write marks the cache untrusted so the old row is not served", async () => {
+  const { storage, reports, cache, advance } = untrustedFixture()
+  await cache.set("user_1", `{"mfa":false}`, 60)
+  expect(await cache.get("user_1")).toBe(`{"mfa":false}`)
+
+  storage.failSet = true
+  await cache.set("user_1", `{"mfa":true}`, 60)
+  storage.failSet = false
+
+  expect(reports).toEqual(["set"])
+  // Reads work again, and storage still holds the old row, but the cache must not hand it out.
+  expect(await cache.get("user_1")).toBeNull()
+  advance(4_999)
   expect(await cache.get("user_1")).toBeNull()
 })
 
