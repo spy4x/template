@@ -43,14 +43,18 @@ function displayName(user: FrameUser): string {
 /**
  * The signed-in frame: `Shell` from `@spy4x/preact-system` with this app's brand, navigation, user
  * menu and connection status. Signed-out screens use {@link PublicFrame} instead.
+ *
+ * With `onSignOut`, "Sign out" is an item of the user menu, which needs JavaScript to open. Without
+ * it, a page rendered on the server, "Sign out" is a form that posts to its route. `connection` is
+ * shown only when the app has a live connection to report.
  */
 export function AppFrame(
   { user, connection, currentPath, navigate, onSignOut, children }: {
     user: FrameUser
-    connection: ConnectionStatus
+    connection?: ConnectionStatus
     currentPath?: string
     navigate?: Navigate
-    onSignOut: () => void
+    onSignOut?: () => void
     children: ComponentChildren
   },
 ): JSX.Element {
@@ -61,15 +65,31 @@ export function AppFrame(
       currentPath={currentPath}
       navigate={navigate}
       user={{ name: displayName(user) }}
-      userMenuItems={[{ label: "Sign out", onClick: onSignOut }]}
+      userMenuItems={onSignOut ? [{ label: "Sign out", onClick: onSignOut }] : []}
       status={
-        <span class="hidden text-xs text-muted sm:inline" data-e2e="shell-ws-status">
-          {CONNECTION_TEXT[connection]}
-        </span>
+        <>
+          {connection && (
+            <span class="hidden text-xs text-muted sm:inline" data-e2e="shell-ws-status">
+              {CONNECTION_TEXT[connection]}
+            </span>
+          )}
+          {!onSignOut && <SignOutForm />}
+        </>
       }
     >
       <div class="mx-auto w-full max-w-5xl px-2 py-6 sm:px-6">{children}</div>
     </Shell>
+  )
+}
+
+/** "Sign out" as a form that posts to its route; with `onSignOut`, the app takes it over. */
+function SignOutForm({ onSignOut }: { onSignOut?: () => void }): JSX.Element {
+  return (
+    <form method="post" action={FORM_ACTIONS.signOut} onSubmit={takeOver(onSignOut)}>
+      <Button type="submit" variant="outline" data-e2e="signout">
+        Sign out
+      </Button>
+    </form>
   )
 }
 
@@ -90,13 +110,7 @@ export function PublicFrame(
       <header class="border-b border-subtle">
         <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Brand navigate={navigate} />
-          {canSignOut && (
-            <form method="post" action={FORM_ACTIONS.signOut} onSubmit={takeOver(onSignOut)}>
-              <Button type="submit" variant="outline" data-e2e="signout">
-                Sign out
-              </Button>
-            </form>
-          )}
+          {canSignOut && <SignOutForm onSignOut={onSignOut} />}
         </div>
       </header>
       <Page as="main" class="py-8">{children}</Page>

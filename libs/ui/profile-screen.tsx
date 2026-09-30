@@ -56,7 +56,8 @@ export interface ProfileScreenProps {
   user: { mfa: UserMFAStatus } | null
   /** The session owes its one-time code: the screen points to it instead. */
   isMfaRequired: boolean
-  connection: ConnectionStatus
+  /** The live connection, for an app that has one. */
+  connection?: ConnectionStatus
   values: ProfileValues
   onValueChange: (field: keyof ProfileValues, value: string) => void
   errors: ProfileErrors
@@ -156,7 +157,9 @@ export function ProfileScreen(
       <Card>
         <CardHeader>
           <h1 class="text-lg font-semibold">Profile</h1>
-          <span data-e2e="ws-status" class="text-xs text-muted">WS: {connection}</span>
+          {connection && (
+            <span data-e2e="ws-status" class="text-xs text-muted">WS: {connection}</span>
+          )}
         </CardHeader>
         <CardBody>
           <form method="post" action={FORM_ACTIONS.profile} onSubmit={takeOver(onSaveProfile)}>
