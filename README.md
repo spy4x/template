@@ -73,6 +73,19 @@ at the port Compose publishes:
 DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=<user> DB_PASS=<password> DB_NAME=<name> deno task db:migrate
 ```
 
+## Production certificates
+
+The production routers ask Traefik for certificates from the resolver named by
+`TRAEFIK_CERT_RESOLVER` (default `myresolver`). `infra/compose/compose.proxy.yml` defines that
+resolver: Let's Encrypt, HTTP challenge on port 80, certificates stored in
+`.volumes/traefik/letsencrypt/acme.json`, expiry notices to `TRAEFIK_ACME_EMAIL`. Point `DOMAIN` at
+the server and run `deno task proxy:start` there.
+
+The template usually deploys behind a Traefik that several projects share. If that Traefik already
+defines a resolver, do not start the proxy compose file: set `TRAEFIK_CERT_RESOLVER` to the name it
+defines. If that Traefik defines none, copy the three `--certificatesresolvers.*` flags from
+`compose.proxy.yml` into its command.
+
 ## Tasks
 
 Current tasks come from [`deno.jsonc`](deno.jsonc).
