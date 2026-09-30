@@ -9,14 +9,13 @@ test.describe("auth profile ws push flow", () => {
     const firstName = "John"
     const lastName = "Doe"
 
-    const cleanup = async () => {
-      try {
-        await request.post(`${apiBase}/api/test/cleanup-user`, {
-          data: { username },
-        })
-      } catch (_error) {
-        // ignore
-      }
+    // The route answers 200 also when the user does not exist yet; anything else fails the spec.
+    // `soft` in `finally`: a failed cleanup is reported next to the spec's own error, not over it.
+    const cleanup = async ({ soft = false } = {}) => {
+      const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
+        data: { username },
+      })
+      ;(soft ? expect.soft : expect)(response.status(), await response.text()).toBe(200)
     }
 
     await cleanup()
@@ -71,7 +70,7 @@ test.describe("auth profile ws push flow", () => {
       const me = await page.request.get("/api/auth/me")
       expect(me.status()).toBe(401)
     } finally {
-      await cleanup()
+      await cleanup({ soft: true })
     }
   })
 
