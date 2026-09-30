@@ -31,8 +31,9 @@ It exists because every SaaS MVP needs the same groundwork before its first feat
 parts live here and in the published [`@spy4x/*`](https://jsr.io/@spy4x) packages; product rules
 stay out.
 
-**Status:** in migration. Sign-up, sign-in with TOTP, groups, notes (the reference aggregate) and
-the outbox worker work today; offline sync, group administration and the MPA's pages do not yet. Details in
+**Status:** in migration. Sign-up, sign-in with TOTP, groups, notes (the reference aggregate),
+the outbox worker and the MPA's pages work today; offline sync and group administration do not yet.
+Details in
 [docs/architecture.md](docs/architecture.md#migration-status) and
 [ADR 001](docs/decisions/001-deno-platform-template.md).
 
@@ -73,6 +74,29 @@ The screenshots and the GIF use a throw-away database and a made-up user;
 **Use it if** you are starting a multi-user web product and want auth, tenancy and operations
 settled before the first feature. **Skip it if** you need offline sync today, or you deploy to
 serverless functions rather than a server you run.
+
+## SPA or MPA
+
+The template ships two web clients over the same API. A product picks one and serves it at
+`DOMAIN`; both render the same screens from `libs/ui` and reach the same command and query
+handlers, so no business rule lives in either client.
+
+- **Pick the SPA** (`apps/spa`, Preact and Vite) when people should see each other's changes live,
+  or when the app will work offline later. It keeps a WebSocket open for groups and notes, as
+  [ADR 002](docs/decisions/002-realtime-transport-and-sync.md) decides.
+- **Pick the MPA** (`apps/mpa`, Fresh) when a page that reloads after each form is enough: an admin
+  area, a back office, a product for people on old phones or behind strict script policies. Every
+  page is rendered on the server and every action is a plain form post, so it works with
+  JavaScript turned off. There is no socket; a change shows on the next page load.
+
+The MPA calls the API over HTTP from the server, with the browser's session cookie, and never
+touches the database itself. It needs `ENV` and `DOMAIN` (the same values as the API) and
+`API_URL`, the address the MPA's server reaches the API at, such as `http://api:8000`. The browser
+must reach the MPA at `DOMAIN`, with `/api` still going to the API: the API accepts a form only
+from `http(s)://DOMAIN`, and the MPA passes the browser's `Origin` on unchanged. Compose serves
+the SPA there today; to serve the MPA instead, route `DOMAIN` to `deno task mpa:start` (after
+`deno task mpa:build`) where the SPA is. Its end-to-end tests run with `deno task --cwd apps/mpa
+e2e` against such a stack.
 
 ## Quick start
 
