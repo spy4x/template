@@ -130,7 +130,7 @@
     // apps/tgbot
 
     // client
-    // spy4x/preact-components 1.2.0. Every package is published at one version together, so all
+    // spy4x/preact-components 1.3.0. Every package is published at one version together, so all
     // five move in one change. preact, @preact/signals, @preact/signals-core and wouter-preact
     // must stay on the versions these packages pin, or two copies load.
     "@spy4x/preact-icons": "jsr:@spy4x/preact-icons@1.3.0",
