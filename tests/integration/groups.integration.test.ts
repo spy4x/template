@@ -339,7 +339,9 @@ async function groupMetadata(sql: postgres.Sql, schema: string): Promise<string[
     FROM (
       SELECT
         'column|' || table_name || '|' || ordinal_position || '|' || column_name || '|' ||
-        data_type || '|' || is_nullable || '|' || COALESCE(column_default, '') AS value
+        data_type || '|' || COALESCE(character_maximum_length::text, '') || '|' ||
+        COALESCE(datetime_precision::text, '') || '|' || is_nullable || '|' ||
+        COALESCE(column_default, '') AS value
       FROM information_schema.columns
       WHERE table_schema = ${schema}
         AND table_name IN ${sql(SNAPSHOT_TABLES)}
