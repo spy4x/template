@@ -12,6 +12,7 @@ import { webPushService } from "@api/services/webPush.ts"
 import { APIContext } from "./_types.ts"
 import { randomBase64Url } from "@spy4x/platform/tokens"
 import { ONE_HOUR_IN_MILLISECONDS } from "@spy4x/platform/universal/time-constants"
+import { startSessionExpiry } from "./services/session-expiry.ts"
 import { createAuthRoute } from "./routes/auth.ts"
 import { createPushNotificationRoute } from "./routes/pushNotification.ts"
 import { createUsersRoute } from "./routes/users.ts"
@@ -81,8 +82,10 @@ if (config.isDev) {
 // This is a temporary solution to expire sessions every hour
 // This should be done in a more efficient way, like using a cron job or similar
 const SESSION_EXPIRE_INTERVAL = ONE_HOUR_IN_MILLISECONDS
-setInterval(async () => {
-  await signIn.expireSessions()
-}, SESSION_EXPIRE_INTERVAL)
+startSessionExpiry({
+  expireSessions: () => signIn.expireSessions(),
+  log,
+  intervalMs: SESSION_EXPIRE_INTERVAL,
+})
 
 export default app
