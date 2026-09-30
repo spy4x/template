@@ -151,6 +151,34 @@ describe("a sign-out made while the server was out of reach", () => {
     expect(sessionState.value.user).toBeNull()
   })
 
+  it("is kept when the server answers the sign-out with an error", async () => {
+    const flags = memoryFlags()
+    flags.setItem("auth:sign-out-owed", "1")
+    useFlagStorage(flags)
+    serverThat((path) =>
+      path === "/api/auth/sign-out"
+        ? Response.json({ error: "Bad Gateway" }, { status: 502 })
+        : Response.json(user)
+    )
+
+    await bootstrapSession(() => ({ id: 5 } as User))
+
+    expect(flags.getItem("auth:sign-out-owed")).toBe("1")
+    expect(sessionState.value.user).toBeNull()
+  })
+
+  it("is owed when the server answers the sign-out with an error", async () => {
+    const flags = memoryFlags()
+    useFlagStorage(flags)
+    sessionState.value = { ...sessionState.value, user: { id: 1 } as User }
+    serverThat(() => Response.json({ error: "Bad Gateway" }, { status: 502 }))
+
+    await signOut()
+
+    expect(sessionState.value.user).toBeNull()
+    expect(flags.getItem("auth:sign-out-owed")).toBe("1")
+  })
+
   it("is forgotten once the person signs in again", async () => {
     const flags = memoryFlags()
     flags.setItem("auth:sign-out-owed", "1")

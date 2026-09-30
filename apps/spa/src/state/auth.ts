@@ -51,12 +51,13 @@ function isSignOutOwed(): boolean {
 
 /**
  * Ends the server's session if an earlier sign-out could not reach it. The flag is cleared only
- * when the server answers; while it is unreachable the flag stays. Resolves whether it is settled.
+ * when the server answers with success; while it is unreachable or failing, the flag stays. Resolves whether it is settled.
  */
 export async function settleOwedSignOut(): Promise<boolean> {
   if (!isSignOutOwed()) return true
   try {
-    await apiFetch<ApiSuccessResponse>("/api/auth/sign-out", { method: "POST" })
+    const result = await apiFetch<ApiSuccessResponse>("/api/auth/sign-out", { method: "POST" })
+    if (!result.ok) return false
     setSignOutOwed(false)
     return true
   } catch (_unreachable) {
@@ -158,8 +159,9 @@ export async function signUp(username: string, password: string): Promise<{
 
 export async function signOut(): Promise<void> {
   try {
-    await apiFetch<ApiSuccessResponse>("/api/auth/sign-out", { method: "POST" })
-    setSignOutOwed(false)
+    const result = await apiFetch<ApiSuccessResponse>("/api/auth/sign-out", { method: "POST" })
+    // An error answer (a proxy's 502 during a deploy) has not ended the session either.
+    setSignOutOwed(!result.ok)
   } catch (_unreachable) {
     // Offline: the page still signs out, and the sign-out is owed to the server. It is sent at
     // the next start and when the browser comes back online; until then the server's session
