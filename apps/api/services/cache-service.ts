@@ -42,12 +42,13 @@ const RECOVERY_INTERVAL_MS = 5_000
  * Wraps `storage` so a Valkey outage never fails a request: while Valkey is down every read is a
  * miss (Postgres answers) and every write is skipped.
  *
- * The cache starts untrusted too, because Valkey may hold stale rows from before this process started. A skipped write is the danger: the row changes in Postgres, and when Valkey returns with its old
- * data (a restart from a snapshot, a network break) the stale row would be served. So the first
- * failed operation marks the whole cache untrusted. While untrusted, `get` misses and `set` and
- * `del` do nothing, none of them touching Valkey. Trust returns only after a `reset()` succeeds,
- * which removes every key this storage holds; it is retried at most once per `retryMs`, on the
- * next operation, so no timer is left running.
+ * The cache starts untrusted too, because Valkey may hold stale rows from before this process
+ * started. A skipped write is the danger: the row changes in Postgres, and when Valkey returns with
+ * its old data (a restart from a snapshot, a network break) the stale row would be served. So the
+ * first failed operation marks the whole cache untrusted. While untrusted, `get` misses and `set`
+ * and `del` do nothing, none of them touching Valkey. Trust returns only after a `reset()`
+ * succeeds, which removes every key this storage holds; it is retried at most once per `retryMs`,
+ * on the next operation, so no timer is left running.
  *
  * ts-libs' `CacheService.wrap` has no such mode; this stays local until it does.
  */
