@@ -14,6 +14,7 @@ import { CommandBus } from "@spy4x/platform/cqrs"
 import { createSessionGate } from "../cqrs/session-gate.ts"
 import type { APIContext } from "../_types.ts"
 import { oversizedJson } from "../_testing/json-bodies.ts"
+import { IdempotencyError } from "@server/idempotency/idempotency.ts"
 import { createGroupsRoute, GroupsRouteDependencies } from "./groups.ts"
 import { buildAuthData } from "../_testing/fake-auth.ts"
 
@@ -433,4 +434,38 @@ describe("groups route caps the JSON body", () => {
     })
     expect(deps.createCommand).toBe(null)
   })
+})
+
+describe("groups route idempotency", () => {
+  const post = (app: ReturnType<typeof buildApp>, extra: Record<string, string> = {}) =>
+    app.request("http://local/groups", {
+      method: "POST",
+      headers: { ...mutationHeaders, ...extra },
+      body: JSON.stringify({ id, kind: GroupKind.SHARED, name: "Team" }),
+    })
+
+  it("passes the Idempotency-Key header to the create command", async () => {
+    const deps = dependencies()
+    const response = await post(buildApp(deps), { "idempotency-key": "key-1" })
+
+    expect(response.status).toBe(201)
+    expect(deps.createCommand?.data.idempotencyKey).toBe("key-1")
+  })
+
+  for (
+    const [code, status, error] of [
+      ["IDEMPOTENCY_KEY_INVALID", 400, new IdempotencyError("INVALID_KEY", "bad key")],
+      ["IDEMPOTENCY_KEY_REUSED", 422, new IdempotencyError("KEY_REUSED", "other body")],
+      ["IDEMPOTENCY_IN_PROGRESS", 409, new IdempotencyError("IN_PROGRESS", "still running")],
+    ] as const
+  ) {
+    it(`answers ${status} ${code} when the key is refused`, async () => {
+      const deps = dependencies()
+      deps.create = () => Promise.reject(error)
+      const response = await post(buildApp(deps), { "idempotency-key": "key-1" })
+
+      expect(response.status).toBe(status)
+      expect((await response.json()).error.code).toBe(code)
+    })
+  }
 })
