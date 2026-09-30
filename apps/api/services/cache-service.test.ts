@@ -84,6 +84,7 @@ Deno.test("a failing cache read is a miss and the value is computed and returned
 
 Deno.test("a failing cache read or write is reported, not thrown", async () => {
   const { storage, reports, cache } = untrustedFixture()
+  await cache.get("warm-up") // a first successful operation clears the cache and trusts it
   storage.down = true
 
   expect(await cache.get("user_1")).toBeNull()
@@ -94,6 +95,7 @@ Deno.test("a failing cache read or write is reported, not thrown", async () => {
 
 Deno.test("a failing cache delete is reported, not thrown", async () => {
   const { storage, reports, cache } = untrustedFixture()
+  await cache.get("warm-up") // a first successful operation clears the cache and trusts it
   storage.down = true
 
   await cache.del("user_1")
@@ -143,4 +145,12 @@ Deno.test("a cache trusts storage again only after a reset succeeds and then sto
 
   expect(await cache.get("user_1")).toBe(`{"new":true}`)
   expect(reports).toEqual(["get", "reset"])
+})
+
+Deno.test("a new cache service clears what an earlier process left before trusting it", async () => {
+  const storage = new MemoryCacheStorage()
+  await storage.set("user_1", JSON.stringify({ id: 1, mfa: 1 }))
+  const cache = createCacheService(storage, () => {})
+
+  expect(await cache.get("user_1")).toBeNull()
 })

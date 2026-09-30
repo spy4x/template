@@ -42,7 +42,7 @@ const RECOVERY_INTERVAL_MS = 5_000
  * Wraps `storage` so a Valkey outage never fails a request: while Valkey is down every read is a
  * miss (Postgres answers) and every write is skipped.
  *
- * A skipped write is the danger: the row changes in Postgres, and when Valkey returns with its old
+ * The cache starts untrusted too, because Valkey may hold stale rows from before this process started. A skipped write is the danger: the row changes in Postgres, and when Valkey returns with its old
  * data (a restart from a snapshot, a network break) the stale row would be served. So the first
  * failed operation marks the whole cache untrusted. While untrusted, `get` misses and `set` and
  * `del` do nothing, none of them touching Valkey. Trust returns only after a `reset()` succeeds,
@@ -57,7 +57,7 @@ export function failOpen(
   retryMs = RECOVERY_INTERVAL_MS,
   now: () => number = Date.now,
 ): ICacheStorage {
-  let trusted = true
+  let trusted = false
   let nextAttemptAt = 0
   let recovery: Promise<void> | null = null
 
