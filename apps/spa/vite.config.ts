@@ -1,5 +1,6 @@
 /// <reference lib="deno.ns" />
 import { defineConfig } from "vite"
+import { fromFileUrl } from "@std/path"
 import deno from "@deno/vite-plugin"
 import preact from "@preact/preset-vite"
 import tailwindcss from "@tailwindcss/vite"
@@ -26,6 +27,14 @@ export default defineConfig({
       }],
     },
   ],
+  resolve: {
+    // Vite, not the Deno plugin, must load libs/ui: the Deno plugin compiles JSX for React, so a
+    // screen loaded through it fails at runtime with "React is not defined".
+    alias: [{
+      find: /^@ui\//,
+      replacement: fromFileUrl(new URL("../../libs/ui/", import.meta.url)),
+    }],
+  },
   server: {
     host: "0.0.0.0",
     watch: {
@@ -33,6 +42,7 @@ export default defineConfig({
         "!../../libs/client/**",
         "!../../libs/domain/**",
         "!../../libs/platform/**",
+        "!../../libs/ui/**",
       ],
     },
   },
