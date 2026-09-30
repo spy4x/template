@@ -5,7 +5,7 @@ import { LoadingSpinner } from "@spy4x/preact-ui/loading-spinner"
 import { Toastr } from "@spy4x/preact-ui/toastr"
 import { Route, Switch } from "wouter-preact"
 import { canSignOut, sessionState } from "./state/session.ts"
-import { bootstrapSession } from "./state/auth.ts"
+import { bootstrapSession, settleOwedSignOut } from "./state/auth.ts"
 import { groupsStore } from "./state/groups.ts"
 import { notesStore } from "./state/notes.ts"
 import { connectRealtime, disconnectRealtime } from "./state/realtime.ts"
@@ -57,6 +57,13 @@ export function App() {
   const [ready, setReady] = useState(false)
   useEffect(() => {
     bootstrapSession(recallUser).finally(() => setReady(true))
+  }, [])
+
+  useEffect(() => {
+    // A sign-out made offline reaches the server as soon as the browser is online again.
+    const settle = () => void settleOwedSignOut()
+    addEventListener("online", settle)
+    return () => removeEventListener("online", settle)
   }, [])
 
   useEffect(() => {

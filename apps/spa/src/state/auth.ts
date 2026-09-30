@@ -7,6 +7,63 @@ import {
 import { apiFetch } from "./api.ts"
 import { PendingSecondFactor, sessionState, SessionUser } from "./session.ts"
 
+const SIGN_OUT_OWED = "auth:sign-out-owed"
+
+type FlagStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">
+
+function browserStorage(): FlagStorage | null {
+  let found: FlagStorage | null = null
+  try {
+    found = localStorage
+  } catch (_error) {
+    // Blocked storage: a sign-out that could not reach the server is not remembered.
+  }
+  return found
+}
+
+let flagStorage: FlagStorage | null | undefined
+
+/** Where the "sign-out owed" flag lives. Tests pass their own; `undefined` means the browser's. */
+export function useFlagStorage(storage: FlagStorage | null | undefined): void {
+  flagStorage = storage
+}
+
+function flags(): FlagStorage | null {
+  return flagStorage === undefined ? browserStorage() : flagStorage
+}
+
+function setSignOutOwed(owed: boolean): void {
+  try {
+    if (owed) flags()?.setItem(SIGN_OUT_OWED, "1")
+    else flags()?.removeItem(SIGN_OUT_OWED)
+  } catch (_error) {
+    // Nothing to keep the flag in.
+  }
+}
+
+function isSignOutOwed(): boolean {
+  try {
+    return flags()?.getItem(SIGN_OUT_OWED) === "1"
+  } catch (_error) {
+    return false
+  }
+}
+
+/**
+ * Ends the server's session if an earlier sign-out could not reach it. The flag is cleared only
+ * when the server answers; while it is unreachable the flag stays. Resolves whether it is settled.
+ */
+export async function settleOwedSignOut(): Promise<boolean> {
+  if (!isSignOutOwed()) return true
+  try {
+    await apiFetch<ApiSuccessResponse>("/api/auth/sign-out", { method: "POST" })
+    setSignOutOwed(false)
+    return true
+  } catch (_unreachable) {
+    return false
+  }
+}
+
 /**
  * Asks the server who is signed in. When the server cannot be reached at all, `recall` may name
  * the user this browser last saw signed in, so the app opens offline; without it, or with none
@@ -15,6 +72,18 @@ import { PendingSecondFactor, sessionState, SessionUser } from "./session.ts"
 export async function bootstrapSession(
   recall?: () => SessionUser | null,
 ): Promise<void> {
+  // A sign-out made offline is finished first, and the person stays signed out, even while the
+  // server is still out of reach (`recall` is not used then).
+  if (isSignOutOwed()) {
+    await settleOwedSignOut()
+    sessionState.value = {
+      ...sessionState.value,
+      isReady: true,
+      user: null,
+      isMfaRequired: false,
+    }
+    return
+  }
   let me: Awaited<ReturnType<typeof apiFetch<User | PendingSecondFactor>>>
   try {
     me = await apiFetch<User | PendingSecondFactor>("/api/auth/me")
@@ -53,6 +122,7 @@ async function handleAuthResponse(
     return { ok: false, mfaRequired: false, error: result.error.message }
   }
   const mfaRequired = result.status === 202
+  setSignOutOwed(false)
   sessionState.value = {
     ...sessionState.value,
     user: mfaRequired ? null : result.data as User,
@@ -89,9 +159,12 @@ export async function signUp(username: string, password: string): Promise<{
 export async function signOut(): Promise<void> {
   try {
     await apiFetch<ApiSuccessResponse>("/api/auth/sign-out", { method: "POST" })
+    setSignOutOwed(false)
   } catch (_unreachable) {
-    // Offline: the page still signs out, so the person is not left signed in on a shared device.
-    // The server's session ends on its own expiry.
+    // Offline: the page still signs out, and the sign-out is owed to the server. It is sent at
+    // the next start and when the browser comes back online; until then the server's session
+    // stays valid, so nobody else may be shown as this person.
+    setSignOutOwed(true)
   }
   sessionState.value = {
     ...sessionState.value,
@@ -108,6 +181,7 @@ export async function checkTotp(otp: string): Promise<{ ok: boolean; error?: str
   if (!result.ok) {
     return { ok: false, error: result.error.message }
   }
+  setSignOutOwed(false)
   sessionState.value = {
     ...sessionState.value,
     user: result.data,

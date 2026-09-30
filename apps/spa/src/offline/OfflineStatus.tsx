@@ -1,3 +1,4 @@
+import { useState } from "preact/hooks"
 import { Button } from "@spy4x/preact-ui/button"
 import { Card, CardBody } from "@spy4x/preact-ui/card"
 import { activeLayer } from "./index.ts"
@@ -22,6 +23,8 @@ function mySide(entry: OutboxEntry): string {
 export function OfflineStatus(
   { groupId, onResolved }: { groupId: string; onResolved: () => void },
 ) {
+  // Which entry's copy button was pressed last: its seq when it worked, the negative when it did not.
+  const [copied, setCopied] = useState(0)
   const layer = activeLayer.value
   if (!layer) return null
   const entries = layer.outbox.entries.value.filter((entry) => entry.groupId === groupId)
@@ -71,10 +74,21 @@ export function OfflineStatus(
                 type="button"
                 variant="ghost"
                 data-e2e="conflict-copy"
-                onClick={() => void navigator.clipboard?.writeText(mySide(entry)).catch(() => {})}
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(mySide(entry))
+                    setCopied(entry.seq!)
+                  } catch (_denied) {
+                    setCopied(-entry.seq!)
+                  }
+                }}
               >
                 Copy my text
               </Button>
+              {copied === entry.seq && <span role="status" class="text-sm">Copied.</span>}
+              {copied === -entry.seq! && (
+                <span role="status" class="text-sm">Could not copy: select the text above.</span>
+              )}
               <Button
                 type="button"
                 variant="outline"

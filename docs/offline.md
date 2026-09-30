@@ -98,7 +98,12 @@ Signing out drops the cached notes and groups and the remembered user. The outbo
 that never reached the server is the person's work, and goes out the next time the same user
 signs in on this browser. Those unsent note texts stay in IndexedDB on a shared device until that
 user signs in again, so on a shared browser use the browser's own "clear site data". Signing out
-with no network still signs the page out; the server's session then ends on its own expiry.
+with no network signs the page out at once and records that a sign-out is owed to the server
+(`localStorage`, `auth:sign-out-owed`). The app sends it first thing at the next start, before
+asking who is signed in, and again when the browser comes back online. The flag is cleared only when
+the server answers; while it is unreachable the person stays signed out and the remembered user is
+not used. Signing in or completing the one-time code clears the flag. Until the server is reached,
+its session stays valid.
 
 ## What is not offline
 

@@ -1,7 +1,14 @@
 import { expect } from "@std/expect"
-import { afterEach, describe, it } from "@std/testing/bdd"
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd"
 import { type User, UserMFAStatus } from "@domain/identity"
-import { bootstrapSession, signOut, totpConnectFinish, totpDisconnect } from "./auth.ts"
+import {
+  bootstrapSession,
+  signIn,
+  signOut,
+  totpConnectFinish,
+  totpDisconnect,
+  useFlagStorage,
+} from "./auth.ts"
 import { sessionState } from "./session.ts"
 
 const realFetch = globalThis.fetch
@@ -25,7 +32,10 @@ function meAnswers(status: number) {
 }
 
 describe("bootstrapSession", () => {
+  // Never read or write the real `localStorage`, which persists between runs.
+  beforeEach(() => useFlagStorage(memoryFlags()))
   afterEach(() => {
+    useFlagStorage(undefined)
     globalThis.fetch = realFetch
     sessionState.value = { ...sessionState.value, user: null, isMfaRequired: false, isReady: false }
   })
@@ -87,13 +97,81 @@ describe("bootstrapSession", () => {
   })
 })
 
+function memoryFlags() {
+  const map = new Map<string, string>()
+  return {
+    getItem: (key: string) => map.get(key) ?? null,
+    setItem: (key: string, value: string) => void map.set(key, value),
+    removeItem: (key: string) => void map.delete(key),
+  }
+}
+
+describe("a sign-out made while the server was out of reach", () => {
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    useFlagStorage(undefined)
+    sessionState.value = { ...sessionState.value, user: null, isReady: false }
+  })
+
+  /** Records each request's path; answers with `answer`. */
+  function serverThat(answer: (path: string) => Response | Promise<never>) {
+    const paths: string[] = []
+    globalThis.fetch = (input) => {
+      const path = new URL(String(input), "http://x").pathname
+      paths.push(path)
+      return Promise.resolve(answer(path))
+    }
+    return paths
+  }
+
+  it("is sent before the session is asked for, and the person stays signed out", async () => {
+    const flags = memoryFlags()
+    flags.setItem("auth:sign-out-owed", "1")
+    useFlagStorage(flags)
+    const paths = serverThat(() => Response.json(user))
+
+    await bootstrapSession(() => ({ id: 5 } as User))
+
+    expect(paths).toEqual(["/api/auth/sign-out"])
+    expect(sessionState.value.user).toBeNull()
+    expect(flags.getItem("auth:sign-out-owed")).toBeNull()
+  })
+
+  it("is kept while the server is still unreachable, and the remembered user is not used", async () => {
+    const flags = memoryFlags()
+    useFlagStorage(flags)
+    globalThis.fetch = () => Promise.reject(new TypeError("Failed to fetch"))
+    sessionState.value = { ...sessionState.value, user: { id: 1 } as User }
+
+    await signOut()
+    expect(flags.getItem("auth:sign-out-owed")).toBe("1")
+
+    await bootstrapSession(() => ({ id: 5 } as User))
+    expect(flags.getItem("auth:sign-out-owed")).toBe("1")
+    expect(sessionState.value.user).toBeNull()
+  })
+
+  it("is forgotten once the person signs in again", async () => {
+    const flags = memoryFlags()
+    flags.setItem("auth:sign-out-owed", "1")
+    useFlagStorage(flags)
+    serverThat(() => Response.json(user))
+
+    await signIn("ada", "Passw0rd!")
+
+    expect(flags.getItem("auth:sign-out-owed")).toBeNull()
+  })
+})
+
 describe("signOut", () => {
   afterEach(() => {
+    useFlagStorage(undefined)
     globalThis.fetch = realFetch
     sessionState.value = { ...sessionState.value, user: null }
   })
 
   it("signs the page out even when the server cannot be reached", async () => {
+    useFlagStorage(memoryFlags())
     sessionState.value = { ...sessionState.value, user: { id: 1 } as User }
     globalThis.fetch = () => Promise.reject(new TypeError("Failed to fetch"))
 
