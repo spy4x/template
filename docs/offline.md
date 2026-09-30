@@ -100,8 +100,9 @@ as a conflict in the second.
 ## Removing the layer
 
 A product that does not want offline deletes the layer and keeps an online SPA that still gets live
-updates. Do these steps; the guard test `tests/offline-removal.test.ts` fails when this list and the
-code disagree.
+updates. Do these steps. The guard test `tests/offline-removal.test.ts` fails when a file that imports the
+layer is missing from this list. Following them on this repository ends with `deno task check` and
+`deno task spa:build` passing.
 
 1. Delete the folder `apps/spa/src/offline/` and the file `apps/spa/public/offline-shell.js`.
 2. In `apps/spa/public/sw.js`, delete the `importScripts("/offline-shell.js")` line.
@@ -116,7 +117,9 @@ code disagree.
 5. In `apps/spa/src/state/realtime.ts`, delete `isRealtimeOpen`.
 6. In `apps/spa/src/views/NotesView.tsx`, delete the `OfflineStatus` import and element.
 7. Remove `dexie` from `deno.jsonc` and run `deno install` to update `deno.lock`.
-8. Delete the spec `e2e/offline.e2e.ts`. The unit tests lived in the folder and went with it.
+8. Delete the spec `e2e/offline.e2e.ts`, and this guard test with its clause at the end of the
+   `test` task in `deno.jsonc`: `tests/offline-removal.test.ts`. The unit tests lived in the
+   folder and went with it.
 
 `deno task check` and `deno task spa:build` then pass, and the app behaves as it did before the
 layer existed: reads and writes over the network only.
