@@ -4,6 +4,7 @@ import {
   CreatePersonalGroupInput,
   CreateSharedGroupInput,
   Group,
+  GROUP_AGGREGATE,
   GroupAccess,
   GroupError,
   GroupKind,
@@ -37,11 +38,20 @@ interface GroupSummaryRow extends postgres.Row {
   name: string
   role: GroupRole
   authorizationRevision: string
+  changeSequence: string
   updatedAt: Date
 }
 
 interface ActiveUserRow extends postgres.Row {
   id: number
+}
+
+interface ChangeSequenceRow extends postgres.Row {
+  sequence: string
+}
+
+interface MemberRow extends postgres.Row {
+  userId: number
 }
 
 interface PersonalMembershipCountRow extends postgres.Row {
@@ -50,7 +60,6 @@ interface PersonalMembershipCountRow extends postgres.Row {
 }
 
 const GROUP_CREATED_EVENT = "group.created"
-const GROUP_AGGREGATE = "group"
 
 export class PostgresGroupRepository implements GroupRepository {
   constructor(private readonly sql: postgres.Sql) {}
@@ -64,6 +73,7 @@ export class PostgresGroupRepository implements GroupRepository {
         groups.name,
         group_members.role,
         groups.authorization_revision::text AS authorization_revision,
+        (groups.next_change_sequence - 1)::text AS change_sequence,
         groups.updated_at
       FROM groups
       INNER JOIN group_members
@@ -124,6 +134,18 @@ export class PostgresGroupRepository implements GroupRepository {
     return row ? { group: toGroup(row), role: row.role } : null
   }
 
+  async listMemberUserIds(groupId: string): Promise<number[]> {
+    const rows = await this.sql<MemberRow[]>`
+      SELECT group_members.user_id
+      FROM group_members
+      INNER JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL
+      INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+      WHERE group_members.group_id = ${groupId}
+      ORDER BY group_members.user_id
+    `
+    return rows.map((row) => row.userId)
+  }
+
   async createShared(
     input: CreateSharedGroupInput,
     actorId: number,
@@ -171,7 +193,9 @@ export class PostgresGroupRepository implements GroupRepository {
       VALUES (${group.id}, ${userId}, ${GroupRole.OWNER}, ${userId})
     `
     await this.assertPersonalGroupInvariant(group.id, userId)
-    return toGroup(group)
+    return toGroup(
+      withStampedSequence(group, await this.recordChange(group.id, userId, GROUP_CREATED_EVENT)),
+    )
   }
 
   /**
@@ -237,7 +261,8 @@ export class PostgresGroupRepository implements GroupRepository {
           VALUES (${inserted.id}, ${userId}, ${GroupRole.OWNER}, ${userId})
         `
         await repository.assertPersonalGroupInvariant(inserted.id, userId)
-        return toGroup(inserted)
+        const sequence = await repository.recordChange(inserted.id, userId, GROUP_CREATED_EVENT)
+        return toGroup(withStampedSequence(inserted, sequence))
       }
 
       const concurrent = await repository.getPersonalForOwner(userId)
@@ -297,27 +322,9 @@ export class PostgresGroupRepository implements GroupRepository {
           ${input.requestId || null}
         )
       `
-      await this.sql`
-        INSERT INTO outbox_events (
-          id,
-          event_kind,
-          aggregate_type,
-          aggregate_id,
-          aggregate_version,
-          group_id,
-          actor_user_id
-        ) VALUES (
-          ${crypto.randomUUID()},
-          ${GROUP_CREATED_EVENT},
-          ${GROUP_AGGREGATE},
-          ${inserted.id},
-          1,
-          ${inserted.id},
-          ${actorId}
-        )
-      `
+      const sequence = await this.recordChange(inserted.id, actorId, GROUP_CREATED_EVENT)
       return {
-        group: toSummary(inserted, GroupRole.OWNER),
+        group: toSummary(withStampedSequence(inserted, sequence), GroupRole.OWNER),
         created: true,
       }
     }
@@ -335,6 +342,54 @@ export class PostgresGroupRepository implements GroupRepository {
       }
     }
     throw new GroupError("ID_ALREADY_EXISTS", "Group id is already in use")
+  }
+
+  /**
+   * Stamps one committed change on a group: takes the group's next sequence and writes the outbox
+   * row that announces it. Returns the sequence, as a decimal string.
+   *
+   * It runs in the transaction of the change it records, so a change that rolls back takes its
+   * sequence and its outbox row with it, and no push is ever sent for it. The `UPDATE` locks the
+   * group row, which is what hands two concurrent changes two different sequences in commit order.
+   * The outbox row carries the group as its aggregate and the sequence as its version, so the
+   * publisher can name both without reading the group again.
+   */
+  private async recordChange(
+    groupId: string,
+    actorId: number,
+    eventKind: string,
+  ): Promise<string> {
+    const stamped = (
+      await this.sql<ChangeSequenceRow[]>`
+        UPDATE groups
+        SET next_change_sequence = next_change_sequence + 1
+        WHERE id = ${groupId}
+        RETURNING (next_change_sequence - 1)::text AS sequence
+      `
+    )[0]
+    if (!stamped) {
+      throw new Error(`Group ${groupId} vanished while its change was being recorded`)
+    }
+    await this.sql`
+      INSERT INTO outbox_events (
+        id,
+        event_kind,
+        aggregate_type,
+        aggregate_id,
+        aggregate_version,
+        group_id,
+        actor_user_id
+      ) VALUES (
+        ${crypto.randomUUID()},
+        ${eventKind},
+        ${GROUP_AGGREGATE},
+        ${groupId},
+        ${stamped.sequence}::bigint,
+        ${groupId},
+        ${actorId}
+      )
+    `
+    return stamped.sequence
   }
 
   private async assertActiveUser(userId: number): Promise<void> {
@@ -400,8 +455,16 @@ function toGroup(row: GroupRow): Group {
   }
 }
 
+/** The row as it reads after `recordChange` took `sequence`: the next one is one past it. */
+function withStampedSequence(row: GroupRow, sequence: string): GroupRow {
+  return { ...row, nextChangeSequence: (BigInt(sequence) + 1n).toString() }
+}
+
 function toSummary(
-  group: Pick<Group, "id" | "kind" | "name" | "authorizationRevision" | "updatedAt">,
+  group: Pick<
+    Group,
+    "id" | "kind" | "name" | "authorizationRevision" | "nextChangeSequence" | "updatedAt"
+  >,
   role: GroupRole,
 ): GroupSummary {
   return {
@@ -410,6 +473,7 @@ function toSummary(
     name: group.name,
     role,
     authorizationRevision: group.authorizationRevision,
+    changeSequence: (BigInt(group.nextChangeSequence) - 1n).toString(),
     updatedAt: group.updatedAt,
   }
 }

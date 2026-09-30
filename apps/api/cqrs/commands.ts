@@ -6,6 +6,8 @@ export interface UserProfileUpdatePayload {
   firstName: string
   lastName: string
   request: RequestInfo
+  /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
+  idempotencyKey?: string
 }
 
 export interface UserProfileUpdateResult {

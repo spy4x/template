@@ -27,9 +27,11 @@ import {
   createPasswordHasher,
   generateTotpSecret,
   type PasswordHasher,
+  secondFactorSatisfied,
   SecondFactorStatus,
   SessionCookie,
   SessionManager,
+  SessionStatus,
   type SessionStore,
   totpEnrolment,
   verifyTotp,
@@ -122,6 +124,13 @@ export interface SignIn {
   ): Promise<boolean>
   /** Marks every active session that has run out as expired. */
   expireSessions(): Promise<void>
+  /**
+   * The session and its user as they are now, or `null` when the session may no longer act: it was
+   * signed out or expired, its user is gone, or it still owes a second factor. The rules are the
+   * ones `parseAuth` and `isAuthenticated2FA` apply to a request, read from the database instead
+   * of a cookie, so a socket that authenticated once can be checked again without the cookie.
+   */
+  entitledSession(sessionId: number): Promise<AppAuthState | null>
 }
 
 /**
@@ -151,21 +160,25 @@ export function createSignIn(options: SignInOptions): SignIn {
   const cookie = new SessionCookie({ secret: options.cookieSecret, secure: options.secureCookie })
   const hasher = options.hasher ?? createPasswordHasher({ pepper: options.pepper })
 
+  /** The user a session belongs to, or `null` when the user is gone or may not sign in. */
+  async function loadUser(userId: number): Promise<User | null> {
+    const user = await db.user.findOne({ id: userId })
+    if (!user) return null
+    try {
+      await db.group.ensurePersonal({ id: crypto.randomUUID(), name: "Personal" }, user.id)
+    } catch (error) {
+      if (error instanceof GroupError && error.code === "USER_NOT_ACTIVE") return null
+      throw error
+    }
+    return user
+  }
+  const hasSecondFactor = (user: User) => user.mfa === UserMFAStatus.CONFIGURED
+
   const auth = createAuth<AuthSessionRecord, User>({
     sessions,
     cookie,
-    async loadUser(userId) {
-      const user = await db.user.findOne({ id: userId })
-      if (!user) return null
-      try {
-        await db.group.ensurePersonal({ id: crypto.randomUUID(), name: "Personal" }, user.id)
-      } catch (error) {
-        if (error instanceof GroupError && error.code === "USER_NOT_ACTIVE") return null
-        throw error
-      }
-      return user
-    },
-    hasSecondFactor: (user) => user.mfa === UserMFAStatus.CONFIGURED,
+    loadUser,
+    hasSecondFactor,
   })
 
   /** What `secondFactorFor` answers for the auth user's `users` row, or `null` without one. */
@@ -385,6 +398,17 @@ export function createSignIn(options: SignInOptions): SignIn {
 
     async expireSessions() {
       await sessions.expireStale()
+    },
+
+    async entitledSession(sessionId) {
+      const session = await db.sessionStore.findById(sessionId)
+      if (!session || session.status !== SessionStatus.Active) return null
+      if (session.expiresAt.getTime() <= Date.now()) return null
+      const user = await loadUser(session.userId)
+      if (!user) return null
+      return secondFactorSatisfied(session.secondFactor, hasSecondFactor(user))
+        ? { session, user }
+        : null
     },
   }
 }

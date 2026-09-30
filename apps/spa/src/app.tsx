@@ -6,9 +6,11 @@ import { Toastr } from "@spy4x/preact-ui/toastr"
 import { Route, Switch } from "wouter-preact"
 import { canSignOut, sessionState } from "./state/session.ts"
 import { bootstrapSession } from "./state/auth.ts"
-import { wsClient } from "./state/ws.ts"
+import { groupsStore } from "./state/groups.ts"
+import { connectRealtime, disconnectRealtime } from "./state/realtime.ts"
 import { toasts } from "./state/toasts.ts"
 import { AuthView } from "./views/AuthView.tsx"
+import { GroupsView } from "./views/GroupsView.tsx"
 import { ProfileView } from "./views/ProfileView.tsx"
 import { AppShell, PublicFrame } from "./views/AppShell.tsx"
 
@@ -18,6 +20,7 @@ function Routes() {
       <Route path="/sign-up">{() => <AuthView key="sign-up" screen="sign-up" />}</Route>
       <Route path="/sign-in">{() => <AuthView key="sign-in" screen="sign-in" />}</Route>
       <Route path="/totp">{() => <AuthView key="one-time-code" screen="one-time-code" />}</Route>
+      <Route path="/groups" component={GroupsView} />
       <Route path="/" component={ProfileView} />
     </Switch>
   )
@@ -47,12 +50,19 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    if (!sessionState.value.user || sessionState.value.isMfaRequired) {
-      wsClient.disconnect()
+    const userId = sessionState.value.user?.id
+    if (userId === undefined || sessionState.value.isMfaRequired) {
+      // Signed out, or the second factor is still owed: drop the socket, the cursors and the data.
+      disconnectRealtime({ forget: true })
+      groupsStore.reset()
       return
     }
-    wsClient.connect()
-    return () => wsClient.disconnect()
+    // The REST read is the pull: it runs at start-up, after every reconnect and for every push
+    // that is news, so a missed frame costs one read and never leaves the list wrong.
+    const pull = () => groupsStore.refresh()
+    void pull().catch(() => {})
+    connectRealtime(userId, pull)
+    return () => disconnectRealtime()
   }, [
     sessionState.value.user?.id,
     sessionState.value.isMfaRequired,

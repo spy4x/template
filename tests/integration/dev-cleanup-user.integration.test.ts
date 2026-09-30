@@ -78,7 +78,7 @@ function buildApp(sql: postgres.Sql, isDev: boolean) {
     const result = await signIn.signUp(c, username, password)
     return result ? c.json(result.user) : c.json({ error: "refused" }, 401)
   })
-  app.route("/test", createDevRoute({ isDev, db, sql }))
+  app.route("/test", createDevRoute({ isDev, db, sql, closeSockets: () => 0 }))
   const post = (path: string, body: unknown) =>
     app.request(`http://local${path}`, {
       method: "POST",
@@ -144,7 +144,8 @@ Deno.test("dev cleanup-user route", async (t) => {
     await t.step("deletes the shared groups the user created, with their events", async () => {
       const userId = await signUp(app, "shared-owner")
       await app.db.group.createShared({ id: crypto.randomUUID(), name: "Team" }, userId)
-      expect((await rowsOf(sql, userId)).outbox_events).toBe(1)
+      // One event for the personal group made at sign-up, one for the shared group.
+      expect((await rowsOf(sql, userId)).outbox_events).toBe(2)
 
       const response = await app.post("/test/cleanup-user", { username: "shared-owner" })
 

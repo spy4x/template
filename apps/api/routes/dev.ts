@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import type { Context } from "hono"
 import { APIContext } from "../_types.ts"
 import { validate } from "@spy4x/validation"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
@@ -15,6 +16,8 @@ export interface DevRouteDeps {
   db: Pick<AppDbBase, "authStore">
   /** The client the cleanup's transaction runs on. */
   sql: Sql
+  /** Closes every open socket of a user like a dropped connection; returns how many it closed. */
+  closeSockets(userId: number): number
 }
 
 /**
@@ -24,31 +27,52 @@ export interface DevRouteDeps {
  * delete: the groups they own or created (with their memberships, audit and outbox events), the
  * audit and outbox events they are the actor of, and the memberships they granted in other groups.
  * It answers 200 when the username has no user, so a spec can call it before its own sign-up.
+ *
+ * `POST /close-sockets` with `{ username }` closes that user's WebSockets the way a dropped network
+ * would, so an e2e spec can check that the app catches up after a reconnect. It answers with how
+ * many sockets it closed.
  */
 export function createDevRoute(deps: DevRouteDeps) {
   return new Hono<APIContext>()
     .post("/cleanup-user", async (c) => {
-      if (!deps.isDev) {
-        return c.json({ error: "Not allowed" }, 403)
+      const user = await readUsername(c, deps)
+      if (user instanceof Response) return user
+      if (user.userId !== null) {
+        await deleteUser(deps.sql, user.userId)
       }
-      let body: unknown = null
-      try {
-        body = await readApiJson(c)
-      } catch (_error) {
-        body = null
-      }
-      const validation = validate(authUsernameSchema, body)
-      if (validation.error) {
-        return c.json({ error: validation.error.description }, 400)
-      }
-      const { username } = validation.data
-      const key = await deps.db.authStore.findKey(PASSWORD_METHOD, username)
-      if (!key) {
-        return c.json({ success: true })
-      }
-      await deleteUser(deps.sql, key.userId)
       return c.json({ success: true })
     })
+    .post("/close-sockets", async (c) => {
+      const user = await readUsername(c, deps)
+      if (user instanceof Response) return user
+      const closed = user.userId === null ? 0 : deps.closeSockets(user.userId)
+      return c.json({ success: true, closed })
+    })
+}
+
+/**
+ * Reads `{ username }` from the body and finds the user behind it (`null` when there is none), or
+ * answers with the refusal: 403 outside development, 400 for a body that names no username.
+ */
+async function readUsername(
+  c: Context<APIContext>,
+  deps: DevRouteDeps,
+): Promise<{ userId: number | null } | Response> {
+  if (!deps.isDev) {
+    return c.json({ error: "Not allowed" }, 403)
+  }
+  let body: unknown = null
+  try {
+    body = await readApiJson(c)
+  } catch (_error) {
+    body = null
+  }
+  const validation = validate(authUsernameSchema, body)
+  if (validation.error) {
+    return c.json({ error: validation.error.description }, 400)
+  }
+  const key = await deps.db.authStore.findKey(PASSWORD_METHOD, validation.data.username)
+  return { userId: key ? key.userId : null }
 }
 
 /** Deletes the user `userId` and every row that references them or a group they own. */

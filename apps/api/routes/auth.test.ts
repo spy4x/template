@@ -57,6 +57,7 @@ function fakeSignIn(
     disconnectTotp: () => (calls.push("disconnectTotp"), Promise.resolve(true)),
     changePassword: () => (calls.push("changePassword"), Promise.resolve(succeed)),
     expireSessions: () => Promise.resolve(),
+    entitledSession: () => Promise.resolve(null),
   }
 }
 

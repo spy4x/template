@@ -24,7 +24,7 @@ check ──┬── build
   its system libraries, and installs Deno with npm. Playwright's own browser download, run through
   Deno in the plain Deno image, hangs. The image tag must equal the Playwright version in
   `deno.jsonc` (`e2e` task), because the browser build in the image belongs to that version. The
-  other two e2e tests, `auth-profile-ws-push` and `two-factor-sign-in`, need the full Docker stack
+  other three e2e specs, `auth-profile-ws-push`, `groups-socket` and `two-factor-sign-in`, need the full Docker stack
   and do not run in CI.
 
 None of these steps needs a secret. A pull request from a fork waits until someone approves it in

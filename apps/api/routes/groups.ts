@@ -14,6 +14,7 @@ import { actorFromAuth } from "../cqrs/actor.ts"
 import { APIContext } from "../_types.ts"
 import { groupErrorResponse, GroupFeatureError } from "../features/groups/errors.ts"
 import { readApiJson } from "@api/services/json-body.ts"
+import { listGroupsPage } from "../features/groups/list.ts"
 
 export interface GroupsRouteDependencies {
   create(command: GroupCreateCommand): Promise<GroupCreateResult>
@@ -45,15 +46,11 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
     .get("/", async (c) => {
       const actor = actorFromAuth(c.get("auth")!)
       const limit = parseLimit(c.req.query("limit"))
-      const cursor = c.req.query("cursor")
-      const after = cursor ? await dependencies.cursor.decode(cursor, actor.userId) : undefined
-      const result = await dependencies.list(
-        new GroupListQuery({ actor, page: { limit, after } }),
-      )
-      const nextCursor = result.nextPageKey
-        ? await dependencies.cursor.encode(actor.userId, result.nextPageKey)
-        : null
-      return c.json({ groups: result.groups, nextCursor })
+      const page = await listGroupsPage(dependencies, actor, {
+        limit,
+        cursor: c.req.query("cursor"),
+      })
+      return c.json(page)
     })
     .post("/", requireSameOrigin, async (c) => {
       if (!c.req.header("content-type")?.toLowerCase().includes("application/json")) {
@@ -73,6 +70,7 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
           kind: GroupKind.SHARED,
           name: input.name,
           requestId: c.get("requestId"),
+          idempotencyKey: c.req.header("idempotency-key"),
         }),
       )
       return c.json({ group: result.group }, result.created ? 201 : 200)

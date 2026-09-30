@@ -54,6 +54,7 @@ Deno.test({
       await applyMigration(sql, "2026_08_18_0002_personal_group_backfill.sql")
       await applyMigration(sql, "2026_09_24_0001_auth_package_tables.sql")
       await applyMigration(sql, "2026_09_30_0002_totp_failure_counter.sql")
+      await applyMigration(sql, "2026_10_01_0001_idempotency_keys.sql")
 
       await t.step("backfill is rerunnable and covers only active users", async () => {
         await applyMigration(sql, "2026_08_18_0002_personal_group_backfill.sql")
@@ -174,6 +175,70 @@ Deno.test({
         expect((await repository.listForUser(activeUserTwo, { limit: 100 })).groups.length).toBe(1)
       })
 
+      await t.step("a committed create takes the group's first sequence", async () => {
+        const repository = new PostgresGroupRepository(sql)
+        const groupId = crypto.randomUUID()
+        const created = await repository.createShared(
+          { id: groupId, name: "Sequenced" },
+          activeUserOne,
+        )
+        expect(created.group.changeSequence).toBe("1")
+        expect(await groupSequences(sql, groupId)).toEqual({ next: "2", outbox: ["1"] })
+        const listed = (await repository.listForUser(activeUserOne, { limit: 100 })).groups
+          .find((group) => group.id === groupId)
+        expect(listed?.changeSequence).toBe("1")
+      })
+
+      await t.step("a replayed create does not take another sequence", async () => {
+        const repository = new PostgresGroupRepository(sql)
+        const groupId = crypto.randomUUID()
+        await repository.createShared({ id: groupId, name: "Replayed" }, activeUserOne)
+        const replay = await repository.createShared(
+          { id: groupId, name: "Replayed" },
+          activeUserOne,
+        )
+        expect(replay.created).toBe(false)
+        expect(replay.group.changeSequence).toBe("1")
+        expect(await groupSequences(sql, groupId)).toEqual({ next: "2", outbox: ["1"] })
+      })
+
+      await t.step("a sign-up that rolls back leaves no outbox row to push", async () => {
+        const userId = await insertUser(sql)
+        const groupId = crypto.randomUUID()
+        await expect(sql.begin(async (transaction: postgres.TransactionSql) => {
+          await new PostgresGroupRepository(transaction).createPersonal(
+            { id: groupId, name: "Personal" },
+            userId,
+          )
+          throw new Error("the surrounding transaction fails after the create")
+        })).rejects.toThrow("surrounding transaction")
+        expect(await groupSequences(sql, groupId)).toEqual({ next: null, outbox: [] })
+      })
+
+      await t.step("a personal group is stamped when it is created", async () => {
+        const userId = await insertUser(sql)
+        const personal = await new PostgresGroupRepository(sql).ensurePersonal(
+          { id: crypto.randomUUID(), name: "Personal" },
+          userId,
+        )
+        expect(personal.nextChangeSequence).toBe("2")
+        expect(await groupSequences(sql, personal.id)).toEqual({ next: "2", outbox: ["1"] })
+      })
+
+      await t.step("member ids name only active users of an active group", async () => {
+        const repository = new PostgresGroupRepository(sql)
+        const groupId = crypto.randomUUID()
+        await repository.createShared({ id: groupId, name: "Members" }, activeUserOne)
+        const gone = await insertUser(sql, new Date())
+        await sql`
+          INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+          VALUES (${groupId}, ${activeUserTwo}, 1, ${activeUserOne}),
+                 (${groupId}, ${gone}, 1, ${activeUserOne})
+        `
+        expect(await repository.listMemberUserIds(groupId)).toEqual([activeUserOne, activeUserTwo])
+        expect(await repository.listMemberUserIds(crypto.randomUUID())).toEqual([])
+      })
+
       await t.step("shared creation rejects soft-deleted actors", async () => {
         const actor = await insertUser(sql, new Date())
         const groupId = crypto.randomUUID()
@@ -215,6 +280,28 @@ async function eventCounts(sql: postgres.Sql, groupId: string): Promise<number[]
   return rows.map((row: CountRow) => row.count)
 }
 
+interface SequenceRow extends postgres.Row {
+  next: string | null
+  outbox: string[]
+}
+
+/** A group's `next_change_sequence` (null when it does not exist) and its outbox versions. */
+async function groupSequences(
+  sql: postgres.Sql,
+  groupId: string,
+): Promise<{ next: string | null; outbox: string[] }> {
+  const rows = await sql<SequenceRow[]>`
+    SELECT
+      (SELECT next_change_sequence::text FROM groups WHERE id = ${groupId}) AS next,
+      COALESCE(
+        (SELECT array_agg(aggregate_version::text ORDER BY aggregate_version)
+         FROM outbox_events WHERE aggregate_id = ${groupId}),
+        '{}'
+      ) AS outbox
+  `
+  return { next: rows[0].next, outbox: rows[0].outbox }
+}
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
   const promise = new Promise<T>((resolvePromise) => {
@@ -241,6 +328,7 @@ const SNAPSHOT_TABLES = [
   "auth_keys",
   "auth_sessions",
   "auth_challenges",
+  "idempotency_keys",
 ]
 
 async function groupMetadata(sql: postgres.Sql, schema: string): Promise<string[]> {

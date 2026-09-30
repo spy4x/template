@@ -95,48 +95,6 @@ export const userPushTokenPublicSchema = userPushTokenSchema.omit(
 )
 export type UserPushTokenPublic = typeof userPushTokenPublicSchema.infer
 
-export const wsReadyPayloadSchema = type({
-  requestId: "string | null = null",
-})
-export type WsReadyPayload = typeof wsReadyPayloadSchema.infer
-
-export const wsProfileUpdatedPayloadSchema = type({
-  user: userSchema,
-})
-export type WsProfileUpdatedPayload = typeof wsProfileUpdatedPayloadSchema.infer
-
-export const wsPushDevicesUpdatedPayloadSchema = type({
-  devices: userPushTokenPublicSchema.array(),
-})
-export type WsPushDevicesUpdatedPayload = typeof wsPushDevicesUpdatedPayloadSchema.infer
-
-export const wsAuthSignedOutPayloadSchema = type({
-  userId: "number",
-})
-export type WsAuthSignedOutPayload = typeof wsAuthSignedOutPayloadSchema.infer
-
-export const wsReadyEventSchema = type({
-  kind: "'ws.ready'",
-  payload: wsReadyPayloadSchema,
-})
-export const wsProfileUpdatedEventSchema = type({
-  kind: "'profile.updated'",
-  payload: wsProfileUpdatedPayloadSchema,
-})
-export const wsPushDevicesUpdatedEventSchema = type({
-  kind: "'push.devices.updated'",
-  payload: wsPushDevicesUpdatedPayloadSchema,
-})
-export const wsAuthSignedOutEventSchema = type({
-  kind: "'auth.signed_out'",
-  payload: wsAuthSignedOutPayloadSchema,
-})
-export const wsProfileEventSchema = wsReadyEventSchema
-  .or(wsProfileUpdatedEventSchema)
-  .or(wsPushDevicesUpdatedEventSchema)
-  .or(wsAuthSignedOutEventSchema)
-export type WsProfileEvent = typeof wsProfileEventSchema.infer
-
 export enum AuthAuditEventType {
   SIGNED_UP = 1,
   SIGNED_IN = 2,

@@ -1,0 +1,254 @@
+import {
+  AggregateNotifier,
+  type Clock,
+  ConnectionRegistry,
+  type ConnectionRegistryOptions,
+  createSystemClock,
+  type ManagedSocket,
+  NotifyStatus,
+  RealtimeRequestError,
+  type RequestContext,
+} from "@spy4x/realtime"
+import { GROUP_AGGREGATE, GroupError } from "@domain/groups"
+import { AccessError, type Actor } from "@domain/identity"
+import { IdempotencyError } from "@server/idempotency/idempotency.ts"
+import { actorFromAuth } from "../cqrs/actor.ts"
+import type { AppAuthState } from "./sign-in.ts"
+
+/** WebSocket close code "policy violation": the session may no longer use the connection. */
+export const POLICY_CLOSE_CODE = 1008
+
+const REVOKED_REASON = "session is no longer valid"
+
+/** What a socket handler is given for one request. */
+export interface SocketCall {
+  /** Built from the session as it is now, not as it was when the socket opened. */
+  actor: Actor
+  requestId: string
+  payload: unknown
+  /** Present on every command: the socket refuses a command without one. */
+  idempotencyKey?: string
+  signal: AbortSignal
+}
+
+/** One request name the socket serves. It parses its own payload and dispatches on a CQRS bus. */
+export interface SocketRequest {
+  kind: "command" | "query"
+  handle(call: SocketCall): Promise<unknown>
+}
+
+/** The requests the socket serves, by name (`group.create`). */
+export type SocketRequests = Readonly<Record<string, SocketRequest>>
+
+export interface RealtimeOptions {
+  /** The session and user as they are now, or `null` when the session may no longer act. */
+  entitledSession(sessionId: number): Promise<AppAuthState | null>
+  /** The users a group's change is pushed to. */
+  memberUserIds(groupId: string): Promise<readonly number[]>
+  requests: SocketRequests
+  /** Called with every failure the socket hides from the client. */
+  log(...data: unknown[]): void
+  clock?: Clock
+  registry?: Partial<ConnectionRegistryOptions>
+}
+
+interface LiveSocket {
+  sessionId: number
+  userId: number
+  socket: ManagedSocket
+}
+
+/**
+ * Turns an error a handler threw into the typed error the client sees, or `null` for one the client
+ * must not be told about (it is answered `internal` and logged instead).
+ *
+ * The domain code travels in `details.code`, so the client can tell "id already in use" from any
+ * other conflict without parsing prose.
+ */
+export function toRequestError(error: unknown): RealtimeRequestError | null {
+  if (error instanceof RealtimeRequestError) return error
+  if (error instanceof GroupError) {
+    return new RealtimeRequestError(GROUP_ERROR_CODES[error.code], error.message, {
+      code: error.code,
+    })
+  }
+  if (error instanceof AccessError) {
+    return new RealtimeRequestError("unauthorized", error.message, { code: error.code })
+  }
+  if (error instanceof IdempotencyError) {
+    const code = error.code === "INVALID_KEY" ? "bad_request" : "conflict"
+    return new RealtimeRequestError(code, error.message, { code: error.code })
+  }
+  return null
+}
+
+const GROUP_ERROR_CODES: Record<
+  GroupError["code"],
+  "bad_request" | "unauthorized" | "forbidden" | "not_found" | "conflict"
+> = {
+  GROUP_NOT_FOUND: "not_found",
+  ID_ALREADY_EXISTS: "conflict",
+  INVALID_CURSOR: "bad_request",
+  INVALID_REQUEST: "bad_request",
+  LAST_OWNER: "conflict",
+  PERSONAL_GROUP_IMMUTABLE: "conflict",
+  ROLE_INSUFFICIENT: "forbidden",
+  USER_NOT_ACTIVE: "unauthorized",
+}
+
+/**
+ * The template's side of the realtime socket, a thin adapter over `@spy4x/realtime`.
+ *
+ * The socket authenticates once, at the upgrade (`routes/ws.ts`), and this class remembers which
+ * session each socket belongs to. From then on:
+ *
+ * - **Every request is authorized again.** The session is read from the database for each frame,
+ *   the {@link Actor} is built from that fresh state, and the request is dispatched on the same
+ *   command and query buses REST uses, where the session gate and the group checks run. A
+ *   socket therefore cannot do anything its session could no longer do over REST.
+ * - **A revoked session loses its sockets.** {@link revalidate} closes with the policy code every
+ *   socket whose session was signed out, expired, lost its user, or owes a second factor. It runs
+ *   when a user signs out, on a timer, and before any request is served.
+ * - **A group change reaches its members.** {@link notifyGroupChange} sends a sequence-stamped
+ *   `change.hint` to each member's sockets. The hint carries no data; a client that is behind pulls.
+ */
+export class Realtime {
+  readonly registry: ConnectionRegistry
+  readonly #options: RealtimeOptions
+  readonly #clock: Clock
+  readonly #live = new Map<string, LiveSocket>()
+  readonly #notifier: AggregateNotifier
+
+  constructor(options: RealtimeOptions) {
+    this.#options = options
+    this.#clock = options.clock ?? createSystemClock()
+    this.registry = new ConnectionRegistry({
+      clock: this.#clock,
+      onRequestError: (error, context) =>
+        options.log(`error: socket request ${context.name} failed`, error),
+      ...options.registry,
+    })
+    this.registry.onRequest((context) => this.#dispatch(context))
+    this.registry.onClose((handle) => this.#live.delete(handle.id))
+    // The client's handshake carries its cursors. The pull, not this answer, brings it up to date;
+    // the acknowledgement only tells it the server heard.
+    this.registry.onFrame(({ socketId, message }) => {
+      if (message.kind === "client.sync" && message.id !== undefined) {
+        this.registry.send(socketId, { kind: "server.ack", ackId: message.id })
+      }
+    })
+    this.#notifier = new AggregateNotifier({
+      fanout: this.registry,
+      resolvers: new Map([[
+        GROUP_AGGREGATE,
+        async (change) => (await options.memberUserIds(change.groupId)).map(String),
+      ]]),
+      onUnknownAggregate: (change) => options.log("error: unhandled aggregate", change),
+      onError: (change, error) => options.log("error: cannot resolve who to notify", change, error),
+    })
+  }
+
+  /**
+   * Adopts a socket that passed the upgrade checks. Returns `false` when the user already holds
+   * the most sockets the registry allows; the socket is then closed.
+   */
+  attach(socket: ManagedSocket, auth: AppAuthState): boolean {
+    const handle = this.registry.attach(String(auth.user.id), socket)
+    if (!handle) return false
+    this.#live.set(handle.id, { sessionId: auth.session.id, userId: auth.user.id, socket })
+    return true
+  }
+
+  /** How many sockets are open, for one user or for everyone. */
+  count(userId?: number): number {
+    return userId === undefined ? this.#live.size : this.registry.connectionsFor(String(userId))
+  }
+
+  /**
+   * Closes every socket (of one user, or of all) whose session may no longer act. Returns how many
+   * it closed. A failure to read a session leaves that socket open and is logged: closing on a
+   * database blip would drop everyone at once, and the per-request check still guards each frame.
+   */
+  async revalidate(userId?: number): Promise<number> {
+    let closed = 0
+    const checked = new Map<number, Promise<AppAuthState | null>>()
+    for (const live of [...this.#live.values()]) {
+      if (userId !== undefined && live.userId !== userId) continue
+      let entitled = checked.get(live.sessionId)
+      if (!entitled) {
+        entitled = this.#options.entitledSession(live.sessionId)
+        checked.set(live.sessionId, entitled)
+      }
+      try {
+        if (await entitled === null) {
+          live.socket.close(POLICY_CLOSE_CODE, REVOKED_REASON)
+          closed++
+        }
+      } catch (error) {
+        this.#options.log("error: cannot revalidate a socket's session", error)
+      }
+    }
+    return closed
+  }
+
+  /** Runs {@link revalidate} for everyone every `intervalMs`. Returns a function that stops it. */
+  startRevalidation(intervalMs: number): () => void {
+    const timer = this.#clock.setInterval(() => void this.revalidate(), intervalMs)
+    return () => this.#clock.clearInterval(timer)
+  }
+
+  /**
+   * Closes every socket of one user, whatever their session says. Returns how many it closed. The
+   * policy code tells a client not to expect the session to work again; a development script
+   * passes another code to look like a dropped connection.
+   */
+  closeUser(userId: number, reason: string, code = POLICY_CLOSE_CODE): number {
+    let closed = 0
+    for (const live of this.#live.values()) {
+      if (live.userId !== userId) continue
+      live.socket.close(code, reason)
+      closed++
+    }
+    return closed
+  }
+
+  /** Sends a group's members the hint that it moved to `sequence`. */
+  async notifyGroupChange(groupId: string, sequence: number): Promise<NotifyStatus> {
+    const outcome = await this.#notifier.notify({ groupId, aggregate: GROUP_AGGREGATE, sequence })
+    return outcome.status
+  }
+
+  /** Closes every socket and stops the registry's timers. */
+  shutdown(): void {
+    this.registry.shutdown()
+  }
+
+  async #dispatch(context: RequestContext): Promise<unknown> {
+    const live = this.#live.get(context.socketId)
+    if (!live) throw new RealtimeRequestError("unauthorized", "the socket is not open")
+    const request = this.#options.requests[context.name]
+    if (!request || request.kind !== context.kind) {
+      throw new RealtimeRequestError("not_found", `unknown ${context.kind}: ${context.name}`)
+    }
+    if (request.kind === "command" && context.idempotencyKey === undefined) {
+      throw new RealtimeRequestError("bad_request", "a command needs an idempotency key")
+    }
+    const auth = await this.#options.entitledSession(live.sessionId)
+    if (!auth) {
+      // After the answer: a socket closed first would drop the error the client should read.
+      this.#clock.setTimeout(() => live.socket.close(POLICY_CLOSE_CODE, REVOKED_REASON), 0)
+      throw new RealtimeRequestError("unauthorized", "the session is no longer valid")
+    }
+    try {
+      return await request.handle({
+        actor: actorFromAuth(auth),
+        requestId: context.requestId,
+        payload: context.payload,
+        idempotencyKey: context.idempotencyKey,
+        signal: context.signal,
+      })
+    } catch (error) {
+      throw toRequestError(error) ?? error
+    }
+  }
+}

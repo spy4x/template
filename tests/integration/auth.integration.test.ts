@@ -342,10 +342,13 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       await client.request("POST", "/sign-in", { username: "alice", password: "Passw0rd!" })
       const signedIn = client.saveCookies()
       expect((await client.request("GET", "/me")).status).toBe(200)
+      // What a live socket asks with the session id alone.
+      expect((await signIn.entitledSession(sessionIdOf(signedIn)))?.user.id).toBeGreaterThan(0)
 
       const response = await client.request("POST", "/sign-out")
       expect(response.status).toBe(200)
       expect(client.saveCookies().size).toBe(0)
+      expect(await signIn.entitledSession(sessionIdOf(signedIn))).toBeNull()
 
       // The browser dropped the cookie; a copy of it must not work any more either.
       client.restoreCookies(signedIn)
@@ -354,6 +357,22 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
         SELECT status FROM auth_sessions WHERE id = ${sessionIdOf(signedIn)}
       `
       expect(session.status).toBe(SessionStatus.SignedOut)
+    })
+
+    await t.step("a session past its expiry is no longer entitled, before any sweep", async () => {
+      const client = buildApp(signIn)
+      await client.request("POST", "/sign-in", { username: "alice", password: "Passw0rd!" })
+      const id = sessionIdOf(client.saveCookies())
+      expect(await signIn.entitledSession(id)).not.toBeNull()
+
+      await sql`UPDATE auth_sessions SET expires_at = now() - interval '1 minute' WHERE id = ${id}`
+
+      expect(await signIn.entitledSession(id)).toBeNull()
+      expect((await client.request("GET", "/me")).status).toBe(401)
+    })
+
+    await t.step("an unknown session is not entitled", async () => {
+      expect(await signIn.entitledSession(2_000_000_000)).toBeNull()
     })
   })
 })
@@ -401,6 +420,10 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
       `
       expect(otherSession.status).toBe(SessionStatus.SignedOut)
       expect((await other.request("POST", "/totp/start")).status).toBe(401)
+      expect(await signIn.entitledSession(sessionIdOf(other.saveCookies()))).toBeNull()
+      expect(
+        (await signIn.entitledSession(sessionIdOf(enrolling.saveCookies())))?.user.mfa,
+      ).toBe(UserMFAStatus.CONFIGURED)
     })
 
     await t.step("a new sign-in owes the second factor and refuses a replayed code", async () => {
@@ -409,6 +432,8 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
       const owed = await client.request("GET", "/me")
       expect(owed.status).toBe(401)
       expect(await owed.json()).toEqual({ error: "Need to pass 2FA" })
+      const owingId = sessionIdOf(client.saveCookies())
+      expect(await signIn.entitledSession(owingId)).toBeNull()
 
       // The code that finished enrolment is still inside the time window, and is refused.
       const replay = await client.request("POST", "/totp/check", { otp: enrolmentCode })
@@ -419,6 +444,7 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
       const next = totpCode(secret, Date.now() + 30_000)
       expect((await client.request("POST", "/totp/check", { otp: next })).status).toBe(200)
       expect((await client.request("GET", "/me")).status).toBe(200)
+      expect(await signIn.entitledSession(owingId)).not.toBeNull()
 
       const again = buildApp(signIn)
       expect((await again.request("POST", "/sign-in", credentials)).status).toBe(202)
