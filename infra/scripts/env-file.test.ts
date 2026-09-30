@@ -2,15 +2,19 @@
 import { expect } from "@std/expect"
 import { MissingEnvVarError, parseEnvValues, requireEnvVar } from "./env-file.ts"
 
-Deno.test("parseEnvValues drops an inline comment after whitespace", () => {
-  expect(parseEnvValues(`ENV=dev # or "prod"\nCONTAINER_PROVIDER=docker\t# or podman`)).toEqual({
+Deno.test("parseEnvValues drops an inline comment after a space", () => {
+  expect(parseEnvValues(`ENV=dev # or "prod"\nCONTAINER_PROVIDER=docker   # or podman`)).toEqual({
     ENV: "dev",
     CONTAINER_PROVIDER: "docker",
   })
 })
 
-Deno.test("parseEnvValues keeps a # that has no whitespace before it", () => {
-  expect(parseEnvValues(`DB_PASS=abc#def`)).toEqual({ DB_PASS: "abc#def" })
+Deno.test("parseEnvValues keeps a # that has no space before it, as Compose does", () => {
+  expect(parseEnvValues(`DB_PASS=abc#def\nA= # note\nB=x\t# tab`)).toEqual({
+    DB_PASS: "abc#def",
+    A: "# note",
+    B: "x\t# tab",
+  })
 })
 
 Deno.test("parseEnvValues keeps every = after the first", () => {
@@ -25,10 +29,14 @@ Deno.test("parseEnvValues strips matching quotes and keeps a quoted #", () => {
   expect(parseEnvValues(`A="x # y"\nB='z'`)).toEqual({ A: "x # y", B: "z" })
 })
 
-Deno.test("parseEnvValues reads a value that is only a comment as empty", () => {
-  expect(parseEnvValues(`PROXY_CF_API_KEY= # set in production`)).toEqual({
-    PROXY_CF_API_KEY: "",
-  })
+Deno.test("parseEnvValues drops a comment after a closing quote, as Compose does", () => {
+  expect(parseEnvValues(`A="x # y" # note\nB='it"s' # note`)).toEqual({ A: "x # y", B: `it"s` })
+})
+
+Deno.test("parseEnvValues names the file and line of a quoted value followed by text", () => {
+  expect(() => parseEnvValues(`A=1\nB="x" y`, "infra/envs/.env")).toThrow(
+    /^infra\/envs\/\.env: unsupported env syntax at line 2: unterminated quote\. Supported:/,
+  )
 })
 
 Deno.test("parseEnvValues reads the shipped .env.example with ENV=dev", async () => {
