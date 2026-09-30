@@ -257,6 +257,37 @@ describe("realtime socket revocation", () => {
     h.realtime.shutdown()
   })
 
+  it("closes a revoked socket when the revalidation interval passes, and not before", async () => {
+    const h = harness()
+    const socket = connect(h, 1)
+    const stop = h.realtime.startRevalidation(15_000)
+    h.sessions.delete(10)
+
+    await h.clock.advance(14_999)
+    await drainMicrotasks()
+    expect(policyCloses(socket)).toHaveLength(0)
+
+    await h.clock.advance(1)
+    await drainMicrotasks()
+    expect(policyCloses(socket)).toHaveLength(1)
+
+    stop()
+    h.realtime.shutdown()
+  })
+
+  it("stops revalidating once the returned stop function is called", async () => {
+    const h = harness()
+    const socket = connect(h, 1)
+    h.realtime.startRevalidation(15_000)()
+    h.sessions.delete(10)
+
+    await h.clock.advance(60_000)
+    await drainMicrotasks()
+
+    expect(policyCloses(socket)).toHaveLength(0)
+    h.realtime.shutdown()
+  })
+
   it("keeps a socket open when its session cannot be read, and logs why", async () => {
     const h = harness({ entitledSession: () => Promise.reject(new Error("db down")) })
     const socket = connect(h, 1)

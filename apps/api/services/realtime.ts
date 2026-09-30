@@ -193,8 +193,8 @@ export class Realtime {
 
   /** Runs {@link revalidate} for everyone every `intervalMs`. Returns a function that stops it. */
   startRevalidation(intervalMs: number): () => void {
-    const timer = setInterval(() => void this.revalidate(), intervalMs)
-    return () => clearInterval(timer)
+    const timer = this.#clock.setInterval(() => void this.revalidate(), intervalMs)
+    return () => this.#clock.clearInterval(timer)
   }
 
   /**
