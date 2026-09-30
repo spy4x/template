@@ -12,10 +12,14 @@
  * - `DENO_ON_SERVER` (optional, default `deno`): the command that runs Deno on the server. The
  *   remote command puts `~/.deno/bin`, the Deno installer's directory, on `PATH` first.
  *
+ * `SSH_TO_SERVER` and `DENO_ON_SERVER` are trusted operator input: the first is passed to ssh and
+ * rsync as a destination, the second runs unquoted in the remote shell (so `~/bin/deno` works).
+ * `PATH_ON_SERVER` is quoted.
+ *
  * Three steps, each stopping the deploy when it fails: rsync the files that
- * `infra/deploy/include.txt` names, leaving out every local `infra/envs/.env*`; copy the chosen
- * env file to `infra/envs/.env` on the server, readable by its owner only; then run
- * `deno task compose up -d --build` there.
+ * `infra/deploy/include.txt` names, leaving out every env file (any `.env*` or `*.env`, anywhere,
+ * and the chosen env file itself); copy the chosen env file to `infra/envs/.env` on the server,
+ * readable by its owner only; then run `deno task compose up -d --build` there.
  *
  * @module
  */
@@ -60,8 +64,11 @@ export function planDeploy(values: Record<string, string>, envFilePath: string):
         "-e",
         "ssh",
         "--exclude-from=infra/deploy/exclude.txt",
-        // Before include.txt, whose infra/*** would otherwise send every local env file.
-        "--exclude=/infra/envs/.env*",
+        // Before include.txt, whose apps/***, libs/*** and infra/*** would otherwise send every
+        // local env file. A pattern without a slash matches a file name in any directory.
+        "--exclude=.env*",
+        "--exclude=*.env",
+        `--exclude=/${envFilePath.replace(/^\.\//, "")}`,
         "--include-from=infra/deploy/include.txt",
         "--exclude=*",
         ".",
@@ -77,6 +84,23 @@ export function planDeploy(values: Record<string, string>, envFilePath: string):
   ]
 }
 
+/** Runs one step with the terminal attached. Returns its exit code. */
+async function run(step: DeployStep): Promise<number> {
+  try {
+    const command = new Deno.Command(step.command, {
+      args: step.args,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    })
+    return (await command.output()).code
+  } catch (err) {
+    if (!(err instanceof Deno.errors.NotFound)) throw err
+    error(`${step.command} is not installed on this machine`)
+    return 1
+  }
+}
+
 async function main(): Promise<void> {
   const envFilePath = Deno.args[0] ?? DEFAULT_ENV_FILE
   let steps: DeployStep[]
@@ -88,12 +112,7 @@ async function main(): Promise<void> {
   }
   for (const step of steps) {
     log(`${step.label}...`)
-    const { code } = await new Deno.Command(step.command, {
-      args: step.args,
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-    }).output()
+    const code = await run(step)
     if (code !== 0) {
       error(`${step.label} failed (${step.command} exited with ${code})`)
       Deno.exit(code)

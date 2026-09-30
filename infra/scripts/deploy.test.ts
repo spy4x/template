@@ -1,5 +1,6 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
+import { basename, globToRegExp } from "@std/path"
 import { planDeploy, shellQuote } from "./deploy.ts"
 import { MissingEnvVarError } from "./env-file.ts"
 
@@ -13,18 +14,53 @@ Deno.test("planDeploy sends files and the env file to the host and path from the
   expect(files.command).toBe("rsync")
   expect(files.args.at(-1)).toBe("deploy@home.example.net:/srv/app")
   expect(envFile.command).toBe("rsync")
-  expect(envFile.args.slice(-2)).toEqual([
+  expect(envFile.args).toEqual([
+    "-e",
+    "ssh",
+    "-p",
+    "--chmod=F600",
     ENV_FILE,
     "deploy@home.example.net:/srv/app/infra/envs/.env",
   ])
 })
 
-Deno.test("planDeploy leaves local env files out of the file copy", () => {
-  const [files] = planDeploy({ SSH_TO_SERVER: "h", PATH_ON_SERVER: "/srv/app" }, ENV_FILE)
-  const exclude = files.args.indexOf("--exclude=/infra/envs/.env*")
-  const include = files.args.indexOf("--include-from=infra/deploy/include.txt")
-  expect(exclude).toBeGreaterThan(-1)
-  expect(exclude).toBeLessThan(include)
+/**
+ * The `--exclude=` patterns of the file copy that come before its first include, applied with
+ * rsync's rule for them: a pattern starting with `/` matches the path from the transfer root, any
+ * other pattern without a slash matches the file name in any directory. rsync itself is not run:
+ * the CI image has none. The pull request records a real `rsync --dry-run` of the same filters.
+ */
+function excludedBeforeIncludes(args: string[], path: string): boolean {
+  const firstInclude = args.findIndex((arg) => arg.startsWith("--include"))
+  return args.slice(0, firstInclude).some((arg) => {
+    if (!arg.startsWith("--exclude=")) return false
+    const pattern = arg.slice("--exclude=".length)
+    if (pattern.startsWith("/")) return globToRegExp(pattern.slice(1)).test(path)
+    return !pattern.includes("/") && globToRegExp(pattern).test(basename(path))
+  })
+}
+
+Deno.test("planDeploy's file copy excludes env files in apps, libs, infra and infra/envs", () => {
+  const envFile = "infra/secrets/home-server"
+  const [files] = planDeploy({ SSH_TO_SERVER: "h", PATH_ON_SERVER: "/srv/app" }, envFile)
+  for (
+    const path of [
+      "apps/api/.env",
+      "libs/server/.env.local",
+      "infra/.env.prod",
+      "infra/envs/.env",
+      "infra/envs/.env.prod",
+      "infra/envs/home.env",
+      "infra/secrets/home-server",
+    ]
+  ) {
+    expect({ path, excluded: excludedBeforeIncludes(files.args, path) })
+      .toEqual({ path, excluded: true })
+  }
+  for (const path of ["apps/api/index.ts", "infra/compose/compose.prod.yml", "deno.jsonc"]) {
+    expect({ path, excluded: excludedBeforeIncludes(files.args, path) })
+      .toEqual({ path, excluded: false })
+  }
 })
 
 Deno.test("planDeploy starts the app in the quoted path with the configured Deno", () => {
