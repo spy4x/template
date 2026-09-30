@@ -23,6 +23,7 @@ const summary: GroupSummary = {
   name: "Team",
   role: GroupRole.OWNER,
   authorizationRevision: "1",
+  changeSequence: "1",
   updatedAt: now,
 }
 
@@ -33,6 +34,10 @@ class FakeGroupRepository implements GroupRepository {
   listForUser(userId: number) {
     this.listUserId = userId
     return Promise.resolve({ groups: [summary], nextPageKey: null })
+  }
+
+  listMemberUserIds(_groupId: string): Promise<number[]> {
+    throw new Error("Not used")
   }
 
   getForMember(_groupId: string, _userId: number): Promise<GroupAccess | null> {

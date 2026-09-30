@@ -61,6 +61,12 @@ export interface GroupSummary {
   name: string
   role: GroupRole
   authorizationRevision: string
+  /**
+   * The sequence of the last change committed to the group, as a decimal string (BIGINT). A client
+   * that holds a group at this sequence has seen every change up to now; it is the number a pull
+   * moves the client's cursor to.
+   */
+  changeSequence: string
   updatedAt: Date
 }
 
@@ -112,6 +118,8 @@ export interface GroupCreatePayload {
   kind: GroupKind.SHARED
   name: string
   requestId?: string
+  /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
+  idempotencyKey?: string
 }
 
 export type GroupCreateResult = CreatedGroup
@@ -133,6 +141,8 @@ export class GroupListQuery implements Query<GroupListPayload, GroupListResult> 
 
 export interface GroupRepository {
   listForUser(userId: number, page: GroupListPage): Promise<GroupListResult>
+  /** The ids of the active users who are members of an active group; who a change is pushed to. */
+  listMemberUserIds(groupId: string): Promise<number[]>
   getForMember(groupId: string, userId: number): Promise<GroupAccess | null>
   createShared(input: CreateSharedGroupInput, actorId: number): Promise<CreatedGroup>
   createPersonal(input: CreatePersonalGroupInput, userId: number): Promise<Group>

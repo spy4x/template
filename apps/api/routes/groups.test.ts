@@ -51,6 +51,7 @@ function dependencies(): GroupsRouteDependencies & {
           name: command.data.name,
           role: GroupRole.OWNER,
           authorizationRevision: "1",
+          changeSequence: "1",
           updatedAt: now,
         },
       })

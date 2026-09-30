@@ -144,7 +144,8 @@ Deno.test("dev cleanup-user route", async (t) => {
     await t.step("deletes the shared groups the user created, with their events", async () => {
       const userId = await signUp(app, "shared-owner")
       await app.db.group.createShared({ id: crypto.randomUUID(), name: "Team" }, userId)
-      expect((await rowsOf(sql, userId)).outbox_events).toBe(1)
+      // One event for the personal group made at sign-up, one for the shared group.
+      expect((await rowsOf(sql, userId)).outbox_events).toBe(2)
 
       const response = await app.post("/test/cleanup-user", { username: "shared-owner" })
 
