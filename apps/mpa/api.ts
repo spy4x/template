@@ -17,6 +17,8 @@ const FORWARDED_HEADERS = [
 export interface ApiAnswer {
   status: number
   body: unknown
+  /** The API's `Retry-After`, sent with a 429, for the page to pass on. */
+  retryAfter?: string
 }
 
 /** Calls the API on behalf of one browser request. */
@@ -64,7 +66,10 @@ export function createApi(
       } catch {
         body = null
       }
-      return { status: response.status, body }
+      const retryAfter = response.headers.get("retry-after")
+      return retryAfter === null
+        ? { status: response.status, body }
+        : { status: response.status, body, retryAfter }
     },
   }
 }

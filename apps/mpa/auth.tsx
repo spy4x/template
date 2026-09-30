@@ -17,7 +17,7 @@ const CALLS: Record<AuthScreenKind, { path: `/api/${string}`; body: (form: FormD
 /**
  * The page of one auth screen: `GET` shows it, `POST` sends its form to the API. A session that
  * still owes its one-time code goes on to the code page; any other success goes to the profile. A
- * refusal shows the form again with the API's message and status.
+ * refusal shows the form again with the API's message, status and `Retry-After`.
  */
 export function authHandlers(screen: AuthScreenKind) {
   return define.handlers({
@@ -33,6 +33,7 @@ export function authHandlers(screen: AuthScreenKind) {
         screen,
         errorMessage(answer, authFailureMessage(screen)),
         answer.status,
+        answer.retryAfter,
       )
     },
   })
@@ -43,6 +44,7 @@ async function renderAuth(
   screen: AuthScreenKind,
   error: string | null,
   status: number,
+  retryAfter?: string,
 ): Promise<Response> {
   const session = await readSession(ctx.state.api)
   return ctx.render(
@@ -55,6 +57,7 @@ async function renderAuth(
         error={error}
       />
     </Frame>,
-    { status },
+    // A locked account or a spent rate limit says when to try again, as the API does.
+    { status, headers: retryAfter ? { "retry-after": retryAfter } : undefined },
   )
 }

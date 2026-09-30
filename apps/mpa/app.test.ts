@@ -3,6 +3,8 @@ import { describe, it } from "@std/testing/bdd"
 import { App } from "fresh"
 import { handler as signIn } from "./routes/sign-in.ts"
 import { handler as signOut } from "./routes/sign-out.ts"
+import { handler as home } from "./routes/index.tsx"
+import { handler as password } from "./routes/profile/password.ts"
 import { handler as note } from "./routes/groups/[groupId]/notes/[noteId]/index.tsx"
 import { pageMiddleware } from "./middleware.ts"
 import type { State } from "./utils.ts"
@@ -31,6 +33,8 @@ function appWith(fetch: typeof globalThis.fetch) {
   return new App<State>()
     .use(pageMiddleware(config, fetch))
     .get("/page", (ctx) => ctx.html("<p>page</p>"))
+    .get("/", home.GET!)
+    .post("/profile/password", password.POST!)
     .post("/sign-in", signIn.POST!)
     .post("/sign-out", signOut.POST!)
     .post("/groups/:groupId/notes/:noteId", note.POST!)
@@ -115,6 +119,63 @@ describe("the sign-in page", () => {
     )
 
     expect(response.headers.get("location")).toBe("/totp")
+  })
+})
+
+describe("the sign-in page when the API says to wait", () => {
+  it("passes the API's 429 and Retry-After on to the browser", async () => {
+    const { fetch } = fakeApi((path) =>
+      path === "/api/auth/me"
+        ? Response.json({ error: "User not signed in" }, { status: 401 })
+        : Response.json({ error: "Too many requests" }, {
+          status: 429,
+          headers: { "retry-after": "30" },
+        })
+    )
+
+    const response = await appWith(fetch)(
+      formPost("/sign-in", { login: "ada", password: "long-enough" }),
+      info,
+    )
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get("retry-after")).toBe("30")
+    expect(await response.text()).toContain("Too many requests")
+  })
+})
+
+describe("the profile page", () => {
+  const signedIn = (path: string) => {
+    if (path === "/api/auth/me") return Response.json({ firstName: "Ada", lastName: "", mfa: 1 })
+    if (path === "/api/push/devices") return Response.json({ data: [] })
+    return Response.json({ error: "Invalid password" }, { status: 400 })
+  }
+
+  it("shows a refused password change with the API's message and never the typed passwords", async () => {
+    const { fetch } = fakeApi(signedIn)
+
+    const response = await appWith(fetch)(
+      formPost("/profile/password", {
+        password: "current-secret-1",
+        newPassword: "new-secret-2",
+      }),
+      info,
+    )
+    const html = await response.text()
+
+    expect(response.status).toBe(400)
+    expect(html).toContain("Invalid password")
+    expect(html).not.toContain("current-secret-1")
+    expect(html).not.toContain("new-secret-2")
+  })
+
+  it("answers an API outage with an error, not with a signed-out page", async () => {
+    const { fetch } = fakeApi(() => Response.json({ error: "down" }, { status: 503 }))
+
+    const response = await appWith(fetch)(new Request(`${config.webAppOrigin}/`), info)
+
+    expect(response.status).toBe(500)
+    expect(await response.text()).not.toContain("Sign in required")
   })
 })
 
