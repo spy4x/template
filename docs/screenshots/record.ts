@@ -137,8 +137,7 @@ async function socialPreview(browser: Browser, profile: Uint8Array): Promise<Uin
 
 /**
  * Records sign-up, then naming the profile, the way a person does it, with a drawn pointer.
- * Light theme: the SPA has no `<meta name="color-scheme">`, so a dark recording flashes white
- * during the full-page reload after sign-up.
+ * The GIF is recorded in the light theme; the stills cover both.
  * Returns the WebM path and how many seconds of blank start to trim.
  */
 async function recordFlow(browser: Browser, dir: string): Promise<{ video: string; trim: number }> {
