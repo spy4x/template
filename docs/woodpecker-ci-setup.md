@@ -24,9 +24,11 @@ check ──┬── build
   its system libraries, and installs Deno with npm. Playwright's own browser download, run through
   Deno in the plain Deno image, hangs. The image tag must equal the Playwright version in
   `deno.jsonc` (`e2e` task), because the browser build in the image belongs to that version. The
-  other e2e test needs the full Docker stack and does not run in CI.
+  other two e2e tests, `auth-profile-ws-push` and `two-factor-sign-in`, need the full Docker stack
+  and do not run in CI.
 
-None of these steps needs a secret, so a pull request from a fork runs them too.
+None of these steps needs a secret. A pull request from a fork waits until someone approves it in
+Woodpecker, because the repository requires approval for forks.
 
 ## Deploy is not wired up
 
@@ -46,7 +48,8 @@ and rename the file to `deploy.yml` to turn deploys on; its header lists what to
 ## Required Secrets (deploy only)
 
 The pipeline in `ci.yml` needs none. The deploy steps in `deploy.yml.example` need these, set in
-the Woodpecker repository settings:
+the Woodpecker repository settings. Give each secret the `push` event only, never `pull_request`:
+an approved pull request can edit `ci.yml` and would otherwise read them.
 
 ### Database Configuration
 - `DB_HOST` - PostgreSQL host (e.g., `db` or IP address)

@@ -58,7 +58,7 @@ steps:
     commands:
       - npm install --global deno@2.9.0
       - deno --version
-      # The other e2e test needs the full Docker stack; this one serves its own fixture.
+      # The other two e2e tests need the full Docker stack; this one serves its own fixture.
       - deno task e2e url-filters
     depends_on: [check]
 
