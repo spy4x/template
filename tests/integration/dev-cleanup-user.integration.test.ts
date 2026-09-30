@@ -78,7 +78,7 @@ function buildApp(sql: postgres.Sql, isDev: boolean) {
     const result = await signIn.signUp(c, username, password)
     return result ? c.json(result.user) : c.json({ error: "refused" }, 401)
   })
-  app.route("/test", createDevRoute({ isDev, db, sql }))
+  app.route("/test", createDevRoute({ isDev, db, sql, closeSockets: () => 0 }))
   const post = (path: string, body: unknown) =>
     app.request(`http://local${path}`, {
       method: "POST",

@@ -1,6 +1,13 @@
 import type { Command, Query } from "@spy4x/platform/cqrs"
 import type { Actor } from "@domain/identity"
 
+/**
+ * The aggregate a group's changes are recorded and announced under: the `aggregate_type` of its
+ * outbox rows (whose `aggregate_version` is the change's sequence) and the `aggregate` of its
+ * `change.hint`.
+ */
+export const GROUP_AGGREGATE = "group"
+
 export enum GroupKind {
   PERSONAL = 1,
   SHARED = 2,

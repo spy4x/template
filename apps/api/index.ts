@@ -22,10 +22,14 @@ import { createTotpFailures } from "./services/totp-failures.ts"
 import { createAuthRateLimits } from "./middlewares/auth-rate-limits.ts"
 import { commandBus } from "./services/commandBus.ts"
 import { queryBus } from "./services/queryBus.ts"
-import { GroupListCursorCodec } from "@server/groups/group-list-cursor.ts"
+import { listenForGroupChanges } from "@server/groups/group-change-notify.ts"
+import { groupListCursor } from "./services/group-list-cursor.ts"
+import { realtime } from "./services/realtimeHub.ts"
 import { createHealthRoute } from "./routes/health.ts"
 import { isCacheConnected } from "./services/cache.ts"
 import "./cqrs/+init.ts"
+
+const REALTIME_REVALIDATE_INTERVAL_MS = 15_000
 
 const app = new Hono<APIContext>().basePath("/api")
 app.use(
@@ -72,7 +76,6 @@ app.route(
   createPushNotificationRoute({ auth: signIn.auth, webPush: webPushService, emit, mutationGuards }),
 )
 app.route("/ws", wsRoute)
-const groupListCursor = await GroupListCursorCodec.fromCookieSecret(config.authCookieSecret)
 app.route(
   "/groups",
   createGroupsRoute({
@@ -84,8 +87,26 @@ app.route(
 )
 if (config.isDev) {
   const { createDevRoute } = await import("./routes/dev.ts")
-  app.route("/test", createDevRoute({ isDev: config.isDev, db, sql }))
+  app.route(
+    "/test",
+    createDevRoute({
+      isDev: config.isDev,
+      db,
+      sql,
+      closeSockets: (userId) => realtime.closeUser(userId, "closed by a development script", 1012),
+    }),
+  )
 }
+
+// A change the worker announced reaches the members' open sockets as a sequence-stamped hint.
+await listenForGroupChanges(sql, ({ groupId, sequence }) => {
+  realtime.notifyGroupChange(groupId, sequence).catch((error) =>
+    log(`error: cannot push the change of group ${groupId}`, error)
+  )
+})
+// Sockets whose session was signed out, expired or lost its second factor while open are closed
+// within this interval; the per-request check already refuses their frames.
+realtime.startRevalidation(REALTIME_REVALIDATE_INTERVAL_MS)
 
 // TODO: move this to a better place
 // This is a temporary solution to expire sessions every hour
