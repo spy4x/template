@@ -7,7 +7,7 @@ import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { GroupKind, GroupRole } from "@domain/groups"
-import { type Navigate, NOTE_PATHS, ScreenLink } from "./progressive.tsx"
+import { FORM_ACTIONS, type Navigate, NOTE_PATHS, ScreenLink, takeOver } from "./progressive.tsx"
 
 /** One group as the screen shows it. */
 export interface GroupRow {
@@ -19,17 +19,23 @@ export interface GroupRow {
 
 export interface GroupsScreenProps {
   groups: readonly GroupRow[]
+  /**
+   * The id the new group is created with, for the form without JavaScript: a form sent twice
+   * creates one group. An app that takes the submit over names the id itself.
+   */
+  draftId?: string
   /** What the person has typed as the new group's name. */
   name: string
-  onNameChange: (name: string) => void
+  onNameChange?: (name: string) => void
   /** A create is in flight. */
   creating: boolean
   /** The list is being fetched. */
   loading: boolean
   /** The error under the form or the list, or `null`. */
   error: string | null
-  onCreate: () => void
-  onRefresh: () => void
+  onCreate?: () => void
+  /** Reads the list again; without it there is no Refresh button, and a page load refreshes. */
+  onRefresh?: () => void
   navigate?: Navigate
 }
 
@@ -47,10 +53,11 @@ const ROLE_TEXT: Record<GroupRole, string> = {
 
 /**
  * The groups page: the groups the person belongs to, each a link to its notes, and a form to create
- * a shared one. Creating has no page without JavaScript, because it goes over the live connection.
+ * a shared one. The form posts the API's field names to its route; with `onCreate`, the app takes
+ * the submit over.
  */
 export function GroupsScreen(
-  { groups, name, onNameChange, creating, loading, error, onCreate, onRefresh, navigate }:
+  { groups, draftId, name, onNameChange, creating, loading, error, onCreate, onRefresh, navigate }:
     GroupsScreenProps,
 ): JSX.Element {
   return (
@@ -60,12 +67,9 @@ export function GroupsScreen(
           <h1 class="text-lg font-semibold">Groups</h1>
         </CardHeader>
         <CardBody>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault()
-              onCreate()
-            }}
-          >
+          <form method="post" action={FORM_ACTIONS.groupCreate} onSubmit={takeOver(onCreate)}>
+            <input type="hidden" name="id" value={draftId} />
+            <input type="hidden" name="kind" value={String(GroupKind.SHARED)} />
             <Stack>
               <Field id="group-name" label="New group" required>
                 <Input
@@ -74,7 +78,7 @@ export function GroupsScreen(
                   autocomplete="off"
                   maxLength={100}
                   value={name}
-                  onInput={(e) => onNameChange(e.currentTarget.value)}
+                  onInput={(e) => onNameChange?.(e.currentTarget.value)}
                   required
                 />
               </Field>
@@ -122,19 +126,21 @@ export function GroupsScreen(
                   ))}
                 </ul>
               )}
-            <div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                data-e2e="group-refresh"
-                busy={loading}
-                busyLabel="Refreshing..."
-                onClick={onRefresh}
-              >
-                Refresh
-              </Button>
-            </div>
+            {onRefresh && (
+              <div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-e2e="group-refresh"
+                  busy={loading}
+                  busyLabel="Refreshing..."
+                  onClick={onRefresh}
+                >
+                  Refresh
+                </Button>
+              </div>
+            )}
           </Stack>
         </CardBody>
       </Card>

@@ -156,8 +156,15 @@ describe("ProfileScreen without JavaScript", () => {
       schemaKeys(pushUnsubscribeRequestSchema),
     )
     expect(surface.forms).toHaveLength(4)
-    // Subscribing to push needs the browser's push manager: the one action with no native form.
-    expect(surface.scriptOnlyButtons).toEqual(["push-register"])
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("offers Add device only to an app that can register push, which needs the browser's push manager", () => {
+    expect(
+      noScriptSurface(<ProfileScreen {...profileDefaults} onRegisterPush={() => {}} />)
+        .scriptOnlyButtons,
+    ).toEqual(["push-register"])
+    expect(noScriptSurface(<ProfileScreen {...profileDefaults} />).scriptOnlyButtons).toEqual([])
   })
 
   it("posts the first code of an enrolment with the API's field name", () => {
@@ -185,6 +192,13 @@ describe("ProfileScreen without JavaScript", () => {
     expect(surface.links).toEqual(["/sign-in", "/sign-up"])
   })
 
+  it("shows the live connection only when the app has one", () => {
+    const { connection: _, ...withoutConnection } = profileDefaults
+
+    expect(renderToString(<ProfileScreen {...profileDefaults} />)).toContain('data-e2e="ws-status"')
+    expect(renderToString(<ProfileScreen {...withoutConnection} />)).not.toContain("ws-status")
+  })
+
   it("links a session that owes its one-time code to the code screen", () => {
     const surface = noScriptSurface(<ProfileScreen {...profileDefaults} isMfaRequired />)
     expect(surface.forms).toEqual([])
@@ -199,7 +213,7 @@ describe("frames without JavaScript", () => {
     expect(surface.links).toEqual(["/"])
   })
 
-  it("links the brand and the navigation of the signed-in frame, but signs out only with JavaScript", () => {
+  it("links the brand and the navigation of the signed-in frame, and signs out from the user menu when the app takes sign-out over", () => {
     const surface = noScriptSurface(
       <AppFrame user={{ firstName: "Ada", lastName: "" }} connection="open" onSignOut={() => {}}>
         page
@@ -214,6 +228,13 @@ describe("frames without JavaScript", () => {
     expect(surface.forms).toEqual([])
     // Shell's user menu takes a link or a click handler, not a form, so "Sign out" is a button.
     expect(surface.scriptOnlyButtons).toEqual(["shell-user-menu-button", "(unnamed)"])
+  })
+
+  it("posts sign-out from the signed-in frame when no app takes it over, and shows no connection it does not have", () => {
+    const frame = <AppFrame user={{ firstName: "Ada", lastName: "" }}>page</AppFrame>
+    const surface = noScriptSurface(frame)
+    expect(surface.forms).toEqual([{ action: FORM_ACTIONS.signOut, method: "post", fields: [] }])
+    expect(renderToString(frame)).not.toContain("shell-ws-status")
   })
 })
 
@@ -263,11 +284,26 @@ describe("GroupsScreen", () => {
     expect(html).toContain('value="Trip"')
   })
 
-  it("posts to no route of its own, because it works only with JavaScript", () => {
-    const surface = noScriptSurface(<GroupsScreen {...groupsDefaults} />)
+  it("posts a new shared group with the API's field names and the id it was drawn with", () => {
+    const draftId = "5f0c7c2e-2a4b-4c7e-9b1d-3e2f1a0b9c8d"
+    const screen = <GroupsScreen {...groupsDefaults} draftId={draftId} />
+    const html = renderToString(screen)
 
-    expect(surface.forms.map((form) => form.action)).toEqual([undefined])
-    expect(surface.scriptOnlyButtons).toEqual(["group-refresh"])
+    expect(formAt(noScriptSurface(screen), FORM_ACTIONS.groupCreate)).toEqual({
+      action: "/groups",
+      method: "post",
+      fields: ["id", "kind", "name"],
+    })
+    expect(html).toContain(`name="id" value="${draftId}"`)
+    expect(html).toContain(`name="kind" value="${GroupKind.SHARED}"`)
+  })
+
+  it("offers Refresh only to an app that can read the list again", () => {
+    const { onRefresh: _, ...withoutRefresh } = groupsDefaults
+
+    expect(noScriptSurface(<GroupsScreen {...groupsDefaults} />).scriptOnlyButtons)
+      .toEqual(["group-refresh"])
+    expect(noScriptSurface(<GroupsScreen {...withoutRefresh} />).scriptOnlyButtons).toEqual([])
   })
 
   it("links each group to its notes", () => {

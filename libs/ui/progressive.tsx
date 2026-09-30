@@ -21,6 +21,8 @@ export const FORM_ACTIONS = {
   totpFinish: "/profile/totp/finish",
   totpDisable: "/profile/totp/disable",
   pushRemove: "/profile/push/remove",
+  /** Creates a shared group: `{ id, kind, name }`. */
+  groupCreate: "/groups",
 } as const
 
 /**

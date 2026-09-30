@@ -1,0 +1,89 @@
+import {
+  BodyReadTimeoutError,
+  parseBoundedFormData,
+  PayloadTooLargeError,
+} from "@spy4x/net/bounded-body"
+
+/**
+ * The largest form any page accepts. The largest real one is a note at its longest: 10 000
+ * characters of four-byte text, percent-encoded to 12 bytes each, is about 120 KiB.
+ */
+export const MAX_FORM_BYTES = 256 * 1024
+
+/** A form post the page cannot read: the status to answer with, and why. */
+export class FormRejected extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+    this.name = "FormRejected"
+  }
+}
+
+/**
+ * Reads a form post, capped at {@link MAX_FORM_BYTES}. Throws {@link FormRejected}: 413 for a body
+ * over the cap, 408 for a body that stalls, 400 for a body that is not a form.
+ */
+export async function readForm(request: Request): Promise<FormData> {
+  try {
+    return await parseBoundedFormData(request, { maxBytes: MAX_FORM_BYTES })
+  } catch (error) {
+    if (error instanceof PayloadTooLargeError) throw new FormRejected(413, "The form is too large")
+    if (error instanceof BodyReadTimeoutError) {
+      throw new FormRejected(408, "The form stopped arriving")
+    }
+    throw new FormRejected(400, "The request is not a form")
+  }
+}
+
+/** A text field's value, or `""` when the form has none. */
+function field(form: FormData, name: string): string {
+  const value = form.get(name)
+  return typeof value === "string" ? value : ""
+}
+
+/**
+ * A number field as a number. A value that is not a whole number stays a string, so the API's
+ * schema refuses it with its own message instead of the MPA guessing a number.
+ */
+function numberField(form: FormData, name: string): number | string {
+  const value = field(form, name)
+  return /^\d+$/.test(value) ? Number(value) : value
+}
+
+/**
+ * Each form translated into the JSON body of its API call. The MPA only renames and converts: the
+ * API's schemas validate every value, so no rule lives here. `AuthForm` from preact-components names
+ * its fields `login` and `code`; the API calls them `username` and `otp`.
+ */
+export const API_BODIES = {
+  credentials: (form: FormData) => ({
+    username: field(form, "login"),
+    password: field(form, "password"),
+  }),
+  oneTimeCode: (form: FormData) => ({ otp: field(form, "code") }),
+  profile: (form: FormData) => ({
+    firstName: field(form, "firstName"),
+    lastName: field(form, "lastName"),
+  }),
+  password: (form: FormData) => ({
+    password: field(form, "password"),
+    newPassword: field(form, "newPassword"),
+  }),
+  totpFinish: (form: FormData) => ({ otp: field(form, "otp") }),
+  pushRemove: (form: FormData) => ({ deviceId: field(form, "deviceId") }),
+  groupCreate: (form: FormData) => ({
+    id: field(form, "id"),
+    kind: numberField(form, "kind"),
+    name: field(form, "name"),
+  }),
+  noteCreate: (form: FormData) => ({
+    id: field(form, "id"),
+    title: field(form, "title"),
+    body: field(form, "body"),
+  }),
+  noteUpdate: (form: FormData) => ({
+    title: field(form, "title"),
+    body: field(form, "body"),
+    version: numberField(form, "version"),
+  }),
+  noteDelete: (form: FormData) => ({ version: numberField(form, "version") }),
+} as const

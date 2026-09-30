@@ -56,7 +56,8 @@ export interface ProfileScreenProps {
   user: { mfa: UserMFAStatus } | null
   /** The session owes its one-time code: the screen points to it instead. */
   isMfaRequired: boolean
-  connection: ConnectionStatus
+  /** The live connection, for an app that has one. */
+  connection?: ConnectionStatus
   values: ProfileValues
   onValueChange: (field: keyof ProfileValues, value: string) => void
   errors: ProfileErrors
@@ -68,7 +69,10 @@ export interface ProfileScreenProps {
   onStartTotp?: () => void
   onFinishTotp?: () => void
   onDisableTotp?: () => void
-  /** Registering a push device needs the browser's push manager, so it has no native form. */
+  /**
+   * Registering a push device needs the browser's push manager, so it has no native form. Without
+   * it there is no "Add device" button.
+   */
   onRegisterPush?: () => void
   onRemovePush?: (deviceId: string) => void
   navigate?: Navigate
@@ -156,7 +160,9 @@ export function ProfileScreen(
       <Card>
         <CardHeader>
           <h1 class="text-lg font-semibold">Profile</h1>
-          <span data-e2e="ws-status" class="text-xs text-muted">WS: {connection}</span>
+          {connection && (
+            <span data-e2e="ws-status" class="text-xs text-muted">WS: {connection}</span>
+          )}
         </CardHeader>
         <CardBody>
           <form method="post" action={FORM_ACTIONS.profile} onSubmit={takeOver(onSaveProfile)}>
@@ -337,7 +343,7 @@ export function ProfileScreen(
         <CardHeader
           title="Push devices"
           headingLevel={2}
-          action={
+          action={onRegisterPush && (
             <Button
               data-e2e="push-register"
               onClick={onRegisterPush}
@@ -346,7 +352,7 @@ export function ProfileScreen(
             >
               Add device
             </Button>
-          }
+          )}
         />
         <CardBody>
           <Stack>
