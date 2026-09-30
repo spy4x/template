@@ -150,4 +150,31 @@ test.describe("groups over the socket", () => {
       await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
     }
   })
+  test("a periodic sweep signs a tab out when its user is removed", async ({ page, request }) => {
+    // No sign-out event fires here, so only the 15 second revalidation can close the socket.
+    test.setTimeout(60_000)
+    const username = "e2e_groups_socket_sweep"
+    const password = "Passw0rd!"
+    await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+    try {
+      const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
+        headers,
+        data: { username, password },
+      })
+      expect(signUp.ok()).toBe(true)
+
+      await page.goto("/sign-in")
+      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-password]").fill(password)
+      await page.locator("[data-e2e=auth-form-submit]").click()
+      await page.waitForURL("/")
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+
+      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+
+      await expect(page.locator("[data-e2e=signin-required]")).toBeVisible({ timeout: 30_000 })
+    } finally {
+      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+    }
+  })
 })
