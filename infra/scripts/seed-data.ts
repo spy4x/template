@@ -14,7 +14,8 @@
  * The user is created through the API's own sign-up (`createSignIn`), so the auth user, password
  * key, profile and personal group are written exactly as a real sign-up writes them. The session
  * that sign-up opens is signed out at once. Running the seed again changes nothing: it stops when
- * `demo` exists.
+ * `demo` exists. It refuses to run when `ENV` is `prod`, so no production database gets a
+ * `demo` account with a known password.
  *
  * @module
  */
@@ -46,11 +47,15 @@ export class SeedConfigError extends Error {
 }
 
 /**
- * Reads and checks `AUTH_PEPPER` and `SEED_PASSWORD`, with the API's rules for each.
+ * Reads and checks `AUTH_PEPPER` and `SEED_PASSWORD`, with the API's rules for each, and refuses
+ * to seed when `ENV` is `prod`.
  *
- * @throws {SeedConfigError} When either is missing or breaks its rule.
+ * @throws {SeedConfigError} When `ENV` is `prod`, or a variable is missing or breaks its rule.
  */
 export function readSeedOptions(env: Record<string, string | undefined>): SeedOptions {
+  if (env.ENV === "prod") {
+    throw new SeedConfigError("ENV is prod: the demo user is for development databases only")
+  }
   const pepper = env.AUTH_PEPPER ?? ""
   if (pepper.length < 32) {
     throw new SeedConfigError("AUTH_PEPPER must be set to the API's value (32 characters or more)")

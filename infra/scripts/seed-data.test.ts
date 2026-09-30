@@ -23,3 +23,10 @@ Deno.test("readSeedOptions refuses a password sign-up would refuse", () => {
       .toThrow(/SEED_PASSWORD/)
   }
 })
+
+Deno.test("readSeedOptions refuses to seed when ENV is prod", () => {
+  expect(() => readSeedOptions({ ENV: "prod", AUTH_PEPPER: PEPPER, SEED_PASSWORD: "12345678" }))
+    .toThrow(new SeedConfigError("ENV is prod: the demo user is for development databases only"))
+  expect(readSeedOptions({ ENV: "dev", AUTH_PEPPER: PEPPER, SEED_PASSWORD: "12345678" }).pepper)
+    .toBe(PEPPER)
+})
