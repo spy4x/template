@@ -5,11 +5,11 @@
 #   1. `pre-deploy-build` runs `deno task compose ... build` inside the Deno image, which has no
 #      Docker client and no Docker socket. It needs an image with Docker and access to the socket.
 #   2. It should wait for `ci.yml`: add a top-level `depends_on: [ci]` to the workflow.
-# The branch is `master`, the default branch of this repository.
+# The branch is `main`, the default branch of this repository.
 
 when:
   event: push
-  branch: master
+  branch: main
 
 steps:
   # ============================================================================
