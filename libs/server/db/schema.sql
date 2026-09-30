@@ -169,8 +169,12 @@ CREATE TABLE user_totp (
     last_accepted_step INT4,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    failed_attempts INT4 DEFAULT 0 NOT NULL,
+    locked_until TIMESTAMPTZ,
+    last_failure_at TIMESTAMPTZ,
     CONSTRAINT user_totp_secret_check CHECK (length(secret) BETWEEN 1 AND 256),
-    CONSTRAINT user_totp_last_accepted_step_check CHECK (last_accepted_step >= 0)
+    CONSTRAINT user_totp_last_accepted_step_check CHECK (last_accepted_step >= 0),
+    CONSTRAINT user_totp_failed_attempts_check CHECK (failed_attempts >= 0)
 );
 
 CREATE TABLE user_push_tokens (
