@@ -210,7 +210,8 @@ docker rm -f "$NAME"
 To run the API for real you also need Valkey, migrations applied
 (`deno task db:migrate`), and `infra/configs/vapid.json` present
 (`deno task vapid-key:create`) copied to `./vapid.json`, since the API reads it
-from the working directory while compose bind-mounts it.
+from the working directory while compose bind-mounts it. Compose fails the start when the file is
+missing; `deno task deploy` generates it on the server.
 
 ## What is not built yet
 

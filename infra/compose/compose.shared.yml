@@ -141,9 +141,9 @@ services:
         max-file: '3'
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.minio.rule=Host(`minio.${DOMAIN}`)'
-      - 'traefik.http.routers.minio.entrypoints=web'
-      - 'traefik.http.services.minio.loadbalancer.server.port=9001'
+      - 'traefik.http.routers.minio-${PROJECT}.rule=Host(`minio.${DOMAIN}`)'
+      - 'traefik.http.routers.minio-${PROJECT}.entrypoints=web'
+      - 'traefik.http.services.minio-${PROJECT}.loadbalancer.server.port=9001'
 
   minio-configure:
     container_name: ${PROJECT}-minio-configure
@@ -164,7 +164,7 @@ services:
   # region Monitoring
   loki:
     container_name: ${PROJECT}-loki
-    image: grafana/loki
+    image: grafana/loki:3.7.8
     restart: unless-stopped
     volumes:
       - ../../infra/configs/loki.yml:/etc/loki/config.yaml:ro,Z
@@ -196,8 +196,13 @@ services:
         max-size: '10m'
         max-file: '3'
 
+  # promtail, nodeexporter and cadvisor watch the whole host (every container's logs, the host's
+  # CPU, disk and network). On a shared server that duplicates the host's own monitoring, so they
+  # start only with the `host-monitoring` profile: set COMPOSE_PROFILES=host-monitoring in the env
+  # file. Prometheus still lists their scrape jobs and shows them as down while they are off.
   promtail:
     container_name: ${PROJECT}-promtail
+    profiles: [host-monitoring]
     restart: unless-stopped
     image: grafana/promtail:2.9.2
     volumes:
@@ -222,7 +227,7 @@ services:
 
   prometheus:
     container_name: ${PROJECT}-prometheus
-    image: prom/prometheus
+    image: prom/prometheus:v3.15.0
     user: root
     restart: unless-stopped
     volumes:
@@ -250,7 +255,7 @@ services:
 
   postgres-prometheus-exporter:
     container_name: ${PROJECT}-postgres-prometheus-exporter
-    image: wrouesnel/postgres_exporter
+    image: wrouesnel/postgres_exporter@sha256:54bd3ba6bc39a9da2bf382667db4dc249c96e4cfc837dafe91d6cc7d362829e0 # untagged upstream build "latest", v0.8.0-21-g8531aba
     environment:
       DATA_SOURCE_NAME: 'postgresql://${DB_USER}:${DB_PASS}@db:5432/${DB_NAME}?sslmode=disable'
     deploy:
@@ -263,7 +268,7 @@ services:
 
   grafana:
     container_name: ${PROJECT}-grafana
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.2.3
     restart: unless-stopped
     user: '0'
     volumes:
@@ -292,13 +297,14 @@ services:
       retries: 5
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)'
-      - 'traefik.http.routers.grafana.entrypoints=web'
-      - 'traefik.http.services.grafana.loadbalancer.server.port=3000'
+      - 'traefik.http.routers.grafana-${PROJECT}.rule=Host(`grafana.${DOMAIN}`)'
+      - 'traefik.http.routers.grafana-${PROJECT}.entrypoints=web'
+      - 'traefik.http.services.grafana-${PROJECT}.loadbalancer.server.port=3000'
 
   nodeexporter:
     container_name: ${PROJECT}-nodeexporter
-    image: prom/node-exporter
+    profiles: [host-monitoring]
+    image: prom/node-exporter:v1.12.1
     restart: unless-stopped
     volumes:
       - /proc:/host/proc:ro
@@ -323,7 +329,8 @@ services:
 
   cadvisor:
     container_name: ${PROJECT}-cadvisor
-    image: gcr.io/cadvisor/cadvisor
+    profiles: [host-monitoring]
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
     restart: unless-stopped
     privileged: true
     volumes:
@@ -368,7 +375,14 @@ services:
       - ../../apps:/app/apps:z
       - ../../libs:/app/libs:z
       - ../../deno.jsonc:/app/deno.jsonc:z
-      - ../../infra/configs/vapid.json:/app/vapid.json:Z
+      # Long form so a missing file fails the start with an error instead of Docker creating an
+      # empty directory there. `deno task deploy` generates the file on the server.
+      - type: bind
+        source: ../../infra/configs/vapid.json
+        target: /app/vapid.json
+        bind:
+          create_host_path: false
+          selinux: Z
     user: "1000:1000"
     environment:
       - HOME=/home/deno

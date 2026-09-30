@@ -32,8 +32,16 @@ Defined in `infra/compose/`:
   guard; anyone who can reach Valkey can write cached profile rows.
 - **MinIO** - object storage, with a one-shot configure container.
 - **Traefik** - reverse proxy, production compose only.
-- **Loki, Promtail, Prometheus, Grafana, node-exporter, cAdvisor,
-  postgres-exporter** - logs and metrics.
+- **Loki, Prometheus, Grafana, postgres-exporter** - this project's logs and metrics. Loki stores
+  what is pushed to it; nothing pushes until Promtail runs.
+- **Promtail, node-exporter, cAdvisor** - watch the whole host (all containers' logs, host CPU,
+  disk, network). Behind the `host-monitoring` compose profile, off by default so a shared server
+  does not get a second copy of its own monitoring. Turn on with
+  `COMPOSE_PROFILES=host-monitoring` in the env file; Prometheus keeps their scrape jobs and shows
+  them as down while they are off.
+- Images are pinned to a version (postgres-exporter to a digest, because upstream never tagged the
+  build in use); change a pin on purpose, not by a moving `latest`.
+- Traefik router, service and middleware names all end in `-${PROJECT}`.
 
 ## Deployment
 

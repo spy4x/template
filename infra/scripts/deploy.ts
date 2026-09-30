@@ -16,10 +16,12 @@
  * rsync as a destination, the second runs unquoted in the remote shell (so `~/bin/deno` works).
  * `PATH_ON_SERVER` is quoted.
  *
- * Three steps, each stopping the deploy when it fails: rsync the files that
+ * Four steps, each stopping the deploy when it fails: rsync the files that
  * `infra/deploy/include.txt` names, leaving out every env file (any `.env*` or `*.env`, anywhere,
- * and the chosen env file itself); copy the chosen env file to `infra/envs/.env` on the server,
- * readable by its owner only; then run `deno task compose up -d --build` there.
+ * and the chosen env file itself) and the web push keys; copy the chosen env file to
+ * `infra/envs/.env` on the server, readable by its owner only; create `infra/configs/vapid.json`
+ * on the server when it is missing (never sent from this machine, never overwritten, mode 600);
+ * then run `deno task compose up -d --build` there.
  *
  * @module
  */
@@ -29,6 +31,9 @@ import { readEnvFile, requireEnvVar } from "./env-file.ts"
 
 /** The env file used when no argument names one. */
 export const DEFAULT_ENV_FILE = "infra/envs/.env.prod"
+
+/** Where the API's web push keys live, relative to the app's directory. */
+export const VAPID_PATH = "infra/configs/vapid.json"
 
 /** One program to run, with its arguments, and what to call it in the log. */
 export interface DeployStep {
@@ -51,9 +56,18 @@ export function planDeploy(values: Record<string, string>, envFilePath: string):
   const server = requireEnvVar(values, "SSH_TO_SERVER", envFilePath)
   const path = requireEnvVar(values, "PATH_ON_SERVER", envFilePath).replace(/^~\//, "")
   const deno = values.DENO_ON_SERVER || "deno"
+  const denoPath = `PATH="$HOME/.deno/bin:$PATH" ${deno}`
   const remoteCommand = [
     `cd ${shellQuote(path)}`,
-    `PATH="$HOME/.deno/bin:$PATH" ${deno} task compose up -d --build`,
+    `${denoPath} task compose up -d --build`,
+  ].join(" && ")
+  // An earlier start without the file leaves an empty directory there (Docker creates one for a
+  // missing bind-mount source); `rmdir` removes only an empty one. A file that exists is kept.
+  const vapidCommand = [
+    `cd ${shellQuote(path)}`,
+    `if [ -d ${VAPID_PATH} ]; then rmdir ${VAPID_PATH}; fi`,
+    `if [ ! -e ${VAPID_PATH} ]; then (umask 077 && ${denoPath} task vapid-key:create); fi`,
+    `chmod 600 ${VAPID_PATH}`,
   ].join(" && ")
   return [
     {
@@ -69,6 +83,8 @@ export function planDeploy(values: Record<string, string>, envFilePath: string):
         "--exclude=.env*",
         "--exclude=*.env",
         `--exclude=/${envFilePath.replace(/^\.\//, "")}`,
+        // The private key is made on the server and stays there, whatever this machine holds.
+        `--exclude=/${VAPID_PATH}`,
         "--include-from=infra/deploy/include.txt",
         "--exclude=*",
         ".",
@@ -80,6 +96,7 @@ export function planDeploy(values: Record<string, string>, envFilePath: string):
       command: "rsync",
       args: ["-e", "ssh", "-p", "--chmod=F600", envFilePath, `${server}:${path}/infra/envs/.env`],
     },
+    { label: "Creating web push keys if missing", command: "ssh", args: [server, vapidCommand] },
     { label: "Starting the app", command: "ssh", args: [server, remoteCommand] },
   ]
 }
