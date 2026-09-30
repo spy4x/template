@@ -11,7 +11,9 @@ import { createCacheService } from "./cache-service.ts"
 // keys at all). "api" is this app's own namespace: every key this cache writes now reads
 // `api:<prefix>_<id>` instead of the old unprefixed `<prefix>_<id>` — this is a genuine change,
 // not merely a rename; see the PR body and docs/handoff.md's rollback note.
-const kv = await RedisKvStore.connect(config.kv.hostname, config.kv.port, "api")
+const kv = await RedisKvStore.connect(config.kv.hostname, config.kv.port, "api", {
+  password: config.kv.password,
+})
 console.log(`✅ Connected to KV`) // kept from the old client's connect log
 const cacheService = createCacheService(kv)
 

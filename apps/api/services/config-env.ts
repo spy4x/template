@@ -1,0 +1,26 @@
+import { type EnvReader, loadConfig } from "@spy4x/server/config"
+import { type } from "arktype"
+
+/** The environment variables the API needs; a missing or blank one stops it from starting. */
+export const envSchema = type({
+  ENV: "'dev' | 'prod'",
+  AUTH_COOKIE_SECRET: "string > 0",
+  AUTH_PEPPER: "string > 0",
+  AUTH_TOTP: "string > 0",
+  DEV_EMAIL: "string > 0",
+  TIMEZONE: "string > 0",
+  RATE_LIMITER_WINDOW_MS: "string.integer.parse",
+  RATE_LIMITER_STRICT_LIMIT: "string.integer.parse",
+  RATE_LIMITER_LIMIT: "string.integer.parse",
+  RATE_LIMITER_OTP_WINDOW_MS: "string.integer.parse",
+  RATE_LIMITER_OTP_LIMIT: "string.integer.parse",
+  DOMAIN: "string > 0",
+  KV_HOSTNAME: "string > 0",
+  KV_PORT: "string.integer.parse",
+  KV_PASSWORD: "string > 0",
+})
+
+/** Reads and checks the API's environment. Throws a `ConfigError` naming every bad variable. */
+export function readApiEnv(reader?: EnvReader) {
+  return loadConfig(envSchema, reader)
+}

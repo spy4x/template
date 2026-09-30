@@ -32,6 +32,7 @@ const MIGRATIONS = [
   "2026_09_24_0001_auth_package_tables.sql",
 ]
 const RETRY_MS = 50
+const KV_PASSWORD = "integration-test-only-valkey-password"
 const PEPPER = "integration-test-only-pepper-0123456789"
 const COOKIE_SECRET = "integration-test-only-cookie-secret-0123456789"
 
@@ -49,17 +50,21 @@ class FakeValkey {
   readonly port: number
 
   /** `values` is what Valkey holds; a restart keeps it, like a restart from a snapshot. */
-  private constructor(listener: Deno.Listener, readonly values: Map<string, string>) {
+  private constructor(
+    listener: Deno.Listener,
+    readonly values: Map<string, string>,
+    readonly password: string,
+  ) {
     this.port = (listener.addr as Deno.NetAddr).port
     this.#serve(listener)
   }
 
-  static start(port = 0, values = new Map<string, string>()): FakeValkey {
-    return new FakeValkey(Deno.listen({ hostname: "127.0.0.1", port }), values)
+  static start(password: string, port = 0, values = new Map<string, string>()): FakeValkey {
+    return new FakeValkey(Deno.listen({ hostname: "127.0.0.1", port }), values, password)
   }
 
   restart(): FakeValkey {
-    return FakeValkey.start(this.port, this.values)
+    return FakeValkey.start(this.password, this.port, this.values)
   }
 
   #serve(listener: Deno.Listener): void {
@@ -78,12 +83,18 @@ class FakeValkey {
     const decoder = new TextDecoder()
     const encoder = new TextEncoder()
     const buffer = new Uint8Array(65536)
+    // Like `requirepass`: nothing but AUTH is answered until the connection has sent the password.
+    let authenticated = false
     for (;;) {
       const read = await conn.read(buffer)
       if (read === null) return
       const [name, key, value, ...rest] = commandWords(decoder.decode(buffer.subarray(0, read)))
       let reply = "+OK\r\n"
-      if (name.toUpperCase() === "PING") reply = "+PONG\r\n"
+      if (name.toUpperCase() === "AUTH") {
+        authenticated = key === this.password
+        reply = authenticated ? "+OK\r\n" : "-WRONGPASS invalid username-password pair\r\n"
+      } else if (!authenticated) reply = "-NOAUTH Authentication required.\r\n"
+      else if (name.toUpperCase() === "PING") reply = "+PONG\r\n"
       else if (name.toUpperCase() === "GET") {
         const found = this.values.get(key)
         reply = found === undefined ? "$-1\r\n" : `$${encoder.encode(found).length}\r\n${found}\r\n`
@@ -136,14 +147,16 @@ async function withValkeyApp(
     connection: { options: `-c search_path=${schema}` },
     onnotice: () => {},
   })
-  let valkey = FakeValkey.start()
+  let valkey = FakeValkey.start(KV_PASSWORD)
   let kv: RedisKvStore | undefined
   try {
     await admin`CREATE SCHEMA ${admin(schema)}`
     for (const name of MIGRATIONS) {
       await sql.unsafe(await Deno.readTextFile(`libs/server/db/migrations/${name}`))
     }
-    kv = await RedisKvStore.connect("127.0.0.1", valkey.port, "api")
+    kv = await RedisKvStore.connect("127.0.0.1", valkey.port, "api", {
+      password: KV_PASSWORD,
+    })
     const reports: string[] = []
     const cache = createCacheService(kv, (operation) => reports.push(operation), RETRY_MS)
     const userCache = buildMethods<User>(cache, "user", ONE_MONTH_IN_SECONDS)
