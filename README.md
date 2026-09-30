@@ -94,8 +94,10 @@ Promtail, node-exporter and cAdvisor watch the whole host, so they are off by de
 `COMPOSE_PROFILES=host-monitoring` in the env file to start them too.
 
 The MPA is not in Compose; run it on the host. Stop the proxy with
-`deno task proxy:stop`. Apply migrations from the host with the values from your `.env`, pointing
-at the port Compose publishes:
+`deno task proxy:stop`. Compose applies pending migrations on every start, in the one-shot
+`migrate` service that the API and the worker wait for; a failed migration stops the start. To apply
+them from the host instead, for an API run outside Compose, use the values from your `.env` and the
+port Compose publishes:
 
 ```sh
 DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=<user> DB_PASS=<password> DB_NAME=<name> deno task db:migrate

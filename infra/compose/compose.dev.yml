@@ -17,6 +17,11 @@ services:
       - default
       - proxy
 
+  migrate:
+    user: "0:0"  # Run as root in dev mode for Podman compatibility, like the api
+    security_opt:
+      - label=disable
+
   worker:
     user: "0:0"  # Run as root in dev mode for Podman compatibility, like the api
     # Restarts on a code change, as `deno task api:dev` does for the API.
