@@ -41,6 +41,8 @@ function harness() {
     server: (_sent: Sent): unknown => ({ note: note("n-1", 2) }),
     current: null as NoteItem | null,
     online: true,
+    /** Runs when a send starts, before the server answers. */
+    onSend: undefined as undefined | (() => Promise<void>),
   }
   let keys = 0
   const outbox = createOutbox({
@@ -49,14 +51,11 @@ function harness() {
     isOnline: () => state.online,
     newKey: () => `key-${++keys}`,
     now: () => "2026-10-03T00:00:00.000Z",
-    send(name, payload, key) {
+    async send(name, payload, key) {
       const call = { name, payload, key }
       sent.push(call)
-      try {
-        return Promise.resolve(state.server(call))
-      } catch (error) {
-        return Promise.reject(error)
-      }
+      await state.onSend?.()
+      return state.server(call)
     },
     fetchNote: () => Promise.resolve(state.current),
   })
@@ -126,6 +125,40 @@ describe("outbox while the socket is down", () => {
     await outbox.flush()
     expect(sent.length).toBe(1)
     expect(outbox.entries.value.length).toBe(2)
+  })
+})
+
+describe("outbox list overlay", () => {
+  it("hides a note deleted offline", async () => {
+    const { outbox, offline } = harness()
+    offline()
+    await outbox.submit({ kind: "delete", groupId, noteId: "n", title: "n", body: "", version: 1 })
+    expect(await outbox.overlay(groupId, [note("n"), note("m")])).toEqual([note("m")])
+  })
+
+  it("shows the text of a note edited offline", async () => {
+    const { outbox, offline } = harness()
+    offline()
+    await outbox.submit({
+      kind: "update",
+      groupId,
+      noteId: "n",
+      title: "New",
+      body: "b",
+      version: 1,
+    })
+    const [shown] = await outbox.overlay(groupId, [note("n")])
+    expect([shown.title, shown.body, shown.version]).toEqual(["New", "b", 1])
+  })
+
+  it("saves an entry as sent before the server answers, so a closed page cannot resend it under a new key", async () => {
+    const { store, outbox, state } = harness()
+    let during: boolean | undefined
+    state.onSend = async () => {
+      during = (await store.readOutbox())[0]?.attempted
+    }
+    await outbox.submit({ kind: "create", groupId, noteId: "n", title: "T", body: "" })
+    expect(during).toBe(true)
   })
 })
 
