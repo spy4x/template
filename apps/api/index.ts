@@ -17,6 +17,7 @@ import { createPushNotificationRoute } from "./routes/pushNotification.ts"
 import { createUsersRoute } from "./routes/users.ts"
 import { wsRoute } from "./routes/ws.ts"
 import { createGroupsRoute } from "./routes/groups.ts"
+import { createNotesRoute } from "./routes/notes.ts"
 import { createMutationGuards } from "./middlewares/mutation-guards.ts"
 import { createTotpFailures } from "./services/totp-failures.ts"
 import { createAuthRateLimits } from "./middlewares/auth-rate-limits.ts"
@@ -24,6 +25,7 @@ import { commandBus } from "./services/commandBus.ts"
 import { queryBus } from "./services/queryBus.ts"
 import { listenForGroupChanges } from "@server/groups/group-change-notify.ts"
 import { groupListCursor } from "./services/group-list-cursor.ts"
+import { noteListCursor } from "./services/note-list-cursor.ts"
 import { realtime } from "./services/realtimeHub.ts"
 import { createHealthRoute } from "./routes/health.ts"
 import { isCacheConnected } from "./services/cache.ts"
@@ -76,6 +78,19 @@ app.route(
   createPushNotificationRoute({ auth: signIn.auth, webPush: webPushService, emit, mutationGuards }),
 )
 app.route("/ws", wsRoute)
+// Before "/groups": its authentication middleware would otherwise answer for these paths too.
+app.route(
+  "/groups/:groupId/notes",
+  createNotesRoute({
+    create: (command) => commandBus.execute(command),
+    update: (command) => commandBus.execute(command),
+    delete: (command) => commandBus.execute(command),
+    list: (query) => queryBus.execute(query),
+    get: (query) => queryBus.execute(query),
+    cursor: noteListCursor,
+    expectedOrigin,
+  }),
+)
 app.route(
   "/groups",
   createGroupsRoute({
