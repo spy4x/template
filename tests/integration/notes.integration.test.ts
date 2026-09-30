@@ -317,10 +317,11 @@ Deno.test("notes against Postgres", async (t) => {
       ])
     })
 
-    await t.step("a create retried with the same idempotency key makes one note", async () => {
-      const { groupId, editor } = await seedGroup(sql)
-      const command = () =>
-        new NoteCreateCommand({
+    await t.step(
+      "a create retried with the same idempotency key answers the first result without writing",
+      async () => {
+        const { groupId, editor } = await seedGroup(sql)
+        const command = new NoteCreateCommand({
           actor: actor(editor),
           groupId,
           id: crypto.randomUUID(),
@@ -329,15 +330,36 @@ Deno.test("notes against Postgres", async (t) => {
           idempotencyKey: "note-create-1",
         })
 
-      const first = await commands.execute(command())
-      // A different id under the same key would be a different request; the replay is the same one.
-      const replay = await commands.execute(
-        new NoteCreateCommand({ ...command().data, id: first.note.id }),
-      )
+        const first = await commands.execute(command)
+        const replay = await commands.execute(new NoteCreateCommand({ ...command.data }))
 
-      expect(replay.note.id).toBe(first.note.id)
-      expect((await outbox(sql, groupId)).length).toBe(1)
-    })
+        // The stored result is JSON, so a replay reads `created: true` like the first answer.
+        expect(replay).toEqual(JSON.parse(JSON.stringify(first)))
+        expect((await outbox(sql, groupId)).length).toBe(1)
+      },
+    )
+
+    await t.step(
+      "a create retried without a key returns the note it made and records nothing more",
+      async () => {
+        const { groupId, editor } = await seedGroup(sql)
+        const command = () =>
+          new NoteCreateCommand({
+            actor: actor(editor),
+            groupId,
+            id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d11a001",
+            title: "Once",
+            body: "",
+          })
+
+        const first = await commands.execute(command())
+        const retry = await commands.execute(command())
+
+        expect([first.created, retry.created]).toEqual([true, false])
+        expect(retry.note.id).toBe(first.note.id)
+        expect((await outbox(sql, groupId)).length).toBe(1)
+      },
+    )
 
     await t.step("the list pages newest first by cursor and leaves deleted notes out", async () => {
       const { groupId, owner } = await seedGroup(sql)
