@@ -9,14 +9,12 @@ test.describe("auth profile ws push flow", () => {
     const firstName = "John"
     const lastName = "Doe"
 
+    // The route answers 200 also when the user does not exist yet; anything else fails the spec.
     const cleanup = async () => {
-      try {
-        await request.post(`${apiBase}/api/test/cleanup-user`, {
-          data: { username },
-        })
-      } catch (_error) {
-        // ignore
-      }
+      const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
+        data: { username },
+      })
+      expect(response.status(), await response.text()).toBe(200)
     }
 
     await cleanup()

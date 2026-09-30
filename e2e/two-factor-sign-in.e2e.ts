@@ -34,12 +34,12 @@ test.describe("two-factor sign-in", () => {
     const password = "Passw0rd!"
     const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 
+    // The route answers 200 also when the user does not exist yet; anything else fails the spec.
     const cleanup = async () => {
-      try {
-        await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
-      } catch (_error) {
-        // ignore
-      }
+      const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
+        data: { username },
+      })
+      expect(response.status(), await response.text()).toBe(200)
     }
 
     await cleanup()
