@@ -19,6 +19,16 @@ function buildMethods<T>(prefix: string, schema?: Type) {
   return buildMethodsBase<T>(cacheService, prefix, ONE_MONTH_IN_SECONDS, schema)
 }
 
+/** True when Valkey answers a command; false on any failure (the store bounds each command). */
+export async function isCacheConnected(): Promise<boolean> {
+  try {
+    await kv.clientId()
+    return true
+  } catch {
+    return false
+  }
+}
+
 export class PublicAPICache {
   user = buildMethods<User>(`user`)
   authAudit = buildMethods<AuthAudit>(`authAudit`)

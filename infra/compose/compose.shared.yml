@@ -82,6 +82,8 @@ services:
         '${KV_MEM_INNER_LIMIT}',
         '--maxmemory-policy',
         'allkeys-lru',
+        '--save',
+        '',
       ]
     deploy:
       resources:

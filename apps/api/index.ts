@@ -1,5 +1,4 @@
 import { Hono } from "hono"
-import type { Context } from "hono"
 import { contextStorage } from "hono/context-storage"
 import { requestId } from "hono/request-id"
 import { requestLog } from "@spy4x/server/request-log"
@@ -23,6 +22,8 @@ import { createAuthRateLimits } from "./middlewares/auth-rate-limits.ts"
 import { commandBus } from "./services/commandBus.ts"
 import { queryBus } from "./services/queryBus.ts"
 import { GroupListCursorCodec } from "@server/groups/group-list-cursor.ts"
+import { createHealthRoute } from "./routes/health.ts"
+import { isCacheConnected } from "./services/cache.ts"
 import "./cqrs/+init.ts"
 
 const app = new Hono<APIContext>().basePath("/api")
@@ -33,14 +34,12 @@ app.use(
   parseAuth,
 )
 
-app.get(
+app.route(
   "/health",
-  async (c: Context<APIContext>) =>
-    c.json({
-      status: "ok",
-      isDbConnected: await db.isConnected(),
-      date: Date.now(),
-    }),
+  createHealthRoute({
+    isDbConnected: () => db.isConnected(),
+    isCacheConnected,
+  }),
 )
 // The browser sends the web app's origin; behind the TLS-terminating proxy the API sees `http://`.
 const expectedOrigin = new URL(config.webAppUrl).origin

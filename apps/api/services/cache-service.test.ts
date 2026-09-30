@@ -1,7 +1,7 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
 import type { ICacheStorage } from "@spy4x/platform/cache"
-import { createCacheService } from "./cache-service.ts"
+import { createCacheService, failOpen } from "./cache-service.ts"
 
 class MemoryCacheStorage implements ICacheStorage {
   private values = new Map<string, string>()
@@ -35,4 +35,122 @@ Deno.test("cache service revives a cached expiresAt as a Date", async () => {
 
   expect(cached?.expiresAt).toBeInstanceOf(Date)
   expect(cached?.expiresAt.getTime()).toBe(expiresAt.getTime())
+})
+
+/** A storage that keeps its data across an outage, like Valkey restarted from a snapshot. */
+class FlakyCacheStorage extends MemoryCacheStorage {
+  down = false
+  calls = 0
+
+  override get(key: string): Promise<string | null> {
+    return this.guard(() => super.get(key))
+  }
+  override set(key: string, value: string): Promise<void> {
+    return this.guard(() => super.set(key, value))
+  }
+  override del(key: string): Promise<void> {
+    return this.guard(() => super.del(key))
+  }
+  override reset(): Promise<void> {
+    return this.guard(() => super.reset())
+  }
+
+  private guard<T>(run: () => Promise<T>): Promise<T> {
+    this.calls++
+    return this.down ? Promise.reject(new Error("valkey down")) : run()
+  }
+}
+
+function untrustedFixture() {
+  const storage = new FlakyCacheStorage()
+  const reports: string[] = []
+  let time = 0
+  const cache = failOpen(storage, (operation) => reports.push(operation), 5_000, () => time)
+  return { storage, reports, cache, advance: (ms: number) => (time += ms) }
+}
+
+Deno.test("a failing cache read is a miss and the value is computed and returned", async () => {
+  const storage = new FlakyCacheStorage()
+  storage.down = true
+  const cache = createCacheService(storage, () => {})
+  let computed = 0
+
+  const value = await cache.wrap("user_1", () => Promise.resolve({ id: computed++ }), 60)
+
+  expect(value).toEqual({ id: 0 })
+  expect(computed).toBe(1)
+  expect(await cache.get("user_1")).toBeNull()
+})
+
+Deno.test("a failing cache read or write is reported, not thrown", async () => {
+  const { storage, reports, cache } = untrustedFixture()
+  await cache.get("warm-up") // a first successful operation clears the cache and trusts it
+  storage.down = true
+
+  expect(await cache.get("user_1")).toBeNull()
+  await cache.set("user_1", "{}", 60)
+
+  expect(reports).toEqual(["get"])
+})
+
+Deno.test("a failing cache delete is reported, not thrown", async () => {
+  const { storage, reports, cache } = untrustedFixture()
+  await cache.get("warm-up") // a first successful operation clears the cache and trusts it
+  storage.down = true
+
+  await cache.del("user_1")
+
+  expect(reports).toEqual(["del"])
+})
+
+Deno.test("a row cached before an outage is not served after it when its delete was skipped", async () => {
+  const { storage, cache, advance } = untrustedFixture()
+  await cache.set("user_1", `{"mfa":false}`, 60)
+  storage.down = true
+  await cache.del("user_1")
+  storage.down = false
+
+  expect(await cache.get("user_1")).toBeNull()
+  advance(5_000)
+  expect(await cache.get("user_1")).toBeNull()
+})
+
+Deno.test("an untrusted cache does not touch storage before the retry is due", async () => {
+  const { storage, cache, advance } = untrustedFixture()
+  storage.down = true
+  await cache.get("user_1")
+  const callsAfterFailure = storage.calls
+  storage.down = false
+
+  advance(4_999)
+  await cache.get("user_1")
+  await cache.set("user_1", "{}", 60)
+
+  expect(storage.calls).toBe(callsAfterFailure)
+})
+
+Deno.test("a cache trusts storage again only after a reset succeeds and then stores values", async () => {
+  const { storage, reports, cache, advance } = untrustedFixture()
+  await cache.set("user_1", `{"old":true}`, 60)
+  storage.down = true
+  await cache.get("user_1")
+
+  advance(5_000)
+  await cache.get("user_1")
+  expect(reports).toEqual(["get", "reset"])
+
+  storage.down = false
+  advance(5_000)
+  await cache.set("user_1", `{"new":true}`, 60)
+
+  expect(await cache.get("user_1")).toBe(`{"new":true}`)
+  expect(reports).toEqual(["get", "reset"])
+})
+
+Deno.test("a new cache service clears what an earlier process left before trusting it", async () => {
+  const storage = new MemoryCacheStorage()
+  await storage.set("user_1", JSON.stringify({ id: 1, mfa: 1 }))
+  const cache = createCacheService(storage, () => {})
+
+  expect(await cache.get("user_1")).toBeNull()
 })
