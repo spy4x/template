@@ -83,8 +83,8 @@ app.route(
   }),
 )
 if (config.isDev) {
-  const { devRoute } = await import("./routes/dev.ts")
-  app.route("/test", devRoute)
+  const { createDevRoute } = await import("./routes/dev.ts")
+  app.route("/test", createDevRoute({ isDev: config.isDev, db, sql }))
 }
 
 // TODO: move this to a better place
