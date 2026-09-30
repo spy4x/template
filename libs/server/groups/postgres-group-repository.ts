@@ -4,7 +4,6 @@ import {
   CreatePersonalGroupInput,
   CreateSharedGroupInput,
   Group,
-  GROUP_AGGREGATE,
   GroupAccess,
   GroupError,
   GroupKind,
@@ -14,6 +13,7 @@ import {
   GroupRole,
   GroupSummary,
 } from "@domain/groups"
+import { recordGroupChange } from "./group-change-log.ts"
 
 interface GroupRow extends postgres.Row {
   id: string
@@ -44,10 +44,6 @@ interface GroupSummaryRow extends postgres.Row {
 
 interface ActiveUserRow extends postgres.Row {
   id: number
-}
-
-interface ChangeSequenceRow extends postgres.Row {
-  sequence: string
 }
 
 interface MemberRow extends postgres.Row {
@@ -344,52 +340,13 @@ export class PostgresGroupRepository implements GroupRepository {
     throw new GroupError("ID_ALREADY_EXISTS", "Group id is already in use")
   }
 
-  /**
-   * Stamps one committed change on a group: takes the group's next sequence and writes the outbox
-   * row that announces it. Returns the sequence, as a decimal string.
-   *
-   * It runs in the transaction of the change it records, so a change that rolls back takes its
-   * sequence and its outbox row with it, and no push is ever sent for it. The `UPDATE` locks the
-   * group row, which is what hands two concurrent changes two different sequences in commit order.
-   * The outbox row carries the group as its aggregate and the sequence as its version, so the
-   * publisher can name both without reading the group again.
-   */
+  /** Records a change on a group in the current transaction; see {@link recordGroupChange}. */
   private async recordChange(
     groupId: string,
     actorId: number,
     eventKind: string,
   ): Promise<string> {
-    const stamped = (
-      await this.sql<ChangeSequenceRow[]>`
-        UPDATE groups
-        SET next_change_sequence = next_change_sequence + 1
-        WHERE id = ${groupId}
-        RETURNING (next_change_sequence - 1)::text AS sequence
-      `
-    )[0]
-    if (!stamped) {
-      throw new Error(`Group ${groupId} vanished while its change was being recorded`)
-    }
-    await this.sql`
-      INSERT INTO outbox_events (
-        id,
-        event_kind,
-        aggregate_type,
-        aggregate_id,
-        aggregate_version,
-        group_id,
-        actor_user_id
-      ) VALUES (
-        ${crypto.randomUUID()},
-        ${eventKind},
-        ${GROUP_AGGREGATE},
-        ${groupId},
-        ${stamped.sequence}::bigint,
-        ${groupId},
-        ${actorId}
-      )
-    `
-    return stamped.sequence
+    return await recordGroupChange(this.sql, groupId, actorId, eventKind)
   }
 
   private async assertActiveUser(userId: number): Promise<void> {
