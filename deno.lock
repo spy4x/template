@@ -105,6 +105,7 @@
     "npm:@types/babel__core@7.20.5": "7.20.5",
     "npm:@types/babel__core@^7.20.5": "7.20.5",
     "npm:arktype@2.2.3": "2.2.3",
+    "npm:dexie@4.4.6": "4.4.6",
     "npm:esbuild-wasm@~0.25.11": "0.25.12",
     "npm:esbuild@0.25.7": "0.25.7",
     "npm:esbuild@~0.25.5": "0.25.12",
@@ -1535,6 +1536,9 @@
     "detect-libc@2.1.2": {
       "integrity": "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="
     },
+    "dexie@4.4.6": {
+      "integrity": "sha512-hJP/BO6mjB+tX6hToIO1kmxYLNmun90wYbfcoAoLpKEyDYal/k33dg0TAfoUe2TDsbbLoVIzljJ3BN2UbR5EOg=="
+    },
     "dom-serializer@2.0.0": {
       "integrity": "sha512-wIkAryiqt/nV5EQKqQpo3SToSOV9J0DnbJqwK7Wv/Trc92zIAYZ4FlMu+JPFW1DfGFt81ZTCGgDEabffXeLyJg==",
       "dependencies": [
@@ -2336,6 +2340,7 @@
       "npm:@preact/signals-core@1.12.1",
       "npm:@preact/signals@2.5.1",
       "npm:arktype@2.2.3",
+      "npm:dexie@4.4.6",
       "npm:playwright@1.57.0",
       "npm:postgres@3.4.7",
       "npm:preact@10.29.8",

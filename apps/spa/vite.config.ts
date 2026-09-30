@@ -35,6 +35,12 @@ export default defineConfig({
       replacement: fromFileUrl(new URL("../../libs/ui/", import.meta.url)),
     }],
   },
+  optimizeDeps: {
+    // Dexie is imported through the Deno plugin's resolver, which the dev server's dependency
+    // scan does not follow. Found late, it triggers a re-bundle that leaves a page that loaded
+    // meanwhile blank ("Outdated Optimize Dep"), so it is named up front.
+    include: ["dexie"],
+  },
   server: {
     host: "0.0.0.0",
     watch: {

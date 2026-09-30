@@ -2,6 +2,8 @@ import { signal } from "@preact/signals"
 import { RealtimeRequestError } from "@spy4x/realtime"
 import { apiFetch } from "./api.ts"
 import { realtimeCommand, realtimeQuery } from "./realtime.ts"
+import { currentLayer } from "../offline/index.ts"
+import { offlineNotes } from "../offline/notes-offline.ts"
 
 /** A note as the API sends it: dates are ISO strings, the sequence a decimal string. */
 export interface NoteItem {
@@ -37,6 +39,8 @@ export interface NotesDependencies {
   ): Promise<{ note: NoteItem }>
   delete(input: { groupId: string; id: string; version: number }): Promise<unknown>
   newId(): string
+  /** What the device already holds of a group's notes, shown before the read answers. */
+  readLocal?(groupId: string): Promise<readonly NoteItem[]>
 }
 
 interface Draft {
@@ -158,11 +162,20 @@ export function createNotesStore(dependencies: NotesDependencies) {
     }
   }
 
+  /** Shows what the device holds while the read runs, unless the read answered first. */
+  async function showLocal(forGroup: string): Promise<void> {
+    const local = await dependencies.readLocal?.(forGroup).catch(() => undefined)
+    if (local && groupId.value === forGroup && loading.value && notes.value.length === 0) {
+      notes.value = local
+    }
+  }
+
   /** Shows a group's notes, and the edit form of `noteId` when one is given. */
   async function open(nextGroupId: string, noteId: string | null): Promise<void> {
     if (groupId.value !== nextGroupId) {
       reset()
       groupId.value = nextGroupId
+      void showLocal(nextGroupId)
       await load()
     }
     if (noteId === null) {
@@ -329,8 +342,8 @@ function toEdit(note: NoteItem): Edit {
   return { id: note.id, title: note.title, body: note.body, version: note.version, conflict: false }
 }
 
-/** The page's own store: reads over REST (start-up and after a push), writes over the socket. */
-export const notesStore = createNotesStore({
+/** The notes as the server serves them: reads over REST, writes over the socket. */
+const onlineNotes: NotesDependencies = {
   async fetchPage(groupId, cursor) {
     const query = new URLSearchParams({ limit: String(PAGE_LIMIT) })
     if (cursor) query.set("cursor", cursor)
@@ -343,4 +356,10 @@ export const notesStore = createNotesStore({
   update: (input) => realtimeCommand("note.update", input),
   delete: (input) => realtimeCommand("note.delete", input),
   newId: () => crypto.randomUUID(),
-})
+}
+
+/**
+ * The page's own store: reads over REST (start-up and after a push), writes over the socket, and
+ * with the offline layer running, served from the device first and queued while offline.
+ */
+export const notesStore = createNotesStore(offlineNotes(onlineNotes, currentLayer))

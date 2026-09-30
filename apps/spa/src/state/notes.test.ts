@@ -65,6 +65,28 @@ function harness(overrides: {
 }
 
 describe("notes store", () => {
+  it("shows the notes the device holds while the read is still running", async () => {
+    let answer: (page: NotePage) => void = () => {}
+    const store = createNotesStore({
+      fetchPage: () => new Promise<NotePage>((resolve) => (answer = resolve)),
+      get: () => Promise.reject(new Error("unused")),
+      create: () => Promise.reject(new Error("unused")),
+      update: () => Promise.reject(new Error("unused")),
+      delete: () => Promise.reject(new Error("unused")),
+      newId: () => "id",
+      readLocal: () => Promise.resolve([item("cached")]),
+    })
+
+    const opening = store.open(groupId, null)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(store.notes.value.map((note) => note.id)).toEqual(["cached"])
+    expect(store.loading.value).toBe(true)
+
+    answer({ notes: [item("fresh")], nextCursor: null })
+    await opening
+    expect(store.notes.value.map((note) => note.id)).toEqual(["fresh"])
+  })
+
   it("reads every page of the group it opens", async () => {
     const { store, reads } = harness({
       pages: [
