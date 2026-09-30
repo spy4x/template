@@ -7,6 +7,7 @@ import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { GroupKind, GroupRole } from "@domain/groups"
+import { type Navigate, NOTE_PATHS, ScreenLink } from "./progressive.tsx"
 
 /** One group as the screen shows it. */
 export interface GroupRow {
@@ -29,6 +30,7 @@ export interface GroupsScreenProps {
   error: string | null
   onCreate: () => void
   onRefresh: () => void
+  navigate?: Navigate
 }
 
 const KIND_TEXT: Record<GroupKind, string> = {
@@ -44,11 +46,12 @@ const ROLE_TEXT: Record<GroupRole, string> = {
 }
 
 /**
- * The groups page: the groups the person belongs to and a form to create a shared one. It has no
- * page without JavaScript, because creating and listing go over the live connection.
+ * The groups page: the groups the person belongs to, each a link to its notes, and a form to create
+ * a shared one. Creating has no page without JavaScript, because it goes over the live connection.
  */
 export function GroupsScreen(
-  { groups, name, onNameChange, creating, loading, error, onCreate, onRefresh }: GroupsScreenProps,
+  { groups, name, onNameChange, creating, loading, error, onCreate, onRefresh, navigate }:
+    GroupsScreenProps,
 ): JSX.Element {
   return (
     <Stack gap="lg">
@@ -105,7 +108,13 @@ export function GroupsScreen(
                       class="flex flex-col gap-1 rounded-primary border border-subtle px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
                       data-e2e={`group-${group.id}`}
                     >
-                      <span class="font-medium" data-e2e="group-item-name">{group.name}</span>
+                      <ScreenLink
+                        href={NOTE_PATHS.list(group.id)}
+                        navigate={navigate}
+                        class="link font-medium"
+                      >
+                        <span data-e2e="group-item-name">{group.name}</span>
+                      </ScreenLink>
                       <span class="text-xs text-muted">
                         {KIND_TEXT[group.kind]} · {ROLE_TEXT[group.role]}
                       </span>

@@ -15,7 +15,13 @@ import { AppFrame, PublicFrame } from "./frame.tsx"
 import { GroupKind, GroupRole } from "@domain/groups"
 import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
-import { FORM_ACTIONS } from "./progressive.tsx"
+import { FORM_ACTIONS, NOTE_PATHS } from "./progressive.tsx"
+import {
+  noteCreateRequestSchema,
+  noteDeleteRequestSchema,
+  noteUpdateRequestSchema,
+} from "@domain/notes"
+import { NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
 
 /** One `<form>` in rendered HTML: its attributes and the names of the fields it submits. */
 interface RenderedForm {
@@ -262,5 +268,131 @@ describe("GroupsScreen", () => {
 
     expect(surface.forms.map((form) => form.action)).toEqual([undefined])
     expect(surface.scriptOnlyButtons).toEqual(["group-refresh"])
+  })
+
+  it("links each group to its notes", () => {
+    const surface = noScriptSurface(
+      <GroupsScreen
+        {...groupsDefaults}
+        groups={[{ id: "g-2", name: "Team", kind: GroupKind.SHARED, role: GroupRole.VIEWER }]}
+      />,
+    )
+
+    expect(surface.links).toEqual([NOTE_PATHS.list("g-2")])
+  })
+})
+
+const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
+const noteRow = {
+  id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001",
+  title: "Groceries",
+  body: "milk",
+  version: 3,
+}
+const noError = { title: null, form: null }
+const notesDefaults: NotesScreenProps = {
+  group: { id: groupId, name: "Team", canWrite: true },
+  notes: [noteRow],
+  loading: false,
+  draftId: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111009",
+  draft: { title: "", body: "" },
+  createErrors: noError,
+  creating: false,
+  editing: null,
+  editErrors: noError,
+  saving: false,
+  deleting: null,
+  listError: null,
+  nextPageHref: null,
+}
+
+describe("NotesScreen without JavaScript", () => {
+  it("posts a new note and each delete with the API's field names, and links each note to its edit page", () => {
+    const surface = noScriptSurface(<NotesScreen {...notesDefaults} />)
+
+    expect(surface.forms.every((form) => form.method === "post")).toBe(true)
+    expect(formAt(surface, NOTE_PATHS.list(groupId)).fields).toEqual(
+      schemaKeys(noteCreateRequestSchema),
+    )
+    expect(formAt(surface, NOTE_PATHS.delete(groupId, noteRow.id)).fields).toEqual(
+      schemaKeys(noteDeleteRequestSchema),
+    )
+    expect(surface.forms).toHaveLength(2)
+    expect(surface.links).toContain(NOTE_PATHS.note(groupId, noteRow.id))
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("posts the edit with the API's field names and the version it started from", () => {
+    const html = renderToString(
+      <NotesScreen
+        {...notesDefaults}
+        editing={{ id: noteRow.id, title: "Groceries", body: "", version: 3, conflict: false }}
+      />,
+    )
+    const surface = noScriptSurface(
+      <NotesScreen
+        {...notesDefaults}
+        editing={{ id: noteRow.id, title: "Groceries", body: "", version: 3, conflict: false }}
+      />,
+    )
+
+    expect(formAt(surface, NOTE_PATHS.note(groupId, noteRow.id)).fields).toEqual(
+      schemaKeys(noteUpdateRequestSchema),
+    )
+    expect(html).toContain('name="version" value="3"')
+    expect(surface.links).toContain(NOTE_PATHS.list(groupId))
+  })
+
+  it("shows a viewer the notes without a single form", () => {
+    const surface = noScriptSurface(
+      <NotesScreen {...notesDefaults} group={{ id: groupId, name: "Team", canWrite: false }} />,
+    )
+    const html = renderToString(
+      <NotesScreen {...notesDefaults} group={{ id: groupId, name: "Team", canWrite: false }} />,
+    )
+
+    expect(surface.forms).toEqual([])
+    expect(html).toContain("Groceries")
+    expect(html).toContain("Only an editor can change them.")
+  })
+
+  it("links a page without JavaScript to the older notes", () => {
+    const surface = noScriptSurface(
+      <NotesScreen {...notesDefaults} nextPageHref={`${NOTE_PATHS.list(groupId)}?cursor=abc`} />,
+    )
+
+    expect(surface.links).toContain(`${NOTE_PATHS.list(groupId)}?cursor=abc`)
+  })
+})
+
+describe("NotesScreen", () => {
+  it("ties the title error to its field and tells a stale edit where the latest version is", () => {
+    const html = renderToString(
+      <NotesScreen
+        {...notesDefaults}
+        editing={{ id: noteRow.id, title: "Mine", body: "", version: 3, conflict: true }}
+        editErrors={{ title: "Enter a title", form: "The note was changed by someone else" }}
+      />,
+    )
+
+    expect(html).toMatch(/aria-describedby="note-edit-title-error"/)
+    expect(html).toContain("Enter a title")
+    expect(html).toContain("The note was changed by someone else")
+    expect(html).toContain("Load the latest version")
+  })
+
+  it("names each delete button after its note", () => {
+    const html = renderToString(<NotesScreen {...notesDefaults} />)
+
+    expect(html).toContain('aria-label="Delete Groceries"')
+  })
+
+  it("says the group was not found once loading is over", () => {
+    expect(renderToString(<NotesScreen {...notesDefaults} group={null} loading />)).toContain(
+      "Loading the group...",
+    )
+    expect(renderToString(<NotesScreen {...notesDefaults} group={null} />)).toContain(
+      "This group was not found.",
+    )
   })
 })
