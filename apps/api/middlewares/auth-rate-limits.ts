@@ -16,7 +16,7 @@ export interface AuthRateLimits {
   strictByUser: MiddlewareHandler<APIContext>
   /**
    * Slow limit per signed-in user, for checking a six-digit one-time code: `/totp/check` and
-   * `/totp/connect/finish` share one budget.
+   * `/totp/connect/finish` share one budget. Only failed checks (status 400 and above) spend it.
    */
   otpByUser: MiddlewareHandler<APIContext>
   /** Normal limit per signed-in user, else per client IP, for every other auth route. */
@@ -48,10 +48,9 @@ export interface AuthRateLimitSettings {
  *
  * The one-time-code limit is separate because a six-digit code is a small secret: one random guess
  * succeeds about once in 333,000 tries, so it needs far fewer attempts per day than a password.
- * Every check counts, a correct code included: the ts-libs middleware cannot skip successful
- * requests. So a user who signs in six times in one window gets 429, and anyone who has the
- * password can spend the budget with wrong codes and keep the owner out of the code step. A lockout
- * counter that counts failures only (#73) is the follow-up.
+ * Only wrong codes spend it (`skipSuccessful`), so a user who signs in six times in one window is
+ * never refused. It forgets everything on restart; the failure counter in
+ * `services/totp-failures.ts` does not, and is what limits guesses over days and years.
  *
  * Proxy assumption: the client IP comes from `X-Real-IP` because Traefik alone sits in front of the
  * API and overwrites that header on every request. The connection's own address, which
@@ -92,6 +91,8 @@ export function createAuthRateLimits(settings: AuthRateLimitSettings): AuthRateL
       remoteAddr,
       keyResolver: byUser,
       keyPrefix: "auth-otp:",
+      // A correct code gives its slot back: only wrong codes run the budget out.
+      skipSuccessful: true,
     }),
     normal: createRateLimitMiddleware(normal, {
       remoteAddr,

@@ -16,7 +16,19 @@ import {
 } from "../_testing/mutation-requests.ts"
 import { MALFORMED_JSON, oversizedJson } from "../_testing/json-bodies.ts"
 import { type AuthRateLimits, createAuthRateLimits } from "../middlewares/auth-rate-limits.ts"
+import type { TotpFailures } from "../services/totp-failures.ts"
 import { createAuthRoute } from "./auth.ts"
+
+/**
+ * A failure counter that records its calls in `calls`, and answers `lockedForMs` to `begin`
+ * (0 = not locked).
+ */
+function fakeTotpFailures(calls: string[], lockedForMs = 0): TotpFailures {
+  return {
+    begin: () => (calls.push("begin"), Promise.resolve(lockedForMs)),
+    refund: () => (calls.push("refund"), Promise.resolve()),
+  }
+}
 
 /**
  * A sign-in whose operations only record that the route called them. With `succeed: false`, every
@@ -58,21 +70,26 @@ const generousLimits = {
 
 function buildApp(
   auth: APIContext["Variables"]["auth"] = buildAuthData(),
-  { rateLimits = createAuthRateLimits(generousLimits), succeed = true, secondFactor }: {
-    rateLimits?: AuthRateLimits
-    succeed?: boolean
-    /** The second-factor state of the session that `signIn` and `signUp` hand back. */
-    secondFactor?: SecondFactorStatus
-  } = {},
+  { rateLimits = createAuthRateLimits(generousLimits), succeed = true, secondFactor, lockedForMs }:
+    {
+      rateLimits?: AuthRateLimits
+      /** How long the failure counter says the user is locked; 0 or left out means not locked. */
+      lockedForMs?: number
+      succeed?: boolean
+      /** The second-factor state of the session that `signIn` and `signUp` hand back. */
+      secondFactor?: SecondFactorStatus
+    } = {},
 ) {
   const calls: string[] = []
+  const failureCalls: string[] = []
   const route = createAuthRoute({
     signIn: fakeSignIn(calls, succeed, secondFactor),
     emit: () => {},
     mutationGuards: testMutationGuards,
     rateLimits,
+    totpFailures: fakeTotpFailures(failureCalls, lockedForMs),
   })
-  return { app: mountRoute("/auth", route, auth), calls }
+  return { app: mountRoute("/auth", route, auth), calls, failureCalls }
 }
 
 function send(
@@ -312,6 +329,47 @@ describe("auth routes rate-limit", () => {
     })
   }
 
+  for (const route of otpRoutes) {
+    it(`lets six correct ${route.path} calls in 15 minutes all succeed`, async () => {
+      const { app } = buildApp(undefined, {
+        rateLimits: createAuthRateLimits(tightLimits),
+        succeed: true,
+      })
+      const statuses = []
+      for (let attempt = 0; attempt < 6; attempt++) {
+        statuses.push((await send(app, route, sameOriginHeaders)).status)
+      }
+
+      expect(statuses).toEqual(Array(6).fill(200))
+    })
+  }
+
+  it("still refuses the 6th wrong code after correct ones in between", async () => {
+    let correct = true
+    const calls: string[] = []
+    const route = otpRoutes[0]
+    const signIn = fakeSignIn(calls)
+    signIn.checkTotp = () => Promise.resolve(correct)
+    const app = mountRoute(
+      "/auth",
+      createAuthRoute({
+        signIn,
+        emit: () => {},
+        mutationGuards: testMutationGuards,
+        rateLimits: createAuthRateLimits(tightLimits),
+        totpFailures: fakeTotpFailures([]),
+      }),
+      buildAuthData(),
+    )
+    const statuses = []
+    for (const isCorrect of [false, false, true, false, true, false, false, false, false]) {
+      correct = isCorrect
+      statuses.push((await send(app, route, sameOriginHeaders)).status)
+    }
+
+    expect(statuses).toEqual([401, 401, 200, 401, 200, 401, 401, 429, 429])
+  })
+
   it("counts totp/check and totp/connect/finish against one one-time-code budget", async () => {
     const { app, calls } = buildApp(undefined, {
       rateLimits: createAuthRateLimits(tightLimits),
@@ -458,4 +516,39 @@ describe("auth routes rate-limit", () => {
 
     expect(statuses).toEqual([200, 200, 429])
   })
+})
+
+describe("auth routes count wrong one-time codes per user", () => {
+  const otpRoutes = sessionRoutes.filter((route) =>
+    ["/auth/totp/check", "/auth/totp/connect/finish"].includes(route.path)
+  )
+
+  for (const route of otpRoutes) {
+    it(`answers ${route.path} with 429 and Retry-After while the user is locked, without checking the code`, async () => {
+      const { app, calls, failureCalls } = buildApp(undefined, { lockedForMs: 90_500 })
+      const response = await send(app, route, sameOriginHeaders)
+
+      expect(response.status).toBe(429)
+      expect(response.headers.get("retry-after")).toBe("91")
+      expect(failureCalls).toEqual(["begin"])
+      expect(calls).toEqual([])
+    })
+
+    it(`counts the check before running it and gives the slot back after a correct ${route.path}`, async () => {
+      const { app, calls, failureCalls } = buildApp(undefined, { succeed: true })
+      const response = await send(app, route, sameOriginHeaders)
+
+      expect(response.status).toBe(200)
+      expect(failureCalls).toEqual(["begin", "refund"])
+      expect(calls).toEqual([route.operation])
+    })
+
+    it(`keeps the count after a wrong ${route.path}`, async () => {
+      const { app, calls, failureCalls } = buildApp(undefined, { succeed: false })
+      await send(app, route, sameOriginHeaders)
+
+      expect(failureCalls).toEqual(["begin"])
+      expect(calls).toEqual([route.operation])
+    })
+  }
 })

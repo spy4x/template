@@ -13,6 +13,7 @@ import type { SignIn } from "@api/services/sign-in.ts"
 import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
 import { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
+import type { TotpFailures } from "../services/totp-failures.ts"
 import type { AuthRateLimits } from "../middlewares/auth-rate-limits.ts"
 import { readApiJson } from "@api/services/json-body.ts"
 
@@ -22,6 +23,30 @@ export interface AuthRouteDependencies {
   emit(event: UserSignedInEvent | UserSignedOutEvent | UserSignedUpEvent): void
   mutationGuards: MutationGuards
   rateLimits: AuthRateLimits
+  /** Persistent count of wrong one-time codes per user, with a growing lock. */
+  totpFailures: TotpFailures
+}
+
+/**
+ * Runs one one-time-code check under the failure counter. While the user is locked the check does
+ * not run at all, so not even a correct code gets through, and the answer is 429 with
+ * `Retry-After`. A correct code gives its slot back.
+ */
+async function checkUnderFailureCount(
+  c: Context<APIContext>,
+  totpFailures: TotpFailures,
+  userId: number,
+  check: () => Promise<boolean>,
+  wrongAnswer: () => Response,
+): Promise<Response | true> {
+  const waitMs = await totpFailures.begin(userId)
+  if (waitMs > 0) {
+    c.header("Retry-After", String(Math.ceil(waitMs / 1000)))
+    return c.json({ error: "Too many wrong codes, try again later." }, 429)
+  }
+  if (!(await check())) return wrongAnswer()
+  await totpFailures.refund(userId)
+  return true
 }
 
 /**
@@ -39,7 +64,7 @@ function signInAnswer(
 }
 
 export function createAuthRoute(
-  { signIn, emit, mutationGuards, rateLimits }: AuthRouteDependencies,
+  { signIn, emit, mutationGuards, rateLimits, totpFailures }: AuthRouteDependencies,
 ): Hono<APIContext> {
   const { isAuthenticated1FA, isAuthenticated2FA } = signIn.auth
   return new Hono<APIContext>()
@@ -120,11 +145,14 @@ export function createAuthRoute(
         if (validationResult.error) {
           return c.json({ error: validationResult.error.description }, 400)
         }
-        const isSuccess = await signIn.checkTotp(authData, validationResult.data.otp)
-        if (!isSuccess) {
-          return c.json({ error: "Invalid token" }, 401)
-        }
-        return c.json(authData.user)
+        const outcome = await checkUnderFailureCount(
+          c,
+          totpFailures,
+          authData.user.id,
+          () => signIn.checkTotp(authData, validationResult.data.otp),
+          () => c.json({ error: "Invalid token" }, 401),
+        )
+        return outcome === true ? c.json(authData.user) : outcome
       } catch (_error) {
         return c.json({ error: "Invalid request format" }, 400)
       }
@@ -142,11 +170,15 @@ export function createAuthRoute(
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
       }
-      const isSuccess = await signIn.connectTotpFinish(c.get("auth")!, validationResult.data.otp)
-      if (!isSuccess) {
-        return c.json({ error: "Code is incorrect" }, 400)
-      }
-      return c.json({ success: true })
+      const authData = c.get("auth")!
+      const outcome = await checkUnderFailureCount(
+        c,
+        totpFailures,
+        authData.user.id,
+        () => signIn.connectTotpFinish(authData, validationResult.data.otp),
+        () => c.json({ error: "Code is incorrect" }, 400),
+      )
+      return outcome === true ? c.json({ success: true }) : outcome
     })
     .use(isAuthenticated2FA)
     .post(`/totp/disconnect`, rateLimits.normal, async (c) => {

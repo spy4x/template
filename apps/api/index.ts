@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { contextStorage } from "hono/context-storage"
 import { requestId } from "hono/request-id"
 import { requestLog } from "@spy4x/server/request-log"
-import { db } from "@api/services/db.ts"
+import { db, sql } from "@api/services/db.ts"
 import { config } from "@api/services/config.ts"
 import { log } from "@api/services/log.ts"
 import { parseAuth, signIn } from "@api/services/auth.ts"
@@ -18,6 +18,7 @@ import { createUsersRoute } from "./routes/users.ts"
 import { wsRoute } from "./routes/ws.ts"
 import { createGroupsRoute } from "./routes/groups.ts"
 import { createMutationGuards } from "./middlewares/mutation-guards.ts"
+import { createTotpFailures } from "./services/totp-failures.ts"
 import { createAuthRateLimits } from "./middlewares/auth-rate-limits.ts"
 import { commandBus } from "./services/commandBus.ts"
 import { queryBus } from "./services/queryBus.ts"
@@ -47,7 +48,16 @@ const mutationGuards = createMutationGuards(config.webAppUrl)
 const emit = (event: Parameters<typeof eventBus.emit>[0]) => eventBus.emit(event)
 // has some public routes and some more protected
 const rateLimits = createAuthRateLimits(config.rateLimiter)
-app.route("/auth", createAuthRoute({ signIn, emit, mutationGuards, rateLimits }))
+app.route(
+  "/auth",
+  createAuthRoute({
+    signIn,
+    emit,
+    mutationGuards,
+    rateLimits,
+    totpFailures: createTotpFailures({ sql }),
+  }),
+)
 app.route(
   "/users",
   createUsersRoute({
