@@ -31,23 +31,25 @@ across real projects, a CLI last.
 
 ## State of master
 
-Green: `deno task check` (23 tests, 35 steps),
-`deno task test:integration` (13 tests, 29 steps, needs Postgres), `deno task spa:build`,
-`deno task mpa:check`, and the Playwright e2e suite (2 tests).
+Green: `deno task check` (107 tests in five runs), `deno task test:integration` (29 tests, 58
+steps, needs Postgres), `deno task spa:build`, `deno task mpa:check`, and the Playwright e2e suite
+(6 tests).
 
 ```
-apps/api      REST, auth, CQRS dispatch. The only app with real behaviour.
-apps/spa      Preact + Vite PWA. Wires the libs/ui auth and profile screens.
+apps/api      REST, the /api/ws socket, auth, CQRS dispatch. The only app with real behaviour.
+apps/spa      Preact + Vite PWA. Wires the libs/ui auth, profile and groups screens;
+              group commands and queries go over the socket.
 apps/mpa      Fresh. SSR shell plus /health. No features yet.
-apps/worker   Drains outbox_events. Real, small.
+apps/worker   Drains outbox_events and announces group changes (pg_notify); sweeps
+              expired idempotency keys.
 
 libs/platform  empty. Its primitives come from spy4x/ts-libs on JSR:
                @spy4x/validation, @spy4x/platform/{cqrs,cache,api,model,
                request-info,tokens}.
 libs/domain    groups (enums, policy, commands/queries), identity (user, session,
-               auth, ws payload contracts). May depend on platform only.
+               auth). May depend on platform only.
 libs/server    db (migrations and schema.sql only), groups (Postgres repository,
-               cursor). Database access, outbox, key-value store, config,
+               cursor, change notification), idempotency (middleware and store). Database access, outbox, key-value store, config,
                request logging, sign-in and auth come from @spy4x/server/*.
 libs/client    vite. Icons, useUrlFilters and the signed-in Shell come from
                @spy4x/preact-icons, @spy4x/preact-signals and @spy4x/preact-system.
@@ -218,40 +220,42 @@ missing; `deno task deploy` generates it on the server.
 
 ## What is not built yet
 
-The sync protocol is designed and not implemented. Specifically:
+- `authorization_revision` exists as a column on `groups` and is **never incremented**.
+- Only `group.create` and `group.list` go over the socket. The profile, password, two-factor and
+  push calls are still REST, and the profile page no longer receives live updates (a profile change
+  in another tab shows after a reload).
+- No notes example aggregate, so the protocol is proven on groups only.
+- No local projection in the SPA, no offline outbox, no conflict UI. The page keeps its cursors in
+  `localStorage` and rereads the whole group list to catch up.
+- The worker publishes a group change with `pg_notify`, which reaches only API instances that are
+  listening at that moment. A push missed that way is caught by the pull after the next reconnect.
 
-- `next_change_sequence` and `authorization_revision` exist as columns on
-  `groups` and are **never incremented**. No cursor exists yet.
-- There is no change log, so nothing can be replayed in order.
-- `outbox_events` is drained by the worker, but the publisher only logs. Nothing
-  consumes the events.
-- No bootstrap or pull endpoint.
-- No WebSocket transport beyond the existing profile socket.
-- No local projection in the SPA, no offline outbox, no conflict UI.
-- No idempotency key store.
+## How a group call travels
+
+1. `apps/spa/src/state/realtime.ts` opens `/api/ws`. The upgrade runs the same session gate as
+   REST and the `Origin` check, then `apps/api/services/realtime.ts` remembers which session each
+   socket belongs to.
+2. `group.create` and `group.list` are dispatched on the same command and query buses REST uses,
+   from `apps/api/features/groups/socket.ts`. Each frame reads the session again from the database,
+   so a signed-out or expired session is refused. Authorization stays in the buses.
+3. A command needs an idempotency key. `libs/server/idempotency` stores it for 7 days per user and
+   runs the command once; a repeat returns the first result, and a repeat while the first still
+   runs waits, then answers `conflict`. The worker sweeps expired keys hourly.
+4. Every committed group change bumps `groups.next_change_sequence` and writes an outbox row in
+   the same transaction. The worker drains the outbox and sends `pg_notify`; the API turns it into
+   a `change.hint` with the sequence for every member's open sockets.
+5. The SPA treats a hint as a reason to read. The read is `GET /api/groups`, the same one it makes
+   at start-up and after every reconnect, so a lost frame costs one read.
 
 ## Next steps, in dependency order
 
 Each is intended to be one small PR. Small PRs are an explicit requirement here.
 
-1. **Increment `next_change_sequence`** on every committed group-scoped change
-   and record changes so they can be replayed in order. Everything else depends
-   on this; without it there is no cursor.
-2. **Increment `authorization_revision`** on membership and role changes.
-3. **Idempotency key store** with a 7-day sweep.
-4. **Bootstrap and pull REST endpoints** over the change log.
-5. **`libs/server/realtime`** - connection registry, `Origin` validation at
-   upgrade, sequence-stamped push, sign-out fan-out. Mounted by `apps/api`; keep
-   it behind a library boundary so it can move to `apps/realtime` later without a
-   rewrite.
-6. **A notes example aggregate**, to prove the protocol end to end on something
-   other than groups.
-7. **SPA local projection and offline outbox.**
-8. **Deterministic Playwright e2e** for offline to reconnect.
-
-Also open and unresolved: authorization currently lives in `apps/api` route
-middleware, which the WebSocket transport will bypass. That has to be solved
-before step 5, and the approach is still under discussion - see the open PR.
+1. **Increment `authorization_revision`** on membership and role changes.
+2. **Move the profile, password, two-factor and push calls to the socket**, with live profile and
+   push-device updates.
+3. **A notes example aggregate**, to prove the protocol end to end on something other than groups.
+4. **SPA local projection and offline outbox.**
 
 Extraction from the sibling Financy project is tracked separately in
 [docs/financy-extraction-inventory.md](financy-extraction-inventory.md);
