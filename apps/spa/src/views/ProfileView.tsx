@@ -62,26 +62,18 @@ export function ProfileView() {
     }))
   }, [session.user?.firstName, session.user?.lastName])
 
+  const loadPushDevices = async () => {
+    const res = await apiFetch<PushDevicesResponse>("/api/push/devices")
+    if (res.ok) setPushDevices(res.data.data)
+  }
+
   useEffect(() => {
     if (!session.user || session.isMfaRequired) return
-    apiFetch<PushDevicesResponse>("/api/push/devices").then((res) => {
-      if (res.ok) setPushDevices(res.data.data)
-    })
+    void loadPushDevices()
     apiFetch<PushPublicKeyResponse>("/api/push/public-key").then((res) => {
       if (res.ok) setPushPublicKey(res.data.publicKey)
     })
   }, [session.user?.id, session.isMfaRequired])
-
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent).detail as UserPushTokenPublic[]
-      if (Array.isArray(detail)) {
-        setPushDevices(detail)
-      }
-    }
-    globalThis.addEventListener("push.devices.updated", handler)
-    return () => globalThis.removeEventListener("push.devices.updated", handler)
-  }, [])
 
   const submitProfile = async () => {
     setProfileError(null)
@@ -161,6 +153,8 @@ export function ProfileView() {
       })
       if (!result.ok) {
         setPushError(result.error.message)
+      } else {
+        await loadPushDevices()
       }
     } catch (_error) {
       setPushError(PROFILE_FAILURES.push)
@@ -175,6 +169,7 @@ export function ProfileView() {
       method: "DELETE",
       body: JSON.stringify({ deviceId } satisfies PushUnsubscribeRequest),
     })
+    await loadPushDevices()
     setPushBusy(false)
   }
 
