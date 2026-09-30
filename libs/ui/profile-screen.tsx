@@ -69,7 +69,10 @@ export interface ProfileScreenProps {
   onStartTotp?: () => void
   onFinishTotp?: () => void
   onDisableTotp?: () => void
-  /** Registering a push device needs the browser's push manager, so it has no native form. */
+  /**
+   * Registering a push device needs the browser's push manager, so it has no native form. Without
+   * it there is no "Add device" button.
+   */
   onRegisterPush?: () => void
   onRemovePush?: (deviceId: string) => void
   navigate?: Navigate
@@ -340,7 +343,7 @@ export function ProfileScreen(
         <CardHeader
           title="Push devices"
           headingLevel={2}
-          action={
+          action={onRegisterPush && (
             <Button
               data-e2e="push-register"
               onClick={onRegisterPush}
@@ -349,7 +352,7 @@ export function ProfileScreen(
             >
               Add device
             </Button>
-          }
+          )}
         />
         <CardBody>
           <Stack>

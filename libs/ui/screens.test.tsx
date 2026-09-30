@@ -156,8 +156,15 @@ describe("ProfileScreen without JavaScript", () => {
       schemaKeys(pushUnsubscribeRequestSchema),
     )
     expect(surface.forms).toHaveLength(4)
-    // Subscribing to push needs the browser's push manager: the one action with no native form.
-    expect(surface.scriptOnlyButtons).toEqual(["push-register"])
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("offers Add device only to an app that can register push, which needs the browser's push manager", () => {
+    expect(
+      noScriptSurface(<ProfileScreen {...profileDefaults} onRegisterPush={() => {}} />)
+        .scriptOnlyButtons,
+    ).toEqual(["push-register"])
+    expect(noScriptSurface(<ProfileScreen {...profileDefaults} />).scriptOnlyButtons).toEqual([])
   })
 
   it("posts the first code of an enrolment with the API's field name", () => {
