@@ -22,9 +22,13 @@ import { createAuthRoute } from "./auth.ts"
  * A sign-in whose operations only record that the route called them. With `succeed: false`, every
  * check of a password or a one-time code fails.
  */
-function fakeSignIn(calls: string[], succeed = true): SignIn {
+function fakeSignIn(
+  calls: string[],
+  succeed = true,
+  secondFactor = SecondFactorStatus.NotRequired,
+): SignIn {
   const signedIn = (): Promise<SignedIn> => {
-    const { user, session } = buildAuthData()
+    const { user, session } = buildAuthData({ session: { secondFactor } })
     return Promise.resolve({ user, session })
   }
   return {
@@ -54,14 +58,16 @@ const generousLimits = {
 
 function buildApp(
   auth: APIContext["Variables"]["auth"] = buildAuthData(),
-  { rateLimits = createAuthRateLimits(generousLimits), succeed = true }: {
+  { rateLimits = createAuthRateLimits(generousLimits), succeed = true, secondFactor }: {
     rateLimits?: AuthRateLimits
     succeed?: boolean
+    /** The second-factor state of the session that `signIn` and `signUp` hand back. */
+    secondFactor?: SecondFactorStatus
   } = {},
 ) {
   const calls: string[] = []
   const route = createAuthRoute({
-    signIn: fakeSignIn(calls, succeed),
+    signIn: fakeSignIn(calls, succeed, secondFactor),
     emit: () => {},
     mutationGuards: testMutationGuards,
     rateLimits,
@@ -392,6 +398,32 @@ describe("auth routes rate-limit", () => {
     const response = await app.request(`${API_URL}/auth/me`, { headers: sameOriginHeaders })
 
     expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({ secondFactor: "Pending" })
+  })
+
+  it("answers POST /auth/password/check with 202 and no profile while the second factor is pending", async () => {
+    const { app } = buildApp(undefined, { secondFactor: SecondFactorStatus.Pending })
+
+    const response = await app.request(`${API_URL}/auth/password/check`, {
+      method: "POST",
+      headers: { ...sameOriginHeaders, "content-type": "application/json" },
+      body: JSON.stringify(credentials),
+    })
+
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({ secondFactor: "Pending" })
+  })
+
+  it("answers POST /auth/password/check with the user when no second factor is pending", async () => {
+    const { app } = buildApp()
+
+    const response = await app.request(`${API_URL}/auth/password/check`, {
+      method: "POST",
+      headers: { ...sameOriginHeaders, "content-type": "application/json" },
+      body: JSON.stringify(credentials),
+    })
+
+    expect(response.status).toBe(200)
     expect((await response.json()).id).toBe(1)
   })
 

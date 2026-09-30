@@ -71,6 +71,22 @@ export function ProfileView() {
     return () => globalThis.removeEventListener("push.devices.updated", handler)
   }, [])
 
+  if (session.isMfaRequired) {
+    return (
+      <Card class="mx-auto max-w-xl">
+        <CardHeader>
+          <h1 class="text-lg font-semibold">Finish MFA</h1>
+        </CardHeader>
+        <CardBody>
+          <Stack>
+            <p>Verify OTP to access profile.</p>
+            <Link href="/totp" class="link">Go to OTP</Link>
+          </Stack>
+        </CardBody>
+      </Card>
+    )
+  }
+
   if (!session.user) {
     return (
       <Card data-e2e="signin-required" class="mx-auto max-w-xl">
@@ -88,22 +104,6 @@ export function ProfileView() {
                 Sign up
               </Link>
             </div>
-          </Stack>
-        </CardBody>
-      </Card>
-    )
-  }
-
-  if (session.isMfaRequired) {
-    return (
-      <Card class="mx-auto max-w-xl">
-        <CardHeader>
-          <h1 class="text-lg font-semibold">Finish MFA</h1>
-        </CardHeader>
-        <CardBody>
-          <Stack>
-            <p>Verify OTP to access profile.</p>
-            <Link href="/totp" class="link">Go to OTP</Link>
           </Stack>
         </CardBody>
       </Card>

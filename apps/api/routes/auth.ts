@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import type { Context } from "hono"
 import { validate } from "@spy4x/validation"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
@@ -6,6 +7,7 @@ import {
   authOTPSchema,
   authPasswordChangeSchema,
   authUsernamePasswordSchema,
+  type User,
 } from "@domain/identity"
 import type { SignIn } from "@api/services/sign-in.ts"
 import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
@@ -20,6 +22,20 @@ export interface AuthRouteDependencies {
   emit(event: UserSignedInEvent | UserSignedOutEvent | UserSignedUpEvent): void
   mutationGuards: MutationGuards
   rateLimits: AuthRateLimits
+}
+
+/**
+ * The body of a sign-in answer. A session that still owes its one-time code gets 202 and only
+ * `{ secondFactor: "Pending" }`: the profile stays behind the second factor, like `/users/me`.
+ */
+function signInAnswer(
+  c: Context<APIContext>,
+  { user, session }: { user: User; session: { secondFactor: SecondFactorStatus } },
+) {
+  if (session.secondFactor === SecondFactorStatus.Pending) {
+    return c.json({ secondFactor: "Pending" }, 202)
+  }
+  return c.json(user, 200)
 }
 
 export function createAuthRoute(
@@ -48,10 +64,7 @@ export function createAuthRoute(
       }
       // 202, like `password/check`: the session still owes its second factor. A reloaded page
       // learns that here, since it has no memory of the sign-in response.
-      return c.json(
-        authData.user,
-        authData.session.secondFactor === SecondFactorStatus.Pending ? 202 : 200,
-      )
+      return signInAnswer(c, authData)
     })
     .post(`password/check`, mutationGuards.anonymous, rateLimits.strictByIp, async (c) => {
       const body = await readApiJson(c)
@@ -71,10 +84,7 @@ export function createAuthRoute(
           request: requestInfoFromContext(c, { trustedProxy: true }),
         }),
       )
-      return c.json(
-        signedIn.user,
-        signedIn.session.secondFactor === SecondFactorStatus.Pending ? 202 : 200,
-      )
+      return signInAnswer(c, signedIn)
     })
     .post(`/password/sign-up`, mutationGuards.anonymous, rateLimits.strictByIp, async (c) => {
       const body = await readApiJson(c)
@@ -95,10 +105,7 @@ export function createAuthRoute(
           request: requestInfoFromContext(c, { trustedProxy: true }),
         }),
       )
-      return c.json(
-        signedUp.user,
-        signedUp.session.secondFactor === SecondFactorStatus.Pending ? 202 : 200,
-      )
+      return signInAnswer(c, signedUp)
     })
     .use(isAuthenticated1FA)
     .use(mutationGuards.signedIn)

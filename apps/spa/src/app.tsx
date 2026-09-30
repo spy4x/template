@@ -4,7 +4,7 @@ import { SWUpdater } from "@spy4x/preact-system/sw-updater"
 import { LoadingSpinner } from "@spy4x/preact-ui/loading-spinner"
 import { Toastr } from "@spy4x/preact-ui/toastr"
 import { Route, Switch } from "wouter-preact"
-import { sessionState } from "./state/session.ts"
+import { canSignOut, sessionState } from "./state/session.ts"
 import { bootstrapSession } from "./state/auth.ts"
 import { wsClient } from "./state/ws.ts"
 import { toasts } from "./state/toasts.ts"
@@ -34,7 +34,7 @@ function Frame() {
     )
   }
   return (
-    <PublicFrame canSignOut={session.user !== null}>
+    <PublicFrame canSignOut={canSignOut(session)}>
       <Routes />
     </PublicFrame>
   )

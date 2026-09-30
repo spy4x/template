@@ -6,11 +6,17 @@ import { sessionState } from "./session.ts"
 const realFetch = globalThis.fetch
 const user = { id: 1, firstName: "Test", lastName: "User" }
 
+/** What the API sends for `status`: no profile while the second factor is pending. */
+function body(status: number) {
+  if (status === 401) return { error: "User not signed in" }
+  return status === 202 ? { secondFactor: "Pending" } : user
+}
+
 /** Makes the next `/api/auth/me` answer with `status` and the user (or an error for 401). */
 function meAnswers(status: number) {
   globalThis.fetch = () =>
     Promise.resolve(
-      new Response(JSON.stringify(status === 401 ? { error: "User not signed in" } : user), {
+      new Response(JSON.stringify(body(status)), {
         status,
         headers: { "content-type": "application/json" },
       }),
@@ -29,7 +35,7 @@ describe("bootstrapSession", () => {
     await bootstrapSession()
 
     expect(sessionState.value.isMfaRequired).toBe(true)
-    expect(sessionState.value.user?.id).toBe(1)
+    expect(sessionState.value.user).toBeNull()
     expect(sessionState.value.isReady).toBe(true)
   })
 
