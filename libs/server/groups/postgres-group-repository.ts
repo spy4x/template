@@ -4,6 +4,7 @@ import {
   CreatePersonalGroupInput,
   CreateSharedGroupInput,
   Group,
+  GROUP_AGGREGATE,
   GroupAccess,
   GroupError,
   GroupKind,
@@ -59,8 +60,6 @@ interface PersonalMembershipCountRow extends postgres.Row {
 }
 
 const GROUP_CREATED_EVENT = "group.created"
-/** The `aggregate_type` of a group's change in the outbox; its `aggregate_version` is the sequence. */
-export const GROUP_AGGREGATE = "group"
 
 export class PostgresGroupRepository implements GroupRepository {
   constructor(private readonly sql: postgres.Sql) {}
