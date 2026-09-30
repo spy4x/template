@@ -112,8 +112,7 @@ export function createTotpFailures({ sql, clock = Date.now }: TotpFailuresOption
       await sql`
         UPDATE user_totp
         SET failed_attempts = GREATEST(failed_attempts - 1, 0),
-            locked_until = CASE WHEN failed_attempts - 1 <= ${FREE_FAILURES} THEN NULL
-                                ELSE locked_until END
+            locked_until = NULL
         WHERE user_id = ${userId}
       `
     },

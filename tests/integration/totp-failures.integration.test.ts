@@ -216,17 +216,19 @@ Deno.test("totp failure counter ends the lock a correct code's own check set", a
   })
 })
 
-Deno.test("totp failure counter keeps a lock that other wrong codes still justify", async () => {
+Deno.test("totp failure counter leaves no lock behind after a correct code", async () => {
   await withSchema(async (_open, sql) => {
     const userId = await insertEnrolledUser(sql)
     let now = T0
     const counter = createTotpFailures({ sql, clock: () => now })
     for (let attempt = 0; attempt <= FREE_FAILURES; attempt++) await counter.begin(userId)
     now = T0 + FIRST_LOCK_MS
-    // The seventh check sets a 30 minute lock. Refunding it leaves six failures counted.
+    // The seventh check books a lock before its code is known. The code is correct, so the
+    // refund must lift that lock: the owner's next check, on another device, is not refused.
     expect(await counter.begin(userId)).toBe(0)
     await counter.refund(userId)
-    expect(await counter.begin(userId)).toBeGreaterThan(0)
+    now += 60_000
+    expect(await counter.begin(userId)).toBe(0)
   })
 })
 
