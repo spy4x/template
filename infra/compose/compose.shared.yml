@@ -76,8 +76,8 @@ services:
     volumes:
       - ../../.volumes/kv:/data:Z
     ports:
-      # As for Postgres: this machine only by default. Valkey is a cache the API trusts for display data, so treat
-      # a reachable Valkey as a break-in (docs/stack.md).
+      # As for Postgres: this machine only by default. Valkey is a cache the API trusts for
+      # display data, so treat a reachable Valkey as a break-in (docs/stack.md).
       - ${KV_HOST_PORT:-127.0.0.1:${KV_PORT}}:6379
     command:
       [
