@@ -3,8 +3,8 @@
  *
  * The in-memory rate limit in `middlewares/auth-rate-limits.ts` stops a burst and forgets
  * everything on restart. This counter lives in `user_totp`, so it survives a restart and a second
- * API instance sees it. Together they cap a guesser at about 380 guesses a year for one user, a
- * chance well under 1% of hitting one of the 3 codes that are valid at any moment (arithmetic in
+ * API instance sees it. Together they cap a guesser at about 570 guesses a year for one user, a
+ * chance of about 0.17% of hitting one of the 3 codes that are valid at any moment (arithmetic in
  * the pull request of #73).
  *
  * How a check goes: {@link TotpFailures.begin} runs first and counts the check as a failure in
@@ -58,8 +58,9 @@ export interface TotpFailures {
    */
   begin(userId: number): Promise<number>
   /**
-   * Gives back the slot {@link begin} took, after a correct code. Ends the lock only when the
-   * count is back to the free failures: a lock a concurrent wrong code set stays.
+   * Gives back the slot {@link begin} took, after a correct code. Always clears the lock,
+   * whatever the count: a lock that a concurrent wrong code set in the meantime is cleared too.
+   * That race is accepted (#73); the count itself still only goes down by one.
    */
   refund(userId: number): Promise<void>
   /** Records a wrong code: the time the count last grew, which the quiet-days reset reads. */
