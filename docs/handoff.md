@@ -104,7 +104,7 @@ Documentation drifts here, so check status before believing anything.
 | `docs/prd/group-sync-platform.md`                   | Superseded in part. Read "REST" as "through the shared CQRS handlers"                                                                |
 | `docs/stack.md`                                     | Current. What is actually running and deployed                                                                                       |
 | `docs/principles.md`                                | Current, general                                                                                                                     |
-| `docs/woodpecker-ci-setup.md`                       | Aspirational. No pipeline is wired up                                                                                                |
+| `docs/woodpecker-ci-setup.md`                       | Current. `.woodpecker/ci.yml` runs check, build, integration and e2e on every pull request and push to `master`                      |
 | `docs/financy-extraction-inventory.md`              | Working list. Delete rows as they land, delete the file when drained                                                                 |
 
 A new ADR supersedes rather than rewrites: ADR 001 keeps its text and carries a
