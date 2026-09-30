@@ -54,10 +54,8 @@ serverless functions rather than a server you run.
 cp infra/envs/.env.example infra/envs/.env
 ```
 
-Before going on, edit `infra/envs/.env`: fill in the secrets, delete the comment after `ENV=dev` so
-the line reads exactly `ENV=dev`, and add the line `CONTAINER_PROVIDER=docker`. The Compose script
-keeps inline comments as part of the value and otherwise runs Podman, while `proxy:start` runs
-Docker.
+Before going on, fill in the secrets in `infra/envs/.env`. It runs on Docker; to use Podman, set
+`CONTAINER_PROVIDER=podman` (`proxy:start` and `proxy:stop` still call Docker).
 
 ```sh
 deno task vapid-key:create   # web push keys → infra/configs/vapid.json
