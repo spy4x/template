@@ -76,19 +76,27 @@ services:
     volumes:
       - ../../.volumes/kv:/data:Z
     ports:
-      # As for Postgres: this machine only by default. Valkey is a cache the API trusts for
-      # display data, so treat a reachable Valkey as a break-in (docs/stack.md).
+      # As for Postgres: this machine only by default, and Valkey needs KV_PASSWORD besides.
       - ${KV_HOST_PORT:-127.0.0.1:${KV_PORT}}:6379
+    # The password reaches Valkey through the environment and is expanded by the shell inside the
+    # container ($$ stops Compose expanding it), so it is not in the command line that
+    # `docker inspect` prints under Config.Cmd. The command goes through the image's own
+    # `docker-entrypoint.sh`: it drops root to the `valkey` user only when its first argument is
+    # `valkey-server`, which a bare `sh -c` would skip (Valkey would run as root). `docker inspect`
+    # still shows Config.Env, like every other secret in this file; `valkey-cli` reads the same
+    # value from REDISCLI_AUTH.
+    environment:
+      - KV_PASSWORD=${KV_PASSWORD:?KV_PASSWORD is required, Valkey will not start without it}
+      - REDISCLI_AUTH=${KV_PASSWORD}
     command:
-      [
-        'valkey-server',
-        '--maxmemory',
-        '${KV_MEM_INNER_LIMIT}',
-        '--maxmemory-policy',
-        'allkeys-lru',
-        '--save',
-        '',
-      ]
+      - sh
+      - -c
+      - >-
+        exec docker-entrypoint.sh valkey-server
+        --requirepass "$$KV_PASSWORD"
+        --maxmemory ${KV_MEM_INNER_LIMIT}
+        --maxmemory-policy allkeys-lru
+        --save ""
     deploy:
       resources:
         limits:
@@ -402,6 +410,7 @@ services:
       - TIMEZONE=${TIMEZONE}
       - KV_HOSTNAME=kv
       - KV_PORT=6379
+      - KV_PASSWORD=${KV_PASSWORD:?KV_PASSWORD is required}
       - RATE_LIMITER_WINDOW_MS=${RATE_LIMITER_WINDOW_MS}
       - RATE_LIMITER_STRICT_LIMIT=${RATE_LIMITER_STRICT_LIMIT}
       - RATE_LIMITER_LIMIT=${RATE_LIMITER_LIMIT}

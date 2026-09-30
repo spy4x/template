@@ -207,7 +207,8 @@ DB_HOST=127.0.0.1 DB_PORT="$PORT" DB_USER=tester DB_PASS="$PASS" DB_NAME=templat
 docker rm -f "$NAME"
 ```
 
-To run the API for real you also need Valkey, migrations applied
+To run the API for real you also need Valkey (`valkey-server --requirepass <KV_PASSWORD>`; the API
+refuses to start without `KV_PASSWORD` and sends it with `AUTH`), migrations applied
 (`deno task db:migrate`), and `infra/configs/vapid.json` present
 (`deno task vapid-key:create`) copied to `./vapid.json`, since the API reads it
 from the working directory while compose bind-mounts it. Compose fails the start when the file is

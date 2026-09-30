@@ -35,6 +35,8 @@ steps:
         from_secret: kv_hostname
       KV_PORT:
         from_secret: kv_port
+      KV_PASSWORD:
+        from_secret: kv_password
       API_PORT:
         from_secret: api_port
       SPA_PORT:
@@ -61,6 +63,7 @@ steps:
         DB_PASSWORD=${DB_PASSWORD}
         KV_HOSTNAME=${KV_HOSTNAME}
         KV_PORT=${KV_PORT}
+        KV_PASSWORD=${KV_PASSWORD}
         API_PORT=${API_PORT}
         SPA_PORT=${SPA_PORT}
         DOMAIN=${DOMAIN}

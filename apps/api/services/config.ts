@@ -1,24 +1,6 @@
-import { loadConfig } from "@spy4x/server/config"
-import { type } from "arktype"
+import { readApiEnv } from "./config-env.ts"
 
-const envSchema = type({
-  ENV: "'dev' | 'prod'",
-  AUTH_COOKIE_SECRET: "string > 0",
-  AUTH_PEPPER: "string > 0",
-  AUTH_TOTP: "string > 0",
-  DEV_EMAIL: "string > 0",
-  TIMEZONE: "string > 0",
-  RATE_LIMITER_WINDOW_MS: "string.integer.parse",
-  RATE_LIMITER_STRICT_LIMIT: "string.integer.parse",
-  RATE_LIMITER_LIMIT: "string.integer.parse",
-  RATE_LIMITER_OTP_WINDOW_MS: "string.integer.parse",
-  RATE_LIMITER_OTP_LIMIT: "string.integer.parse",
-  DOMAIN: "string > 0",
-  KV_HOSTNAME: "string > 0",
-  KV_PORT: "string.integer.parse",
-})
-
-const env = loadConfig(envSchema)
+const env = readApiEnv()
 // loadConfig names a failing variable but not the rule it broke, so this one says it outright.
 if (env.AUTH_COOKIE_SECRET.length < 32) {
   throw new Error("AUTH_COOKIE_SECRET must be at least 32 characters (openssl rand -hex 32)")
@@ -50,6 +32,7 @@ export class Config {
   kv = {
     hostname: env.KV_HOSTNAME,
     port: env.KV_PORT,
+    password: env.KV_PASSWORD,
   }
 
   get isDev() {

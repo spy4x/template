@@ -79,8 +79,10 @@ serverless functions rather than a server you run.
 cp infra/envs/.env.example infra/envs/.env
 ```
 
-Before going on, fill in the secrets in `infra/envs/.env`. It runs on Docker; to use Podman, set
-`CONTAINER_PROVIDER=podman` (`proxy:start` and `proxy:stop` still call Docker).
+Before going on, fill in the secrets in `infra/envs/.env` (`KV_PASSWORD` is the Valkey password;
+Valkey and the API both refuse to start without it, `openssl rand -hex 24` makes one). It runs on
+Docker; to use Podman, set `CONTAINER_PROVIDER=podman` (`proxy:start` and `proxy:stop` still call
+Docker).
 
 ```sh
 deno task vapid-key:create   # web push keys → infra/configs/vapid.json
