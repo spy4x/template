@@ -1,0 +1,71 @@
+# Continuous integration: runs on every pull request and every push to master.
+#
+# Woodpecker reads every `*.yml` in this folder as its own workflow. Deploys are not wired up: see
+# `deploy.yml.example` and docs/woodpecker-ci-setup.md.
+#
+# Deno 2.9.0 is the version the repository uses (`DENO_VERSION` in infra/envs/.env.example and
+# Dockerfile.base). Playwright 1.57.0 is the version `deno task e2e` runs (deno.jsonc); the e2e
+# image tag must match it, because the browser build inside the image is tied to that version.
+
+when:
+  - event: pull_request
+  - event: push
+    branch: master
+
+steps:
+  check:
+    image: denoland/deno:2.9.0
+    commands:
+      - deno task check
+
+  build:
+    image: denoland/deno:2.9.0
+    commands:
+      - deno task build
+    depends_on: [check]
+
+  integration:
+    image: denoland/deno:2.9.0
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: tester
+      DB_PASS: ci-throwaway
+      DB_NAME: template_test
+    commands:
+      # Wait over TCP. Postgres first runs a temporary server that listens on a unix socket only,
+      # so a successful TCP connection means the real server is up (HANDOFF.md, trap 3).
+      - |
+          deno eval '
+          for (let i = 0; i < 120; i++) {
+            try {
+              (await Deno.connect({ hostname: "postgres", port: 5432 })).close()
+              Deno.exit(0)
+            } catch {
+              await new Promise((resolve) => setTimeout(resolve, 500))
+            }
+          }
+          console.error("postgres did not accept connections within 60 s")
+          Deno.exit(1)
+          '
+      - deno task test:integration
+    depends_on: [check]
+
+  e2e:
+    # The image carries Chromium and its system libraries. Installing the browser through Deno
+    # (`playwright install`) downloads it and then hangs (issue 48), so nothing is installed here.
+    image: mcr.microsoft.com/playwright:v1.57.0-noble
+    commands:
+      - npm install --global deno@2.9.0
+      - deno --version
+      # The other e2e test needs the full Docker stack; this one serves its own fixture.
+      - deno task e2e url-filters
+    depends_on: [check]
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tester
+      POSTGRES_PASSWORD: ci-throwaway
+      POSTGRES_DB: template_test

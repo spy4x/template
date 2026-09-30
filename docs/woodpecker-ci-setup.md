@@ -2,42 +2,51 @@
 
 ## Overview
 
-This guide explains how to configure Woodpecker CI for this project. The CI pipeline performs three main tasks:
+The pipeline lives in `.woodpecker/ci.yml`. Woodpecker reads every `*.yml` file in the `.woodpecker/`
+folder at the repository root as its own workflow, with no setting to change in its web interface.
+Every product copied from the template gets the pipeline the moment its repository is activated in
+Woodpecker.
 
-1. **Code Quality Checks** - Runs linting, formatting, TypeScript checks, and tests
-2. **Docker Build** - Builds production Docker images
-3. **Deploy** - Deploys the application to the production server
-
-## Pipeline Flow
+It runs on every pull request and every push to `master`, in this order:
 
 ```
-┌─────────┐
-│  Push   │
-│  to     │──────┐
-│  main   │      │
-└─────────┘      │
-                 ▼
-         ┌───────────────┐
-         │  Code Quality │
-         │    Checks     │
-         └───────┬───────┘
-                 │ ✓ Pass
-                 ▼
-         ┌───────────────┐
-         │  Build Docker │
-         │    Images     │
-         └───────┬───────┘
-                 │ ✓ Pass
-                 ▼
-         ┌───────────────┐
-         │   Deploy to   │
-         │  Production   │
-         └───────────────┘
+check ──┬── build
+        ├── integration   (Postgres service)
+        └── e2e           (Playwright image, `deno task e2e url-filters`)
 ```
 
-## Required Secrets
+- `check` runs `deno task check`: format, lint, type check and unit tests.
+- `build` runs `deno task build` (the SPA production build).
+- `integration` runs `deno task test:integration` against a throw-away `postgres:16-alpine` service
+  (user `tester`, password `ci-throwaway`, database `template_test`, reachable as host `postgres`).
+  It waits over TCP for the server, see HANDOFF.md trap 3.
+- `e2e` runs `deno task e2e url-filters` in `mcr.microsoft.com/playwright`, which ships Chromium and
+  its system libraries, and installs Deno with npm. Playwright's own browser download, run through
+  Deno in the plain Deno image, hangs. The image tag must equal the Playwright version in
+  `deno.jsonc` (`e2e` task), because the browser build in the image belongs to that version. The
+  other e2e test needs the full Docker stack and does not run in CI.
 
-Configure these secrets in your Woodpecker CI repository settings:
+None of these steps needs a secret, so a pull request from a fork runs them too.
+
+## Deploy is not wired up
+
+`.woodpecker/deploy.yml.example` holds the old production build and deploy steps. Woodpecker ignores
+it because of the extension. The build step needs Docker inside the Deno image, which the image does
+not have, and the steps had never run: the pipeline was not in a folder Woodpecker reads. Fix those
+and rename the file to `deploy.yml` to turn deploys on; its header lists what to fix.
+
+## Activating a repository
+
+1. In Woodpecker, open the repository and enable it. The forge webhook is created for you.
+2. Leave the repository's **Pipeline path** empty. Woodpecker then uses `.woodpecker/`. Setting it
+   to another path (for example `infra/configs/`) hides the pipeline from every copy of the template.
+3. Check that a pull request shows the `check`, `build`, `integration` and `e2e` results
+   (`gh pr checks <number>`).
+
+## Required Secrets (deploy only)
+
+The pipeline in `ci.yml` needs none. The deploy steps in `deploy.yml.example` need these, set in
+the Woodpecker repository settings:
 
 ### Database Configuration
 - `DB_HOST` - PostgreSQL host (e.g., `db` or IP address)
@@ -123,29 +132,17 @@ Or via the Web UI:
 
 ## Pipeline Behavior
 
-### On Pull Request
-- Runs code quality checks only
-- No build or deployment
-
-### On Push to Main Branch
-1. Runs code quality checks
-2. If checks pass, builds Docker images
-3. If build succeeds, deploys to production
-
-### On Push to Other Branches
-- Runs code quality checks only
-- No build or deployment
+- Pull request: `check`, then `build`, `integration` and `e2e` in parallel.
+- Push to `master`: the same steps.
+- Push to any other branch: nothing. Open a pull request to run the pipeline.
 
 ## Customization
 
-### Modify Deno Version
+### Modify the Deno version
 
-Edit the `deno_version` variable in `.woodpecker.yml`:
-
-```yaml
-variables:
-  - &deno_version '2.1.4'  # Change to desired version
-```
+Change the tag in every `image: denoland/deno:<version>` line of `ci.yml`, and the `deno@<version>`
+in the `e2e` step. Keep them equal to `DENO_VERSION` in `infra/envs/.env.example` and
+`Dockerfile.base`.
 
 ### Add Environment-Specific Deployments
 
@@ -153,7 +150,7 @@ To add staging deployment:
 
 ```yaml
 deploy-staging:
-  image: denoland/deno:${deno_version}
+  image: denoland/deno:2.9.0
   environment:
     - SSH_TO_SERVER=${SSH_TO_SERVER_STAGING}
     - PATH_ON_SERVER=${PATH_ON_SERVER_STAGING}
@@ -164,22 +161,6 @@ deploy-staging:
       branch: develop
   depends_on:
     - build
-```
-
-### Enable Test Database
-
-Uncomment the services section in `.woodpecker.yml`:
-
-```yaml
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      - POSTGRES_DB=app_test
-      - POSTGRES_USER=test
-      - POSTGRES_PASSWORD=test
-    when:
-      - event: pull_request
 ```
 
 ## Troubleshooting
@@ -226,8 +207,10 @@ Or configure agent to run privileged containers.
 Test the pipeline steps locally:
 
 ```bash
-# Run checks
+# Run the checks, the integration tests (recipe in HANDOFF.md) and one e2e test
 deno task check
+deno task test:integration
+deno task e2e url-filters
 
 # Build with production config
 deno task compose --env-file=./infra/envs/.env.prod build

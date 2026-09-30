@@ -37,10 +37,10 @@ Defined in `infra/compose/`:
 Docker Compose for both local development and single-node production. Scaling is
 vertical, through per-service resource limits.
 
-**There is no CI pipeline wired up.** `infra/configs/woodpecker-ci.yml` and
-[woodpecker-ci-setup.md](woodpecker-ci-setup.md) describe an intended Woodpecker
-setup, but no `.woodpecker.yml` exists at the repository root, so nothing runs on
-push today. Treat CI as unbuilt.
+CI is Woodpecker. `.woodpecker/ci.yml` runs `deno task check`, the SPA build, the integration
+tests against a Postgres service and the `url-filters` browser test on every pull request and every
+push to `master`; see [woodpecker-ci-setup.md](woodpecker-ci-setup.md). Deploys are not wired up
+(`.woodpecker/deploy.yml.example`).
 
 ## Conventions worth keeping
 
