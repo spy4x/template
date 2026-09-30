@@ -8,9 +8,10 @@ them. The diagram in the README, [`architecture.svg`](architecture.svg), shows w
 
 > **Migration status: WIP.** App boundaries, group core persistence, signup personal groups,
 > basic group REST/CQRS, the notes reference aggregate ([aggregates.md](aggregates.md)), the
-> REST-only MPA (`apps/mpa`, server-rendered, works without JavaScript) and the `libs/shared` split
-> into `libs/platform` and `libs/domain` now exist. Offline sync, group administration and worker
-> behavior stay incomplete. Target architecture below and ADR 001
+> REST-only MPA (`apps/mpa`, server-rendered, works without JavaScript), the offline SPA
+> ([offline.md](offline.md)) and the `libs/shared` split into `libs/platform` and `libs/domain` now
+> exist. Group administration and worker behavior stay incomplete. Target architecture below and
+> ADR 001
 > are authoritative.
 
 ## Database evolution

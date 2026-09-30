@@ -32,8 +32,8 @@ parts live here and in the published [`@spy4x/*`](https://jsr.io/@spy4x) package
 stay out.
 
 **Status:** in migration. Sign-up, sign-in with TOTP, groups, notes (the reference aggregate),
-the outbox worker and the MPA's pages work today; offline sync and group administration do not yet.
-Details in
+the outbox worker and the MPA's pages work today, and the SPA works offline
+([docs/offline.md](docs/offline.md)); group administration does not yet. Details in
 [docs/architecture.md](docs/architecture.md#migration-status) and
 [ADR 001](docs/decisions/001-deno-platform-template.md).
 
@@ -50,7 +50,7 @@ The screenshots and the GIF use a throw-away database and a made-up user;
 <details>
 <summary>How the parts fit together</summary>
 
-<img src="docs/architecture.svg" alt="Architecture diagram. Clients: apps/spa, a Preact and Vite PWA with sign-up, sign-in, TOTP and profile, talks to apps/api over REST and WebSocket; a Dexie offline store with group sync is planned. apps/mpa is a Fresh page shell with /health; its REST calls are planned. Servers: apps/api on Hono (auth, groups, CQRS dispatch, web push) and apps/worker, which drains outbox_events. Data: Postgres is authoritative and Valkey is the API cache; Docker Compose also runs Traefik, MinIO, Loki, Prometheus and Grafana. Shared code: libs/domain, libs/server, libs/client and the @spy4x packages on JSR." width="860">
+<img src="docs/architecture.svg" alt="Architecture diagram. Clients: apps/spa, a Preact and Vite PWA with sign-up, sign-in, TOTP and profile, talks to apps/api over REST and WebSocket; a Dexie offline store keeps the last notes and groups and queues writes made offline. apps/mpa is a Fresh page shell with /health; its REST calls are planned. Servers: apps/api on Hono (auth, groups, CQRS dispatch, web push) and apps/worker, which drains outbox_events. Data: Postgres is authoritative and Valkey is the API cache; Docker Compose also runs Traefik, MinIO, Loki, Prometheus and Grafana. Shared code: libs/domain, libs/server, libs/client and the @spy4x packages on JSR." width="860">
 
 </details>
 
@@ -60,6 +60,11 @@ The screenshots and the GIF use a throw-away database and a made-up user;
   same IDs, membership checks and roles, from viewer to owner.
 - **Auth that is done.** Sign-up, sign-in, sessions and an authenticator-app second factor, with
   PBKDF2-SHA-256 password hashes. Web push subscriptions are built in too.
+- **Offline-first SPA.** The SPA keeps the last notes and groups in IndexedDB (Dexie), opens with no
+  network, and queues note writes with their idempotency keys. It sends them on reconnect and
+  shows a stale write as a conflict to settle, never as a silent overwrite. The layer sits in one
+  folder, so a product that does not want it deletes the folder and keeps an online SPA:
+  [docs/offline.md](docs/offline.md).
 - **CQRS with an outbox.** Commands, queries and events go through one bus. Creating a shared
   group writes its event to `outbox_events`, and the worker drains that table.
 - **Safe API defaults.** Every mutation must come from the web app's own origin, and group lists
@@ -72,8 +77,8 @@ The screenshots and the GIF use a throw-away database and a made-up user;
   Postgres, Valkey, MinIO, Loki, Prometheus and Grafana.
 
 **Use it if** you are starting a multi-user web product and want auth, tenancy and operations
-settled before the first feature. **Skip it if** you need offline sync today, or you deploy to
-serverless functions rather than a server you run.
+settled before the first feature. **Skip it if** you deploy to serverless functions rather than a server
+you run.
 
 ## SPA or MPA
 
@@ -82,7 +87,7 @@ The template ships two web clients over the same API. A product picks one and se
 handlers, so no business rule lives in either client.
 
 - **Pick the SPA** (`apps/spa`, Preact and Vite) when people should see each other's changes live,
-  or when the app will work offline later. It keeps a WebSocket open for groups and notes, as
+  or when the app should work offline ([docs/offline.md](docs/offline.md)). It keeps a WebSocket open for groups and notes, as
   [ADR 002](docs/decisions/002-realtime-transport-and-sync.md) decides.
 - **Pick the MPA** (`apps/mpa`, Fresh) when a page that reloads after each form is enough: an admin
   area, a back office, a product for people on old phones or behind strict script policies. Every
