@@ -51,7 +51,10 @@ test.describe("two-factor sign-in", () => {
       expect(signUp.ok()).toBe(true)
 
       // Turn two-factor auth on through the profile screen and read the secret it shows.
+      // Without an authenticator app the page offers Enable only, never Disable next to it.
       await page.goto("/")
+      await expect(page.locator("[data-e2e=totp-start]")).toBeVisible()
+      await expect(page.locator("[data-e2e=totp-disable]")).toHaveCount(0)
       await page.locator("[data-e2e=totp-start]").click()
       const shown = await page.getByText(/^Secret: /).innerText()
       const secret = shown.replace("Secret: ", "").trim()
@@ -59,6 +62,9 @@ test.describe("two-factor sign-in", () => {
       await page.locator("[data-e2e=totp-connect-otp]").fill(await totpCode(secret, enrolStep))
       await page.locator("[data-e2e=totp-connect-finish]").click()
       await page.locator("[data-e2e=totp-connect-finish]").waitFor({ state: "detached" })
+      // Once the app is connected the page offers Disable only.
+      await expect(page.locator("[data-e2e=totp-disable]")).toBeVisible()
+      await expect(page.locator("[data-e2e=totp-start]")).toHaveCount(0)
 
       await page.locator("[data-e2e=shell-user-menu-button]").click()
       await page.getByRole("menuitem", { name: "Sign out" }).click()

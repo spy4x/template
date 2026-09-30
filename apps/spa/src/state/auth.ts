@@ -1,4 +1,9 @@
-import type { ApiSuccessResponse, TotpConnectStartResponse, User } from "@domain/identity"
+import {
+  type ApiSuccessResponse,
+  type TotpConnectStartResponse,
+  type User,
+  UserMFAStatus,
+} from "@domain/identity"
 import { apiFetch } from "./api.ts"
 import { PendingSecondFactor, sessionState, SessionUser } from "./session.ts"
 
@@ -142,6 +147,7 @@ export async function totpConnectFinish(otp: string): Promise<{ ok: boolean; err
   if (!result.ok) {
     return { ok: false, error: result.error.message }
   }
+  setUserMfa(UserMFAStatus.CONFIGURED)
   return { ok: true }
 }
 
@@ -152,5 +158,13 @@ export async function totpDisconnect(): Promise<{ ok: boolean; error?: string }>
   if (!result.ok) {
     return { ok: false, error: result.error.message }
   }
+  setUserMfa(UserMFAStatus.NOT_CONFIGURED)
   return { ok: true }
+}
+
+/** Records the signed-in user's new MFA status, so the profile page shows the right control. */
+function setUserMfa(mfa: UserMFAStatus): void {
+  const user = sessionState.value.user
+  if (!user) return
+  sessionState.value = { ...sessionState.value, user: { ...user, mfa } }
 }

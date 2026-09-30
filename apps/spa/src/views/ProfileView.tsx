@@ -17,6 +17,7 @@ import {
 } from "../state/auth.ts"
 import { sessionState } from "../state/session.ts"
 import { apiFetch } from "../state/api.ts"
+import { TwoFactorStep, twoFactorStep } from "../state/two-factor.ts"
 import { toasts } from "../state/toasts.ts"
 import type { PushSubscribeRequest, PushUnsubscribeRequest } from "@spy4x/platform/model"
 import type {
@@ -41,6 +42,7 @@ export function ProfileView() {
   const [totpSecret, setTotpSecret] = useState<string | null>(null)
   const [totpOtp, setTotpOtp] = useState("")
   const totpQrSrc = useMemo(() => (totpQr ? svgToDataUrl(totpQr) : null), [totpQr])
+  const step = twoFactorStep(session.user?.mfa, totpQr !== null)
   const [pushDevices, setPushDevices] = useState<UserPushTokenPublic[]>([])
   const [pushPublicKey, setPushPublicKey] = useState<string | null>(null)
   const [pushError, setPushError] = useState<string | null>(null)
@@ -301,7 +303,7 @@ export function ProfileView() {
           <CardBody>
             <Stack>
               <p class="text-sm">Use an authenticator app.</p>
-              {!totpQr
+              {step === TwoFactorStep.Enable
                 ? (
                   <div>
                     <Button
@@ -315,7 +317,9 @@ export function ProfileView() {
                     </Button>
                   </div>
                 )
-                : (
+                : null}
+              {step === TwoFactorStep.Confirm
+                ? (
                   <Stack>
                     {totpQrSrc
                       ? (
@@ -346,17 +350,22 @@ export function ProfileView() {
                       </Button>
                     </div>
                   </Stack>
-                )}
-              <div>
-                <Button
-                  variant="danger"
-                  data-e2e="totp-disable"
-                  onClick={disableTotp}
-                  disabled={totpBusy}
-                >
-                  Disable 2FA
-                </Button>
-              </div>
+                )
+                : null}
+              {step === TwoFactorStep.Disable
+                ? (
+                  <div>
+                    <Button
+                      variant="danger"
+                      data-e2e="totp-disable"
+                      onClick={disableTotp}
+                      disabled={totpBusy}
+                    >
+                      Disable 2FA
+                    </Button>
+                  </div>
+                )
+                : null}
             </Stack>
           </CardBody>
         </Card>
