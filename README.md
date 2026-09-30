@@ -20,10 +20,11 @@ gh repo create my-product --template spy4x/template --private --clone
 
 </div>
 
-Create your repository from it, fill in the env file, and you start with a product that already has accounts, a second
-factor, tenancy and a place for background work. A new user signs up and gets an account, a
-session and a personal group in one database transaction. Groups are the only tenancy boundary, so
-the same membership checks and roles cover personal data and shared workspaces.
+Create your repository from it, fill in the env file, and you start with a product that already
+has accounts, a second factor, tenancy and a place for background work. A new user signs up and
+gets an account, a session and a personal group in one database transaction. Groups are the only
+tenancy boundary, so the same membership checks and roles cover personal data and shared
+workspaces.
 
 It exists because every SaaS MVP needs the same groundwork before its first feature. The reusable
 parts live here and in the published [`@spy4x/*`](https://jsr.io/@spy4x) packages; product rules
