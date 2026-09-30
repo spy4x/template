@@ -108,6 +108,10 @@ Deno.test("a committed group change reaches its members' sockets as a hint", asy
     })
 
     await t.step("the hint goes to the owner's socket and to nobody else's", async () => {
+      // The stranger belongs to a group of their own, so "not a member of this group" is what
+      // keeps the owner's hint from them, not "not a member of any group".
+      await repository.createShared({ id: crypto.randomUUID(), name: "Not shared" }, stranger)
+      await processor.drainOnce()
       const clock = new FakeClock()
       const realtime = new Realtime({
         clock,
