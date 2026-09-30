@@ -1,3 +1,10 @@
 import { createDefine } from "fresh"
+import type { Api } from "./api.ts"
 
-export const define = createDefine<Record<never, never>>()
+/** What the middleware hands every route. */
+export interface State {
+  /** The API, called on behalf of this request. */
+  api: Api
+}
+
+export const define = createDefine<State>()

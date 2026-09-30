@@ -3,14 +3,19 @@
     "build": "deno run -A --node-modules-dir=auto npm:vite@7.3.6 build",
     "check": "deno fmt --check . && deno lint . && deno check",
     "dev": "deno run -A --node-modules-dir=auto npm:vite@7.3.6",
+    // Needs the MPA and the API at MPA_BASE_URL (default http://app.localhost), /api going to the API.
+    "e2e": "deno run -A --node-modules-dir npm:playwright@1.57.0 test --config=../../e2e/mpa/playwright.config.ts",
     "start": "deno serve -A _fresh/server.js"
   },
   "imports": {
     "@/": "./",
     "@fresh/plugin-vite": "jsr:@fresh/plugin-vite@1.1.2",
+    "@spy4x/net/bounded-body": "jsr:@spy4x/net@1.19.0/bounded-body",
+    "@tailwindcss/vite": "npm:@tailwindcss/vite@4.1.12",
     "@types/babel__core": "npm:@types/babel__core@7.20.5",
     "fresh": "jsr:@fresh/core@2.3.3",
     "preact": "npm:preact@10.29.8",
+    "tailwindcss": "npm:tailwindcss@4.1.12",
     "vite": "npm:vite@7.3.6"
   },
   "compilerOptions": {
