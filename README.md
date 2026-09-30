@@ -2,20 +2,25 @@
 
 # template
 
-**The foundation I build SaaS MVPs on: auth, groups, an API, web clients, a worker and Postgres,
-already wired together.**
+**A modern SaaS baseline built on web standards: auth with a second factor, groups, an API, web
+clients, a worker and Postgres, already wired together.**
 
+[![CI](https://ci.antonshubin.com/api/badges/11/status.svg)](https://ci.antonshubin.com/repos/11)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+```sh
+gh repo create my-product --template spy4x/template --private --clone
+```
+
+<img src="docs/screenshots/sign-up-flow.gif" alt="A new user signs up with a username and password, lands on the profile page with the realtime connection open, types the first name Alex and the last name Rivera, and saves; a green toast confirms the profile was updated." width="800">
 
 [Architecture](docs/architecture.md) · [ADR 001](docs/decisions/001-deno-platform-template.md) ·
 [ADR 002](docs/decisions/002-realtime-transport-and-sync.md) · [Stack](docs/stack.md) ·
-[Deno policy](docs/deno-policy.md)
-
-<img src="docs/architecture.svg" alt="Architecture diagram. Clients: apps/spa, a Preact and Vite PWA with sign-up, sign-in, TOTP and profile, talks to apps/api over REST and WebSocket; a Dexie offline store with group sync is planned. apps/mpa is a Fresh page shell with /health; its REST calls are planned. Servers: apps/api on Hono (auth, groups, CQRS dispatch, web push) and apps/worker, which drains outbox_events. Data: Postgres is authoritative and Valkey is the API cache; Docker Compose also runs Traefik, MinIO, Loki, Prometheus and Grafana. Shared code: libs/domain, libs/server, libs/client and the @spy4x packages on JSR." width="860">
+[Deno policy](docs/deno-policy.md) · [Handoff](docs/handoff.md)
 
 </div>
 
-Fork it, fill in the env file, and you start with a product that already has accounts, a second
+Create your repository from it, fill in the env file, and you start with a product that already has accounts, a second
 factor, tenancy and a place for background work. A new user signs up and gets an account, a
 session and a personal group in one database transaction. Groups are the only tenancy boundary, so
 the same membership checks and roles cover personal data and shared workspaces.
@@ -29,6 +34,23 @@ today; offline sync, notes, group administration and the MPA's pages do not yet.
 [docs/architecture.md](docs/architecture.md#migration-status) and
 [ADR 001](docs/decisions/001-deno-platform-template.md).
 
+## What a fresh project looks like
+
+| Light                                                                                                                                                                                                 | Dark                                                                                                                                                                                                |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="docs/screenshots/sign-in-light.png" alt="The sign-in page in the light theme: a card titled Welcome back with username and password fields, a Sign in button and a link to sign up.">       | <img src="docs/screenshots/sign-in-dark.png" alt="The sign-in page in the dark theme: a card titled Welcome back with username and password fields, a Sign in button and a link to sign up.">       |
+| <img src="docs/screenshots/profile-light.png" alt="The profile page in the light theme for the demo user Alex Rivera: name fields with a Save button, a change-password card and a two-factor card."> | <img src="docs/screenshots/profile-dark.png" alt="The profile page in the dark theme for the demo user Alex Rivera: name fields with a Save button, a change-password card and a two-factor card."> |
+
+The screenshots and the GIF use a throw-away database and a made-up user;
+[`docs/screenshots/record.ts`](docs/screenshots/record.ts) records them again from a running app.
+
+<details>
+<summary>How the parts fit together</summary>
+
+<img src="docs/architecture.svg" alt="Architecture diagram. Clients: apps/spa, a Preact and Vite PWA with sign-up, sign-in, TOTP and profile, talks to apps/api over REST and WebSocket; a Dexie offline store with group sync is planned. apps/mpa is a Fresh page shell with /health; its REST calls are planned. Servers: apps/api on Hono (auth, groups, CQRS dispatch, web push) and apps/worker, which drains outbox_events. Data: Postgres is authoritative and Valkey is the API cache; Docker Compose also runs Traefik, MinIO, Loki, Prometheus and Grafana. Shared code: libs/domain, libs/server, libs/client and the @spy4x packages on JSR." width="860">
+
+</details>
+
 ## Why template
 
 - **Tenancy from day one.** Every user gets a `PERSONAL` group at sign-up; `SHARED` groups use the
@@ -39,8 +61,10 @@ today; offline sync, notes, group administration and the MPA's pages do not yet.
   group writes its event to `outbox_events`, and the worker drains that table.
 - **Safe API defaults.** Every mutation must come from the web app's own origin, and group lists
   page with HMAC-signed cursors.
-- **Web standards.** Hono handlers take a `Request` and return a `Response`; ES modules, Preact
-  and Fresh throughout, with Deno as the runtime.
+- **Built on web standards.** Hono handlers take a Fetch `Request` and return a `Response`;
+  password hashes and cursor signatures use Web Crypto; live updates travel over a standard
+  WebSocket; everything is an ES module. The servers run on Deno 2 in Docker on any Linux host you
+  control, and the clients run in any modern browser.
 - **Operations included.** Docker Compose for development and single-node production: Traefik,
   Postgres, Valkey, MinIO, Loki, Prometheus and Grafana.
 
@@ -109,8 +133,8 @@ deno task check
 deno task hooks:install   # runs the checks before every commit
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules, and [HANDOFF.md](HANDOFF.md) for the state
-of the migration and the traps in this codebase.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules, and [docs/handoff.md](docs/handoff.md) for
+the state of the migration and the traps in this codebase.
 
 ## Built by
 
