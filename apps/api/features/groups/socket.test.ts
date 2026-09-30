@@ -74,7 +74,6 @@ describe("group socket requests", () => {
       kind: GroupKind.SHARED,
       name: "Team",
       requestId: "req-1",
-      signal,
       idempotencyKey: "key-1",
     })
   })
