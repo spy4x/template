@@ -323,23 +323,21 @@ describe("NotesScreen without JavaScript", () => {
   })
 
   it("posts the edit with the API's field names and the version it started from", () => {
-    const html = renderToString(
+    // The edit started from version 2 while the list already shows 3: the form must post the
+    // version the person edited, not the one the delete form next to it carries.
+    const screen = (
       <NotesScreen
         {...notesDefaults}
-        editing={{ id: noteRow.id, title: "Groceries", body: "", version: 3, conflict: false }}
-      />,
+        editing={{ id: noteRow.id, title: "Groceries", body: "", version: 2, conflict: false }}
+      />
     )
-    const surface = noScriptSurface(
-      <NotesScreen
-        {...notesDefaults}
-        editing={{ id: noteRow.id, title: "Groceries", body: "", version: 3, conflict: false }}
-      />,
-    )
+    const html = renderToString(screen)
+    const surface = noScriptSurface(screen)
 
     expect(formAt(surface, NOTE_PATHS.note(groupId, noteRow.id)).fields).toEqual(
       schemaKeys(noteUpdateRequestSchema),
     )
-    expect(html).toContain('name="version" value="3"')
+    expect(html).toContain('name="version" value="2"')
     expect(surface.links).toContain(NOTE_PATHS.list(groupId))
   })
 
