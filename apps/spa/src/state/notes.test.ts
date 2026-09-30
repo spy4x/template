@@ -1,0 +1,186 @@
+import { expect } from "@std/expect"
+import { describe, it } from "@std/testing/bdd"
+import { RealtimeRequestError } from "@spy4x/realtime"
+import { createNotesStore, NOTE_MESSAGES, type NoteItem, type NotePage } from "./notes.ts"
+
+const groupId = "g-1"
+
+function item(id: string, version = 1, title = id): NoteItem {
+  return {
+    id,
+    groupId,
+    title,
+    body: "",
+    version,
+    changeSequence: "1",
+    createdByUserId: 1,
+    updatedByUserId: 1,
+    createdAt: "2026-10-02T00:00:00.000Z",
+    updatedAt: "2026-10-02T00:00:00.000Z",
+  }
+}
+
+function conflict(currentVersion: number) {
+  return new RealtimeRequestError("conflict", "The note was changed by someone else", {
+    code: "VERSION_CONFLICT",
+    currentVersion,
+  })
+}
+
+function harness(overrides: {
+  pages?: NotePage[]
+  update?: () => Promise<{ note: NoteItem }>
+  delete?: () => Promise<unknown>
+  get?: () => Promise<{ note: NoteItem }>
+} = {}) {
+  const pages = [...(overrides.pages ?? [])]
+  const reads: { groupId: string; cursor: string | null }[] = []
+  const calls: { name: string; input: unknown }[] = []
+  let ids = 0
+  const store = createNotesStore({
+    fetchPage(forGroup, cursor) {
+      reads.push({ groupId: forGroup, cursor })
+      return Promise.resolve(pages.shift() ?? { notes: [], nextCursor: null })
+    },
+    get(forGroup, id) {
+      calls.push({ name: "get", input: { groupId: forGroup, id } })
+      return overrides.get?.() ?? Promise.resolve({ note: item(id) })
+    },
+    create(input) {
+      calls.push({ name: "create", input })
+      return Promise.resolve({ note: { ...item(input.id), title: input.title } })
+    },
+    update(input) {
+      calls.push({ name: "update", input })
+      return overrides.update?.() ??
+        Promise.resolve({ note: { ...item(input.id, input.version + 1), title: input.title } })
+    },
+    delete(input) {
+      calls.push({ name: "delete", input })
+      return overrides.delete?.() ?? Promise.resolve({})
+    },
+    newId: () => `new-${++ids}`,
+  })
+  return { store, reads, calls }
+}
+
+describe("notes store", () => {
+  it("reads every page of the group it opens", async () => {
+    const { store, reads } = harness({
+      pages: [
+        { notes: [item("a")], nextCursor: "c1" },
+        { notes: [item("b")], nextCursor: null },
+      ],
+    })
+
+    await store.open(groupId, null)
+
+    expect(store.notes.value.map((note) => note.id)).toEqual(["a", "b"])
+    expect(reads).toEqual([{ groupId, cursor: null }, { groupId, cursor: "c1" }])
+  })
+
+  it("creates with the form's id and trimmed title, then starts a new draft with a new id", async () => {
+    const { store, calls } = harness()
+    await store.open(groupId, null)
+    const firstId = store.draftId.value
+    store.draft.value = { title: "  Plan  ", body: "b" }
+
+    await store.create()
+
+    expect(calls).toEqual([
+      { name: "create", input: { groupId, id: firstId, title: "Plan", body: "b" } },
+    ])
+    expect(store.notes.value.map((note) => note.title)).toEqual(["Plan"])
+    expect(store.draft.value).toEqual({ title: "", body: "" })
+    expect(store.draftId.value).not.toBe(firstId)
+  })
+
+  it("puts a missing title error on the title and sends nothing", async () => {
+    const { store, calls } = harness()
+    await store.open(groupId, null)
+    store.draft.value = { title: "   ", body: "b" }
+
+    await store.create()
+
+    expect(store.createErrors.value).toEqual({ title: NOTE_MESSAGES.titleRequired, form: null })
+    expect(calls).toEqual([])
+  })
+
+  it("saves the edit with the version it started from", async () => {
+    const { store, calls } = harness({ pages: [{ notes: [item("a", 4)], nextCursor: null }] })
+    await store.open(groupId, "a")
+    store.editing.value = { ...store.editing.value!, title: "New title" }
+
+    expect(await store.save()).toBe(true)
+
+    expect(calls).toEqual([
+      { name: "update", input: { groupId, id: "a", title: "New title", body: "", version: 4 } },
+    ])
+    expect(store.editing.value).toBe(null)
+    expect(store.notes.value[0].version).toBe(5)
+  })
+
+  it("keeps the typed text and flags a conflict when the note moved on", async () => {
+    const { store } = harness({
+      pages: [{ notes: [item("a", 1)], nextCursor: null }],
+      update: () => Promise.reject(conflict(2)),
+    })
+    await store.open(groupId, "a")
+    store.editing.value = { ...store.editing.value!, title: "Mine" }
+
+    expect(await store.save()).toBe(false)
+
+    expect(store.editing.value).toMatchObject({ title: "Mine", version: 1, conflict: true })
+    expect(store.editErrors.value.form).toBe(NOTE_MESSAGES.conflict)
+  })
+
+  it("starts the edit again from the latest version when asked", async () => {
+    const { store } = harness({
+      pages: [{ notes: [item("a", 1)], nextCursor: null }],
+      update: () => Promise.reject(conflict(2)),
+      get: () => Promise.resolve({ note: item("a", 2, "Theirs") }),
+    })
+    await store.open(groupId, "a")
+    await store.save()
+
+    await store.reloadLatest()
+
+    expect(store.editing.value).toEqual({
+      id: "a",
+      title: "Theirs",
+      body: "",
+      version: 2,
+      conflict: false,
+    })
+    expect(store.editErrors.value).toEqual({ title: null, form: null })
+  })
+
+  it("rereads the list when a delete was refused for a stale version", async () => {
+    const { store, reads } = harness({
+      pages: [
+        { notes: [item("a", 1)], nextCursor: null },
+        { notes: [item("a", 2, "Changed")], nextCursor: null },
+      ],
+      delete: () => Promise.reject(conflict(2)),
+    })
+    await store.open(groupId, null)
+
+    await store.remove(store.notes.value[0])
+
+    expect(store.listError.value).toBe(NOTE_MESSAGES.deleteConflict)
+    expect(reads.length).toBe(2)
+    expect(store.notes.value.map((note) => note.title)).toEqual(["Changed"])
+  })
+
+  it("forgets the previous group's notes and draft when another group opens", async () => {
+    const { store, reads } = harness({ pages: [{ notes: [item("a")], nextCursor: null }] })
+    await store.open(groupId, null)
+    store.draft.value = { title: "Half typed", body: "" }
+
+    await store.open("g-2", null)
+
+    expect(store.notes.value).toEqual([])
+    expect(store.draft.value).toEqual({ title: "", body: "" })
+    expect(reads.map((read) => read.groupId)).toEqual([groupId, "g-2"])
+  })
+})

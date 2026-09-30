@@ -4,6 +4,7 @@ import { createPostgresAuthStore, createPostgresSessionStore } from "@spy4x/serv
 import type { SessionStore } from "@spy4x/server/sign-in"
 import type { User, UserBase } from "@domain/identity"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
+import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 
 /** A user's authenticator-app enrolment, one row of `user_totp`. */
 export interface UserTotp {
@@ -59,6 +60,11 @@ export class AppDbBase extends DbServiceBase {
    */
   get group(): PostgresGroupRepository {
     return new PostgresGroupRepository(this.sql)
+  }
+
+  /** The notes repository. Built per access, like `group`, so inside `begin()` it uses the transaction. */
+  get note(): PostgresNoteRepository {
+    return new PostgresNoteRepository(this.sql)
   }
 
   /**

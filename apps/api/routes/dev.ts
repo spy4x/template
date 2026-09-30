@@ -4,6 +4,8 @@ import { APIContext } from "../_types.ts"
 import { validate } from "@spy4x/validation"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import { authUsernameSchema } from "@domain/identity"
+import { GroupKind, GroupRole } from "@domain/groups"
+import { type } from "arktype"
 import type { Sql, Transaction } from "@spy4x/server/db"
 import type { AppDbBase } from "@api/services/db-base.ts"
 import { readApiJson } from "@api/services/json-body.ts"
@@ -25,8 +27,15 @@ export interface DevRouteDeps {
  *
  * `POST /cleanup-user` with `{ username }` deletes that user and everything that would stop the
  * delete: the groups they own or created (with their memberships, audit and outbox events), the
- * audit and outbox events they are the actor of, and the memberships they granted in other groups.
+ * audit and outbox events they are the actor of, the notes they wrote, and the memberships they
+ * granted in other groups.
  * It answers 200 when the username has no user, so a spec can call it before its own sign-up.
+ *
+ * `POST /add-member` with `{ username, groupId, role }` makes that user a member of a shared group
+ * with the role (1 viewer, 2 editor, 3 admin), or changes the role of one who is. The product has
+ * no way to add a member yet, and the notes e2e spec needs a second member of one group. It
+ * answers 404 when the user or the shared group does not exist, and 409 for the group's owner,
+ * whose role it never changes: a group has exactly one owner.
  *
  * `POST /close-sockets` with `{ username }` closes that user's WebSockets the way a dropped network
  * would, so an e2e spec can check that the app catches up after a reconnect. It answers with how
@@ -42,6 +51,41 @@ export function createDevRoute(deps: DevRouteDeps) {
       }
       return c.json({ success: true })
     })
+    .post("/add-member", async (c) => {
+      if (!deps.isDev) return c.json({ error: "Not allowed" }, 403)
+      let body: unknown = null
+      try {
+        body = await readApiJson(c)
+      } catch (_error) {
+        body = null
+      }
+      const validation = validate(addMemberSchema, body)
+      if (validation.error) {
+        return c.json({ error: validation.error.description }, 400)
+      }
+      const { username, groupId, role } = validation.data
+      const key = await deps.db.authStore.findKey(PASSWORD_METHOD, username)
+      if (!key) return c.json({ error: "No such user" }, 404)
+      const added = await deps.sql`
+        INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+        SELECT groups.id, ${key.userId}, ${role}, groups.owner_user_id
+        FROM groups
+        WHERE groups.id = ${groupId} AND groups.kind = ${GroupKind.SHARED}
+          AND groups.deleted_at IS NULL
+        ON CONFLICT (group_id, user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()
+          WHERE group_members.role <> ${GroupRole.OWNER}
+        RETURNING user_id
+      `
+      if (added.length === 0) {
+        const owner = await deps.sql`
+          SELECT 1 FROM group_members
+          WHERE group_id = ${groupId} AND user_id = ${key.userId} AND role = ${GroupRole.OWNER}
+        `
+        if (owner.length > 0) return c.json({ error: "The owner's role is not changed here" }, 409)
+        return c.json({ error: "No such shared group" }, 404)
+      }
+      return c.json({ success: true })
+    })
     .post("/close-sockets", async (c) => {
       const user = await readUsername(c, deps)
       if (user instanceof Response) return user
@@ -49,6 +93,12 @@ export function createDevRoute(deps: DevRouteDeps) {
       return c.json({ success: true, closed })
     })
 }
+
+/** The body of `POST /add-member`. Owner is left out: a group has one, and it is not moved here. */
+const addMemberSchema = authUsernameSchema.and({
+  groupId: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  role: type.enumerated(GroupRole.VIEWER, GroupRole.EDITOR, GroupRole.ADMIN),
+})
 
 /**
  * Reads `{ username }` from the body and finds the user behind it (`null` when there is none), or
@@ -81,6 +131,11 @@ async function deleteUser(sql: Sql, userId: number): Promise<void> {
     // A fresh fragment per statement: postgres.js runs a query object once.
     const owned = () =>
       tx`SELECT id FROM groups WHERE owner_user_id = ${userId} OR created_by_user_id = ${userId}`
+    await tx`
+      DELETE FROM notes
+      WHERE created_by_user_id = ${userId} OR updated_by_user_id = ${userId}
+        OR group_id IN (${owned()})
+    `
     await tx`DELETE FROM audit_events WHERE actor_user_id = ${userId} OR group_id IN (${owned()})`
     await tx`DELETE FROM outbox_events WHERE actor_user_id = ${userId} OR group_id IN (${owned()})`
     await tx`

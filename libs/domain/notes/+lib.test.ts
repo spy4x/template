@@ -1,0 +1,117 @@
+import { expect } from "@std/expect"
+import { describe, it } from "@std/testing/bdd"
+import { GroupRole } from "@domain/groups"
+import {
+  assertCanReadNotes,
+  assertCanWriteNotes,
+  NOTE_BODY_MAX_LENGTH,
+  NOTE_TITLE_MAX_LENGTH,
+  noteCreatePayloadSchema,
+  noteCreateRequestSchema,
+  noteDeleteRequestSchema,
+  NoteError,
+  noteListPayloadSchema,
+  noteUpdateRequestSchema,
+  NoteVersionConflictError,
+  parseNoteRequest,
+} from "./+lib.ts"
+
+const id = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
+const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
+
+function codeOf(run: () => unknown): string | null {
+  try {
+    run()
+    return null
+  } catch (error) {
+    return error instanceof NoteError ? error.code : `not a NoteError: ${error}`
+  }
+}
+
+describe("note requests", () => {
+  it("accepts a create with a UUID v4 id and trims the title", () => {
+    const parsed = parseNoteRequest(
+      noteCreateRequestSchema,
+      { id, title: "  Groceries  ", body: "milk" },
+    )
+    expect(parsed).toEqual({ id, title: "Groceries", body: "milk" })
+  })
+
+  for (
+    const [name, schema, value] of [
+      ["a create that names a user", noteCreateRequestSchema, {
+        id,
+        title: "a",
+        body: "",
+        userId: 1,
+      }],
+      ["a create with an uppercase id", noteCreateRequestSchema, {
+        id: id.toUpperCase(),
+        title: "a",
+        body: "",
+      }],
+      ["a create with a blank title", noteCreateRequestSchema, { id, title: "   ", body: "" }],
+      ["a create with a title one character too long", noteCreateRequestSchema, {
+        id,
+        title: "é".repeat(NOTE_TITLE_MAX_LENGTH + 1),
+        body: "",
+      }],
+      ["a create with a body one character too long", noteCreateRequestSchema, {
+        id,
+        title: "a",
+        body: "x".repeat(NOTE_BODY_MAX_LENGTH + 1),
+      }],
+      ["an update without a version", noteUpdateRequestSchema, { title: "a", body: "" }],
+      ["an update with version zero", noteUpdateRequestSchema, {
+        title: "a",
+        body: "",
+        version: 0,
+      }],
+      ["an update with a fractional version", noteUpdateRequestSchema, {
+        title: "a",
+        body: "",
+        version: 1.5,
+      }],
+      ["a delete with a string version", noteDeleteRequestSchema, { version: "2" }],
+      ["a socket create without a group", noteCreatePayloadSchema, { id, title: "a", body: "" }],
+      ["a list above the largest page", noteListPayloadSchema, { groupId, limit: 101 }],
+      ["a list with an empty cursor", noteListPayloadSchema, { groupId, cursor: "" }],
+    ] as const
+  ) {
+    it(`rejects ${name}`, () => {
+      expect(codeOf(() => parseNoteRequest(schema, value))).toBe("INVALID_REQUEST")
+    })
+  }
+
+  it("counts an emoji as one character of the title", () => {
+    const title = "😀".repeat(NOTE_TITLE_MAX_LENGTH)
+    expect(parseNoteRequest(noteCreateRequestSchema, { id, title, body: "" }).title)
+      .toBe(title)
+  })
+})
+
+describe("note authorization", () => {
+  it("lets every member read and answers a stranger as if the group did not exist", () => {
+    for (const role of [GroupRole.VIEWER, GroupRole.EDITOR, GroupRole.ADMIN, GroupRole.OWNER]) {
+      expect(codeOf(() => assertCanReadNotes(role))).toBe(null)
+    }
+    expect(codeOf(() => assertCanReadNotes(null))).toBe("GROUP_NOT_FOUND")
+  })
+
+  it("lets an editor and above write, and refuses a viewer", () => {
+    for (const role of [GroupRole.EDITOR, GroupRole.ADMIN, GroupRole.OWNER]) {
+      expect(codeOf(() => assertCanWriteNotes(role))).toBe(null)
+    }
+    expect(codeOf(() => assertCanWriteNotes(GroupRole.VIEWER))).toBe("ROLE_INSUFFICIENT")
+    expect(codeOf(() => assertCanWriteNotes(null))).toBe("GROUP_NOT_FOUND")
+  })
+})
+
+describe("note version conflict", () => {
+  it("is a VERSION_CONFLICT that carries the note's current version", () => {
+    const error = new NoteVersionConflictError(4)
+    expect(error).toBeInstanceOf(NoteError)
+    expect(error.code).toBe("VERSION_CONFLICT")
+    expect(error.currentVersion).toBe(4)
+  })
+})

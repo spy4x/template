@@ -16,7 +16,8 @@ gh repo create my-product --template spy4x/template --private --clone
 
 [Architecture](docs/architecture.md) · [ADR 001](docs/decisions/001-deno-platform-template.md) ·
 [ADR 002](docs/decisions/002-realtime-transport-and-sync.md) · [Stack](docs/stack.md) ·
-[Deno policy](docs/deno-policy.md) · [Handoff](docs/handoff.md)
+[Deno policy](docs/deno-policy.md) · [Adding an aggregate](docs/aggregates.md) ·
+[Handoff](docs/handoff.md)
 
 </div>
 
@@ -30,8 +31,8 @@ It exists because every SaaS MVP needs the same groundwork before its first feat
 parts live here and in the published [`@spy4x/*`](https://jsr.io/@spy4x) packages; product rules
 stay out.
 
-**Status:** in migration. Sign-up, sign-in with TOTP, groups over REST and the outbox worker work
-today; offline sync, notes, group administration and the MPA's pages do not yet. Details in
+**Status:** in migration. Sign-up, sign-in with TOTP, groups, notes (the reference aggregate) and
+the outbox worker work today; offline sync, group administration and the MPA's pages do not yet. Details in
 [docs/architecture.md](docs/architecture.md#migration-status) and
 [ADR 001](docs/decisions/001-deno-platform-template.md).
 
@@ -149,7 +150,9 @@ deno task hooks:install   # runs the checks before every commit
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules, and [docs/handoff.md](docs/handoff.md) for
-the state of the migration and the traps in this codebase.
+the state of the migration and the traps in this codebase. To add a product feature, follow
+[docs/aggregates.md](docs/aggregates.md): it walks through every file of the notes aggregate, in
+order.
 
 ## Built by
 

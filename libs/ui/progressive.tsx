@@ -23,6 +23,20 @@ export const FORM_ACTIONS = {
   pushRemove: "/profile/push/remove",
 } as const
 
+/**
+ * The routes a group's notes post to and live at, built from the ids in the path. A form's field
+ * names match the API schema of the same action (`@domain/notes`); the path carries the group and
+ * the note. The notes screen posts to these.
+ */
+export const NOTE_PATHS = {
+  /** The list and the create form; `POST` creates `{ id, title, body }`. */
+  list: (groupId: string) => `/groups/${groupId}/notes`,
+  /** One note's edit form; `POST` updates `{ title, body, version }`. */
+  note: (groupId: string, noteId: string) => `/groups/${groupId}/notes/${noteId}`,
+  /** `POST` deletes `{ version }`. */
+  delete: (groupId: string, noteId: string) => `/groups/${groupId}/notes/${noteId}/delete`,
+} as const
+
 /** The pages these screens link to. */
 export const SCREEN_PATHS = {
   signIn: "/sign-in",

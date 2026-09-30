@@ -19,8 +19,10 @@ COPY apps/spa/deno.json ./apps/spa/deno.json
 COPY apps/worker/deno.json ./apps/worker/deno.json
 COPY libs/domain/groups/deno.json ./libs/domain/groups/deno.json
 COPY libs/domain/identity/deno.json ./libs/domain/identity/deno.json
+COPY libs/domain/notes/deno.json ./libs/domain/notes/deno.json
 COPY libs/server/groups/deno.json ./libs/server/groups/deno.json
 COPY libs/server/idempotency/deno.json ./libs/server/idempotency/deno.json
+COPY libs/server/notes/deno.json ./libs/server/notes/deno.json
 COPY libs/ui/deno.json ./libs/ui/deno.json
 
 # Install dependencies (this layer will be cached if deno.jsonc doesn't change)

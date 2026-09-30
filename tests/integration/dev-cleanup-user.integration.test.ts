@@ -2,6 +2,7 @@
 import { expect } from "@std/expect"
 import { Hono } from "hono"
 import postgres from "postgres"
+import { GroupRole } from "@domain/groups"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
 import { createDevRoute } from "../../apps/api/routes/dev.ts"
@@ -107,6 +108,8 @@ async function rowsOf(sql: postgres.Sql, userId: number): Promise<Record<string,
       WHERE actor_user_id = ${userId}
     UNION ALL SELECT 'outbox_events', COUNT(*)::int FROM outbox_events
       WHERE actor_user_id = ${userId}
+    UNION ALL SELECT 'notes', COUNT(*)::int FROM notes
+      WHERE created_by_user_id = ${userId} OR updated_by_user_id = ${userId}
   `
   return Object.fromEntries(rows.map((row) => [row.name, row.count]))
 }
@@ -118,6 +121,7 @@ const NONE = {
   group_members: 0,
   audit_events: 0,
   outbox_events: 0,
+  notes: 0,
 }
 
 Deno.test("dev cleanup-user route", async (t) => {
@@ -183,6 +187,118 @@ Deno.test("dev cleanup-user route", async (t) => {
           1,
         ])
         expect((await rowsOf(sql, memberId)).users).toBe(1)
+      },
+    )
+
+    await t.step("deletes the notes the user wrote in another user's group", async () => {
+      const ownerId = await signUp(app, "notes-owner")
+      const writerId = await signUp(app, "notes-writer")
+      const groupId = crypto.randomUUID()
+      await app.db.group.createShared({ id: groupId, name: "Notes" }, ownerId)
+      expect(
+        (await app.post("/test/add-member", {
+          username: "notes-writer",
+          groupId,
+          role: 2,
+        })).status,
+      ).toBe(200)
+      await app.db.note.create(
+        { groupId, id: crypto.randomUUID(), title: "Mine", body: "" },
+        writerId,
+      )
+      const kept = await app.db.note.create(
+        { groupId, id: crypto.randomUUID(), title: "Owner's", body: "" },
+        ownerId,
+      )
+
+      const response = await app.post("/test/cleanup-user", { username: "notes-writer" })
+
+      expect(response.status).toBe(200)
+      expect(await rowsOf(sql, writerId)).toEqual(NONE)
+      expect((await app.db.note.list(groupId, { limit: 10 })).notes.map((note) => note.id))
+        .toEqual([kept.note.id])
+    })
+
+    await t.step("add-member gives a user a role in a shared group, and changes it", async () => {
+      const ownerId = await signUp(app, "member-owner")
+      const joinerId = await signUp(app, "member-joiner")
+      const groupId = crypto.randomUUID()
+      await app.db.group.createShared({ id: groupId, name: "Team" }, ownerId)
+      const roleOf = async () =>
+        (await sql<{ role: number }[]>`
+          SELECT role FROM group_members WHERE group_id = ${groupId} AND user_id = ${joinerId}
+        `).map((row) => row.role)
+
+      expect(
+        (await app.post("/test/add-member", { username: "member-joiner", groupId, role: 1 }))
+          .status,
+      ).toBe(200)
+      expect(await roleOf()).toEqual([1])
+      expect(
+        (await app.post("/test/add-member", { username: "member-joiner", groupId, role: 2 }))
+          .status,
+      ).toBe(200)
+      expect(await roleOf()).toEqual([2])
+    })
+
+    await t.step("add-member leaves the owner's role alone", async () => {
+      const ownerId = await signUp(app, "member-kept-owner")
+      const groupId = crypto.randomUUID()
+      await app.db.group.createShared({ id: groupId, name: "Team" }, ownerId)
+
+      const response = await app.post("/test/add-member", {
+        username: "member-kept-owner",
+        groupId,
+        role: 1,
+      })
+
+      expect(response.status).toBe(409)
+      expect(
+        (await sql<{ role: number }[]>`
+          SELECT role FROM group_members WHERE group_id = ${groupId} AND user_id = ${ownerId}
+        `).map((row) => row.role),
+      ).toEqual([GroupRole.OWNER])
+    })
+
+    await t.step(
+      "add-member refuses an owner role, a personal group and a missing user",
+      async () => {
+        const ownerId = await signUp(app, "member-refuser")
+        await signUp(app, "member-refused")
+        const personal = (
+          await sql<GroupIdRow[]>`SELECT id FROM groups WHERE owner_user_id = ${ownerId}`
+        )[0].id
+        const shared = crypto.randomUUID()
+        await app.db.group.createShared({ id: shared, name: "Team" }, ownerId)
+
+        expect(
+          (await app.post("/test/add-member", {
+            username: "member-refused",
+            groupId: shared,
+            role: 4,
+          })).status,
+        ).toBe(400)
+        expect(
+          (await app.post("/test/add-member", {
+            username: "member-refused",
+            groupId: personal,
+            role: 1,
+          })).status,
+        ).toBe(404)
+        expect(
+          (await app.post("/test/add-member", {
+            username: "never-signed-up",
+            groupId: shared,
+            role: 1,
+          })).status,
+        ).toBe(404)
+        expect(
+          (await buildApp(sql, false).post("/test/add-member", {
+            username: "member-refused",
+            groupId: shared,
+            role: 1,
+          })).status,
+        ).toBe(403)
       },
     )
 

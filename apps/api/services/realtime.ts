@@ -11,6 +11,7 @@ import {
 } from "@spy4x/realtime"
 import { GROUP_AGGREGATE, GroupError } from "@domain/groups"
 import { AccessError, type Actor } from "@domain/identity"
+import { NoteError, NoteVersionConflictError } from "@domain/notes"
 import { IdempotencyError } from "@server/idempotency/idempotency.ts"
 import { actorFromAuth } from "../cqrs/actor.ts"
 import type { AppAuthState } from "./sign-in.ts"
@@ -72,6 +73,13 @@ export function toRequestError(error: unknown): RealtimeRequestError | null {
       code: error.code,
     })
   }
+  if (error instanceof NoteError) {
+    // A version conflict names the version the note is at now, so the client can reread it.
+    const details = error instanceof NoteVersionConflictError
+      ? { code: error.code, currentVersion: error.currentVersion }
+      : { code: error.code }
+    return new RealtimeRequestError(NOTE_ERROR_CODES[error.code], error.message, details)
+  }
   if (error instanceof AccessError) {
     return new RealtimeRequestError("unauthorized", error.message, { code: error.code })
   }
@@ -94,6 +102,19 @@ const GROUP_ERROR_CODES: Record<
   PERSONAL_GROUP_IMMUTABLE: "conflict",
   ROLE_INSUFFICIENT: "forbidden",
   USER_NOT_ACTIVE: "unauthorized",
+}
+
+const NOTE_ERROR_CODES: Record<
+  NoteError["code"],
+  "bad_request" | "forbidden" | "not_found" | "conflict"
+> = {
+  GROUP_NOT_FOUND: "not_found",
+  ID_ALREADY_EXISTS: "conflict",
+  INVALID_CURSOR: "bad_request",
+  INVALID_REQUEST: "bad_request",
+  NOTE_NOT_FOUND: "not_found",
+  ROLE_INSUFFICIENT: "forbidden",
+  VERSION_CONFLICT: "conflict",
 }
 
 /**

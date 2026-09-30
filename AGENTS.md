@@ -61,6 +61,11 @@ says what is missing. Do not copy the gap into a new screen.
   helpers have interaction tests (`libs/ui/progressive.test.tsx`); the screens have none yet
   ([#107](https://github.com/spy4x/template/issues/107)).
 
+## Adding a feature
+
+A new product aggregate copies the notes aggregate, file by file:
+[docs/aggregates.md](docs/aggregates.md) lists every file in order. Do not invent a second shape.
+
 ## Handoff
 
 [docs/handoff.md](docs/handoff.md) holds the state of the migration, the decisions already made and

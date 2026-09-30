@@ -1,0 +1,167 @@
+import { Hono } from "hono"
+import type { Context, MiddlewareHandler } from "hono"
+import {
+  type DeletedNote,
+  isUuidV4,
+  type Note,
+  NoteCreateCommand,
+  noteCreateRequestSchema,
+  NoteDeleteCommand,
+  noteDeleteRequestSchema,
+  NoteGetQuery,
+  NoteUpdateCommand,
+  noteUpdateRequestSchema,
+  type NoteWriteResult,
+  parseNoteRequest,
+} from "@domain/notes"
+import { createSameOriginMutationGuard } from "@spy4x/server/http/same-origin"
+import { actorFromAuth } from "../cqrs/actor.ts"
+import type { APIContext } from "../_types.ts"
+import { noteErrorResponse, NoteFeatureError } from "../features/notes/errors.ts"
+import {
+  DEFAULT_NOTE_LIST_LIMIT,
+  listNotesPage,
+  type NoteListDependencies,
+} from "../features/notes/list.ts"
+import { readApiJson } from "@api/services/json-body.ts"
+
+export interface NotesRouteDependencies extends NoteListDependencies {
+  create(command: NoteCreateCommand): Promise<NoteWriteResult>
+  update(command: NoteUpdateCommand): Promise<{ note: Note }>
+  delete(command: NoteDeleteCommand): Promise<{ note: DeletedNote }>
+  get(query: NoteGetQuery): Promise<{ note: Note }>
+  /** The origin the browser sends; see `GroupsRouteDependencies.expectedOrigin`. */
+  expectedOrigin?: string
+}
+
+/**
+ * The REST routes of a group's notes, mounted at `/api/groups/:groupId/notes`: the transport the
+ * MPA uses. Like the socket, it parses, names the actor from the session and dispatches on the
+ * buses; who may read or write is decided by the handlers, never here.
+ *
+ * - `GET /` lists the notes, newest first: `?limit=1..100&cursor=…`.
+ * - `GET /:noteId` reads one note.
+ * - `POST /` creates `{ id, title, body }`: 201, or 200 for a retry of the same create.
+ * - `PATCH /:noteId` updates `{ title, body, version }`.
+ * - `DELETE /:noteId` deletes `{ version }`.
+ *
+ * An update or delete that names a stale version answers 409 `VERSION_CONFLICT` with
+ * `currentVersion`. Writes need the web app's origin and accept an `Idempotency-Key` header.
+ */
+export function createNotesRoute(dependencies: NotesRouteDependencies): Hono<APIContext> {
+  const requireSameOrigin = createSameOriginMutationGuard<APIContext>({
+    expectedOrigin: dependencies.expectedOrigin,
+    onReject: (c) =>
+      noteErrorResponse(
+        c,
+        new NoteFeatureError("REQUEST_ORIGIN_INVALID", "Mutation origin check failed"),
+      ),
+  })
+  return new Hono<APIContext>()
+    .onError((error, c) => noteErrorResponse(c, error))
+    .use(requireAuthentication)
+    .get("/", async (c) => {
+      const page = await listNotesPage(dependencies, actorOf(c), groupIdOf(c), {
+        limit: parseLimit(c.req.query("limit")),
+        cursor: c.req.query("cursor"),
+      })
+      return c.json(page)
+    })
+    .get("/:noteId", async (c) => {
+      const result = await dependencies.get(
+        new NoteGetQuery({ actor: actorOf(c), groupId: groupIdOf(c), id: noteIdOf(c) }),
+      )
+      return c.json(result)
+    })
+    .post("/", requireSameOrigin, async (c) => {
+      const input = parseNoteRequest(
+        noteCreateRequestSchema,
+        await readJson(c),
+      )
+      const result = await dependencies.create(
+        new NoteCreateCommand({
+          actor: actorOf(c),
+          groupId: groupIdOf(c),
+          ...input,
+          idempotencyKey: c.req.header("idempotency-key"),
+        }),
+      )
+      return c.json({ note: result.note }, result.created ? 201 : 200)
+    })
+    .patch("/:noteId", requireSameOrigin, async (c) => {
+      const input = parseNoteRequest(
+        noteUpdateRequestSchema,
+        await readJson(c),
+      )
+      const result = await dependencies.update(
+        new NoteUpdateCommand({
+          actor: actorOf(c),
+          groupId: groupIdOf(c),
+          id: noteIdOf(c),
+          ...input,
+          idempotencyKey: c.req.header("idempotency-key"),
+        }),
+      )
+      return c.json(result)
+    })
+    .delete("/:noteId", requireSameOrigin, async (c) => {
+      const input = parseNoteRequest(
+        noteDeleteRequestSchema,
+        await readJson(c),
+      )
+      const result = await dependencies.delete(
+        new NoteDeleteCommand({
+          actor: actorOf(c),
+          groupId: groupIdOf(c),
+          id: noteIdOf(c),
+          version: input.version,
+          idempotencyKey: c.req.header("idempotency-key"),
+        }),
+      )
+      return c.json(result)
+    })
+}
+
+/** Authentication only; the session gate on the buses decides whether the session is strong enough. */
+const requireAuthentication: MiddlewareHandler<APIContext> = async (c, next) => {
+  if (!c.get("auth")) {
+    return noteErrorResponse(c, new NoteFeatureError("AUTH_REQUIRED", "Missing session"))
+  }
+  return await next()
+}
+
+function actorOf(c: Context<APIContext>) {
+  return actorFromAuth(c.get("auth")!)
+}
+
+function groupIdOf(c: Context<APIContext>): string {
+  const groupId = c.req.param("groupId")
+  if (!isUuidV4(groupId)) throw new NoteFeatureError("INVALID_REQUEST", "Group id is invalid")
+  return groupId
+}
+
+function noteIdOf(c: Context<APIContext>): string {
+  const noteId = c.req.param("noteId")
+  if (!isUuidV4(noteId)) throw new NoteFeatureError("INVALID_REQUEST", "Note id is invalid")
+  return noteId
+}
+
+async function readJson(c: Context<APIContext>): Promise<unknown> {
+  if (!c.req.header("content-type")?.toLowerCase().includes("application/json")) {
+    throw new NoteFeatureError("INVALID_REQUEST", "Content type must be JSON")
+  }
+  try {
+    return await readApiJson(c)
+  } catch {
+    throw new NoteFeatureError("INVALID_REQUEST", "Request body must be JSON")
+  }
+}
+
+function parseLimit(value: string | undefined): number {
+  if (value === undefined) return DEFAULT_NOTE_LIST_LIMIT
+  const limit = /^\d+$/.test(value) ? Number(value) : 0
+  if (limit < 1 || limit > 100) {
+    throw new NoteFeatureError("INVALID_REQUEST", "Note list limit is invalid")
+  }
+  return limit
+}

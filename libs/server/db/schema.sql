@@ -270,3 +270,31 @@ CREATE TABLE idempotency_keys (
 COMMENT ON COLUMN idempotency_keys.status IS '1=started, 2=done';
 
 CREATE INDEX idx_idempotency_keys_created ON idempotency_keys (created_at);
+
+-- Notes: the reference aggregate (docs/aggregates.md). See migration 2026_10_02_0001_notes.sql.
+CREATE TABLE notes (
+    id UUID PRIMARY KEY,
+    group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    title VARCHAR(200) NOT NULL,
+    body TEXT DEFAULT '' NOT NULL,
+    version INT4 DEFAULT 1 NOT NULL,
+    change_sequence BIGINT NOT NULL,
+    created_by_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    updated_by_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMPTZ(3),
+    CONSTRAINT notes_title_check CHECK (length(btrim(title)) BETWEEN 1 AND 200),
+    CONSTRAINT notes_body_check CHECK (length(body) <= 10000),
+    CONSTRAINT notes_version_check CHECK (version >= 1),
+    CONSTRAINT notes_change_sequence_check CHECK (change_sequence >= 1)
+);
+
+-- The list: a group's live notes, newest first, paged by (updated_at, id).
+CREATE INDEX idx_notes_group_updated_id_active
+    ON notes (group_id, updated_at DESC, id)
+    WHERE deleted_at IS NULL;
+-- A future pull by cursor: a group's notes changed after a sequence, deleted ones included.
+CREATE INDEX idx_notes_group_change_sequence ON notes (group_id, change_sequence);
+CREATE INDEX idx_notes_created_by ON notes (created_by_user_id);
+CREATE INDEX idx_notes_updated_by ON notes (updated_by_user_id);

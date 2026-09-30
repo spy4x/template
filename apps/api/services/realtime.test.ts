@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd"
 import { drainMicrotasks, FakeClock, FakeSocket } from "@spy4x/realtime/testing"
 import { RealtimeRequestError } from "@spy4x/realtime"
 import { GroupError } from "@domain/groups"
+import { NoteError, NoteVersionConflictError } from "@domain/notes"
 import { AccessError, UserMFAStatus } from "@domain/identity"
 import { IdempotencyError } from "@server/idempotency/idempotency.ts"
 import { buildAuthData } from "../_testing/fake-auth.ts"
@@ -341,6 +342,23 @@ describe("toRequestError", () => {
     expect(code(new IdempotencyError("IN_PROGRESS", "x"))).toBe("conflict")
     expect(code(new IdempotencyError("INVALID_KEY", "x"))).toBe("bad_request")
     expect(code(new RealtimeRequestError("rate_limited", "x"))).toBe("rate_limited")
+  })
+
+  it("maps each note failure to a closed code and keeps the note's code in the details", () => {
+    const code = (error: unknown) => toRequestError(error)?.code
+    expect(code(new NoteError("INVALID_REQUEST", "x"))).toBe("bad_request")
+    expect(code(new NoteError("GROUP_NOT_FOUND", "x"))).toBe("not_found")
+    expect(code(new NoteError("NOTE_NOT_FOUND", "x"))).toBe("not_found")
+    expect(code(new NoteError("ROLE_INSUFFICIENT", "x"))).toBe("forbidden")
+    expect(toRequestError(new NoteError("ROLE_INSUFFICIENT", "x"))?.details).toEqual({
+      code: "ROLE_INSUFFICIENT",
+    })
+  })
+
+  it("tells the client the current version of a note it tried to overwrite", () => {
+    const error = toRequestError(new NoteVersionConflictError(5))
+    expect(error?.code).toBe("conflict")
+    expect(error?.details).toEqual({ code: "VERSION_CONFLICT", currentVersion: 5 })
   })
 
   it("does not describe an unexpected failure", () => {

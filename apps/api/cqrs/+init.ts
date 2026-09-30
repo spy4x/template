@@ -13,6 +13,18 @@ import { userProfileGetHandler } from "@api/cqrs/query-handlers/user-profile-get
 import { groupCreateHandler } from "@api/cqrs/command-handlers/group-create.ts"
 import { groupListHandler } from "@api/cqrs/query-handlers/group-list.ts"
 import {
+  NoteCreateCommand,
+  NoteDeleteCommand,
+  NoteGetQuery,
+  NoteListQuery,
+  NoteUpdateCommand,
+} from "@domain/notes"
+import { noteCreateHandler } from "@api/cqrs/command-handlers/note-create.ts"
+import { noteUpdateHandler } from "@api/cqrs/command-handlers/note-update.ts"
+import { noteDeleteHandler } from "@api/cqrs/command-handlers/note-delete.ts"
+import { noteListHandler } from "@api/cqrs/query-handlers/note-list.ts"
+import { noteGetHandler } from "@api/cqrs/query-handlers/note-get.ts"
+import {
   UserProfileUpdatedEvent,
   UserSignedInEvent,
   UserSignedOutEvent,
@@ -38,7 +50,12 @@ commandBus.use(
 
 commandBus.register(UserProfileUpdateCommand, userProfileUpdateHandler)
 commandBus.register(GroupCreateCommand, groupCreateHandler)
+commandBus.register(NoteCreateCommand, noteCreateHandler)
+commandBus.register(NoteUpdateCommand, noteUpdateHandler)
+commandBus.register(NoteDeleteCommand, noteDeleteHandler)
 queryBus.register(UserProfileGetQuery, userProfileGetHandler)
 queryBus.register(GroupListQuery, groupListHandler)
+queryBus.register(NoteListQuery, noteListHandler)
+queryBus.register(NoteGetQuery, noteGetHandler)
 
 console.log("✅ CQRS handlers initialized")

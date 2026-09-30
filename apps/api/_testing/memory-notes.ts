@@ -1,0 +1,94 @@
+import type { GroupRole } from "@domain/groups"
+import {
+  type DeletedNote,
+  type GroupRoleLookup,
+  type Note,
+  type NoteCreateInput,
+  type NoteDeleteInput,
+  NoteError,
+  type NoteListPage,
+  type NoteListResult,
+  type NoteRepository,
+  type NoteUpdateInput,
+  NoteVersionConflictError,
+  type NoteWriteResult,
+} from "@domain/notes"
+
+/**
+ * Notes in memory, with the Postgres repository's version rules: an update or delete at another
+ * version is refused with the current one. `writes` counts every write that changed something.
+ */
+export class MemoryNoteRepository implements NoteRepository {
+  readonly notes = new Map<string, Note>()
+  writes = 0
+  #sequence = 1
+
+  list(groupId: string, page: NoteListPage): Promise<NoteListResult> {
+    const notes = [...this.notes.values()].filter((note) => note.groupId === groupId)
+      .slice(0, page.limit)
+    return Promise.resolve({ notes, nextPageKey: null })
+  }
+
+  get(groupId: string, id: string): Promise<Note | null> {
+    const note = this.notes.get(id)
+    return Promise.resolve(note && note.groupId === groupId ? note : null)
+  }
+
+  create(input: NoteCreateInput, actorId: number): Promise<NoteWriteResult> {
+    if (this.notes.has(input.id)) throw new NoteError("ID_ALREADY_EXISTS", "taken")
+    const at = new Date("2026-10-02T10:00:00.000Z")
+    const note: Note = {
+      ...input,
+      version: 1,
+      changeSequence: String(this.#sequence++),
+      createdByUserId: actorId,
+      updatedByUserId: actorId,
+      createdAt: at,
+      updatedAt: at,
+    }
+    this.notes.set(note.id, note)
+    this.writes++
+    return Promise.resolve({ note, created: true })
+  }
+
+  update(input: NoteUpdateInput, actorId: number): Promise<Note> {
+    const note = this.#current(input.groupId, input.id, input.expectedVersion)
+    const next: Note = {
+      ...note,
+      title: input.title,
+      body: input.body,
+      version: note.version + 1,
+      changeSequence: String(this.#sequence++),
+      updatedByUserId: actorId,
+    }
+    this.notes.set(next.id, next)
+    this.writes++
+    return Promise.resolve(next)
+  }
+
+  delete(input: NoteDeleteInput, _actorId: number): Promise<DeletedNote> {
+    const note = this.#current(input.groupId, input.id, input.expectedVersion)
+    this.notes.delete(note.id)
+    this.writes++
+    return Promise.resolve({
+      id: note.id,
+      groupId: note.groupId,
+      version: note.version + 1,
+      changeSequence: String(this.#sequence++),
+    })
+  }
+
+  #current(groupId: string, id: string, expectedVersion: number): Note {
+    const note = this.notes.get(id)
+    if (!note || note.groupId !== groupId) throw new NoteError("NOTE_NOT_FOUND", "gone")
+    if (note.version !== expectedVersion) throw new NoteVersionConflictError(note.version)
+    return note
+  }
+}
+
+/** Roles by `groupId:userId`; anyone not listed is not a member. */
+export function roles(entries: Record<string, GroupRole>): GroupRoleLookup {
+  return {
+    roleOf: (groupId, userId) => Promise.resolve(entries[`${groupId}:${userId}`] ?? null),
+  }
+}
