@@ -371,6 +371,43 @@ services:
     profiles:
       - donotstart
 
+  # Applies pending migrations, then exits. The API and the worker start only after it exits with 0,
+  # so a deploy never serves traffic on the old schema, and a failed migration stops `compose up`
+  # (and so `deno task deploy`) instead of starting an API whose queries fail. The runner in
+  # @spy4x/server/db locks and checksums, so it runs on every `up`: with nothing pending it changes
+  # nothing. Same build as the API; migration files come from the bind-mounted libs.
+  migrate:
+    container_name: ${PROJECT}-migrate
+    restart: "no"
+    build:
+      context: ../..
+      dockerfile: apps/api/dockerfile
+      args:
+        - DENO_VERSION=${DENO_VERSION}
+    command: [ 'deno', 'task', 'db:migrate' ]
+    volumes:
+      - ../../apps:/app/apps:z
+      - ../../libs:/app/libs:z
+      - ../../deno.jsonc:/app/deno.jsonc:z
+    user: "1000:1000"
+    environment:
+      - HOME=/home/deno
+      - DENO_DIR=/tmp/deno-cache
+      - DENO_LOG=${DENO_LOG}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
+      - DB_NAME=${DB_NAME}
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
   api:
     container_name: ${PROJECT}-api
     restart: unless-stopped
@@ -424,6 +461,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [ 'CMD', 'wget', '--spider', 'http://127.0.0.1:${API_PORT}/api/health' ]
@@ -490,6 +529,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     logging:
       driver: json-file
       options:
