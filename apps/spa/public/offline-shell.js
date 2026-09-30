@@ -53,8 +53,9 @@ self.addEventListener("fetch", (event) => {
     // Every route is the same page, so a page load is stored and served under `/`.
     const key = request.mode === "navigate" ? "/" : request
     try {
-      const response = await fetch(request)
-      if (response.ok) await cache.put(key, response.clone())
+      const response = await fetchWithRetry(request)
+      // A failed cache write must not fail a response that arrived.
+      if (response.ok) event.waitUntil(cache.put(key, response.clone()).catch(() => {}))
       return response
     } catch (error) {
       const cached = await cache.match(key)
@@ -63,3 +64,17 @@ self.addEventListener("fetch", (event) => {
     }
   })())
 })
+
+/**
+ * `fetch`, tried again once while the browser says it is online: a request that fails because the
+ * network interface changed in that moment (a dropped Wi-Fi link, a new virtual network) fails
+ * for the page too, though nothing is wrong a moment later.
+ */
+async function fetchWithRetry(request) {
+  try {
+    return await fetch(request.clone())
+  } catch (error) {
+    if (self.navigator.onLine) return await fetch(request)
+    throw error
+  }
+}
