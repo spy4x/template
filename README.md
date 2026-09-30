@@ -85,8 +85,11 @@ Before going on, fill in the secrets in `infra/envs/.env`. It runs on Docker; to
 ```sh
 deno task vapid-key:create   # web push keys → infra/configs/vapid.json
 deno task proxy:start        # Traefik
-deno task dev                # Postgres, Valkey, MinIO, API, SPA, logs and metrics
+deno task dev                # Postgres, Valkey, MinIO, API, SPA, Loki, Prometheus, Grafana
 ```
+
+Promtail, node-exporter and cAdvisor watch the whole host, so they are off by default. Set
+`COMPOSE_PROFILES=host-monitoring` in the env file to start them too.
 
 The worker and the MPA are not in Compose; run them on the host. Stop the proxy with
 `deno task proxy:stop`. Apply migrations from the host with the values from your `.env`, pointing
@@ -106,6 +109,12 @@ The production routers ask Traefik for certificates from the resolver named by
 resolver: Let's Encrypt, HTTP challenge on port 80, certificates stored in
 `.volumes/traefik/letsencrypt/acme.json`, expiry notices to `TRAEFIK_ACME_EMAIL`. Point `DOMAIN` at
 the server and run `deno task proxy:start` there.
+
+`deno task deploy` needs no manual step on a new server: it creates `infra/configs/vapid.json`
+(the web push keys) there when the file is missing, readable by its owner only. It never sends the
+key from your machine and never replaces one that exists. Router, service and middleware names
+carry `${PROJECT}`, so projects with different `PROJECT` values can share one Traefik. Postgres and
+Valkey stay on `127.0.0.1`. Every image has a pinned version.
 
 The template usually deploys behind a Traefik that several projects share. If that Traefik already
 defines a resolver, do not start the proxy compose file: set `TRAEFIK_CERT_RESOLVER` to the name it

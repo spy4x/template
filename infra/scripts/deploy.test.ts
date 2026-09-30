@@ -1,7 +1,7 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
 import { basename, globToRegExp } from "@std/path"
-import { planDeploy, shellQuote } from "./deploy.ts"
+import { planDeploy, shellQuote, VAPID_PATH } from "./deploy.ts"
 import { MissingEnvVarError } from "./env-file.ts"
 
 const ENV_FILE = "infra/envs/.env.home"
@@ -40,7 +40,7 @@ function excludedBeforeIncludes(args: string[], path: string): boolean {
   })
 }
 
-Deno.test("planDeploy's file copy excludes env files in apps, libs, infra and infra/envs", () => {
+Deno.test("planDeploy's file copy excludes every env file and the web push keys", () => {
   const envFile = "infra/secrets/home-server"
   const [files] = planDeploy({ SSH_TO_SERVER: "h", PATH_ON_SERVER: "/srv/app" }, envFile)
   for (
@@ -52,6 +52,7 @@ Deno.test("planDeploy's file copy excludes env files in apps, libs, infra and in
       "infra/envs/.env.prod",
       "infra/envs/home.env",
       "infra/secrets/home-server",
+      "infra/configs/vapid.json",
     ]
   ) {
     expect({ path, excluded: excludedBeforeIncludes(files.args, path) })
@@ -64,7 +65,7 @@ Deno.test("planDeploy's file copy excludes env files in apps, libs, infra and in
 })
 
 Deno.test("planDeploy starts the app in the quoted path with the configured Deno", () => {
-  const [, , start] = planDeploy(
+  const [, , , start] = planDeploy(
     { SSH_TO_SERVER: "h", PATH_ON_SERVER: "/srv/my app", DENO_ON_SERVER: "/opt/deno/deno" },
     ENV_FILE,
   )
@@ -79,7 +80,7 @@ Deno.test("planDeploy starts the app in the quoted path with the configured Deno
 })
 
 Deno.test("planDeploy reads a leading ~/ in PATH_ON_SERVER as the home directory", () => {
-  const [files, , start] = planDeploy({ SSH_TO_SERVER: "h", PATH_ON_SERVER: "~/app" }, ENV_FILE)
+  const [files, , , start] = planDeploy({ SSH_TO_SERVER: "h", PATH_ON_SERVER: "~/app" }, ENV_FILE)
   expect(files.args.at(-1)).toBe("h:app")
   expect(start.args[1]).toMatch(/^cd 'app' && .* deno task compose up -d --build$/)
 })
@@ -93,4 +94,33 @@ Deno.test("planDeploy refuses an env file without SSH_TO_SERVER or PATH_ON_SERVE
 
 Deno.test("shellQuote keeps a single quote inside one shell word", () => {
   expect(shellQuote(`it's`)).toBe(`'it'\\''s'`)
+})
+
+Deno.test("planDeploy creates the web push keys on the server before starting the app", () => {
+  const steps = planDeploy({ SSH_TO_SERVER: "h", PATH_ON_SERVER: "/srv/app" }, ENV_FILE)
+  expect(steps.map((step) => step.label)).toEqual([
+    "Copying files",
+    `Copying ${ENV_FILE} to infra/envs/.env`,
+    "Creating web push keys if missing",
+    "Starting the app",
+  ])
+  const [server, command] = steps[2].args
+  expect(steps[2].command).toBe("ssh")
+  expect(server).toBe("h")
+  // In this order: an empty directory left by an earlier start goes first (rmdir cannot delete a
+  // file), then only a missing file is generated, so a key on the server is never replaced.
+  expect(command).toBe(
+    `cd '/srv/app' && if [ -d ${VAPID_PATH} ]; then rmdir ${VAPID_PATH}; fi && ` +
+      `if [ ! -e ${VAPID_PATH} ]; then ` +
+      `(umask 077 && PATH="$HOME/.deno/bin:$PATH" deno task vapid-key:create); fi && ` +
+      `chmod 600 ${VAPID_PATH}`,
+  )
+})
+
+Deno.test("planDeploy runs the key step with the configured Deno", () => {
+  const steps = planDeploy(
+    { SSH_TO_SERVER: "h", PATH_ON_SERVER: "/srv/app", DENO_ON_SERVER: "/opt/deno/deno" },
+    ENV_FILE,
+  )
+  expect(steps[2].args[1]).toContain(`/opt/deno/deno task vapid-key:create`)
 })

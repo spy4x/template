@@ -17,9 +17,9 @@ services:
       - default
     labels:
       - "traefik.docker.network=proxy"
-      - 'traefik.http.routers.minio.entrypoints=websecure'
-      - 'traefik.http.routers.minio.tls=true'
-      - 'traefik.http.routers.minio.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-myresolver}'
+      - 'traefik.http.routers.minio-${PROJECT}.entrypoints=websecure'
+      - 'traefik.http.routers.minio-${PROJECT}.tls=true'
+      - 'traefik.http.routers.minio-${PROJECT}.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-myresolver}'
 
   grafana:
     networks:
@@ -27,9 +27,9 @@ services:
       - default
     labels:
       - "traefik.docker.network=proxy"
-      - 'traefik.http.routers.grafana.entrypoints=websecure'
-      - 'traefik.http.routers.grafana.tls=true'
-      - 'traefik.http.routers.grafana.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-myresolver}'
+      - 'traefik.http.routers.grafana-${PROJECT}.entrypoints=websecure'
+      - 'traefik.http.routers.grafana-${PROJECT}.tls=true'
+      - 'traefik.http.routers.grafana-${PROJECT}.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-myresolver}'
 
   api:
     networks:
