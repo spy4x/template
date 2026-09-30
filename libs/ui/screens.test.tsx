@@ -12,6 +12,8 @@ import {
 import { pushUnsubscribeRequestSchema } from "@spy4x/platform/model"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
+import { GroupKind, GroupRole } from "@domain/groups"
+import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
 import { FORM_ACTIONS } from "./progressive.tsx"
 
@@ -199,10 +201,66 @@ describe("frames without JavaScript", () => {
     )
     const [skipLink, ...pages] = surface.links
     expect(skipLink).toMatch(/^#./)
-    // The navigation's "Profile" is drawn twice (sidebar and drawer), the brand once.
-    expect(pages).toEqual(["/", "/", "/"])
+    // The navigation is drawn twice (sidebar and drawer), the brand once.
+    expect(pages.filter((href) => href === "/")).toHaveLength(3)
+    expect(pages.filter((href) => href === "/groups")).toHaveLength(2)
+    expect(pages).toHaveLength(5)
     expect(surface.forms).toEqual([])
     // Shell's user menu takes a link or a click handler, not a form, so "Sign out" is a button.
     expect(surface.scriptOnlyButtons).toEqual(["shell-user-menu-button", "(unnamed)"])
+  })
+})
+
+const groupsDefaults: GroupsScreenProps = {
+  groups: [],
+  name: "",
+  onNameChange: () => {},
+  creating: false,
+  loading: false,
+  error: null,
+  onCreate: () => {},
+  onRefresh: () => {},
+}
+
+describe("GroupsScreen", () => {
+  it("lists each group with its kind and the person's role", () => {
+    const html = renderToString(
+      <GroupsScreen
+        {...groupsDefaults}
+        groups={[
+          { id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER },
+          { id: "g-2", name: "Team", kind: GroupKind.SHARED, role: GroupRole.VIEWER },
+        ]}
+      />,
+    )
+
+    expect(html).toContain("Home")
+    expect(html).toContain("Personal · Owner")
+    expect(html).toContain("Team")
+    expect(html).toContain("Shared · Viewer")
+    expect(html).not.toContain("No groups yet.")
+  })
+
+  it("says so when there are no groups, and says loading while it fetches", () => {
+    expect(renderToString(<GroupsScreen {...groupsDefaults} />)).toContain("No groups yet.")
+    expect(renderToString(<GroupsScreen {...groupsDefaults} loading />)).toContain(
+      "Loading groups...",
+    )
+  })
+
+  it("shows the error and keeps the typed name in the create form", () => {
+    const html = renderToString(
+      <GroupsScreen {...groupsDefaults} name="Trip" error="Group id is already in use" />,
+    )
+
+    expect(html).toContain("Group id is already in use")
+    expect(html).toContain('value="Trip"')
+  })
+
+  it("posts to no route of its own, because it works only with JavaScript", () => {
+    const surface = noScriptSurface(<GroupsScreen {...groupsDefaults} />)
+
+    expect(surface.forms.map((form) => form.action)).toEqual([undefined])
+    expect(surface.scriptOnlyButtons).toEqual(["group-refresh"])
   })
 })

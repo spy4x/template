@@ -14,6 +14,8 @@ const actor = {
   sessionSecondFactor: SecondFactorStatus.NotRequired,
 }
 
+const signal = new AbortController().signal
+
 function harness() {
   const seen: { command: GroupCreateCommand | null; query: GroupListQuery | null } = {
     command: null,
@@ -61,6 +63,7 @@ describe("group socket requests", () => {
     await requests["group.create"].handle({
       actor,
       requestId: "req-1",
+      signal,
       idempotencyKey: "key-1",
       payload: { id, kind: GroupKind.SHARED, name: " Team " },
     })
@@ -71,6 +74,7 @@ describe("group socket requests", () => {
       kind: GroupKind.SHARED,
       name: "Team",
       requestId: "req-1",
+      signal,
       idempotencyKey: "key-1",
     })
   })
@@ -81,6 +85,7 @@ describe("group socket requests", () => {
     await expect(requests["group.create"].handle({
       actor,
       requestId: "req-1",
+      signal,
       idempotencyKey: "key-1",
       payload: { id, kind: GroupKind.SHARED, name: "Team", userId: 999 },
     })).rejects.toBeInstanceOf(GroupError)
@@ -93,6 +98,7 @@ describe("group socket requests", () => {
     const page = await requests["group.list"].handle({
       actor,
       requestId: "req-2",
+      signal,
       payload: { limit: 10, cursor: "abc" },
     })
 

@@ -5,7 +5,10 @@ import { Page } from "@spy4x/preact-ui/layout"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenLink, takeOver } from "./progressive.tsx"
 
 /** Every page a signed-in user can open. Add a route here when it gets its own page. */
-const NAV_ITEMS: readonly ShellNavItem[] = [{ name: "Profile", href: SCREEN_PATHS.profile }]
+const NAV_ITEMS: readonly ShellNavItem[] = [
+  { name: "Profile", href: SCREEN_PATHS.profile },
+  { name: "Groups", href: SCREEN_PATHS.groups },
+]
 
 /** Where the live connection to the API stands. */
 export type ConnectionStatus = "idle" | "connecting" | "open" | "closed"

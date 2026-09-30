@@ -29,6 +29,7 @@ export const SCREEN_PATHS = {
   signUp: "/sign-up",
   oneTimeCode: "/totp",
   profile: "/",
+  groups: "/groups",
 } as const
 
 /**
