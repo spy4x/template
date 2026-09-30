@@ -106,11 +106,11 @@
     // #endregion Aliases
 
     // #region Dependencies
-    // spy4x/ts-libs 1.13.0. hono, postgres and arktype below must stay on the exact versions these
+    // spy4x/ts-libs 1.15.0. hono, postgres and arktype below must stay on the exact versions these
     // packages were published with, or two copies load and their types stop matching.
-    "@spy4x/validation": "jsr:@spy4x/validation@1.13.0",
-    "@spy4x/platform": "jsr:@spy4x/platform@1.13.0",
-    "@spy4x/server": "jsr:@spy4x/server@1.13.0",
+    "@spy4x/validation": "jsr:@spy4x/validation@1.15.0",
+    "@spy4x/platform": "jsr:@spy4x/platform@1.15.0",
+    "@spy4x/server": "jsr:@spy4x/server@1.15.0",
 
     // apps/api
     "hono": "jsr:@hono/hono@4.13.8",
