@@ -231,10 +231,11 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 ## What is not built yet
 
 - `authorization_revision` exists as a column on `groups` and is **never incremented**.
-- Only `group.create` and `group.list` go over the socket. The profile, password, two-factor and
+- Only the group and note calls go over the socket. The profile, password, two-factor and
   push calls are still REST, and the profile page no longer receives live updates (a profile change
   in another tab shows after a reload).
-- No notes example aggregate, so the protocol is proven on groups only.
+- Notes ([docs/aggregates.md](aggregates.md)) have no MPA pages yet, and group membership cannot
+  be changed through the product: tests seed a second member with `POST /api/test/add-member`.
 - No local projection in the SPA, no offline outbox, no conflict UI. The page keeps its cursors in
   `localStorage` and rereads the whole group list to catch up.
 - The worker publishes a group change with `pg_notify`, which reaches only API instances that are
@@ -264,8 +265,7 @@ Each is intended to be one small PR. Small PRs are an explicit requirement here.
 1. **Increment `authorization_revision`** on membership and role changes.
 2. **Move the profile, password, two-factor and push calls to the socket**, with live profile and
    push-device updates.
-3. **A notes example aggregate**, to prove the protocol end to end on something other than groups.
-4. **SPA local projection and offline outbox.**
+3. **SPA local projection and offline outbox.**
 
 Extraction from the sibling Financy project is tracked separately in
 [docs/financy-extraction-inventory.md](financy-extraction-inventory.md);

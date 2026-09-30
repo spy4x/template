@@ -7,9 +7,10 @@ them. The diagram in the README, [`architecture.svg`](architecture.svg), shows w
 ## Migration status
 
 > **Migration status: WIP.** App boundaries, group core persistence, signup personal groups,
-> basic group REST/CQRS, and the `libs/shared` split into `libs/platform` and `libs/domain` now
-> exist. Notes/sync, group administration, MPA, and worker behavior stay incomplete. Target
-> architecture below and ADR 001 are authoritative.
+> basic group REST/CQRS, the notes reference aggregate ([aggregates.md](aggregates.md)), and the
+> `libs/shared` split into `libs/platform` and `libs/domain` now exist. Offline sync, group
+> administration, MPA, and worker behavior stay incomplete. Target architecture below and ADR 001
+> are authoritative.
 
 ## Database evolution
 
