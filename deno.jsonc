@@ -144,6 +144,9 @@
     "@preact/signals": "npm:@preact/signals@2.5.1",
     "@preact/signals-core": "npm:@preact/signals-core@1.12.1",
 
+    // apps/spa offline store (apps/spa/src/offline)
+    "dexie": "npm:dexie@4.4.6",
+
     // shared
     "@std/path": "jsr:@std/path@1.1.6",
     "@std/fs": "jsr:@std/fs@1.0.24",
