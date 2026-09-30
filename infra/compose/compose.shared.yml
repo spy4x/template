@@ -61,7 +61,9 @@ services:
       - POSTGRES_PASSWORD=${DB_PASS}
       - POSTGRES_DB=${DB_NAME}
     ports:
-      - ${DB_HOST_PORT:-${DB_PORT}}:5432
+      # Left side of the mapping, host address included. Default: this machine only. Never publish
+      # Postgres on 0.0.0.0; set DB_HOST_PORT=127.0.0.1:<port> to pick the host port.
+      - ${DB_HOST_PORT:-127.0.0.1:${DB_PORT}}:5432
     healthcheck:
       test: [ 'CMD', 'pg_isready', '-d', '${DB_NAME}', '-U', '${DB_USER}' ]
     security_opt:
@@ -74,7 +76,9 @@ services:
     volumes:
       - ../../.volumes/kv:/data:Z
     ports:
-      - ${KV_HOST_PORT:-${KV_PORT}}:6379
+      # As for Postgres: this machine only by default. Valkey is a cache the API trusts for
+      # display data, so treat a reachable Valkey as a break-in (docs/stack.md).
+      - ${KV_HOST_PORT:-127.0.0.1:${KV_PORT}}:6379
     command:
       [
         'valkey-server',

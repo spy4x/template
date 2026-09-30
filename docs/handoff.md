@@ -172,10 +172,10 @@ These cost real time to find. Do not rediscover them.
    longer cached in Valkey, so the `userSession_*` and `isSessionTokenExpired_*`
    keys of trap 6 are never written again. Rolling back past this migration
    needs a database restore: the old tables are gone. **Deploy step:** the
-   migration resets `users.mfa` in SQL only, and the API caches `users` rows in
-   Valkey for 30 days (`api:user_<id>`), so a stale entry would still say
-   "configured" and demand a second factor the user no longer has. Delete those
-   keys once, right after the migration runs:
+   migration resets `users.mfa` in SQL only, and the API cached `users` rows in
+   Valkey for 30 days (`api:user_<id>`). Since the second factor and role are read
+   from Postgres (#97) a stale entry only affects the profile display; delete those
+   keys once, right after the migration runs, to clear it:
    ```sh
    valkey-cli --scan --pattern 'api:user_*' | xargs -r valkey-cli del
    ```

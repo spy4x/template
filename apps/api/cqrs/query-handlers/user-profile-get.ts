@@ -4,7 +4,8 @@ import { db } from "@api/services/db.ts"
 
 export const userProfileGetHandler: QueryHandler<UserProfileGetQuery> = async (query) => {
   const userId = query.data.actor.userId
-  const user = await db.user.findOne({ id: userId })
+  // Display data only: this row's `mfa` and `role` decide nothing here (see `findOneCached`).
+  const user = await db.user.findOneCached({ id: userId })
   if (!user || user.deletedAt) {
     throw new Error("User not found")
   }
