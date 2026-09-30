@@ -25,8 +25,11 @@ Defined in `infra/compose/`:
 
 - **Postgres** - authoritative store. No PgBouncer; connection pooling is
   handled by the driver.
-- **Valkey** - cache and session helpers. The host needs
-  `sysctl vm.overcommit_memory=1`.
+- **Valkey** - cache for display data (sessions and every authentication decision come from
+  Postgres). The host needs `sysctl vm.overcommit_memory=1`. Postgres and Valkey are published on
+  `127.0.0.1` only, through `DB_HOST_PORT` and `KV_HOST_PORT`. Valkey has no password yet:
+  `RedisKvStore` in `@spy4x/server` cannot send `AUTH`, so the network binding is the only
+  guard; anyone who can reach Valkey can write cached profile rows.
 - **MinIO** - object storage, with a one-shot configure container.
 - **Traefik** - reverse proxy, production compose only.
 - **Loki, Promtail, Prometheus, Grafana, node-exporter, cAdvisor,
