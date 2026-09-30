@@ -1,4 +1,4 @@
-import { AuthAudit, AuthAuditBase, UserPushToken, UserPushTokenBase } from "@domain/identity"
+import { AuthAudit, AuthAuditBase } from "@domain/identity"
 import postgres from "postgres"
 import { createSqlFromEnv, type Sql } from "@spy4x/server/db"
 import { publicAPICache } from "./cache.ts"
@@ -29,47 +29,6 @@ export const sql: Sql = (() => {
 export class DbService extends AppDbBase {
   constructor() {
     super({ sql, userCache: publicAPICache.user })
-  }
-
-  get userPushToken() {
-    return {
-      ...this.buildMethods<UserPushToken, UserPushTokenBase, Partial<UserPushTokenBase>>(
-        `user_push_tokens`,
-        publicAPICache.userPushToken,
-      ),
-      findMany: async (params: { userId: number }): Promise<UserPushToken[]> => {
-        return await this.sql<UserPushToken[]>`
-        SELECT *
-        FROM user_push_tokens
-        WHERE deleted_at IS NULL AND user_id = ${params.userId}
-        ORDER BY created_at DESC`
-      },
-      findOne: async (
-        { deviceId, userId }: { deviceId: string; userId: number },
-      ): Promise<null | UserPushToken> => {
-        return (
-          await this.sql<
-            UserPushToken[]
-          >`SELECT * FROM user_push_tokens WHERE deleted_at is NULL AND device_id = ${deviceId} AND user_id = ${userId}`
-        )[0]
-      },
-      deleteOne: async (params: { deviceId: string; userId?: number }): Promise<void> => {
-        await this.sql<UserPushToken[]>`
-        UPDATE user_push_tokens
-          SET updated_at = NOW(), deleted_at = NOW()
-          WHERE device_id = ${params.deviceId} ${
-          params.userId ? this.sql`AND user_id = ${params.userId}` : this.sql``
-        }
-          RETURNING *`
-      },
-      deleteByUser: async (params: { userId: number }): Promise<void> => {
-        await this.sql<UserPushToken[]>`
-            UPDATE user_push_tokens
-            SET updated_at = NOW(), deleted_at = NOW()
-            WHERE user_id = ${params.userId}
-            RETURNING *`
-      },
-    }
   }
 
   get authAudit() {

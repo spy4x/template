@@ -188,6 +188,9 @@ CREATE TABLE user_push_tokens (
 CREATE INDEX idx_user_push_tokens_by_deleted_at ON user_push_tokens (deleted_at);
 CREATE INDEX idx_user_push_tokens_by_user_id_deleted_at ON user_push_tokens (user_id, deleted_at);
 CREATE INDEX idx_user_push_tokens_by_device_user ON user_push_tokens (device_id, user_id);
+CREATE UNIQUE INDEX idx_user_push_tokens_live_by_user_device
+    ON user_push_tokens (user_id, device_id)
+    WHERE deleted_at IS NULL;
 
 CREATE TABLE audit_events (
     id BIGSERIAL PRIMARY KEY,

@@ -1,6 +1,6 @@
 import { RedisKvStore } from "@spy4x/server/kv"
 import type { Type } from "arktype"
-import { AuthAudit, User, UserPushToken } from "@domain/identity"
+import { AuthAudit, User } from "@domain/identity"
 import { config } from "../services/config.ts"
 
 import { buildMethods as buildMethodsBase } from "@spy4x/platform/cache"
@@ -21,7 +21,6 @@ function buildMethods<T>(prefix: string, schema?: Type) {
 
 export class PublicAPICache {
   user = buildMethods<User>(`user`)
-  userPushToken = buildMethods<UserPushToken>(`userPushToken`)
   authAudit = buildMethods<AuthAudit>(`authAudit`)
 }
 
