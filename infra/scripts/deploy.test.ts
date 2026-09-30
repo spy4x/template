@@ -40,7 +40,7 @@ function excludedBeforeIncludes(args: string[], path: string): boolean {
   })
 }
 
-Deno.test("planDeploy's file copy excludes env files in apps, libs, infra and infra/envs, and the web push keys", () => {
+Deno.test("planDeploy's file copy excludes every env file and the web push keys", () => {
   const envFile = "infra/secrets/home-server"
   const [files] = planDeploy({ SSH_TO_SERVER: "h", PATH_ON_SERVER: "/srv/app" }, envFile)
   for (
@@ -107,14 +107,14 @@ Deno.test("planDeploy creates the web push keys on the server before starting th
   const [server, command] = steps[2].args
   expect(steps[2].command).toBe("ssh")
   expect(server).toBe("h")
-  // Only a missing file is generated, so a key that exists on the server is never replaced.
-  expect(command).toContain(`if [ ! -e ${VAPID_PATH} ]; then`)
-  expect(command).toContain(`task vapid-key:create`)
-  expect(command).toContain(`umask 077`)
-  expect(command).toContain(`chmod 600 ${VAPID_PATH}`)
-  // An empty directory left by an earlier start is removed; rmdir cannot delete a file.
-  expect(command).toContain(`if [ -d ${VAPID_PATH} ]; then rmdir ${VAPID_PATH}; fi`)
-  expect(command).toMatch(/^cd '\/srv\/app' && /)
+  // In this order: an empty directory left by an earlier start goes first (rmdir cannot delete a
+  // file), then only a missing file is generated, so a key on the server is never replaced.
+  expect(command).toBe(
+    `cd '/srv/app' && if [ -d ${VAPID_PATH} ]; then rmdir ${VAPID_PATH}; fi && ` +
+      `if [ ! -e ${VAPID_PATH} ]; then ` +
+      `(umask 077 && PATH="$HOME/.deno/bin:$PATH" deno task vapid-key:create); fi && ` +
+      `chmod 600 ${VAPID_PATH}`,
+  )
 })
 
 Deno.test("planDeploy runs the key step with the configured Deno", () => {
