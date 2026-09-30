@@ -51,7 +51,8 @@ function isSignOutOwed(): boolean {
 
 /**
  * Ends the server's session if an earlier sign-out could not reach it. The flag is cleared only
- * when the server answers with success; while it is unreachable or failing, the flag stays. Resolves whether it is settled.
+ * when the server answers with success; while it is unreachable or failing, the flag stays.
+ * Resolves whether it is settled.
  */
 export async function settleOwedSignOut(): Promise<boolean> {
   if (!isSignOutOwed()) return true
