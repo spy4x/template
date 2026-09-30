@@ -116,4 +116,38 @@ test.describe("groups over the socket", () => {
       await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
     }
   })
+  test("signing out in one tab signs the other tab out within seconds", async ({ page, request }) => {
+    const username = "e2e_groups_socket_twotabs"
+    const password = "Passw0rd!"
+    await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+    try {
+      const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
+        headers,
+        data: { username, password },
+      })
+      expect(signUp.ok()).toBe(true)
+
+      await page.goto("/sign-in")
+      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-password]").fill(password)
+      await page.locator("[data-e2e=auth-form-submit]").click()
+      await page.waitForURL("/")
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+
+      // A second tab of the same browser shares the session cookie and opens its own socket.
+      const other = await page.context().newPage()
+      await other.goto("/")
+      await expect(other.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+
+      await page.locator("[data-e2e=shell-user-menu-button]").click()
+      await page.getByRole("menuitem", { name: "Sign out" }).click()
+      await page.locator("[data-e2e=signin-required]").waitFor()
+
+      // The API closes the other tab's socket when the session ends, so it does not have to wait
+      // for the 15 second sweep.
+      await expect(other.locator("[data-e2e=signin-required]")).toBeVisible({ timeout: 5_000 })
+    } finally {
+      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+    }
+  })
 })
