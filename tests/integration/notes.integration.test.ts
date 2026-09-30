@@ -143,6 +143,19 @@ async function outbox(sql: postgres.Sql, groupId: string): Promise<OutboxRow[]> 
   `
 }
 
+/** Waits, for at most five seconds, until `count` statements wait on a row lock. */
+async function waitForLockWaiters(sql: postgres.Sql, count: number): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const [{ waiting }] = await sql<{ waiting: number }[]>`
+      SELECT count(*)::int AS waiting FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event_type = 'Lock'
+    `
+    if (waiting >= count) return
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error(`Fewer than ${count} statements waited on the row lock within five seconds`)
+}
+
 async function refusal(promise: Promise<unknown>): Promise<unknown> {
   return await promise.then(() => null, (error) => error)
 }
@@ -244,6 +257,145 @@ Deno.test("notes against Postgres", async (t) => {
         )
         expect([note.title, note.version]).toEqual(["Owner's edit", 2])
         expect(await nextSequence(sql, groupId)).toBe(sequence)
+      },
+    )
+
+    await t.step(
+      "a member of one group cannot read, update or delete another group's note",
+      async () => {
+        const x = await seedGroup(sql)
+        const y = await seedGroup(sql)
+        const id = crypto.randomUUID()
+        await commands.execute(
+          new NoteCreateCommand({
+            actor: actor(x.owner),
+            groupId: x.groupId,
+            id,
+            title: "X's",
+            body: "",
+          }),
+        )
+        const sequenceX = await nextSequence(sql, x.groupId)
+        const sequenceY = await nextSequence(sql, y.groupId)
+
+        // Y's owner passes the role check for Y, then names X's note.
+        const asY = { actor: actor(y.owner), groupId: y.groupId, id }
+        const refused = [
+          await refusal(commands.execute(
+            new NoteUpdateCommand({ ...asY, title: "Taken over", body: "", version: 1 }),
+          )),
+          await refusal(commands.execute(new NoteDeleteCommand({ ...asY, version: 1 }))),
+          await refusal(queries.execute(new NoteGetQuery(asY))),
+        ]
+
+        for (const error of refused) {
+          expect(error).toBeInstanceOf(NoteError)
+          expect((error as NoteError).code).toBe("NOTE_NOT_FOUND")
+        }
+        const { note } = await queries.execute(
+          new NoteGetQuery({ actor: actor(x.owner), groupId: x.groupId, id }),
+        )
+        expect([note.title, note.version]).toEqual(["X's", 1])
+        expect(await nextSequence(sql, x.groupId)).toBe(sequenceX)
+        expect(await nextSequence(sql, y.groupId)).toBe(sequenceY)
+      },
+    )
+
+    await t.step(
+      "of four concurrent updates at the same version, one wins and the others conflict",
+      async () => {
+        const { groupId, owner } = await seedGroup(sql)
+        const id = crypto.randomUUID()
+        await commands.execute(
+          new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Start", body: "" }),
+        )
+
+        // A second connection holds the note's row lock, so all four updates are waiting on it
+        // at once before any of them may write: the race is forced, not left to timing.
+        const holder = await sql.reserve()
+        let outcomes: PromiseSettledResult<unknown>[]
+        try {
+          await holder`BEGIN`
+          await holder`SELECT id FROM notes WHERE id = ${id} FOR UPDATE`
+          const racing = Promise.allSettled([1, 2, 3, 4].map((writer) =>
+            commands.execute(
+              new NoteUpdateCommand({
+                actor: actor(owner),
+                groupId,
+                id,
+                title: `Writer ${writer}`,
+                body: "",
+                version: 1,
+              }),
+            )
+          ))
+          await waitForLockWaiters(sql, 4)
+          await holder`COMMIT`
+          outcomes = await racing
+        } finally {
+          holder.release()
+        }
+
+        const won = outcomes.filter((outcome) => outcome.status === "fulfilled")
+        const lost = outcomes.flatMap((outcome) =>
+          outcome.status === "rejected" ? [outcome.reason] : []
+        )
+        expect(won.length).toBe(1)
+        expect(lost.length).toBe(3)
+        for (const error of lost) {
+          expect(error).toBeInstanceOf(NoteVersionConflictError)
+          expect((error as NoteVersionConflictError).currentVersion).toBe(2)
+        }
+        const { note } = await queries.execute(
+          new NoteGetQuery({ actor: actor(owner), groupId, id }),
+        )
+        expect(note.version).toBe(2)
+        expect((await outbox(sql, groupId)).map((row) => row.eventKind)).toEqual([
+          "note.created",
+          "note.updated",
+        ])
+      },
+    )
+
+    await t.step(
+      "a failed outbox insert rolls back the note write and the sequence change",
+      async () => {
+        const { groupId, owner } = await seedGroup(sql)
+        const id = crypto.randomUUID()
+        await commands.execute(
+          new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Kept", body: "" }),
+        )
+        const sequence = await nextSequence(sql, groupId)
+
+        // Only this test's schema gets the constraint, and only for this step. NOT VALID leaves the
+        // rows earlier steps wrote alone and checks only new ones.
+        await sql`
+          ALTER TABLE outbox_events
+          ADD CONSTRAINT test_refuse_note_updates CHECK (event_kind <> 'note.updated') NOT VALID
+        `
+        let failure: unknown
+        try {
+          failure = await refusal(commands.execute(
+            new NoteUpdateCommand({
+              actor: actor(owner),
+              groupId,
+              id,
+              title: "Lost",
+              body: "",
+              version: 1,
+            }),
+          ))
+        } finally {
+          await sql`ALTER TABLE outbox_events DROP CONSTRAINT test_refuse_note_updates`
+        }
+
+        expect(String(failure)).toContain("test_refuse_note_updates")
+        expect(await nextSequence(sql, groupId)).toBe(sequence)
+        expect((await outbox(sql, groupId)).map((row) => row.eventKind)).toEqual(["note.created"])
+        const { note } = await queries.execute(
+          new NoteGetQuery({ actor: actor(owner), groupId, id }),
+        )
+        expect([note.title, note.version]).toEqual(["Kept", 1])
       },
     )
 
