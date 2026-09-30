@@ -1,9 +1,9 @@
 import type { ApiSuccessResponse, TotpConnectStartResponse, User } from "@domain/identity"
 import { apiFetch } from "./api.ts"
-import { sessionState, SessionUser } from "./session.ts"
+import { PendingSecondFactor, sessionState, SessionUser } from "./session.ts"
 
 export async function bootstrapSession(): Promise<void> {
-  const me = await apiFetch<User>("/api/auth/me")
+  const me = await apiFetch<User | PendingSecondFactor>("/api/auth/me")
   if (!me.ok) {
     sessionState.value = {
       ...sessionState.value,
@@ -13,16 +13,18 @@ export async function bootstrapSession(): Promise<void> {
     }
     return
   }
+  // 202 carries no profile: the session owes its one-time code, so there is no user yet.
+  const isMfaRequired = me.status === 202
   sessionState.value = {
     ...sessionState.value,
-    user: me.data,
-    isMfaRequired: me.status === 202,
+    user: isMfaRequired ? null : me.data as User,
+    isMfaRequired,
     isReady: true,
   }
 }
 
 async function handleAuthResponse(
-  result: Awaited<ReturnType<typeof apiFetch<SessionUser>>>,
+  result: Awaited<ReturnType<typeof apiFetch<SessionUser | PendingSecondFactor>>>,
 ): Promise<{ ok: boolean; mfaRequired: boolean; error?: string }> {
   if (!result.ok) {
     return { ok: false, mfaRequired: false, error: result.error.message }
@@ -30,7 +32,7 @@ async function handleAuthResponse(
   const mfaRequired = result.status === 202
   sessionState.value = {
     ...sessionState.value,
-    user: result.data,
+    user: mfaRequired ? null : result.data as User,
     isMfaRequired: mfaRequired,
     isReady: true,
   }
@@ -42,7 +44,7 @@ export async function signIn(username: string, password: string): Promise<{
   mfaRequired: boolean
   error?: string
 }> {
-  const result = await apiFetch<SessionUser>("/api/auth/password/check", {
+  const result = await apiFetch<SessionUser | PendingSecondFactor>("/api/auth/password/check", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   })
@@ -54,7 +56,7 @@ export async function signUp(username: string, password: string): Promise<{
   mfaRequired: boolean
   error?: string
 }> {
-  const result = await apiFetch<SessionUser>("/api/auth/password/sign-up", {
+  const result = await apiFetch<SessionUser | PendingSecondFactor>("/api/auth/password/sign-up", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   })

@@ -34,7 +34,7 @@ function Frame() {
     )
   }
   return (
-    <PublicFrame canSignOut={session.user !== null}>
+    <PublicFrame canSignOut={session.user !== null || session.isMfaRequired}>
       <Routes />
     </PublicFrame>
   )
