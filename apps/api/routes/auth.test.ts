@@ -27,6 +27,7 @@ function fakeTotpFailures(calls: string[], lockedForMs = 0): TotpFailures {
   return {
     begin: () => (calls.push("begin"), Promise.resolve(lockedForMs)),
     refund: () => (calls.push("refund"), Promise.resolve()),
+    fail: () => (calls.push("fail"), Promise.resolve()),
   }
 }
 
@@ -543,11 +544,11 @@ describe("auth routes count wrong one-time codes per user", () => {
       expect(calls).toEqual([route.operation])
     })
 
-    it(`keeps the count after a wrong ${route.path}`, async () => {
+    it(`records a wrong ${route.path}`, async () => {
       const { app, calls, failureCalls } = buildApp(undefined, { succeed: false })
       await send(app, route, sameOriginHeaders)
 
-      expect(failureCalls).toEqual(["begin"])
+      expect(failureCalls).toEqual(["begin", "fail"])
       expect(calls).toEqual([route.operation])
     })
   }

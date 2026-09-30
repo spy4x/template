@@ -10,8 +10,9 @@
  * How a check goes: {@link TotpFailures.begin} runs first and counts the check as a failure in
  * advance; a correct code then calls {@link TotpFailures.refund}, which gives that one slot back.
  * A correct code does not wipe the count: that would hand a guesser six fresh guesses every time
- * the owner signs in. After {@link QUIET_RESET_MS} without a new failure the count starts again
- * from 0, so an owner who mistypes once a month is never locked. Counting first, in one locked
+ * the owner signs in. A wrong code also calls {@link TotpFailures.fail}, which stamps the time.
+ * After {@link QUIET_RESET_MS} without a wrong code the count starts again from 0, however often
+ * the owner signed in meanwhile. Counting first, in one locked
  * transaction, means parallel guesses cannot all slip through before the first one is counted.
  * While a lock runs, every check is refused without looking at the code, a correct one included:
  * a lock that let the right code through would let a lucky guess through too. The price is that
@@ -56,8 +57,13 @@ export interface TotpFailures {
    * running. A user with no enrolment has nothing to guess, so it always returns 0.
    */
   begin(userId: number): Promise<number>
-  /** Gives back the slot {@link begin} took, after a correct code, and ends the lock it set. */
+  /**
+   * Gives back the slot {@link begin} took, after a correct code. Ends the lock only when the
+   * count is back to the free failures: a lock a concurrent wrong code set stays.
+   */
   refund(userId: number): Promise<void>
+  /** Records a wrong code: the time the count last grew, which the quiet-days reset reads. */
+  fail(userId: number): Promise<void>
 }
 
 /** Options for {@link createTotpFailures}. */
@@ -87,6 +93,8 @@ export function createTotpFailures({ sql, clock = Date.now }: TotpFailuresOption
         const now = clock()
         const lockedUntil = row.lockedUntil?.getTime() ?? 0
         if (lockedUntil > now) return lockedUntil - now
+        // The reset stamps the time too, so parallel checks that arrive after a quiet spell reset
+        // the count once, not once each.
         const quiet = row.lastFailureAt !== null &&
           now - row.lastFailureAt.getTime() >= QUIET_RESET_MS
         const failures = (quiet ? 0 : row.failedAttempts) + 1
@@ -95,7 +103,7 @@ export function createTotpFailures({ sql, clock = Date.now }: TotpFailuresOption
           UPDATE user_totp
           SET failed_attempts = ${failures},
               locked_until = ${delay === 0 ? null : new Date(now + delay)},
-              last_failure_at = ${new Date(now)}
+              last_failure_at = ${quiet ? new Date(now) : row.lastFailureAt}
           WHERE user_id = ${userId}
         `
         return 0
@@ -103,8 +111,15 @@ export function createTotpFailures({ sql, clock = Date.now }: TotpFailuresOption
     refund: async (userId) => {
       await sql`
         UPDATE user_totp
-        SET failed_attempts = GREATEST(failed_attempts - 1, 0), locked_until = NULL
+        SET failed_attempts = GREATEST(failed_attempts - 1, 0),
+            locked_until = CASE WHEN failed_attempts - 1 <= ${FREE_FAILURES} THEN NULL
+                                ELSE locked_until END
         WHERE user_id = ${userId}
+      `
+    },
+    fail: async (userId) => {
+      await sql`
+        UPDATE user_totp SET last_failure_at = ${new Date(clock())} WHERE user_id = ${userId}
       `
     },
   }

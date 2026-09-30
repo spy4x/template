@@ -104,7 +104,9 @@ Deno.test("totp failure counter starts again from 0 after seven quiet days", asy
     const late = await insertEnrolledUser(sql)
     for (const userId of [early, late]) {
       for (let attempt = 0; attempt <= FREE_FAILURES; attempt++) {
-        await createTotpFailures({ sql, clock: () => T0 }).begin(userId)
+        const counter = createTotpFailures({ sql, clock: () => T0 })
+        await counter.begin(userId)
+        await counter.fail(userId)
       }
     }
     // One millisecond short of seven days: the seventh failure counts and doubles the lock.
@@ -133,7 +135,10 @@ Deno.test("totp failure counter caps a guesser under 600 guesses in a year", asy
     const counter = createTotpFailures({ sql, clock: () => now })
     while (now < T0 + year) {
       const waitMs = await counter.begin(userId)
-      if (waitMs === 0) guesses += 1
+      if (waitMs === 0) {
+        guesses += 1
+        await counter.fail(userId)
+      }
       now = nextTry(now, waitMs)
     }
     return guesses
@@ -157,6 +162,71 @@ Deno.test("totp failure counter caps a guesser under 600 guesses in a year", asy
     )
     expect(patientGuesses).toBeLessThan(600)
     // 3 valid codes out of 10^6 at any moment: 600 guesses is a chance of 0.18%.
+  })
+})
+
+Deno.test("totp failure counter lets only six of twenty parallel guesses run after a quiet spell", async () => {
+  await withSchema(async (_open, sql) => {
+    const userId = await insertEnrolledUser(sql)
+    const before = createTotpFailures({ sql, clock: () => T0 })
+    for (let attempt = 0; attempt < FREE_FAILURES; attempt++) {
+      await before.begin(userId)
+      await before.fail(userId)
+    }
+    const counter = createTotpFailures({ sql, clock: () => T0 + QUIET_RESET_MS })
+    const waits = await Promise.all(Array.from({ length: 20 }, () => counter.begin(userId)))
+    expect(waits.filter((wait) => wait === 0)).toHaveLength(FREE_FAILURES + 1)
+  })
+})
+
+Deno.test("totp failure counter is free again after seven days of only correct codes", async () => {
+  await withSchema(async (_open, sql) => {
+    const userId = await insertEnrolledUser(sql)
+    let now = T0
+    const counter = createTotpFailures({ sql, clock: () => now })
+    for (let attempt = 0; attempt < FREE_FAILURES; attempt++) {
+      await counter.begin(userId)
+      await counter.fail(userId)
+    }
+    // The owner signs in with the right code every day for a week.
+    for (let day = 1; day <= 7; day++) {
+      now = T0 + day * 24 * 60 * 60_000
+      expect(await counter.begin(userId)).toBe(0)
+      await counter.refund(userId)
+    }
+    for (let attempt = 0; attempt <= FREE_FAILURES; attempt++) {
+      expect(await counter.begin(userId)).toBe(0)
+    }
+    expect(await counter.begin(userId)).toBeGreaterThan(0)
+  })
+})
+
+Deno.test("totp failure counter ends the lock a correct code's own check set", async () => {
+  await withSchema(async (_open, sql) => {
+    const userId = await insertEnrolledUser(sql)
+    const counter = createTotpFailures({ sql, clock: () => T0 })
+    for (let attempt = 0; attempt < FREE_FAILURES; attempt++) {
+      await counter.begin(userId)
+      await counter.fail(userId)
+    }
+    // The sixth check sets the lock; it was the right code, so the lock goes with the slot.
+    expect(await counter.begin(userId)).toBe(0)
+    await counter.refund(userId)
+    expect(await counter.begin(userId)).toBe(0)
+  })
+})
+
+Deno.test("totp failure counter keeps a lock that other wrong codes still justify", async () => {
+  await withSchema(async (_open, sql) => {
+    const userId = await insertEnrolledUser(sql)
+    let now = T0
+    const counter = createTotpFailures({ sql, clock: () => now })
+    for (let attempt = 0; attempt <= FREE_FAILURES; attempt++) await counter.begin(userId)
+    now = T0 + FIRST_LOCK_MS
+    // The seventh check sets a 30 minute lock. Refunding it leaves six failures counted.
+    expect(await counter.begin(userId)).toBe(0)
+    await counter.refund(userId)
+    expect(await counter.begin(userId)).toBeGreaterThan(0)
   })
 })
 

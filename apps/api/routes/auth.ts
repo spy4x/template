@@ -30,7 +30,7 @@ export interface AuthRouteDependencies {
 /**
  * Runs one one-time-code check under the failure counter. While the user is locked the check does
  * not run at all, so not even a correct code gets through, and the answer is 429 with
- * `Retry-After`. A correct code gives its slot back.
+ * `Retry-After`. A wrong code is recorded, a correct one gives its slot back.
  */
 async function checkUnderFailureCount(
   c: Context<APIContext>,
@@ -44,7 +44,10 @@ async function checkUnderFailureCount(
     c.header("Retry-After", String(Math.ceil(waitMs / 1000)))
     return c.json({ error: "Too many wrong codes, try again later." }, 429)
   }
-  if (!(await check())) return wrongAnswer()
+  if (!(await check())) {
+    await totpFailures.fail(userId)
+    return wrongAnswer()
+  }
   await totpFailures.refund(userId)
   return true
 }
