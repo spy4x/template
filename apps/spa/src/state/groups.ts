@@ -56,6 +56,7 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
   const creating = signal(false)
   const error = signal<string | null>(null)
   let inFlight: Promise<void> | null = null
+  let queued: Promise<void> | null = null
 
   async function readAll(via: ReadChannel): Promise<void> {
     const all: GroupItem[] = []
@@ -70,18 +71,27 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
     for (const group of all) dependencies.advance(group.id, Number(group.changeSequence))
   }
 
-  /**
-   * Reads every group, over REST unless told otherwise. A call while a read is running joins it
-   * instead of starting another.
-   */
-  function refresh(via: ReadChannel = "rest"): Promise<void> {
-    if (inFlight) return inFlight
+  function start(via: ReadChannel): Promise<void> {
     loading.value = true
     inFlight = readAll(via).finally(() => {
       inFlight = null
       loading.value = false
     })
     return inFlight
+  }
+
+  /**
+   * Reads every group, over REST unless told otherwise. A read that is already running may have
+   * started before the change that asked for this one, so it is not joined: exactly one more read
+   * is queued behind it, and every call made meanwhile shares that one.
+   */
+  function refresh(via: ReadChannel = "rest"): Promise<void> {
+    if (!inFlight) return start(via)
+    queued ??= inFlight.catch(() => {}).then(() => {
+      queued = null
+      return start(via)
+    })
+    return queued
   }
 
   /** The refresh button: reads over the socket, and shows a failure instead of rejecting. */
@@ -122,6 +132,7 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
     loading.value = false
     creating.value = false
     inFlight = null
+    queued = null
   }
 
   return { groups, name, loading, creating, error, refresh, refreshFromUser, create, reset }

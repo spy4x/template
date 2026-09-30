@@ -16,6 +16,12 @@ function item(id: string, sequence: string, name = id): GroupItem {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => (resolve = r))
+  return { promise, resolve }
+}
+
 function harness(overrides: { pages?: GroupPage[]; create?: () => Promise<{ group: GroupItem }> }) {
   const pages = [...(overrides.pages ?? [{ groups: [], nextCursor: null }])]
   const reads: { cursor: string | null; via: ReadChannel }[] = []
@@ -52,12 +58,34 @@ describe("groups store", () => {
     expect(advanced).toEqual([["a", 3], ["b", 7]])
   })
 
-  it("lets a read that starts while another runs join it", async () => {
+  it("reads once more after a running read, and lets calls made meanwhile share that read", async () => {
     const { store, reads } = harness({})
 
-    await Promise.all([store.refresh(), store.refresh()])
+    await Promise.all([store.refresh(), store.refresh(), store.refresh()])
 
-    expect(reads).toHaveLength(1)
+    expect(reads).toHaveLength(2)
+  })
+
+  it("shows a group added while a read was running", async () => {
+    const stale = deferred<GroupPage>()
+    const served = [
+      stale.promise,
+      Promise.resolve({ groups: [item("a", "1"), item("new", "1")], nextCursor: null }),
+    ]
+    const store = createGroupsStore({
+      fetchPage: () => served.shift() ?? Promise.resolve({ groups: [], nextCursor: null }),
+      create: () => Promise.reject(new Error("unused")),
+      advance: () => {},
+      newId: () => "x",
+    })
+
+    const first = store.refresh()
+    // The change lands after the first read started; its hint asks for another read.
+    const hinted = store.refresh()
+    stale.resolve({ groups: [item("a", "1")], nextCursor: null })
+    await Promise.all([first, hinted])
+
+    expect(store.groups.value.map((group) => group.id)).toEqual(["a", "new"])
   })
 
   it("replaces the list with the server's answer, dropping a group it no longer lists", async () => {
