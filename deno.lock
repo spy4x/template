@@ -107,6 +107,7 @@
     "npm:esbuild@~0.25.5": "0.25.12",
     "npm:playwright@1.57.0": "1.57.0",
     "npm:postgres@3.4.7": "3.4.7",
+    "npm:preact-render-to-string@6.7.0": "6.7.0_preact@10.29.8",
     "npm:preact-render-to-string@^6.6.3": "6.7.0_preact@10.29.8",
     "npm:preact@10.29.8": "10.29.8_preact-render-to-string@6.7.0",
     "npm:preact@^10.28.2": "10.29.8_preact-render-to-string@6.7.0",
@@ -169,7 +170,7 @@
         "npm:@preact/signals@^2.5.1",
         "npm:esbuild-wasm",
         "npm:esbuild@0.25.7",
-        "npm:preact-render-to-string",
+        "npm:preact-render-to-string@^6.6.3",
         "npm:preact@^10.28.2",
         "npm:preact@^10.29.1"
       ]
@@ -2342,6 +2343,11 @@
           "npm:@tailwindcss/vite@4.1.12",
           "npm:tailwindcss@4.1.12",
           "npm:vite@7.3.6"
+        ]
+      },
+      "libs/ui": {
+        "dependencies": [
+          "npm:preact-render-to-string@6.7.0"
         ]
       }
     }

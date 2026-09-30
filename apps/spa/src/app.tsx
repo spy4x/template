@@ -10,7 +10,7 @@ import { wsClient } from "./state/ws.ts"
 import { toasts } from "./state/toasts.ts"
 import { AuthView } from "./views/AuthView.tsx"
 import { ProfileView } from "./views/ProfileView.tsx"
-import { AppShell, PublicFrame } from "./components/AppShell.tsx"
+import { AppShell, PublicFrame } from "./views/AppShell.tsx"
 
 function Routes() {
   return (
