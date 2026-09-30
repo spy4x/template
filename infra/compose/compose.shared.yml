@@ -453,6 +453,49 @@ services:
       - default
       - proxy
 
+  # Drains outbox_events, announces committed group changes to the API (pg_notify, which the API
+  # turns into a live hint for other tabs) and sweeps expired idempotency keys. Same build as the
+  # API, so both run one image; only the command differs. No port: nothing connects to it.
+  # Connections: the worker's pool (max 10) plus the API's (max 10, plus one LISTEN connection)
+  # plus postgres-exporter stay under the db's max_connections=30.
+  worker:
+    container_name: ${PROJECT}-worker
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: apps/api/dockerfile
+      args:
+        - DENO_VERSION=${DENO_VERSION}
+    command: [ 'deno', 'run', '--allow-sys', '--allow-env', '--allow-net', 'apps/worker/+main.ts' ]
+    volumes:
+      - ../../apps:/app/apps:z
+      - ../../libs:/app/libs:z
+      - ../../deno.jsonc:/app/deno.jsonc:z
+    user: "1000:1000"
+    environment:
+      - HOME=/home/deno
+      - DENO_DIR=/tmp/deno-cache
+      - DENO_LOG=${DENO_LOG}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
+      - DB_NAME=${DB_NAME}
+    deploy:
+      resources:
+        limits:
+          # Defaults, so an env file written before the worker existed still deploys.
+          cpus: '${WORKER_CPU_LIMIT:-0.5}'
+          memory: '${WORKER_MEM_LIMIT:-256M}'
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
   spa:
     container_name: ${PROJECT}-spa
     restart: unless-stopped
