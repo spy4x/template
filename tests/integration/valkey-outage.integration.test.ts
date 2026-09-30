@@ -5,7 +5,8 @@ import postgres from "postgres"
 import { RedisKvStore } from "@spy4x/server/kv"
 import { buildMethods } from "@spy4x/platform/cache"
 import { ONE_MONTH_IN_SECONDS } from "@spy4x/platform/universal/time-constants"
-import type { User } from "@domain/identity"
+import { SecondFactorStatus } from "@spy4x/server/sign-in"
+import { type User, UserMFAStatus } from "@domain/identity"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createCacheService } from "../../apps/api/services/cache-service.ts"
 import { createSignIn } from "../../apps/api/services/sign-in.ts"
@@ -113,7 +114,18 @@ class FakeValkey {
   }
 }
 
-Deno.test("a signed-in request survives a Valkey outage and recovers after it", async () => {
+/** A database schema of its own, a fake Valkey behind the API's real `RedisKvStore`, and an app. */
+async function withValkeyApp(
+  body: (fixture: {
+    sql: postgres.Sql
+    db: AppDbBase
+    app: Hono<APIContext>
+    reports: string[]
+    valkey: () => FakeValkey
+    restartValkey: () => void
+    stopValkey: () => void
+  }) => Promise<void>,
+): Promise<void> {
   const settings = requireDbConnection()
   const admin = postgres({ ...settings, max: 1 })
   const schema = `valkey_test_${crypto.randomUUID().replaceAll("-", "")}`
@@ -150,18 +162,50 @@ Deno.test("a signed-in request survives a Valkey outage and recovers after it", 
       const result = await signIn.signUp(c, "alice", "Passw0rd!")
       return result ? c.json(result.user) : c.json({ error: "refused" }, 401)
     })
+    app.post("/sign-in", async (c) => {
+      const result = await signIn.signIn(c, "alice", "Passw0rd!")
+      if (!result) return c.json({ error: "refused" }, 401)
+      return c.json(
+        result.user,
+        result.session.secondFactor === SecondFactorStatus.Pending ? 202 : 200,
+      )
+    })
     app.get("/me", signIn.auth.isAuthenticated2FA, (c) => c.json(c.get("auth")!.user))
+    await body({
+      sql,
+      db,
+      app,
+      reports,
+      valkey: () => valkey,
+      restartValkey: () => {
+        valkey = valkey.restart()
+      },
+      stopValkey: () => valkey.stop(),
+    })
+  } finally {
+    kv?.close()
+    valkey.stop()
+    await sql.end({ timeout: 5 })
+    await admin`DROP SCHEMA IF EXISTS ${admin(schema)} CASCADE`
+    await admin.end({ timeout: 5 })
+  }
+}
 
+const cookieOf = (response: Response) =>
+  response.headers.getSetCookie().map((line) => line.split(";")[0]).join("; ")
+
+Deno.test("a signed-in request survives a Valkey outage and recovers after it", async () => {
+  await withValkeyApp(async ({ db, app, reports, valkey, restartValkey, stopValkey }) => {
     const signUp = await app.request("http://local/sign-up", { method: "POST" })
     expect(signUp.status).toBe(200)
-    const cookie = signUp.headers.getSetCookie().map((line) => line.split(";")[0]).join("; ")
+    const cookie = cookieOf(signUp)
     const userId = (await signUp.json()).id as number
     const me = () => app.request("http://local/me", { headers: { cookie } })
 
     expect((await me()).status).toBe(200)
     expect(reports).toEqual([])
 
-    valkey.stop()
+    stopValkey()
     // The update commits to Postgres while Valkey cannot be told: its old copy must not come back.
     await db.user.updateOne({ id: userId, data: { firstName: "Changed" } })
     for (let i = 0; i < 3; i++) {
@@ -171,19 +215,37 @@ Deno.test("a signed-in request survives a Valkey outage and recovers after it", 
     }
     expect(reports.length).toBeGreaterThan(0)
 
-    valkey = valkey.restart()
+    restartValkey()
     await new Promise((resolve) => setTimeout(resolve, RETRY_MS * 2))
     expect((await me()).status).toBe(200)
     expect((await (await me()).json()).firstName).toBe("Changed")
-    expect(valkey.values.size).toBeGreaterThan(0)
+    expect(valkey().values.size).toBeGreaterThan(0)
     const reportsAfterRecovery = reports.length
     expect((await me()).status).toBe(200)
     expect(reports.length).toBe(reportsAfterRecovery)
-  } finally {
-    kv?.close()
-    valkey.stop()
-    await sql.end({ timeout: 5 })
-    await admin`DROP SCHEMA IF EXISTS ${admin(schema)} CASCADE`
-    await admin.end({ timeout: 5 })
-  }
+  })
+})
+
+Deno.test("a forged cached user row cannot turn a password into a full session", async () => {
+  await withValkeyApp(async ({ sql, db, app, valkey }) => {
+    const signUp = await app.request("http://local/sign-up", { method: "POST" })
+    expect(signUp.status).toBe(200)
+    const userId = (await signUp.json()).id as number
+    // Postgres says the user has an authenticator app.
+    await sql`
+      INSERT INTO user_totp (user_id, secret, confirmed_at)
+      VALUES (${userId}, ${"JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"}, NOW())
+    `
+    await sql`UPDATE users SET mfa = ${UserMFAStatus.CONFIGURED} WHERE id = ${userId}`
+    // Someone who can write to Valkey caches the same row with `mfa` reset to "not configured".
+    const key = `api:user_${userId}`
+    const forged = { ...(await db.user.findOne({ id: userId })), mfa: UserMFAStatus.NOT_CONFIGURED }
+    valkey().values.set(key, JSON.stringify(forged))
+    expect((await db.user.findOneCached({ id: userId }))?.mfa).toBe(UserMFAStatus.NOT_CONFIGURED)
+
+    const signedIn = await app.request("http://local/sign-in", { method: "POST" })
+    expect(signedIn.status).toBe(202)
+    const me = await app.request("http://local/me", { headers: { cookie: cookieOf(signedIn) } })
+    expect(me.status).toBe(401)
+  })
 })

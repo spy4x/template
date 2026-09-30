@@ -26,7 +26,10 @@ const noCache: RowCache<User> = {
 /** Options for {@link AppDbBase}. */
 export interface AppDbBaseOptions {
   sql: Sql
-  /** Cache for `users` rows. Defaults to none. */
+  /**
+   * Cache for `users` rows, read only through `user.findOneCached` (display data). Defaults to
+   * none. Nothing that decides authentication or a role reads it: see `user.findOne`.
+   */
   userCache?: RowCache<User>
 }
 
@@ -74,8 +77,22 @@ export class AppDbBase extends DbServiceBase {
 
   get user() {
     const cache = this.userCache
+    const cached = this.buildMethods<User, UserBase, Partial<UserBase>>(`users`, cache)
+    const fresh = this.buildMethods<User, UserBase, Partial<UserBase>>(`users`, noCache)
     return {
-      ...this.buildMethods<User, UserBase, Partial<UserBase>>(`users`, cache),
+      ...cached,
+      /**
+       * One row straight from Postgres. Everything that decides authentication or a role reads
+       * through this (`mfa`, `role`): Valkey is a separate service that another process may be able
+       * to write to, so what it holds must never decide who is allowed in. It costs one indexed
+       * query by primary key per call.
+       */
+      findOne: fresh.findOne,
+      /**
+       * The same row through the Valkey cache, up to 30 days old or forged. For display only:
+       * never let `mfa` or `role` from this row decide anything.
+       */
+      findOneCached: cached.findOne,
       /** Creates the profile row of a new auth user; `users.id` is the auth user's id. */
       createForAuthUser: (id: number, data: UserBase): Promise<User> =>
         this.createOne<User>(
