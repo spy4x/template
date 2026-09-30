@@ -10,6 +10,7 @@ import {
   NoteDeleteCommand,
   NoteError,
   NoteGetQuery,
+  type NoteListPageKey,
   NoteListQuery,
   NoteUpdateCommand,
   NoteVersionConflictError,
@@ -383,5 +384,42 @@ Deno.test("notes against Postgres", async (t) => {
       expect(second.notes.map((note) => note.title)).toEqual(["one"])
       expect(second.nextPageKey).toBe(null)
     })
+
+    await t.step(
+      "the list pages through notes written in the same millisecond, each once",
+      async () => {
+        const { groupId, owner } = await seedGroup(sql)
+        const notes = new PostgresNoteRepository(sql)
+        const ids: string[] = []
+        for (const title of ["a", "b", "c"]) {
+          const { note } = await notes.create(
+            { groupId, id: crypto.randomUUID(), title, body: "" },
+            owner,
+          )
+          ids.push(note.id)
+        }
+        // Three writes ten microseconds apart, inside one millisecond. The times are built in SQL:
+        // postgres.js would send a timestamp parameter through a Date, which drops the microseconds.
+        for (const [index, id] of ids.entries()) {
+          await sql`
+            UPDATE notes
+            SET updated_at = TIMESTAMPTZ '2026-10-02 12:00:00.12345+00'
+              - make_interval(secs => ${index * 10} / 1000000.0)
+            WHERE id = ${id}
+          `
+        }
+
+        const seen: string[] = []
+        let after: NoteListPageKey | undefined
+        for (let page = 0; page < 5; page++) {
+          const result = await notes.list(groupId, after ? { limit: 1, after } : { limit: 1 })
+          seen.push(...result.notes.map((note) => note.id))
+          if (!result.nextPageKey) break
+          after = result.nextPageKey
+        }
+
+        expect(seen.toSorted()).toEqual(ids.toSorted())
+      },
+    )
   })
 })
