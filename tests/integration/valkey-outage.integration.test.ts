@@ -251,5 +251,15 @@ Deno.test("a forged cached user row cannot turn a password into a full session",
     expect(signedIn.status).toBe(202)
     const me = await app.request("http://local/me", { headers: { cookie: cookieOf(signedIn) } })
     expect(me.status).toBe(401)
+    // A session that claims no second factor is required is refused too: whether the user owes one
+    // comes from Postgres, not from the cached row.
+    await sql`
+      UPDATE auth_sessions SET second_factor = ${SecondFactorStatus.NotRequired}
+      WHERE user_id = ${userId}
+    `
+    const notRequired = await app.request("http://local/me", {
+      headers: { cookie: cookieOf(signedIn) },
+    })
+    expect(notRequired.status).toBe(401)
   })
 })
