@@ -2,8 +2,8 @@
 
 > Written 2026-08-19 for whoever picks this up next, human or AI. It describes the
 > state of `master`, the decisions already made and why, the traps this codebase
-> has, and what to do next. Read [ADR 001](docs/decisions/001-deno-platform-template.md)
-> and [ADR 002](docs/decisions/002-realtime-transport-and-sync.md) first - they are
+> has, and what to do next. Read [ADR 001](decisions/001-deno-platform-template.md)
+> and [ADR 002](decisions/002-realtime-transport-and-sync.md) first - they are
 > authoritative and this file is not.
 
 ## What this repository is
@@ -250,7 +250,7 @@ middleware, which the WebSocket transport will bypass. That has to be solved
 before step 5, and the approach is still under discussion - see the open PR.
 
 Extraction from the sibling Financy project is tracked separately in
-[docs/financy-extraction-inventory.md](docs/financy-extraction-inventory.md);
+[docs/financy-extraction-inventory.md](financy-extraction-inventory.md);
 delete rows there as they land.
 
 ## Working agreements

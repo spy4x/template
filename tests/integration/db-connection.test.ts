@@ -25,7 +25,7 @@ function withDbEnv(overrides: Partial<Record<typeof DB_VARS[number], string>>, b
 Deno.test("requireDbConnection names every DB_* variable when none are set", () => {
   withDbEnv({}, () => {
     expect(() => requireDbConnection()).toThrow(
-      "integration test needs DB_HOST, DB_USER, DB_PASS, DB_NAME (recipe in HANDOFF.md)",
+      "integration test needs DB_HOST, DB_USER, DB_PASS, DB_NAME (recipe in docs/handoff.md)",
     )
   })
 })
@@ -33,7 +33,7 @@ Deno.test("requireDbConnection names every DB_* variable when none are set", () 
 Deno.test("requireDbConnection names only the variables that are missing", () => {
   withDbEnv({ DB_HOST: "127.0.0.1", DB_NAME: "template_test" }, () => {
     expect(() => requireDbConnection()).toThrow(
-      "integration test needs DB_USER, DB_PASS (recipe in HANDOFF.md)",
+      "integration test needs DB_USER, DB_PASS (recipe in docs/handoff.md)",
     )
   })
 })
@@ -72,7 +72,7 @@ Deno.test("requireDbConnection defaults DB_PORT to 5432", () => {
 Deno.test("requireDbConnection names a single missing variable", () => {
   withDbEnv({ DB_HOST: "127.0.0.1", DB_USER: "tester", DB_NAME: "template_test" }, () => {
     expect(() => requireDbConnection()).toThrow(
-      "integration test needs DB_PASS (recipe in HANDOFF.md)",
+      "integration test needs DB_PASS (recipe in docs/handoff.md)",
     )
   })
 })
