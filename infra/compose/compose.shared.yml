@@ -103,7 +103,9 @@ services:
 
   minio:
     container_name: ${PROJECT}-minio
-    image: minio/minio
+    # `pgsty/minio` and `pgsty/mc` are the community fork that keeps building MinIO: upstream's
+    # `minio/minio` and `minio/mc` refuse anonymous pulls. Same binaries, commands and env names.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     restart: unless-stopped
     entrypoint:
       - sh
@@ -141,7 +143,7 @@ services:
 
   minio-configure:
     container_name: ${PROJECT}-minio-configure
-    image: minio/mc
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
     depends_on:
       - minio
     volumes:
