@@ -249,6 +249,8 @@ Deno.test("a forged cached user row cannot turn a password into a full session",
 
     const signedIn = await app.request("http://local/sign-in", { method: "POST" })
     expect(signedIn.status).toBe(202)
+    // Signing in rewrote the cached row from Postgres; forge it again for the requests that follow.
+    valkey().values.set(key, JSON.stringify(forged))
     const me = await app.request("http://local/me", { headers: { cookie: cookieOf(signedIn) } })
     expect(me.status).toBe(401)
     // A session that claims no second factor is required is refused too: whether the user owes one
