@@ -1,6 +1,7 @@
 import { expect } from "@std/expect"
 import { afterEach, describe, it } from "@std/testing/bdd"
-import { bootstrapSession } from "./auth.ts"
+import { type User, UserMFAStatus } from "@domain/identity"
+import { bootstrapSession, totpConnectFinish, totpDisconnect } from "./auth.ts"
 import { sessionState } from "./session.ts"
 
 const realFetch = globalThis.fetch
@@ -57,5 +58,47 @@ describe("bootstrapSession", () => {
     expect(sessionState.value.user).toBeNull()
     expect(sessionState.value.isMfaRequired).toBe(false)
     expect(sessionState.value.isReady).toBe(true)
+  })
+})
+
+/** Makes every request answer 200 with `{ success: true }`. */
+function apiSucceeds() {
+  globalThis.fetch = () =>
+    Promise.resolve(
+      new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+}
+
+describe("two-factor enrolment", () => {
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    sessionState.value = { ...sessionState.value, user: null }
+  })
+
+  it("marks the user's authenticator app as connected after the first code", async () => {
+    sessionState.value = {
+      ...sessionState.value,
+      user: { ...user, mfa: UserMFAStatus.CONFIGURATION_NOT_FINISHED } as unknown as User,
+    }
+    apiSucceeds()
+
+    expect(await totpConnectFinish("123456")).toEqual({ ok: true })
+
+    expect(sessionState.value.user?.mfa).toBe(UserMFAStatus.CONFIGURED)
+  })
+
+  it("marks the user's authenticator app as removed after disabling", async () => {
+    sessionState.value = {
+      ...sessionState.value,
+      user: { ...user, mfa: UserMFAStatus.CONFIGURED } as unknown as User,
+    }
+    apiSucceeds()
+
+    expect(await totpDisconnect()).toEqual({ ok: true })
+
+    expect(sessionState.value.user?.mfa).toBe(UserMFAStatus.NOT_CONFIGURED)
   })
 })

@@ -20,8 +20,8 @@ import { requireDbConnection } from "./db-connection.ts"
  * Sign-up, sign-in, sign-out and the authenticator app against a real Postgres, through the exact
  * `createSignIn` and `AppDbBase` the API runs, and the migration onto the package's tables.
  *
- * Needs `DB_HOST`, `DB_USER`, `DB_PASS` and `DB_NAME` (recipe in HANDOFF.md). It fails when they
- * are missing rather than skipping.
+ * Needs `DB_HOST`, `DB_USER`, `DB_PASS` and `DB_NAME` (recipe in docs/handoff.md). It fails when
+ * they are missing rather than skipping.
  */
 
 const AUTH_MIGRATION = "2026_09_24_0001_auth_package_tables.sql"

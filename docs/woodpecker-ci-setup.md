@@ -19,7 +19,7 @@ check ──┬── build
 - `build` runs `deno task build` (the SPA production build).
 - `integration` runs `deno task test:integration` against a throw-away `postgres:16-alpine` service
   (user `tester`, password `ci-throwaway`, database `template_test`, reachable as host `postgres`).
-  It waits over TCP for the server, see HANDOFF.md trap 3.
+  It waits over TCP for the server, see docs/handoff.md trap 3.
 - `e2e` runs `deno task e2e url-filters` in `mcr.microsoft.com/playwright`, which ships Chromium and
   its system libraries, and installs Deno with npm. Playwright's own browser download, run through
   Deno in the plain Deno image, hangs. The image tag must equal the Playwright version in
@@ -210,7 +210,7 @@ Or configure agent to run privileged containers.
 Test the pipeline steps locally:
 
 ```bash
-# Run the checks, the integration tests (recipe in HANDOFF.md) and one e2e test
+# Run the checks, the integration tests (recipe in docs/handoff.md) and one e2e test
 deno task check
 deno task test:integration
 deno task e2e url-filters

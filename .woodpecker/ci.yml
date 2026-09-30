@@ -34,7 +34,7 @@ steps:
       DB_NAME: template_test
     commands:
       # Wait over TCP. Postgres first runs a temporary server that listens on a unix socket only,
-      # so a successful TCP connection means the real server is up (HANDOFF.md, trap 3).
+      # so a successful TCP connection means the real server is up (docs/handoff.md, trap 3).
       - |
           deno eval '
           for (let i = 0; i < 120; i++) {

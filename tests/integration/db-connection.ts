@@ -13,8 +13,8 @@ export interface DbConnectionSettings {
 
 /**
  * Postgres connection settings for the integration tier, read from `DB_HOST`, `DB_PORT`,
- * `DB_USER`, `DB_PASS` and `DB_NAME` (recipe in HANDOFF.md). Throws, naming every variable that
- * is missing, instead of letting a test mark itself `ignore` or silently connect to whatever
+ * `DB_USER`, `DB_PASS` and `DB_NAME` (recipe in docs/handoff.md). Throws, naming every variable
+ * that is missing, instead of letting a test mark itself `ignore` or silently connect to whatever
  * Postgres the shell's own environment happens to point at.
  *
  * `connect_timeout` is pinned to 5 seconds: the driver's own default took 60 seconds to report
@@ -23,7 +23,7 @@ export interface DbConnectionSettings {
 export function requireDbConnection(): DbConnectionSettings {
   const missing = REQUIRED_DB_ENV.filter((name) => !Deno.env.get(name))
   if (missing.length) {
-    throw new Error(`integration test needs ${missing.join(", ")} (recipe in HANDOFF.md)`)
+    throw new Error(`integration test needs ${missing.join(", ")} (recipe in docs/handoff.md)`)
   }
   return {
     host: Deno.env.get("DB_HOST")!,

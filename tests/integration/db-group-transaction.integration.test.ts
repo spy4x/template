@@ -5,7 +5,7 @@ import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { requireDbConnection } from "./db-connection.ts"
 
 /**
- * Proves HANDOFF.md trap 5 against the real class `apps/api/services/db.ts`'s `DbService`
+ * Proves docs/handoff.md trap 5 against the real class `apps/api/services/db.ts`'s `DbService`
  * extends: `AppDbBase.group` must be built fresh on every access, not cached on the
  * instance, because `DbServiceBase.begin()` derives its transactional clone with
  * `Object.create(this)` and rebinds `sql` on the clone - a repository built once and
