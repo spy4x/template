@@ -87,13 +87,13 @@ Docker).
 ```sh
 deno task vapid-key:create   # web push keys → infra/configs/vapid.json
 deno task proxy:start        # Traefik
-deno task dev                # Postgres, Valkey, MinIO, API, SPA, Loki, Prometheus, Grafana
+deno task dev                # Postgres, Valkey, MinIO, API, worker, SPA, Loki, Prometheus, Grafana
 ```
 
 Promtail, node-exporter and cAdvisor watch the whole host, so they are off by default. Set
 `COMPOSE_PROFILES=host-monitoring` in the env file to start them too.
 
-The worker and the MPA are not in Compose; run them on the host. Stop the proxy with
+The MPA is not in Compose; run it on the host. Stop the proxy with
 `deno task proxy:stop`. Apply migrations from the host with the values from your `.env`, pointing
 at the port Compose publishes:
 

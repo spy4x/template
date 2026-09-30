@@ -33,7 +33,7 @@ across real projects, a CLI last.
 
 Green: `deno task check` (107 tests in five runs), `deno task test:integration` (29 tests, 58
 steps, needs Postgres), `deno task spa:build`, `deno task mpa:check`, and the Playwright e2e suite
-(6 tests).
+(9 tests).
 
 ```
 apps/api      REST, the /api/ws socket, auth, CQRS dispatch. The only app with real behaviour.
@@ -41,7 +41,7 @@ apps/spa      Preact + Vite PWA. Wires the libs/ui auth, profile and groups scre
               group commands and queries go over the socket.
 apps/mpa      Fresh. SSR shell plus /health. No features yet.
 apps/worker   Drains outbox_events and announces group changes (pg_notify); sweeps
-              expired idempotency keys.
+              expired idempotency keys. Runs in compose as `worker`, from the API's image.
 
 libs/platform  empty. Its primitives come from spy4x/ts-libs on JSR:
                @spy4x/validation, @spy4x/platform/{cqrs,cache,api,model,
@@ -217,6 +217,11 @@ refuses to start without `KV_PASSWORD` and sends it with `AUTH`), migrations app
 (`deno task vapid-key:create`) copied to `./vapid.json`, since the API reads it
 from the working directory while compose bind-mounts it. Compose fails the start when the file is
 missing; `deno task deploy` generates it on the server.
+
+Live updates between tabs need the worker too: without it a group created in one tab shows in
+another only after a reconnect or a reload, and the e2e test "a group created in one tab appears in
+the other tab without a reload or reconnect" fails. Compose runs it as `worker`; outside compose,
+start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `DB_*` values.
 
 ## What is not built yet
 

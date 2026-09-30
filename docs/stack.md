@@ -31,6 +31,12 @@ Defined in `infra/compose/`:
   (`--requirepass`; the API sends it with `AUTH` on every connect and reconnect, and neither the API
   nor Valkey starts without it). The password reaches the container through its environment, so it
   is not in the command line; the healthcheck reads it from `REDISCLI_AUTH`.
+- **Worker** - `apps/worker` in the API's image (same Dockerfile and build context) with its own
+  command. It drains `outbox_events`, announces committed group changes with `pg_notify` (the API
+  turns each into a live hint for other tabs) and sweeps expired idempotency keys hourly. No
+  published port. Its pool (at most 10 connections) plus the API's (at most 10, plus one `LISTEN`
+  connection) and postgres-exporter stay under Postgres' `max_connections=30`; raise that before
+  raising either pool. `WORKER_CPU_LIMIT` and `WORKER_MEM_LIMIT` default to 0.5 CPU and 256M.
 - **MinIO** - object storage, with a one-shot configure container.
 - **Traefik** - reverse proxy, production compose only.
 - **Loki, Prometheus, Grafana, postgres-exporter** - this project's logs and metrics. Loki stores
