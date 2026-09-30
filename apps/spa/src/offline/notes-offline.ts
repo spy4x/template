@@ -124,7 +124,6 @@ export function offlineNotes(
     id: string,
   ): Promise<{ note: NoteItem }> {
     if (outcome.kind === "failed") throw outcome.error
-    if (outcome.kind === "sent" && outcome.note) return { note: outcome.note }
     const note = await visible(layer, groupId, id)
     if (!note) throw new Error("The note is not in the local store")
     return { note }
