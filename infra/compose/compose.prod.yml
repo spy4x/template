@@ -19,7 +19,7 @@ services:
       - "traefik.docker.network=proxy"
       - 'traefik.http.routers.minio.entrypoints=websecure'
       - 'traefik.http.routers.minio.tls=true'
-      - 'traefik.http.routers.minio.tls.certresolver=myresolver'
+      - 'traefik.http.routers.minio.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-myresolver}'
 
   grafana:
     networks:
@@ -29,7 +29,7 @@ services:
       - "traefik.docker.network=proxy"
       - 'traefik.http.routers.grafana.entrypoints=websecure'
       - 'traefik.http.routers.grafana.tls=true'
-      - 'traefik.http.routers.grafana.tls.certresolver=myresolver'
+      - 'traefik.http.routers.grafana.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-myresolver}'
 
   api:
     networks:
@@ -45,7 +45,7 @@ services:
       - "traefik.docker.network=proxy"
       - 'traefik.http.routers.api-${PROJECT}.entrypoints=websecure'
       - 'traefik.http.routers.api-${PROJECT}.tls=true'
-      - 'traefik.http.routers.api-${PROJECT}.tls.certresolver=myresolver'
+      - 'traefik.http.routers.api-${PROJECT}.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-myresolver}'
       # Keep the CF-Connecting-IP strip from compose.shared.yml's api-${PROJECT} router; see the
       # comment there for why it is required.
       - 'traefik.http.routers.api-${PROJECT}.middlewares=strip-cf-ip-${PROJECT}'
@@ -61,4 +61,4 @@ services:
       - "traefik.docker.network=proxy"
       - "traefik.http.routers.spa-${PROJECT}.entrypoints=websecure"
       - "traefik.http.routers.spa-${PROJECT}.tls=true"
-      - "traefik.http.routers.spa-${PROJECT}.tls.certresolver=myresolver"
+      - "traefik.http.routers.spa-${PROJECT}.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-myresolver}"
