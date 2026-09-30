@@ -61,6 +61,7 @@ an approved pull request can edit `ci.yml` and would otherwise read them.
 ### Redis/Valkey Configuration
 - `KV_HOSTNAME` - Redis/Valkey host (e.g., `valkey` or IP address)
 - `KV_PORT` - Redis/Valkey port (default: `6379`)
+- `KV_PASSWORD` - Valkey password (`openssl rand -hex 24`); required by Valkey and the API
 
 ### Application Configuration
 - `API_PORT` - API server port (e.g., `8000`)

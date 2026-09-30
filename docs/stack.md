@@ -27,9 +27,10 @@ Defined in `infra/compose/`:
   handled by the driver.
 - **Valkey** - cache for display data (sessions and every authentication decision come from
   Postgres). The host needs `sysctl vm.overcommit_memory=1`. Postgres and Valkey are published on
-  `127.0.0.1` only, through `DB_HOST_PORT` and `KV_HOST_PORT`. Valkey has no password yet:
-  `RedisKvStore` in `@spy4x/server` cannot send `AUTH`, so the network binding is the only
-  guard; anyone who can reach Valkey can write cached profile rows.
+  `127.0.0.1` only, through `DB_HOST_PORT` and `KV_HOST_PORT`, and Valkey requires `KV_PASSWORD`
+  (`--requirepass`; the API sends it with `AUTH` on every connect and reconnect, and neither the API
+  nor Valkey starts without it). The password reaches the container through its environment, so it
+  is not in the command line; the healthcheck reads it from `REDISCLI_AUTH`.
 - **MinIO** - object storage, with a one-shot configure container.
 - **Traefik** - reverse proxy, production compose only.
 - **Loki, Prometheus, Grafana, postgres-exporter** - this project's logs and metrics. Loki stores
