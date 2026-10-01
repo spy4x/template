@@ -8,12 +8,18 @@ type Outcome =
   | "stays blank"
   | "blank after network change"
   | "blank after a network change of another origin"
+  | "waits on a request"
 
 const APP = "http://app.localhost:8080"
 type Handler = (arg: never) => void
 
-const failedRequest = (url: string, errorText: string) =>
-  ({ url: () => url, failure: () => ({ errorText }) }) as unknown as Request
+/** A request for `url` that fails with `errorText`, or never fails when that is left out. */
+const fakeRequest = (url: string, errorText?: string, navigation = false) =>
+  ({
+    url: () => url,
+    isNavigationRequest: () => navigation,
+    failure: () => (errorText ? { errorText } : null),
+  }) as unknown as Request
 
 /**
  * A page whose n-th load ends as `outcomes[n]`, and that records what the helper does to it. A load
@@ -28,22 +34,28 @@ function fakePage(outcomes: Outcome[]) {
   const starts: string[] = []
   const load = (start: string, url: string) => {
     starts.push(start)
-    emit("request", { isNavigationRequest: () => true, url: () => `${APP}${url}` })
+    const navigation = fakeRequest(`${APP}${url}`, undefined, true)
+    emit("request", navigation)
+    emit("requestfinished", navigation)
+    const fail = (request: Request) => {
+      emit("request", request)
+      emit("requestfailed", request)
+    }
     const outcome = outcomes[starts.length - 1]
     if (outcome === "blank after network change") {
-      emit("requestfailed", failedRequest(`${APP}/src/main.tsx`, "net::ERR_NETWORK_CHANGED"))
+      fail(fakeRequest(`${APP}/src/main.tsx`, "net::ERR_NETWORK_CHANGED"))
+      emit("request", fakeRequest(`${APP}/src/app.css`))
       emit("console", {
         type: () => "error",
         text: () => "Failed to load resource: net::ERR_NETWORK_CHANGED",
       } as ConsoleMessage)
     } else if (outcome === "blank after a network change of another origin") {
-      emit(
-        "requestfailed",
-        failedRequest("https://fonts.example/a.css", "net::ERR_NETWORK_CHANGED"),
-      )
+      fail(fakeRequest("https://fonts.example/a.css", "net::ERR_NETWORK_CHANGED"))
     } else if (outcome === "stays blank") {
-      emit("requestfailed", failedRequest(`${APP}/src/app.tsx`, "net::ERR_CONNECTION_REFUSED"))
+      fail(fakeRequest(`${APP}/src/app.tsx`, "net::ERR_CONNECTION_REFUSED"))
       emit("console", { type: () => "error", text: () => "boom in the module" } as ConsoleMessage)
+    } else if (outcome === "waits on a request") {
+      emit("request", fakeRequest("https://fonts.example/a.css"))
     }
     return Promise.resolve()
   }
@@ -94,11 +106,12 @@ Deno.test("gotoApp throws after the second load when only the first was broken b
   expect(fake.loads()).toBe(2)
 })
 
-Deno.test("gotoApp reports only the failed requests and the console of its last load", async () => {
+Deno.test("gotoApp reports only the requests and the console of its last load", async () => {
   const fake = fakePage(["blank after network change", "stays blank"])
   const error = await gotoApp(fake.page, "/sign-in", fake.ready).catch((e: Error) => e)
   expect((error as Error).message).toContain("Attempt 2 of /sign-in.")
   expect((error as Error).message).toContain("Failed requests (1):")
+  expect((error as Error).message).toContain("Pending requests (0):")
   expect((error as Error).message).toContain("Console (1):")
   expect((error as Error).message).not.toContain("net::ERR_NETWORK_CHANGED")
 })
@@ -120,6 +133,14 @@ Deno.test("gotoApp names the failed requests and the console in the error it thr
   const error = await gotoApp(fake.page, "/sign-in", fake.ready).catch((e: Error) => e)
   expect((error as Error).message).toContain(`${APP}/src/app.tsx net::ERR_CONNECTION_REFUSED`)
   expect((error as Error).message).toContain("error: boom in the module")
+})
+
+Deno.test("gotoApp names the requests still pending in the error it throws", async () => {
+  const fake = fakePage(["waits on a request"])
+  const error = await gotoApp(fake.page, "/sign-in", fake.ready).catch((e: Error) => e)
+  expect((error as Error).message).toContain(
+    "Pending requests (1):\nhttps://fonts.example/a.css for ",
+  )
 })
 
 Deno.test("gotoApp stops listening when it returns", async () => {
