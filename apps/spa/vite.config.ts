@@ -36,10 +36,12 @@ export default defineConfig({
     }],
   },
   optimizeDeps: {
-    // Dexie is imported through the Deno plugin's resolver, which the dev server's dependency
-    // scan does not follow. Found late, it triggers a re-bundle that leaves a page that loaded
-    // meanwhile blank ("Outdated Optimize Dep"), so it is named up front.
-    include: ["dexie"],
+    // These come in through the Deno plugin's resolver, which the dev server's dependency scan
+    // does not follow: dexie, tailwind-merge (through the JSR package @spy4x/preact-cn) and
+    // arktype (through @spy4x/validation and its siblings). Found late, each triggers a re-bundle
+    // that leaves a page that loaded meanwhile blank ("Outdated Optimize Dep"), so they are named
+    // up front.
+    include: ["dexie", "tailwind-merge", "arktype"],
   },
   server: {
     host: "0.0.0.0",
