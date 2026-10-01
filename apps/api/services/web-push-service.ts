@@ -10,6 +10,7 @@ import {
   type PushSubscriptionStore,
   type VapidKeys,
   vapidPublicKey,
+  type WebPushSender,
   type WebPushSenderOptions,
 } from "@spy4x/integrations/push"
 import type { UserPushTokenPublic } from "@domain/identity"
@@ -26,7 +27,18 @@ function subscriptionOf(token: PushTokenRecord): PushSubscriptionJson {
   }
 }
 
-function logFailure(result: PushSendResult): PushSendResult {
+/** The library's store over the app's rows: every live subscription of a user. */
+function subscriptionsOf(store: PushTokenStore): PushSubscriptionStore {
+  return {
+    listByUser: async (userId) => (await store.listByUser(Number(userId))).map(subscriptionOf),
+    deleteByEndpoint: (userId, endpoint) => store.deleteByEndpoint(userId, endpoint),
+  }
+}
+
+/** Logs what the push service reported. The endpoint is never logged: its path is a capability. */
+function logResult(userId: number, result: PushSendResult): PushSendResult {
+  const deleted = result.deliveries.filter((delivery) => delivery.deleted).length
+  if (deleted) console.log("Subscription is no longer valid, deleted", { userId, deleted })
   if (!result.success) console.error("Error sending push notification", result.error)
   return result
 }
@@ -47,6 +59,8 @@ export class WebPushService {
     private readonly senderOptions: PushSenderOptions,
     private readonly store: PushTokenStore,
     private readonly encodedPublicKey: string,
+    /** Sends over every subscription in `store`; built once by `createWebPushService`. */
+    private readonly sender: WebPushSender,
   ) {}
 
   public getPublicKey(): string {
@@ -68,14 +82,21 @@ export class WebPushService {
     // The welcome push goes to this one subscription only, not to the user's other devices. One
     // the push service reports gone deletes the row, yet subscribe still reports success: the
     // browser handed us the subscription a moment ago.
-    await this.push(
-      userId,
-      { title: "✅ Test Push Notification", body: "You are now subscribed", url: null },
-      {},
-      {
+    const welcome = await createWebPushSender({
+      ...this.senderOptions,
+      vapidKeys: this.vapidKeys,
+      store: {
         listByUser: () => Promise.resolve([subscriptionOf(token)]),
         deleteByEndpoint: (user, endpoint) => this.store.deleteByEndpoint(user, endpoint),
       },
+    })
+    logResult(
+      userId,
+      await welcome.send(userId, {
+        title: "✅ Test Push Notification",
+        body: "You are now subscribed",
+        url: null,
+      }),
     )
     return toPublic(token)
   }
@@ -93,29 +114,12 @@ export class WebPushService {
    * service reports gone (404 or 410) is deleted; any other failure is logged, and the remaining
    * devices are still tried. Never throws; an invalid payload is a failed result.
    */
-  public send(
+  public async send(
     userId: number,
     message: PushNotificationMessage,
     options: PushOptions = {},
   ): Promise<PushSendResult> {
-    return this.push(userId, message, options, {
-      listByUser: async (user) => (await this.store.listByUser(Number(user))).map(subscriptionOf),
-      deleteByEndpoint: (user, endpoint) => this.store.deleteByEndpoint(user, endpoint),
-    })
-  }
-
-  private async push(
-    userId: number,
-    message: PushNotificationMessage,
-    options: PushOptions,
-    store: PushSubscriptionStore,
-  ): Promise<PushSendResult> {
-    const sender = await createWebPushSender({
-      ...this.senderOptions,
-      vapidKeys: this.vapidKeys,
-      store,
-    })
-    return logFailure(await sender.send(userId, message, options))
+    return logResult(userId, await this.sender.send(userId, message, options))
   }
 }
 
@@ -130,5 +134,16 @@ export async function createWebPushService(
   store: PushTokenStore,
 ): Promise<WebPushService> {
   const vapidKeys: VapidKeys = JSON.parse(vapidKeysJson)
-  return new WebPushService(vapidKeys, senderOptions, store, await vapidPublicKey(vapidKeys))
+  const sender = await createWebPushSender({
+    ...senderOptions,
+    vapidKeys,
+    store: subscriptionsOf(store),
+  })
+  return new WebPushService(
+    vapidKeys,
+    senderOptions,
+    store,
+    await vapidPublicKey(vapidKeys),
+    sender,
+  )
 }

@@ -100,6 +100,23 @@ describe("WebPushService.send", () => {
     })
   }
 
+  it("logs a deleted subscription without its endpoint", async () => {
+    const store = memoryStore([token(1, "d1")])
+    const push = fakePushService({ "https://push.example/1/d1": 410 })
+    const logged: unknown[][] = []
+    const originalLog = console.log
+    console.log = (...args: unknown[]) => logged.push(args)
+    try {
+      await (await service(store, push.options)).send(1, message)
+    } finally {
+      console.log = originalLog
+    }
+    expect(logged).toEqual([["Subscription is no longer valid, deleted", {
+      userId: 1,
+      deleted: 1,
+    }]])
+  })
+
   it("keeps a subscription after a temporary failure and still tries the other devices", async () => {
     const store = memoryStore([token(1, "d1"), token(1, "d2")])
     const push = fakePushService({ "https://push.example/1/d1": 503 })
