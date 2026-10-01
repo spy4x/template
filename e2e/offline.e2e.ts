@@ -178,8 +178,6 @@ test.describe("offline notes", () => {
   })
 
   test("two devices editing the same note offline end with one visible conflict and no lost edit", async ({ browser, request }) => {
-    // Two browsers, two offline reloads and a 20 s wait for sync: 28 s on main, which is too close to 30 s.
-    test.setTimeout(60_000)
     const user = "e2e_offline_pair@example.com"
     await cleanup(request, user)
     const baseURL = test.info().project.use.baseURL
@@ -231,8 +229,6 @@ test.describe("offline notes", () => {
   })
 
   test("choosing the server's version drops the offline edit and shows the server's note", async ({ browser, request }) => {
-    // Two browsers, two offline reloads and a 20 s wait for sync: 28 s on main, which is too close to 30 s.
-    test.setTimeout(60_000)
     const user = "e2e_offline_theirs@example.com"
     await cleanup(request, user)
     const baseURL = test.info().project.use.baseURL
