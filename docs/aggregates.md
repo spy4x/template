@@ -154,8 +154,9 @@ development). Teach `POST /api/test/cleanup-user` to delete the new table's rows
 
 ## What is left to the next aggregate
 
-- A create posted to `/notes` goes to the group selected when the post arrives. If another device
-  switched groups after the page was drawn, the note lands in the new group.
+- A create posts to `/notes?group=<id>`, naming the group the page showed. The MPA refuses it when
+  that is no longer the selected group (another device switched), so a note never lands in a group
+  other than the one on screen. The SPA creates in the group it shows over the socket.
 - The role check and the write are two steps, not one transaction. Membership cannot change
   through the product yet; when it can, the check moves into the write's transaction.
 - The SPA reads the whole list again on every hint. A pull of only the notes changed after the
