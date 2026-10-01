@@ -13,7 +13,13 @@ import { readForm } from "./forms.ts"
 import { Frame, readSession } from "./session.tsx"
 import { define, type State } from "./utils.ts"
 
-const NO_ERRORS: ProfileErrors = { profile: null, password: null, push: null }
+const NO_ERRORS: ProfileErrors = {
+  fields: {},
+  profile: null,
+  password: null,
+  totp: null,
+  push: null,
+}
 
 /**
  * The profile page. `values` keeps what the person typed into a form that was refused; `enrolment`
@@ -72,7 +78,8 @@ export function profileAction(
     method: string
     path: `/api/${string}`
     body?: (form: FormData) => unknown
-    errorAt: keyof ProfileErrors
+    /** The API names no field, so its message goes under the form. */
+    errorAt: Exclude<keyof ProfileErrors, "fields">
     failure: string
     keep?: (form: FormData) => Partial<ProfileValues>
   },

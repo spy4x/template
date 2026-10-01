@@ -3,6 +3,7 @@ import { useLocation } from "wouter-preact"
 import { decodeBase64Url } from "@std/encoding"
 import {
   PROFILE_FAILURES,
+  type ProfileFieldErrors,
   ProfileScreen,
   type ProfileValues,
   type TotpEnrolment,
@@ -18,6 +19,8 @@ import { sessionState } from "../state/session.ts"
 import { apiFetch } from "../state/api.ts"
 import { toasts } from "../state/toasts.ts"
 import type { PushSubscribeRequest, PushUnsubscribeRequest } from "@spy4x/platform/model"
+import { validate } from "@spy4x/validation"
+import { authOTPSchema, authPasswordChangeSchema, userProfileBaseSchema } from "@domain/identity"
 import type {
   ApiIsSuccessResponse,
   PushDevicesResponse,
@@ -40,8 +43,10 @@ export function ProfileView() {
     newPassword: "",
     otp: "",
   })
+  const [fieldErrors, setFieldErrors] = useState<ProfileFieldErrors>({})
   const [profileError, setProfileError] = useState<string | null>(null)
   const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [totpError, setTotpError] = useState<string | null>(null)
   const [busyProfile, setBusyProfile] = useState(false)
   const [busyPassword, setBusyPassword] = useState(false)
   const [totpBusy, setTotpBusy] = useState(false)
@@ -75,8 +80,19 @@ export function ProfileView() {
     })
   }, [session.user?.id, session.isMfaRequired])
 
+  /**
+   * Checks the values with the schema the API checks them with. Each refused field gets its message
+   * under it, and the call is not made; `false` means the form has something to fix.
+   */
+  const fieldsPass = (problems: ProfileFieldErrors | null): boolean => {
+    setFieldErrors(problems ?? {})
+    return problems === null
+  }
+
   const submitProfile = async () => {
     setProfileError(null)
+    const { firstName, lastName } = values
+    if (!fieldsPass(refusedFields(userProfileBaseSchema, { firstName, lastName }))) return
     setBusyProfile(true)
     const result = await profileUpdate(values.firstName, values.lastName)
     setBusyProfile(false)
@@ -89,6 +105,13 @@ export function ProfileView() {
 
   const submitPassword = async () => {
     setPasswordError(null)
+    const problems = refusedFields(authPasswordChangeSchema, {
+      password: values.currentPassword,
+      newPassword: values.newPassword,
+    })
+    // The API calls the current password `password`; the form's field is `currentPassword`.
+    const { password: currentPassword, ...rest } = problems ?? {}
+    if (!fieldsPass(problems && { currentPassword, ...rest })) return
     setBusyPassword(true)
     const result = await changePassword(values.currentPassword, values.newPassword)
     setBusyPassword(false)
@@ -100,22 +123,25 @@ export function ProfileView() {
   }
 
   const startTotp = async () => {
+    setTotpError(null)
     setTotpBusy(true)
     const result = await totpConnectStart()
     setTotpBusy(false)
     if (!result.ok) {
-      setProfileError(result.error)
+      setTotpError(result.error)
       return
     }
     setEnrolment({ qrcode: result.qrcode, secret: result.secret })
   }
 
   const finishTotp = async () => {
+    setTotpError(null)
+    if (!fieldsPass(refusedFields(authOTPSchema, { otp: values.otp }))) return
     setTotpBusy(true)
     const result = await totpConnectFinish(values.otp)
     setTotpBusy(false)
     if (!result.ok) {
-      setProfileError(result.error || PROFILE_FAILURES.totpFinish)
+      setTotpError(result.error || PROFILE_FAILURES.totpFinish)
       return
     }
     setEnrolment(null)
@@ -123,11 +149,12 @@ export function ProfileView() {
   }
 
   const disableTotp = async () => {
+    setTotpError(null)
     setTotpBusy(true)
     const result = await totpDisconnect()
     setTotpBusy(false)
     if (!result.ok) {
-      setProfileError(result.error || PROFILE_FAILURES.totpDisable)
+      setTotpError(result.error || PROFILE_FAILURES.totpDisable)
     }
   }
 
@@ -180,7 +207,13 @@ export function ProfileView() {
       connection={session.wsStatus}
       values={values}
       onValueChange={setValue}
-      errors={{ profile: profileError, password: passwordError, push: pushError }}
+      errors={{
+        fields: fieldErrors,
+        profile: profileError,
+        password: passwordError,
+        totp: totpError,
+        push: pushError,
+      }}
       pending={{ profile: busyProfile, password: busyPassword, totp: totpBusy, push: pushBusy }}
       enrolment={enrolment}
       pushDevices={pushDevices}
@@ -194,6 +227,23 @@ export function ProfileView() {
       navigate={navigate}
     />
   )
+}
+
+/**
+ * The first message of each field `schema` refuses in `value`, keyed by the field's name, or `null`
+ * when the value passes.
+ */
+function refusedFields(
+  schema: Parameters<typeof validate>[0],
+  value: unknown,
+): Record<string, string> | null {
+  const { error } = validate(schema, value)
+  if (!error) return null
+  const fields: Record<string, string> = {}
+  for (const [field, issues] of Object.entries(error.errors)) {
+    if (issues?.[0]) fields[field] = issues[0].message
+  }
+  return fields
 }
 
 function subscriptionToPayload(

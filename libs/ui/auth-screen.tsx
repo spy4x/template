@@ -19,6 +19,9 @@ const ACTIONS: Record<AuthScreenKind, string> = {
   "one-time-code": FORM_ACTIONS.oneTimeCode,
 }
 
+/** The API schemas call the fields `username` and `otp`, so the forms post those names. */
+const FIELD_NAMES = { login: "username", code: "otp" }
+
 const COPY: Record<AuthScreenKind, { title: string; description: string; failure: string }> = {
   "sign-in": {
     title: "Welcome back",
@@ -137,6 +140,7 @@ export function AuthScreen(
           busy={busy}
           error={error}
           labels={{ login: "Username", codeHint: "Six digits from your authenticator app." }}
+          names={FIELD_NAMES}
           onModeChange={onModeChange}
           onSignIn={onSignIn}
           onSignUp={onSignUp}

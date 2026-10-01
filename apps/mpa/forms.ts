@@ -50,16 +50,16 @@ function numberField(form: FormData, name: string): number | string {
 }
 
 /**
- * Each form translated into the JSON body of its API call. The MPA only renames and converts: the
- * API's schemas validate every value, so no rule lives here. `AuthForm` from preact-components names
- * its fields `login` and `code`; the API calls them `username` and `otp`.
+ * Each form translated into the JSON body of its API call. The MPA only picks and converts: every
+ * form already posts the API's field names, and the API's schemas validate every value, so no rule
+ * lives here.
  */
 export const API_BODIES = {
   credentials: (form: FormData) => ({
-    username: field(form, "login"),
+    username: field(form, "username"),
     password: field(form, "password"),
   }),
-  oneTimeCode: (form: FormData) => ({ otp: field(form, "code") }),
+  oneTimeCode: (form: FormData) => ({ otp: field(form, "otp") }),
   profile: (form: FormData) => ({
     firstName: field(form, "firstName"),
     lastName: field(form, "lastName"),

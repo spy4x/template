@@ -92,7 +92,7 @@ describe("pageMiddleware", () => {
     const { calls, fetch } = fakeApi(() => Response.json({}))
 
     const response = await appWith(fetch)(
-      formPost("/sign-in", { login: "x".repeat(300 * 1024), password: "p" }),
+      formPost("/sign-in", { username: "x".repeat(300 * 1024), password: "p" }),
       info,
     )
 
@@ -112,14 +112,14 @@ describe("pageMiddleware", () => {
 })
 
 describe("the sign-in page", () => {
-  it("signs in with AuthForm's fields renamed and hands the browser the API's session cookie", async () => {
+  it("signs in with the API's field names and hands the browser the API's session cookie", async () => {
     const cookie = "sessionIdToken=s; Max-Age=60; Path=/; HttpOnly; Secure; SameSite=Lax"
     const { calls, fetch } = fakeApi(() =>
       Response.json({ id: 1 }, { headers: { "set-cookie": cookie } })
     )
 
     const response = await appWith(fetch)(
-      formPost("/sign-in", { login: "ada", password: "long-enough" }),
+      formPost("/sign-in", { username: "ada", password: "long-enough" }),
       info,
     )
 
@@ -137,7 +137,7 @@ describe("the sign-in page", () => {
     const { fetch } = fakeApi(() => Response.json({ secondFactor: "Pending" }, { status: 202 }))
 
     const response = await appWith(fetch)(
-      formPost("/sign-in", { login: "ada", password: "long-enough" }),
+      formPost("/sign-in", { username: "ada", password: "long-enough" }),
       info,
     )
 
@@ -157,7 +157,7 @@ describe("the sign-in page when the API says to wait", () => {
     )
 
     const response = await appWith(fetch)(
-      formPost("/sign-in", { login: "ada", password: "long-enough" }),
+      formPost("/sign-in", { username: "ada", password: "long-enough" }),
       info,
     )
 

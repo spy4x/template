@@ -19,7 +19,7 @@ export const handler = define.handlers({
       return renderProfile(ctx, { enrolment: { qrcode: body.qrcode, secret: body.secret } })
     }
     return renderProfile(ctx, {
-      errors: { profile: errorMessage(answer, "Failed to start 2FA") },
+      errors: { totp: errorMessage(answer, "Failed to start 2FA") },
       status: isOk(answer) ? 502 : answer.status,
     })
   },

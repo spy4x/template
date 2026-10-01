@@ -70,7 +70,7 @@ test("a form another site posts to an action is refused, sign-out included", asy
   for (const action of ["/sign-out", "/sign-in", "/groups"]) {
     const response = await request.post(action, {
       headers: { origin: "https://attacker.example", "sec-fetch-site": "cross-site" },
-      form: { login: "someone", password },
+      form: { username: "someone", password },
     })
     expect(response.status(), action).toBe(403)
   }

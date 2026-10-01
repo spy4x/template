@@ -7,7 +7,7 @@ import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { GroupKind, GroupRole } from "@domain/groups"
-import { FORM_ACTIONS, type Navigate, NOTE_PATHS, ScreenLink, takeOver } from "./progressive.tsx"
+import { FORM_ACTIONS, type Navigate, NOTE_PATHS, ScreenForm, ScreenLink } from "./progressive.tsx"
 
 /** One group as the screen shows it. */
 export interface GroupRow {
@@ -67,7 +67,7 @@ export function GroupsScreen(
           <h1 class="text-lg font-semibold">Groups</h1>
         </CardHeader>
         <CardBody>
-          <form method="post" action={FORM_ACTIONS.groupCreate} onSubmit={takeOver(onCreate)}>
+          <ScreenForm action={FORM_ACTIONS.groupCreate} pending={creating} onSubmit={onCreate}>
             <input type="hidden" name="id" value={draftId} />
             <input type="hidden" name="kind" value={String(GroupKind.SHARED)} />
             <Stack>
@@ -94,7 +94,7 @@ export function GroupsScreen(
                 </Button>
               </div>
             </Stack>
-          </form>
+          </ScreenForm>
         </CardBody>
       </Card>
 

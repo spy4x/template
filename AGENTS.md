@@ -33,33 +33,27 @@ says what is missing. Do not copy the gap into a new screen.
 - **Pure.** Props in, callbacks out. No store, no `fetch`, no router, no `window`, `document` or
   `location` at render, no import from an app. Output is the same under Fresh server rendering and
   in the browser. Links take an optional `navigate` port instead of a router.
-  `tests/ui-boundary.test.ts` walks `libs/ui` and runs the rule in `libs/ui/boundary.ts` over every
-  module.
+  `tests/ui-boundary.test.ts` walks `libs/ui` and runs preact-components' rule
+  (`@spy4x/preact-system/boundary`) over every module, with this repository's app aliases.
 - **Works without JavaScript.** Every action is a real `<form method="post" action="…">` or
   `<a href="…">`, with field `name`s matching the API schema of the same action. Form actions are
   listed in `FORM_ACTIONS` (`libs/ui/progressive.tsx`). With its callback, the app takes the submit
   over; without it, the browser posts. Push registration needs the browser's push manager, so it is
-  the one action without a native form. **Open:** `AuthForm`'s mode switch is a button, its field
-  names are `login` and `code` rather than `username` and `otp`, and "Sign out" in `Shell`'s user
-  menu is a button
-  ([preact-components#455](https://github.com/spy4x/preact-components/issues/455),
-  [#456](https://github.com/spy4x/preact-components/issues/456),
-  [#457](https://github.com/spy4x/preact-components/issues/457)).
-- **Built on preact-components' `EnhancedForm`.** **Open:** the forms are plain `<form>`s until
-  `EnhancedForm` takes its status as a prop
-  ([preact-components#453](https://github.com/spy4x/preact-components/issues/453),
-  [#107](https://github.com/spy4x/template/issues/107)).
+  the one action without a native form. **Open:** `AuthForm`'s mode switch is a button
+  ([preact-components#456](https://github.com/spy4x/preact-components/issues/456)).
+- **Built on preact-components' `EnhancedForm`.** Every form here is `ScreenForm`
+  (`libs/ui/progressive.tsx`): `EnhancedForm` with its status taken from the screen's `pending`
+  prop, so a pending form is disabled and refuses a second submit.
 - **State comes in as props:** `value`, `errors`, `pending`, `items`, `cursor`. Error and pending
   display is part of the component, so both apps show the same messages.
 - **Accessible by construction.** Every control has a label. Error text is tied to its field with
   `aria-describedby`. Focus moves to the first error, and to the next control after a step change.
-  **Open:** profile errors show under the form, not on their field, and the two-factor card does
-  not move focus when its step changes ([#107](https://github.com/spy4x/template/issues/107)).
+  A message the API ties to no field stays under its form.
 - **`data-e2e` hooks stay**, so one e2e page object covers both apps.
 - **Tested.** Each component has a server-render test that finds a working form or link for every
-  action (`libs/ui/screens.test.tsx`), and an interaction test. **Open:** only the link and submit
-  helpers have interaction tests (`libs/ui/progressive.test.tsx`); the screens have none yet
-  ([#107](https://github.com/spy4x/template/issues/107)).
+  action (`libs/ui/screens.test.tsx`), and an interaction test that types, submits with and without
+  the app's callback and checks where focus goes, in a happy-dom page
+  (`libs/ui/interactions.test.tsx`).
 
 ## Adding a feature
 
