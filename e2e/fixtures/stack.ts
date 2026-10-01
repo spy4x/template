@@ -1,5 +1,5 @@
 import { type APIRequestContext, type Browser, expect, test as base } from "@playwright/test"
-import { gotoApp, signIn } from "./app.ts"
+import { gotoApp, signIn, withoutGoogleFonts } from "./app.ts"
 
 const WARM_PASSWORD = "Passw0rd!"
 
@@ -45,11 +45,15 @@ async function warmUp(browser: Browser, api: APIRequestContext, baseURL: string,
 }
 
 /**
- * `test` with one automatic worker fixture that warms the dev server before the first spec. The
- * specs that need the full stack import it from here; `url-filters` serves its own fixture and
- * keeps the plain one.
+ * `test` with a browser that does not load Google Fonts and one automatic worker fixture that warms
+ * the dev server before the first spec. The specs that need the full stack import it from here;
+ * `url-filters` serves its own page, which loads no fonts, and keeps the plain one.
  */
 export const test = base.extend<object, { warmDevServer: void }>({
+  // Built on the configured options, so the browser a harness sets in the config is kept.
+  launchOptions: [async ({ launchOptions }, use) => {
+    await use(withoutGoogleFonts(launchOptions))
+  }, { scope: "worker" }],
   warmDevServer: [async ({ browser, playwright }, use, workerInfo) => {
     const baseURL = String(workerInfo.project.use.baseURL)
     // Its own request context: one shared with the browser context would hold the session cookie
