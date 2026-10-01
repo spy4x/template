@@ -17,22 +17,33 @@ import { createPushNotificationRoute } from "./pushNotification.ts"
 
 function buildApp(auth: APIContext["Variables"]["auth"] = buildAuthData()) {
   const calls: string[] = []
+  const actors: number[] = []
   const route = createPushNotificationRoute({
     auth: testSessionGuards(),
     mutationGuards: testMutationGuards,
-    emit: () => {},
-    webPush: {
-      getPublicKey: () => "public-key",
-      deviceList: () => Promise.resolve([]),
-      subscribe: (_subscription, deviceId, userId) => {
-        calls.push("subscribe")
-        const now = new Date("2026-09-26T10:00:00.000Z")
-        return Promise.resolve({ id: 1, userId, deviceId, createdAt: now, updatedAt: now })
-      },
-      unsubscribe: () => (calls.push("unsubscribe"), Promise.resolve()),
+    getPublicKey: () => "public-key",
+    list: ({ data }) => (actors.push(data.actor.userId), Promise.resolve({ devices: [] })),
+    register: ({ data }) => {
+      actors.push(data.actor.userId)
+      calls.push("subscribe")
+      const now = new Date("2026-09-26T10:00:00.000Z")
+      return Promise.resolve({
+        userPushToken: {
+          id: 1,
+          userId: data.actor.userId,
+          deviceId: data.deviceId,
+          createdAt: now,
+          updatedAt: now,
+        },
+      })
     },
+    remove: ({ data }) => (
+      actors.push(data.actor.userId),
+        calls.push("unsubscribe"),
+        Promise.resolve({ isSuccess: true as const })
+    ),
   })
-  return { app: mountRoute("/push", route, auth), calls }
+  return { app: mountRoute("/push", route, auth), calls, actors }
 }
 
 function send(
@@ -89,6 +100,27 @@ describe("push routes", () => {
       expect(calls).toEqual([])
     })
   }
+})
+
+describe("push routes act for the signed-in user", () => {
+  for (const route of routes) {
+    it(`dispatches ${route.method} ${route.path} for the session's user`, async () => {
+      const { app, actors } = buildApp(buildAuthData({ user: { id: 42 } }))
+
+      await send(app, route, sameOriginHeaders)
+
+      expect(actors).toEqual([42])
+    })
+  }
+
+  it("lists the devices of the session's user", async () => {
+    const { app, actors } = buildApp(buildAuthData({ user: { id: 42 } }))
+
+    const response = await app.request(`${API_URL}/push/devices`, { headers: sameOriginHeaders })
+
+    expect(response.status).toBe(200)
+    expect(actors).toEqual([42])
+  })
 })
 
 describe("push routes cap the JSON body", () => {

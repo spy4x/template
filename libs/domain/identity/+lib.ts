@@ -119,6 +119,14 @@ export type AuthAuditBase = typeof authAuditBaseSchema.infer
 export const authAuditSchema = BaseModelSchema.and(authAuditBaseSchema)
 export type AuthAudit = typeof authAuditSchema.infer
 
+/**
+ * The id a person's own changes (profile, push devices) are announced under. The socket sends a
+ * `change.hint` for it to every socket of that person, so a second tab reads the profile again.
+ */
+export function userChangeGroupId(userId: number): string {
+  return `user:${userId}`
+}
+
 export type ProfileResponse = {
   user: User
 }

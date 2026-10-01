@@ -15,7 +15,7 @@ what is running and how it is deployed.
 | App | Stack | Transport |
 | --- | ----- | --------- |
 | `apps/api` | Deno, Hono | REST plus the `/api/ws` socket for group calls (ADR 002) |
-| `apps/spa` | Preact, Vite, PWA | Group calls over the socket; REST for auth, profile, bootstrap and the pull |
+| `apps/spa` | Preact, Vite, PWA | Group, note, profile and push calls over the socket; REST for auth, bootstrap and the pull |
 | `apps/mpa` | Fresh | REST only, request/response, no realtime |
 | `apps/worker` | Deno | No inbound transport; drains `outbox_events` |
 

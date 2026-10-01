@@ -1,9 +1,12 @@
 import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
-import type { WebPushService } from "@api/services/web-push-service.ts"
 import type { SignIn } from "@api/services/sign-in.ts"
-import { PushDevicesUpdatedEvent } from "@api/cqrs/events.ts"
+import { actorFromAuth } from "../cqrs/actor.ts"
+import { PushRegisterCommand, PushRemoveCommand } from "@api/cqrs/commands.ts"
+import type { PushRegisterResult, PushRemoveResult } from "@api/cqrs/commands.ts"
+import { PushListQuery } from "@api/cqrs/queries.ts"
+import type { PushListResult } from "@api/cqrs/queries.ts"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
 import { pushSubscribeRequestSchema, pushUnsubscribeRequestSchema } from "@spy4x/platform/model"
 import { validate } from "@spy4x/validation"
@@ -13,43 +16,35 @@ import { readApiJson } from "@api/services/json-body.ts"
 export interface PushNotificationRouteDependencies {
   auth: Pick<SignIn["auth"], "isAuthenticated2FA">
   mutationGuards: MutationGuards
-  webPush: Pick<WebPushService, "getPublicKey" | "deviceList" | "subscribe" | "unsubscribe">
-  emit(event: PushDevicesUpdatedEvent): void
+  getPublicKey(): string
+  register(command: PushRegisterCommand): Promise<PushRegisterResult>
+  remove(command: PushRemoveCommand): Promise<PushRemoveResult>
+  list(query: PushListQuery): Promise<PushListResult>
 }
 
 export function createPushNotificationRoute(
-  { auth, webPush, emit, mutationGuards }: PushNotificationRouteDependencies,
+  { auth, mutationGuards, getPublicKey, register, remove, list }: PushNotificationRouteDependencies,
 ): Hono<APIContext> {
   return new Hono<APIContext>()
     .use(auth.isAuthenticated2FA)
     .use(mutationGuards.signedIn)
-    .get(`/public-key`, async (c) => {
-      const publicKey = await webPush.getPublicKey()
-      return c.json({ publicKey })
-    })
+    .get(`/public-key`, (c) => c.json({ publicKey: getPublicKey() }))
     .get(`/devices`, async (c) => {
-      const userId = c.get("auth")!.user.id
-      const deviceList = await webPush.deviceList(userId)
-      return c.json({ data: deviceList })
+      const { devices } = await list(new PushListQuery({ actor: actorFromAuth(c.get("auth")!) }))
+      return c.json({ data: devices })
     })
     .post(`/`, async (c) => {
-      const userId = c.get("auth")!.user.id
       const body = await readApiJson(c)
       const validationResult = validate(pushSubscribeRequestSchema, body)
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
       }
       const { subscription, deviceId } = validationResult.data
-      const userPushToken = await webPush.subscribe(
-        subscription,
-        deviceId,
-        userId,
-      )
-      const devices = await webPush.deviceList(userId)
-      emit(
-        new PushDevicesUpdatedEvent({
-          userId,
-          devices,
+      const { userPushToken } = await register(
+        new PushRegisterCommand({
+          actor: actorFromAuth(c.get("auth")!),
+          subscription,
+          deviceId,
           // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
           request: requestInfoFromContext(c, { trustedProxy: true }),
         }),
@@ -57,19 +52,16 @@ export function createPushNotificationRoute(
       return c.json({ userPushToken })
     })
     .delete("/", async (c) => {
-      const userId = c.get("auth")!.user.id
       const body = await readApiJson(c)
       const validationResult = validate(pushUnsubscribeRequestSchema, body)
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
       }
       const { deviceId } = validationResult.data
-      await webPush.unsubscribe(deviceId, userId)
-      const devices = await webPush.deviceList(userId)
-      emit(
-        new PushDevicesUpdatedEvent({
-          userId,
-          devices,
+      await remove(
+        new PushRemoveCommand({
+          actor: actorFromAuth(c.get("auth")!),
+          deviceId,
           // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
           request: requestInfoFromContext(c, { trustedProxy: true }),
         }),

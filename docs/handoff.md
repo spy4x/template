@@ -240,14 +240,24 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 ## What is not built yet
 
 - `authorization_revision` exists as a column on `groups` and is **never incremented**.
-- Only the group and note calls go over the socket. The profile, password, two-factor and
-  push calls are still REST, and the profile page no longer receives live updates (a profile change
-  in another tab shows after a reload).
+- The password and two-factor calls are still REST: they change the session the socket is bound
+  to. The MPA has no socket, so the profile and push REST routes stay for it.
 - Group membership cannot be changed through the product: tests seed a second member with `POST /api/test/add-member`.
 - No local projection in the SPA, no offline outbox, no conflict UI. The page keeps its cursors in
   `localStorage` and rereads the whole group list to catch up.
 - The worker publishes a group change with `pg_notify`, which reaches only API instances that are
   listening at that moment. A push missed that way is caught by the pull after the next reconnect.
+
+## How a profile or push call travels
+
+`profile.get`, `profile.update`, `push.register`, `push.remove` and `push.list` are served from
+`apps/api/features/profile/socket.ts` and `features/push/socket.ts` and dispatched on the same buses
+as the REST routes (`/api/users/me`, `/api/push`), which the MPA still uses. The two commands that
+change devices carry an idempotency key. Every change emits `UserProfileUpdatedEvent` or
+`PushDevicesUpdatedEvent`, whether it came over REST or the socket, and an event handler calls
+`Realtime.notifyUserChange`, which sends a `change.hint` (group id `user:<id>`, aggregate `user`,
+sequence = the clock in milliseconds) to every socket of that user. The SPA's pull answers that
+hint with `profileStore.refresh()`, so a second tab follows without a reload.
 
 ## How a group call travels
 
@@ -286,9 +296,7 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 Each is intended to be one small PR. Small PRs are an explicit requirement here.
 
 1. **Increment `authorization_revision`** on membership and role changes.
-2. **Move the profile, password, two-factor and push calls to the socket**, with live profile and
-   push-device updates.
-3. **SPA local projection and offline outbox.**
+2. **SPA local projection and offline outbox.**
 
 Extraction from the sibling Financy project is tracked separately in
 [docs/financy-extraction-inventory.md](financy-extraction-inventory.md);

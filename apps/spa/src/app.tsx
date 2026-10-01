@@ -9,6 +9,8 @@ import { bootstrapSession, settleOwedSignOut } from "./state/auth.ts"
 import { groupsStore } from "./state/groups.ts"
 import { notesStore } from "./state/notes.ts"
 import { connectRealtime, disconnectRealtime } from "./state/realtime.ts"
+import { profileStore } from "./state/profile.ts"
+import { userChangeGroupId } from "@domain/identity"
 import { flushOutbox, startOffline, stopOffline } from "./offline/index.ts"
 import { forgetUser, recallUser, rememberUser } from "./offline/session-cache.ts"
 import { toasts } from "./state/toasts.ts"
@@ -73,6 +75,11 @@ export function App() {
     else if (isReady && !user) forgetUser()
   }, [sessionState.value.user, sessionState.value.isReady, sessionState.value.isMfaRequired])
 
+  // A change made in another tab while this socket was down is read when it opens again.
+  useEffect(() => profileStore.onSocketStatus(sessionState.value.wsStatus), [
+    sessionState.value.wsStatus,
+  ])
+
   useEffect(() => {
     const userId = sessionState.value.user?.id
     if (userId === undefined || sessionState.value.isMfaRequired) {
@@ -81,12 +88,15 @@ export function App() {
       void stopOffline({ forget: true })
       groupsStore.reset()
       notesStore.reset()
+      profileStore.reset()
       return
     }
     // The REST read is the pull: it runs at start-up, after every reconnect and for every push
     // that is news, so a missed frame costs one read and never leaves the list wrong. A note
     // change moves its group's sequence, so the open group's notes are read again too.
     const pull = async (gap?: { groupId: string }) => {
+      // The hint for this person's own profile or push devices, sent after a change in another tab.
+      if (gap?.groupId === userChangeGroupId(userId)) return await profileStore.refresh()
       // Writes made offline go out before anything is read, so the read shows their result.
       await flushOutbox()
       const openGroup = notesStore.groupId.value
