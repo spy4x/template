@@ -76,7 +76,7 @@ function rest(buses: GroupsRouteDependencies, userId: number) {
     await next()
   })
   app.route("/groups", createGroupsRoute(buses))
-  return (method: string, path: string, body?: unknown) =>
+  return (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) =>
     app.request(`http://local/groups${path}`, {
       method,
       headers: {
@@ -84,6 +84,7 @@ function rest(buses: GroupsRouteDependencies, userId: number) {
         cookie: "sessionIdToken=1:token",
         origin: "http://local",
         "sec-fetch-site": "same-origin",
+        ...headers,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
@@ -183,6 +184,17 @@ describe("deleting a group over REST", () => {
       }
     })
   }
+
+  it("answers 409 LAST_GROUP when it is the person's only group", async () => {
+    const { groups, buses } = stack()
+    groups.lastGroup = true
+
+    const response = await rest(buses, OWNER)("DELETE", `/${groupId}`)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error.code).toBe("LAST_GROUP")
+    expect(groups.deleted).toBe(false)
+  })
 
   it("tells a non-member the group does not exist and deletes nothing", async () => {
     const { groups, buses } = stack()
@@ -300,6 +312,21 @@ describe("changing a group over the socket", () => {
     })
   }
 
+  it("answers a conflict with the code LAST_GROUP when it is the only group", async () => {
+    const { groups, buses } = stack()
+    groups.lastGroup = true
+    const ws = socket(buses, OWNER)
+
+    const frame = await ws.command("group.delete", { groupId })
+
+    expect(frame).toMatchObject({
+      kind: "server.error",
+      code: "conflict",
+      details: { code: "LAST_GROUP" },
+    })
+    ws.shutdown()
+  })
+
   it("tells a non-member the group does not exist for rename, delete and restore", async () => {
     const { groups, buses } = stack()
     const ws = socket(buses, STRANGER)
@@ -335,5 +362,26 @@ describe("changing a group over the socket", () => {
     expect(adminFrame).toMatchObject({ payload: { groups: [] } })
     owner.shutdown()
     admin.shutdown()
+  })
+})
+
+describe("a write from another site", () => {
+  const crossSite = { origin: "https://evil.example.net", "sec-fetch-site": "cross-site" }
+
+  it("is refused for rename, delete and restore, and changes nothing", async () => {
+    const { groups, buses } = stack()
+    const owner = rest(buses, OWNER)
+
+    const renamed = await owner("PATCH", `/${groupId}`, { name: "Hijacked" }, crossSite)
+    const deleted = await owner("DELETE", `/${groupId}`, undefined, crossSite)
+    groups.deleted = true
+    const restored = await owner("POST", `/${groupId}/restore`, undefined, crossSite)
+
+    for (const response of [renamed, deleted, restored]) {
+      expect(response.status).toBe(403)
+      expect((await response.json()).error.code).toBe("REQUEST_ORIGIN_INVALID")
+    }
+    expect(groups.writes).toBe(0)
+    expect(groups.name).toBe("Team")
   })
 })

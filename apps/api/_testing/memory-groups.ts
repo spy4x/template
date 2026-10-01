@@ -17,7 +17,8 @@ const AT = new Date("2026-10-02T10:00:00.000Z")
  * One group in memory with a role for each member, for the tests of the group handlers and
  * transports. It holds the rules the handlers decide with (who is a member, which group is deleted
  * and so restorable) and none of the database's: it does not enforce the last-group rule or give
- * stranded members a group, which the integration tests prove against Postgres. `writes` counts
+ * stranded members a group, which the integration tests prove against Postgres; `lastGroup` makes
+ * a delete fail as the database does for a person's only group. `writes` counts
  * every rename, delete and restore that reached it, so a refused request is shown to change
  * nothing.
  */
@@ -25,6 +26,7 @@ export class MemoryGroupRepository implements GroupRepository {
   writes = 0
   name: string
   deleted = false
+  lastGroup = false
 
   constructor(
     readonly groupId: string,
@@ -83,6 +85,9 @@ export class MemoryGroupRepository implements GroupRepository {
   softDelete(_groupId: string, actorId: number): Promise<DeletedGroupSummary | null> {
     const access = this.#access(actorId, false)
     if (!access) return Promise.resolve(null)
+    if (this.lastGroup) {
+      return Promise.reject(new GroupError("LAST_GROUP", "A person must keep at least one group"))
+    }
     this.deleted = true
     this.writes++
     return Promise.resolve({ ...this.#summary(access.role), deletedAt: AT })
