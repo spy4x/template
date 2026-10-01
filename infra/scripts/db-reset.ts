@@ -49,13 +49,13 @@ const NO_PROD_FILE = "no production file to compare against"
  * @throws {ResetRefusedError} When the file is missing (`content` undefined), `DB_NAME` is missing
  *   or empty, or its value contains `$`. The message never carries the value.
  */
-export function readProdDbName(content: string | undefined): string {
+export function readProdDbName(content: string | undefined, path = PROD_ENV_PATH): string {
   if (content === undefined) {
     throw new ResetRefusedError(
-      `${NO_PROD_FILE}: ${PROD_ENV_PATH} is missing (pass --no-prod-check to skip the check)`,
+      `${NO_PROD_FILE}: ${path} is missing (pass --no-prod-check to skip the check)`,
     )
   }
-  const name = parseEnvValues(content.replaceAll("\r\n", "\n"), PROD_ENV_PATH).DB_NAME
+  const name = parseEnvValues(content.replaceAll("\r\n", "\n"), path).DB_NAME
   if (!name) throw new ResetRefusedError("DB_NAME is missing or empty in the production file")
   if (name.includes("$")) {
     throw new ResetRefusedError("the production DB_NAME uses variable expansion, which is refused")
@@ -103,12 +103,17 @@ export interface ResetSteps {
 export async function runReset(
   env: Record<string, string | undefined>,
   prodEnvContent: string | undefined,
-  options: { yes: boolean; skipProdCheck?: boolean },
+  options: { yes: boolean; skipProdCheck?: boolean; prodPath?: string },
   steps: ResetSteps,
 ): Promise<boolean> {
-  checkGuards(env, options.skipProdCheck ? undefined : readProdDbName(prodEnvContent))
+  const prodPath = options.prodPath ?? PROD_ENV_PATH
+  checkGuards(env, options.skipProdCheck ? undefined : readProdDbName(prodEnvContent, prodPath))
   const target = `${env.DB_NAME} on ${env.DB_HOST}:${env.DB_PORT || "5432"}` +
-    (options.skipProdCheck ? ` (${NO_PROD_FILE})` : "")
+    (options.skipProdCheck
+      ? ` (${NO_PROD_FILE})`
+      : prodPath === PROD_ENV_PATH
+      ? ""
+      : ` (production file: ${prodPath})`)
   steps.announce(target)
   if (!options.yes && !(await steps.confirm(target))) return false
   await steps.recreate(env)
@@ -164,6 +169,7 @@ async function main(): Promise<void> {
     const done = await runReset(env, prodEnv, {
       yes: Deno.args.includes("--yes"),
       skipProdCheck: Deno.args.includes("--no-prod-check"),
+      prodPath,
     }, {
       announce: (target) => console.log(`Target: ${target}`),
       confirm: (target) => {

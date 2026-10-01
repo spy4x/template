@@ -126,3 +126,12 @@ Deno.test("skips the question with --yes", async () => {
   expect(await runReset(DEV, PROD_FILE, { yes: true }, s)).toBe(true)
   expect(s.calls).toEqual(["recreate", "migrate", "seed"])
 })
+
+Deno.test("names a production file other than the default in the target", async () => {
+  const targets: string[] = []
+  const s = { ...steps(true), announce: (t: string) => void targets.push(t) }
+  await runReset(DEV, PROD_FILE, { yes: true, prodPath: "./infra/envs/.env.example" }, s)
+  expect(targets).toEqual(["dev_db on 127.0.0.1:5432 (production file: ./infra/envs/.env.example)"])
+  await expect(runReset(DEV, undefined, { yes: true, prodPath: "./infra/envs/other" }, s)).rejects
+    .toThrow("./infra/envs/other is missing")
+})
