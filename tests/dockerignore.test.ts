@@ -57,7 +57,7 @@ export function isIgnored(dockerignore: string, path: string): boolean {
     const line = raw.trim()
     if (!line || line.startsWith("#")) continue
     const negated = line.startsWith("!")
-    const pattern = dockerPattern(negated ? line.slice(1) : line)
+    const pattern = dockerPattern(negated ? line.slice(1).trim() : line)
     if (candidates.some((candidate) => pattern.test(candidate))) ignored = !negated
   }
   return ignored
@@ -109,6 +109,8 @@ Deno.test("reads a rule the way Docker does, not as a general glob", () => {
     ["*/.env", "infra/envs/.env", false],
     ["**/.env", "infra/envs/.env", true],
     ["infra\\/envs", "infra/envs/.env", true],
+    ["infra/envs\n! infra/envs/.env", "infra/envs/.env", false],
+    ["**/.env", ".env", true],
   ]
   for (const [rule, path, ignored] of cases) {
     expect({ rule, ignored: isIgnored(rule, path) }).toEqual({ rule, ignored })
