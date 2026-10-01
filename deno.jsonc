@@ -113,7 +113,7 @@
     // #endregion Aliases
 
     // #region Dependencies
-    // spy4x/ts-libs 1.22.0 (idempotency, keyset cursor, lockout, offline outbox). hono, postgres
+    // spy4x/ts-libs 1.23.0 (idempotency, keyset cursor, lockout, offline outbox). hono, postgres
     // and arktype below must stay on the exact versions these packages were published with, or
     // two copies load and their types stop matching.
     "@spy4x/validation": "jsr:@spy4x/validation@1.23.0",
