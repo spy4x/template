@@ -65,6 +65,27 @@ describe("pageMiddleware", () => {
     expect(calls).toEqual([])
   })
 
+  it("lets the app's own sign-out form through to the API", async () => {
+    const { calls, fetch } = fakeApi(() => Response.json({ success: true }))
+
+    const response = await appWith(fetch)(formPost("/sign-out", {}), info)
+
+    expect(response.status).not.toBe(403)
+    expect(calls.map((call) => call.path)).toEqual(["/api/auth/sign-out"])
+  })
+
+  it("lets a same-origin post under no-referrer through, whose origin is null", async () => {
+    const { calls, fetch } = fakeApi(() => Response.json({ success: true }))
+
+    const response = await appWith(fetch)(
+      formPost("/sign-out", {}, { origin: "null", "sec-fetch-site": "same-origin" }),
+      info,
+    )
+
+    expect(response.status).not.toBe(403)
+    expect(calls).toHaveLength(1)
+  })
+
   it("answers a form over the size cap with 413 and never calls the API", async () => {
     const { calls, fetch } = fakeApi(() => Response.json({}))
 
