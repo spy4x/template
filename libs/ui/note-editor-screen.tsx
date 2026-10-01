@@ -197,6 +197,8 @@ function EditorCard(props: WithGroup): JSX.Element {
                 href={NOTE_PATHS.note(note.id)}
                 navigate={props.onReloadLatest ? () => props.onReloadLatest?.() : navigate}
                 class="pc-link"
+                // Acts on this page, so a guard that asks before leaving must let it through.
+                data-unsaved-ok="true"
               >
                 Load the latest version
               </Link>{" "}

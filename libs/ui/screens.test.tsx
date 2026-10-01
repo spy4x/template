@@ -757,6 +757,8 @@ describe("NoteEditorScreen", () => {
     expect(html).toContain("Enter a title")
     expect(html).toContain("The note was changed by someone else")
     expect(html).toContain("Load the latest version")
+    // The unsaved-text guard lets this link through: it acts on the page and leaves nothing.
+    expect(html).toMatch(/<a\b[^>]*data-unsaved-ok="true"[^>]*>Load the latest version/)
   })
 
   it("shows the error of a refused read instead of claiming the note does not exist", () => {

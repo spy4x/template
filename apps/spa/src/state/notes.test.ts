@@ -275,6 +275,16 @@ describe("notes store", () => {
     expect(store.unsaved.value).toBe(false)
   })
 
+  it("keeps the typed text unsaved while the note is flagged as changed by someone else", async () => {
+    const { store } = harness({ pages: [{ notes: [item("a", 1)], nextCursor: null }] })
+    await store.open(groupId, "a")
+    expect(store.unsaved.value).toBe(false)
+
+    store.editing.value = { ...store.editing.value!, conflict: true }
+
+    expect(store.unsaved.value).toBe(true)
+  })
+
   it("does not count another member's change to the open note as the person's own edit", async () => {
     const { store } = harness({
       pages: [{ notes: [item("a", 1)], nextCursor: null }, {
