@@ -1,4 +1,4 @@
-import type { GroupRow } from "@ui/groups-screen.tsx"
+import type { DeletedGroupRow, GroupRow } from "@ui/groups-screen.tsx"
 import type { GroupPickerData } from "@ui/group-picker.tsx"
 import { type Api, isOk, isRecord } from "./api.ts"
 
@@ -36,10 +36,22 @@ export async function readSelected(api: Api): Promise<string | null> {
 export async function readGroup(api: Api, groupId: string): Promise<GroupRow | null> {
   const answer = await api.call("GET", `/api/groups/${encodeURIComponent(groupId)}`)
   if (!isOk(answer) || !isRecord(answer.body) || !isRecord(answer.body.group)) return null
-  const { id, name, kind, role } = answer.body.group
-  if (typeof id !== "string" || typeof name !== "string") return null
-  if (typeof kind !== "number" || typeof role !== "number") return null
-  return { id, name, kind, role }
+  const { id, name, role } = answer.body.group
+  if (typeof id !== "string" || typeof name !== "string" || typeof role !== "number") return null
+  return { id, name, role }
+}
+
+/**
+ * The groups the person deleted and can still restore (`GET /api/groups/deleted`), or an empty
+ * list when the read failed: the page shows its groups without the restore list instead of failing.
+ */
+export async function readDeleted(api: Api): Promise<DeletedGroupRow[]> {
+  const answer = await api.call("GET", "/api/groups/deleted")
+  if (!isOk(answer) || !isRecord(answer.body) || !Array.isArray(answer.body.groups)) return []
+  return answer.body.groups.filter((group): group is DeletedGroupRow =>
+    isRecord(group) && typeof group.id === "string" && typeof group.name === "string" &&
+    typeof group.deletedAt === "string"
+  )
 }
 
 /**

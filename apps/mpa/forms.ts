@@ -82,9 +82,9 @@ export const API_BODIES = {
   pushRemove: (form: FormData) => ({ deviceId: field(form, "deviceId") }),
   groupCreate: (form: FormData) => ({
     id: field(form, "id"),
-    kind: numberField(form, "kind"),
     name: field(form, "name"),
   }),
+  groupRename: (form: FormData) => ({ name: field(form, "name") }),
   groupSelect: (form: FormData) => ({ groupId: field(form, "groupId") }),
   noteCreate: (form: FormData) => ({
     id: field(form, "id"),

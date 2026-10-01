@@ -2,13 +2,12 @@ import { expect } from "@std/expect"
 import { afterEach, describe, it } from "@std/testing/bdd"
 import { renderToString } from "preact-render-to-string"
 import { Router } from "wouter-preact"
-import { GroupKind, GroupRole } from "@domain/groups"
+import { GroupRole } from "@domain/groups"
 import { groupsStore } from "../state/groups.ts"
 import { GroupSettingsView } from "./GroupSettingsView.tsx"
 
 const known = {
   id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001",
-  kind: GroupKind.SHARED,
   name: "Secret Team",
   role: GroupRole.ADMIN,
   authorizationRevision: "1",

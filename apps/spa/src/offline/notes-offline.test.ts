@@ -2,7 +2,7 @@ import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import type { NoteItem, NotePage, NotesDependencies } from "../state/notes.ts"
 import type { GroupItem, GroupsDependencies } from "../state/groups.ts"
-import { GroupKind, GroupRole } from "@domain/groups"
+import { GroupRole } from "@domain/groups"
 import type { OfflineLayer } from "./index.ts"
 import { createMemoryStore } from "./memory-store.ts"
 import { createPromiseLock } from "@spy4x/realtime/outbox"
@@ -152,7 +152,6 @@ describe("offline notes writes", () => {
 describe("offline groups", () => {
   const group: GroupItem = {
     id: "g-1",
-    kind: GroupKind.SHARED,
     name: "Team",
     role: GroupRole.OWNER,
     authorizationRevision: "1",
@@ -169,6 +168,10 @@ describe("offline groups", () => {
           ? Promise.resolve({ groups: [group], nextCursor: null })
           : Promise.reject(new TypeError()),
       create: () => Promise.reject(new Error("not used")),
+      fetchDeleted: () => Promise.reject(new Error("not used")),
+      rename: () => Promise.reject(new Error("not used")),
+      remove: () => Promise.reject(new Error("not used")),
+      restore: () => Promise.reject(new Error("not used")),
       advance: () => {},
       newId: () => "id",
     }
