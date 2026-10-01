@@ -1,8 +1,8 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { NoteError } from "@domain/notes"
-import { GroupListCursorCodec } from "@server/groups/group-list-cursor.ts"
-import { NoteListCursorCodec } from "./note-list-cursor.ts"
+import { createGroupListCursor } from "@server/groups/group-list-cursor.ts"
+import { createNoteListCursor } from "./note-list-cursor.ts"
 
 const secret = "note-list-cursor-test-secret-0123456789"
 const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
@@ -19,30 +19,29 @@ async function codeOf(promise: Promise<unknown>): Promise<string | null> {
 
 describe("note list cursor", () => {
   it("round-trips a page key for the same user and group", async () => {
-    const codec = new NoteListCursorCodec(secret)
+    const codec = await createNoteListCursor(secret)
     const cursor = await codec.encode(7, groupId, pageKey)
 
     expect(await codec.decode(cursor, 7, groupId)).toEqual(pageKey)
   })
 
   it("refuses a cursor handed to another user or another group", async () => {
-    const codec = new NoteListCursorCodec(secret)
+    const codec = await createNoteListCursor(secret)
     const cursor = await codec.encode(7, groupId, pageKey)
 
     expect(await codeOf(codec.decode(cursor, 8, groupId))).toBe("INVALID_CURSOR")
     expect(await codeOf(codec.decode(cursor, 7, otherGroupId))).toBe("INVALID_CURSOR")
   })
 
-  it("refuses a group list cursor signed with the same key", async () => {
-    const groups = new GroupListCursorCodec(secret)
-    const groupCursor = await groups.encode(7, pageKey)
+  it("refuses a group list cursor built on the same secret", async () => {
+    const groupCursor = await (await createGroupListCursor(secret)).encode(7, pageKey)
 
-    expect(await codeOf(new NoteListCursorCodec(secret).decode(groupCursor, 7, groupId)))
+    expect(await codeOf((await createNoteListCursor(secret)).decode(groupCursor, 7, groupId)))
       .toBe("INVALID_CURSOR")
   })
 
   it("refuses a tampered cursor", async () => {
-    const codec = new NoteListCursorCodec(secret)
+    const codec = await createNoteListCursor(secret)
     const cursor = await codec.encode(7, groupId, pageKey)
     const tampered = cursor.slice(0, -2) + (cursor.endsWith("AA") ? "BB" : "AA")
 
