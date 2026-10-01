@@ -323,4 +323,45 @@ test.describe("notes in a shared group", () => {
       await cleanup(request, owner)
     }
   })
+
+  test('after a refused save, "Load the latest version" loads the server\'s text instead of asking to leave', async ({ browser, request }) => {
+    const owner = "e2e_notes_conflict@example.com"
+    await cleanup(request, owner)
+    const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    try {
+      await signUp(request, owner)
+      const page = await context.newPage()
+      await signIn(page, owner)
+      const { groupId } = await (await page.request.get(`${apiBase}/api/groups/selected`)).json()
+      const noteId = crypto.randomUUID()
+      const created = await page.request.post(`${apiBase}/api/groups/${groupId}/notes`, {
+        headers,
+        data: { id: noteId, title: "Original", body: "" },
+      })
+      expect(created.status(), await created.text()).toBe(201)
+
+      await page.goto(`/notes/${noteId}`)
+      const title = page.locator("[data-e2e=note-title]")
+      await expect(title).toHaveValue("Original")
+      await title.fill("Mine")
+
+      // Someone else saves first, so this save is refused for a stale version.
+      const theirs = await page.request.patch(`${apiBase}/api/groups/${groupId}/notes/${noteId}`, {
+        headers,
+        data: { title: "Theirs", body: "", version: 1 },
+      })
+      expect(theirs.status(), await theirs.text()).toBe(200)
+      await page.locator("[data-e2e=note-save]").click()
+      await expect(page.locator("[data-e2e=note-conflict]")).toBeVisible()
+      await expect(title).toHaveValue("Mine")
+
+      await page.getByRole("link", { name: "Load the latest version" }).click()
+      await expect(title).toHaveValue("Theirs")
+      await expect(page.locator("[data-e2e=unsaved-dialog]")).toHaveCount(0)
+      await expect(page.locator("[data-e2e=note-conflict]")).toHaveCount(0)
+    } finally {
+      await context.close()
+      await cleanup(request, owner)
+    }
+  })
 })
