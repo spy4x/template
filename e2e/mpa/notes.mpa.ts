@@ -52,21 +52,47 @@ test("a person without JavaScript signs up, signs out, signs in, picks a group a
     await expect(page.getByRole("heading", { level: 1, name: "Notes in Trip" })).toBeVisible()
     await expect(page.getByText("No notes yet.")).toBeVisible()
 
-    await page.locator("[data-e2e=note-new-title]").fill("Packing")
-    await page.locator("[data-e2e=note-new-body]").fill("Tent and stove")
-    await page.locator("[data-e2e=note-create]").click()
+    // Create: the list links to a page of its own, whose form posts and lands on the note's page.
+    await page.locator("[data-e2e=note-new]").click()
+    await expect(page).toHaveURL("/notes/new")
+    await expect(page.getByRole("heading", { level: 1, name: "New note" })).toBeVisible()
+    await page.locator("[data-e2e=note-title]").fill("Packing")
+    await page.locator("[data-e2e=note-body]").fill("Tent and stove")
+    await page.locator("[data-e2e=note-save]").click()
+    await expect(page).toHaveURL(/\/notes\/[0-9a-f-]{36}$/)
+    await expect(page.getByRole("heading", { level: 1, name: "Edit note" })).toBeVisible()
+    await expect(page.locator("[data-e2e=note-title]")).toHaveValue("Packing")
+    const notePath = new URL(page.url()).pathname
+
+    await page.locator("[data-e2e=note-back]").click()
+    await expect(page).toHaveURL("/notes")
     const list = page.locator("[data-e2e=note-list]")
     await expect(list.locator("[data-e2e=note-item-title]")).toHaveText(["Packing"])
     await expect(list.locator("[data-e2e=note-item-body]")).toHaveText(["Tent and stove"])
 
-    await page.getByRole("link", { name: "Edit Packing" }).click()
-    await page.locator("[data-e2e=note-edit-title]").fill("Packing list")
+    // Edit: save returns to the list.
+    await page.getByRole("link", { name: "Packing" }).click()
+    await expect(page).toHaveURL(notePath)
+    await page.locator("[data-e2e=note-title]").fill("Packing list")
     await page.locator("[data-e2e=note-save]").click()
-    await expect(page.getByRole("heading", { level: 1, name: "Notes in Trip" })).toBeVisible()
+    await expect(page).toHaveURL("/notes")
     await expect(list.locator("[data-e2e=note-item-title]")).toHaveText(["Packing list"])
 
-    await page.getByRole("button", { name: "Delete Packing list" }).click()
+    // Delete asks on a page of its own; keeping the note leaves it.
+    await page.getByRole("link", { name: "Packing list" }).click()
+    await page.locator("[data-e2e=note-delete]").click()
+    await expect(page).toHaveURL(`${notePath}/delete`)
+    await expect(page.getByRole("heading", { level: 1, name: "Delete this note?" })).toBeVisible()
+    await page.getByRole("link", { name: "Keep it" }).click()
+    await expect(page).toHaveURL(notePath)
+    await page.locator("[data-e2e=note-delete]").click()
+    await page.locator("[data-e2e=note-delete-confirm]").click()
+    await expect(page).toHaveURL("/notes")
     await expect(page.getByText("No notes yet.")).toBeVisible()
+
+    // A note that is gone is "not found", not an error page.
+    await page.goto(notePath)
+    await expect(page.getByRole("heading", { level: 1, name: "Note not found" })).toBeVisible()
 
     // The side menu's picker is a form: pick the personal group and press Switch.
     await page.locator("#sidebar-group-picker").selectOption({ label: "Personal · Owner" })
@@ -77,6 +103,66 @@ test("a person without JavaScript signs up, signs out, signs in, picks a group a
       .toBeVisible()
   } finally {
     await cleanup(request, email)
+  }
+})
+
+test("a viewer without JavaScript reads a note as text, with no form and no way to add one", async ({ browser, request }) => {
+  const owner = `mpa-${crypto.randomUUID().slice(0, 8)}`
+  const viewer = `mpa-${crypto.randomUUID().slice(0, 8)}`
+  const baseURL = test.info().project.use.baseURL
+  const ownerContext = await browser.newContext({ baseURL, javaScriptEnabled: false })
+  const viewerContext = await browser.newContext({ baseURL, javaScriptEnabled: false })
+  try {
+    for (const username of [owner, viewer]) await cleanup(request, username)
+    const ownerPage = await ownerContext.newPage()
+    await ownerPage.goto("/sign-up")
+    await submitCredentials(ownerPage, owner)
+    await expect(ownerPage).toHaveURL("/")
+    await ownerPage.goto("/groups")
+    await ownerPage.locator("[data-e2e=group-name]").fill("Read only")
+    await ownerPage.locator("[data-e2e=group-create]").click()
+    await ownerPage.getByRole("button", { name: "Open notes in Read only" }).click()
+    await ownerPage.locator("[data-e2e=note-new]").click()
+    await ownerPage.locator("[data-e2e=note-title]").fill("Owner's note")
+    await ownerPage.locator("[data-e2e=note-body]").fill("Only the owner writes")
+    await ownerPage.locator("[data-e2e=note-save]").click()
+    await expect(ownerPage).toHaveURL(/\/notes\/[0-9a-f-]{36}$/)
+    const notePath = new URL(ownerPage.url()).pathname
+
+    const groups = await (await ownerPage.request.get("/api/groups")).json()
+    const groupId = groups.groups.find((group: { name: string }) => group.name === "Read only").id
+    const viewerPage = await viewerContext.newPage()
+    await viewerPage.goto("/sign-up")
+    await submitCredentials(viewerPage, viewer)
+    await expect(viewerPage).toHaveURL("/")
+    const added = await request.post("/api/test/add-member", {
+      data: { username: viewer, groupId, role: 1 },
+    })
+    expect(added.status(), await added.text()).toBe(200)
+
+    await viewerPage.goto("/groups")
+    await viewerPage.getByRole("button", { name: "Open notes in Read only" }).click()
+    await expect(viewerPage.locator("[data-e2e=note-new]")).toHaveCount(0)
+    await viewerPage.getByRole("link", { name: "Owner's note" }).click()
+    await expect(viewerPage).toHaveURL(notePath)
+    await expect(viewerPage.locator("[data-e2e=note-read-only]")).toBeVisible()
+    await expect(viewerPage.locator("[data-e2e=note-read-body]")).toHaveText(
+      "Only the owner writes",
+    )
+    await expect(
+      viewerPage.locator(
+        "form[action^='/notes'], [data-e2e=note-save], [data-e2e=note-delete]",
+      ),
+    )
+      .toHaveCount(0)
+
+    await viewerPage.goto("/notes/new")
+    await expect(viewerPage.getByText("Only an editor can add notes to this group.")).toBeVisible()
+    await expect(viewerPage.locator("[data-e2e=note-save]")).toHaveCount(0)
+  } finally {
+    await ownerContext.close()
+    await viewerContext.close()
+    for (const username of [owner, viewer]) await cleanup(request, username)
   }
 })
 

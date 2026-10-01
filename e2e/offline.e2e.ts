@@ -112,9 +112,12 @@ test.describe("offline notes", () => {
       const titles = page.locator("[data-e2e=note-item-title]")
       await expect(titles).toHaveText(["Written online"])
 
-      await page.locator("[data-e2e=note-new-title]").fill("Written offline")
-      await page.locator("[data-e2e=note-new-body]").fill("no network here")
-      await page.locator("[data-e2e=note-create]").click()
+      await page.locator("[data-e2e=note-new]").click()
+      await page.locator("[data-e2e=note-title]").fill("Written offline")
+      await page.locator("[data-e2e=note-body]").fill("no network here")
+      await page.locator("[data-e2e=note-save]").click()
+      await expect(page).toHaveURL(/\/notes\/[0-9a-f-]{36}$/)
+      await page.locator("[data-e2e=note-back]").click()
       await expect(titles).toHaveText(["Written offline", "Written online"])
       await expect(page.locator("[data-e2e=offline-pending]")).toHaveText(
         "1 change is waiting to sync.",
@@ -198,8 +201,8 @@ test.describe("offline notes", () => {
       await reloadOffline(contextB, b)
 
       for (const [page, title] of [[a, "Edited on A"], [b, "Edited on B"]] as const) {
-        await page.getByRole("link", { name: "Edit Shared note" }).click()
-        await page.locator("[data-e2e=note-edit-title]").fill(title)
+        await page.getByRole("link", { name: "Shared note" }).click()
+        await page.locator("[data-e2e=note-title]").fill(title)
         await page.locator("[data-e2e=note-save]").click()
         await expect(page.locator("[data-e2e=note-item-title]")).toHaveText([title])
         await expect(page.locator("[data-e2e=offline-pending]")).toBeVisible()
@@ -249,8 +252,8 @@ test.describe("offline notes", () => {
       for (const page of [a, b]) await openNotesAndCacheShell(page, groupId)
       await reloadOffline(contextB, b)
 
-      await b.getByRole("link", { name: "Edit Shared note" }).click()
-      await b.locator("[data-e2e=note-edit-title]").fill("Edited on B")
+      await b.getByRole("link", { name: "Shared note" }).click()
+      await b.locator("[data-e2e=note-title]").fill("Edited on B")
       await b.locator("[data-e2e=note-save]").click()
 
       // Device A, online, changes the note first.
