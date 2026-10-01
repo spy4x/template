@@ -52,6 +52,15 @@ Deno.test("skips build output below the root, not the root's own parents", () =>
   expect(skipped(`${root}libs/ui/screens.test.tsx`)).toBe(true)
 })
 
+Deno.test("escapes regex characters and backslashes in the root", () => {
+  for (const root of [`/home/a+b (1)/build/x/`, `C:\\Users\\me\\build\\x\\`]) {
+    const sep = root.endsWith(`\\`) ? `\\` : `/`
+    const skipped = (path: string) => skipPatterns(root).some((p) => p.test(path))
+    expect(skipped(`${root}apps${sep}spa${sep}src${sep}app.tsx`)).toBe(false)
+    expect(skipped(`${root}apps${sep}spa${sep}dist${sep}index.js`)).toBe(true)
+  }
+})
+
 Deno.test("every spacing class in apps/ and libs/ is on the scale", async () => {
   const files = await sourceFiles(ROOT)
   // An empty walk would pass silently, so require a file the SPA cannot lose.
