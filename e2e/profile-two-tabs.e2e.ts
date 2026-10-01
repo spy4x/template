@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures/stack.ts"
+import { gotoApp, signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -35,11 +36,7 @@ test.describe("profile over the socket", () => {
           profileWrites.push(req.url())
         }
       })
-      await first.goto("/sign-in")
-      await first.locator("[data-e2e=auth-form-login]").fill(email)
-      await first.locator("[data-e2e=auth-form-password]").fill(password)
-      await first.locator("[data-e2e=auth-form-submit]").click()
-      await first.waitForURL("/")
+      await signIn(first, email, password)
       await first.getByRole("navigation", { name: "Main navigation" })
         .getByRole("link", { name: "Profile" }).click()
       await expect(first.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible()
@@ -77,7 +74,7 @@ test.describe("profile over the socket", () => {
         route.connectToServer()
         openSockets.push(route)
       })
-      await second.goto("/")
+      await gotoApp(second, "/", second.locator("[data-e2e=shell-ws-status]"))
       await second.getByRole("navigation", { name: "Main navigation" })
         .getByRole("link", { name: "Profile" }).click()
       await expect(second.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible()
