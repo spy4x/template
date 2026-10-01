@@ -1,6 +1,6 @@
 import { commandBus } from "@api/services/commandBus.ts"
 import { queryBus } from "@api/services/queryBus.ts"
-import { eventBus } from "@api/services/eventBus.ts"
+import { subscribe } from "@api/services/eventBus.ts"
 import { sql } from "@api/services/db.ts"
 import { log } from "@api/services/log.ts"
 import { createIdempotencyMiddleware, PostgresIdempotencyStore } from "@spy4x/server/idempotency"
@@ -36,11 +36,21 @@ import { authAuditOnUserSignedOutHandler } from "@api/cqrs/event-handlers/auth-a
 import { authAuditOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-profile-updated.ts"
 import { realtimeOnUserSignedOutHandler } from "@api/cqrs/event-handlers/realtime-on-user-signed-out.ts"
 
-eventBus.on(UserSignedUpEvent, authAuditOnUserSignedUpHandler)
-eventBus.on(UserSignedInEvent, authAuditOnUserSignedInHandler)
-eventBus.on(UserSignedOutEvent, authAuditOnUserSignedOutHandler)
-eventBus.on(UserProfileUpdatedEvent, authAuditOnUserProfileUpdatedHandler)
-eventBus.on(UserSignedOutEvent, realtimeOnUserSignedOutHandler)
+// Every listener is best-effort: a failure is logged and counted (`services/eventBus.ts`) and
+// nothing retries it, because the in-process bus holds no copy of the event.
+//
+// - The four audit listeners ought to be durable, since a lost row is a lost audit record. They
+//   stay best-effort until an outbox row can carry the event: today a row has no payload, and the
+//   audit row needs the address and user agent, which cannot be read back later.
+// - The socket-closing listener is best-effort by nature: sockets live in this process and the
+//   worker, which runs outbox jobs, cannot close them. Its durable backstop is already in place:
+//   every socket is revalidated on a timer (`realtime.startRevalidation`) and before each
+//   request, so a failure here delays the close by one interval at most.
+subscribe(UserSignedUpEvent, authAuditOnUserSignedUpHandler)
+subscribe(UserSignedInEvent, authAuditOnUserSignedInHandler)
+subscribe(UserSignedOutEvent, authAuditOnUserSignedOutHandler)
+subscribe(UserProfileUpdatedEvent, authAuditOnUserProfileUpdatedHandler)
+subscribe(UserSignedOutEvent, realtimeOnUserSignedOutHandler)
 
 // After the session gate (added where the bus is built): a command from a session that may not act
 // never reaches the key store. It needs the database, so it is attached here and not there.
