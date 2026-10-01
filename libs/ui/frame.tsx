@@ -2,7 +2,13 @@ import type { ComponentChildren, JSX } from "preact"
 import { Shell, type ShellNavItem } from "@spy4x/preact-system/shell"
 import { Button } from "@spy4x/preact-ui/button"
 import { Page } from "@spy4x/preact-ui/layout"
-import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenLink, takeOver } from "./progressive.tsx"
+import {
+  FORM_ACTIONS,
+  type Navigate,
+  SCREEN_PATHS,
+  ScreenForm,
+  ScreenLink,
+} from "./progressive.tsx"
 
 /** Every page a signed-in user can open. Add a route here when it gets its own page. */
 const NAV_ITEMS: readonly ShellNavItem[] = [
@@ -44,9 +50,10 @@ function displayName(user: FrameUser): string {
  * The signed-in frame: `Shell` from `@spy4x/preact-system` with this app's brand, navigation, user
  * menu and connection status. Signed-out screens use {@link PublicFrame} instead.
  *
- * With `onSignOut`, "Sign out" is an item of the user menu, which needs JavaScript to open. Without
- * it, a page rendered on the server, "Sign out" is a form that posts to its route. `connection` is
- * shown only when the app has a live connection to report.
+ * With `onSignOut`, "Sign out" is an item of the user menu, which needs JavaScript to open: a form
+ * that posts to its route, which the app takes over. Without it, a page rendered on the server,
+ * "Sign out" is a form in the header. `connection` is shown only when the app has a live connection
+ * to report.
  */
 export function AppFrame(
   { user, connection, currentPath, navigate, onSignOut, children }: {
@@ -65,7 +72,9 @@ export function AppFrame(
       currentPath={currentPath}
       navigate={navigate}
       user={{ name: displayName(user) }}
-      userMenuItems={onSignOut ? [{ label: "Sign out", onClick: onSignOut }] : []}
+      userMenuItems={onSignOut
+        ? [{ label: "Sign out", action: FORM_ACTIONS.signOut, onClick: onSignOut }]
+        : []}
       status={
         <>
           {connection && (
@@ -85,11 +94,11 @@ export function AppFrame(
 /** "Sign out" as a form that posts to its route; with `onSignOut`, the app takes it over. */
 function SignOutForm({ onSignOut }: { onSignOut?: () => void }): JSX.Element {
   return (
-    <form method="post" action={FORM_ACTIONS.signOut} onSubmit={takeOver(onSignOut)}>
+    <ScreenForm action={FORM_ACTIONS.signOut} onSubmit={onSignOut}>
       <Button type="submit" variant="outline" data-e2e="signout">
         Sign out
       </Button>
-    </form>
+    </ScreenForm>
   )
 }
 

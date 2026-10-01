@@ -1,7 +1,7 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import type { JSX } from "preact"
-import { ScreenLink, takeOver } from "./progressive.tsx"
+import { ScreenLink } from "./progressive.tsx"
 
 /** A stand-in for a DOM event: records whether `preventDefault` was called. */
 function fakeEvent(init: Partial<MouseEvent> = {}) {
@@ -60,20 +60,5 @@ describe("ScreenLink", () => {
     link.props.onClick(event as unknown as MouseEvent)
     expect(event.defaultPrevented).toBe(false)
     expect(link.props.href).toBe("/sign-in")
-  })
-})
-
-describe("takeOver", () => {
-  it("cancels the native post and runs the callback", () => {
-    let runs = 0
-    const event = fakeEvent()
-    takeOver(() => runs++)(event as unknown as JSX.TargetedEvent<HTMLFormElement, SubmitEvent>)
-    expect({ runs, prevented: event.defaultPrevented }).toEqual({ runs: 1, prevented: true })
-  })
-
-  it("lets the browser post when there is no callback", () => {
-    const event = fakeEvent()
-    takeOver(undefined)(event as unknown as JSX.TargetedEvent<HTMLFormElement, SubmitEvent>)
-    expect(event.defaultPrevented).toBe(false)
   })
 })

@@ -5,6 +5,7 @@ import { renderToString } from "preact-render-to-string"
 import {
   authOTPSchema,
   authPasswordChangeSchema,
+  authUsernamePasswordSchema,
   UserMFAStatus,
   userProfileBaseSchema,
   type UserPushTokenPublic,
@@ -90,8 +91,11 @@ describe("AuthScreen without JavaScript", () => {
   it("posts the sign-in credentials to the sign-in route", () => {
     const surface = noScriptSurface(<AuthScreen {...authDefaults} />)
     expect(surface.forms).toEqual([
-      // AuthForm names the username field `login`; the API calls it `username`.
-      { action: FORM_ACTIONS.signIn, method: "post", fields: ["login", "password"] },
+      {
+        action: FORM_ACTIONS.signIn,
+        method: "post",
+        fields: schemaKeys(authUsernamePasswordSchema),
+      },
     ])
     expect(surface.scriptOnlyButtons).toEqual(["auth-form-password-toggle"])
   })
@@ -99,7 +103,11 @@ describe("AuthScreen without JavaScript", () => {
   it("posts the sign-up credentials to the sign-up route", () => {
     const surface = noScriptSurface(<AuthScreen {...authDefaults} screen="sign-up" />)
     expect(surface.forms).toEqual([
-      { action: FORM_ACTIONS.signUp, method: "post", fields: ["login", "password"] },
+      {
+        action: FORM_ACTIONS.signUp,
+        method: "post",
+        fields: schemaKeys(authUsernamePasswordSchema),
+      },
     ])
   })
 
@@ -108,8 +116,7 @@ describe("AuthScreen without JavaScript", () => {
       <AuthScreen {...authDefaults} screen="one-time-code" isMfaRequired />,
     )
     expect(surface.forms).toEqual([
-      // AuthForm names the code field `code`; the API calls it `otp`.
-      { action: FORM_ACTIONS.oneTimeCode, method: "post", fields: ["code"] },
+      { action: FORM_ACTIONS.oneTimeCode, method: "post", fields: schemaKeys(authOTPSchema) },
     ])
     expect(surface.links).toEqual(["/sign-in"])
     expect(surface.scriptOnlyButtons).toEqual([])
@@ -137,7 +144,7 @@ const profileDefaults: ProfileScreenProps = {
   connection: "open",
   values: { firstName: "Ada", lastName: "Lovelace", currentPassword: "", newPassword: "", otp: "" },
   onValueChange: () => {},
-  errors: { profile: null, password: null, push: null },
+  errors: { fields: {}, profile: null, password: null, totp: null, push: null },
   pending: { profile: false, password: false, totp: false, push: false },
   enrolment: null,
   pushDevices: [device],
@@ -213,7 +220,7 @@ describe("frames without JavaScript", () => {
     expect(surface.links).toEqual(["/"])
   })
 
-  it("links the brand and the navigation of the signed-in frame, and signs out from the user menu when the app takes sign-out over", () => {
+  it("links the brand and the navigation of the signed-in frame, and posts sign-out from the user menu when the app takes sign-out over", () => {
     const surface = noScriptSurface(
       <AppFrame user={{ firstName: "Ada", lastName: "" }} connection="open" onSignOut={() => {}}>
         page
@@ -225,9 +232,9 @@ describe("frames without JavaScript", () => {
     expect(pages.filter((href) => href === "/")).toHaveLength(3)
     expect(pages.filter((href) => href === "/groups")).toHaveLength(2)
     expect(pages).toHaveLength(5)
-    expect(surface.forms).toEqual([])
-    // Shell's user menu takes a link or a click handler, not a form, so "Sign out" is a button.
-    expect(surface.scriptOnlyButtons).toEqual(["shell-user-menu-button", "(unnamed)"])
+    // "Sign out" is a form in the user menu; only the button that opens the menu needs a script.
+    expect(surface.forms).toEqual([{ action: FORM_ACTIONS.signOut, method: "post", fields: [] }])
+    expect(surface.scriptOnlyButtons).toEqual(["shell-user-menu-button"])
   })
 
   it("posts sign-out from the signed-in frame when no app takes it over, and shows no connection it does not have", () => {

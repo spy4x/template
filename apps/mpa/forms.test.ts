@@ -9,10 +9,10 @@ function form(fields: Record<string, string>): FormData {
 }
 
 describe("API_BODIES", () => {
-  it("renames AuthForm's login and code to the API's username and otp", () => {
-    expect(API_BODIES.credentials(form({ login: "ada", password: "secret-pass" })))
+  it("sends the auth forms' username, password and otp as the API names them", () => {
+    expect(API_BODIES.credentials(form({ username: "ada", password: "secret-pass" })))
       .toEqual({ username: "ada", password: "secret-pass" })
-    expect(API_BODIES.oneTimeCode(form({ code: "012345" }))).toEqual({ otp: "012345" })
+    expect(API_BODIES.oneTimeCode(form({ otp: "012345" }))).toEqual({ otp: "012345" })
   })
 
   it("sends a note's version and a group's kind as numbers, the way the API's schema takes them", () => {
@@ -36,9 +36,9 @@ describe("readForm", () => {
   it("reads a form post", async () => {
     const request = new Request("http://app.localhost/sign-in", {
       method: "POST",
-      body: new URLSearchParams({ login: "ada" }),
+      body: new URLSearchParams({ username: "ada" }),
     })
-    expect((await readForm(request)).get("login")).toBe("ada")
+    expect((await readForm(request)).get("username")).toBe("ada")
   })
 
   it("answers 413 to a form over the cap instead of buffering it", async () => {

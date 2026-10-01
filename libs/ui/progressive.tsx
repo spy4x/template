@@ -1,4 +1,5 @@
 import type { ComponentChildren, JSX } from "preact"
+import { EnhancedForm, type EnhancedFormLabels } from "@spy4x/preact-ui/enhanced-form"
 
 /**
  * Follows an in-app link without a page load. The SPA passes its router's `navigate`; a server
@@ -77,17 +78,35 @@ export function ScreenLink(
   return <a href={href} class={className} onClick={onClick}>{children}</a>
 }
 
+/** `EnhancedForm` announces nothing itself: each screen shows its own busy button and error. */
+const QUIET: EnhancedFormLabels = { sending: "", done: "", failed: "" }
+
 /**
- * The submit handler of a form that posts natively until a callback takes it over: with `run`, the
- * native post is cancelled and `run` is called; without it, the browser posts to the form's
- * `action` as usual.
+ * A screen's form: `EnhancedForm` posting to `action`. Without `onSubmit`, the browser posts as
+ * usual; with it, the native post is cancelled and `onSubmit` is called. While `pending`, the
+ * fields are disabled and a second submit is refused.
  */
-export function takeOver(
-  run: (() => void) | undefined,
-): (event: JSX.TargetedEvent<HTMLFormElement, SubmitEvent>) => void {
-  return (event) => {
-    if (!run) return
-    event.preventDefault()
-    run()
-  }
+export function ScreenForm(
+  { action, pending = false, onSubmit, class: className, children }: {
+    action: string
+    pending?: boolean
+    onSubmit?: () => void
+    class?: string
+    children: ComponentChildren
+  },
+): JSX.Element {
+  return (
+    <EnhancedForm
+      action={action}
+      method="post"
+      status={pending ? "sending" : "idle"}
+      labels={QUIET}
+      onSubmit={onSubmit && (() => onSubmit())}
+      // EnhancedForm spaces its fields from its status line, which stays empty here: space-y-0
+      // replaces its space-y-4, so the empty line takes no room.
+      class={className ? `space-y-0 ${className}` : "space-y-0"}
+    >
+      {children}
+    </EnhancedForm>
+  )
 }

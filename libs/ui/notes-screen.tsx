@@ -8,7 +8,7 @@ import { Field } from "@spy4x/preact-ui/field"
 import { Input, Textarea } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { NOTE_BODY_MAX_LENGTH, NOTE_TITLE_MAX_LENGTH } from "@domain/notes"
-import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenLink, takeOver } from "./progressive.tsx"
+import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm, ScreenLink } from "./progressive.tsx"
 
 /** One note as the screen shows it. */
 export interface NoteRow {
@@ -159,7 +159,7 @@ function CreateForm(
   { group, draftId, draft, onDraftChange, createErrors, creating, onCreate }: WithGroup,
 ): JSX.Element {
   return (
-    <form method="post" action={NOTE_PATHS.list(group.id)} onSubmit={takeOver(onCreate)}>
+    <ScreenForm action={NOTE_PATHS.list(group.id)} pending={creating} onSubmit={onCreate}>
       <input type="hidden" name="id" value={draftId} />
       <NoteFields
         idPrefix="note-new"
@@ -173,7 +173,7 @@ function CreateForm(
           Add note
         </Button>
       </div>
-    </form>
+    </ScreenForm>
   )
 }
 
@@ -191,7 +191,7 @@ function EditForm(
 ): JSX.Element {
   const notePath = NOTE_PATHS.note(group.id, editing.id)
   return (
-    <form method="post" action={notePath} onSubmit={takeOver(onSave)}>
+    <ScreenForm action={notePath} pending={saving} onSubmit={onSave}>
       <input type="hidden" name="version" value={String(editing.version)} />
       <NoteFields
         idPrefix="note-edit"
@@ -224,7 +224,7 @@ function EditForm(
           Cancel
         </ScreenLink>
       </div>
-    </form>
+    </ScreenForm>
   )
 }
 
@@ -297,10 +297,10 @@ function NoteItem(
           >
             Edit<span class="sr-only">{` ${note.title}`}</span>
           </ScreenLink>
-          <form
-            method="post"
+          <ScreenForm
             action={NOTE_PATHS.delete(group.id, note.id)}
-            onSubmit={takeOver(onDelete ? () => onDelete(note) : undefined)}
+            pending={deleting === note.id}
+            onSubmit={onDelete && (() => onDelete(note))}
           >
             <input type="hidden" name="version" value={String(note.version)} />
             <Button
@@ -314,7 +314,7 @@ function NoteItem(
             >
               Delete
             </Button>
-          </form>
+          </ScreenForm>
         </div>
       )}
     </li>
