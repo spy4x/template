@@ -76,11 +76,31 @@ export function createProfileStore(dependencies: ProfileDependencies) {
     }
   }
 
-  function reset(): void {
-    pushDevices.value = []
+  let wasOpen = false
+  let dropped = false
+
+  /**
+   * Feed it every socket status. A hint for this person's own changes has no stored cursor, so
+   * the transport's catch-up after a reconnect does not cover it: when the socket opens again
+   * after a drop, read again here.
+   */
+  function onSocketStatus(status: "idle" | "connecting" | "open" | "closed"): void {
+    if (status === "open") {
+      if (dropped) void refresh().catch(() => {})
+      wasOpen = true
+      dropped = false
+    } else if (wasOpen) {
+      dropped = true
+    }
   }
 
-  return { pushDevices, refresh, saveProfile, registerPush, removePush, reset }
+  function reset(): void {
+    pushDevices.value = []
+    wasOpen = false
+    dropped = false
+  }
+
+  return { pushDevices, refresh, saveProfile, registerPush, removePush, onSocketStatus, reset }
 }
 
 /** The page's own store, over the socket. */

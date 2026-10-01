@@ -75,6 +75,11 @@ export function App() {
     else if (isReady && !user) forgetUser()
   }, [sessionState.value.user, sessionState.value.isReady, sessionState.value.isMfaRequired])
 
+  // A change made in another tab while this socket was down is read when it opens again.
+  useEffect(() => profileStore.onSocketStatus(sessionState.value.wsStatus), [
+    sessionState.value.wsStatus,
+  ])
+
   useEffect(() => {
     const userId = sessionState.value.user?.id
     if (userId === undefined || sessionState.value.isMfaRequired) {

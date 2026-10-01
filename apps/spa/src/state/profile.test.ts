@@ -117,6 +117,25 @@ describe("profile store", () => {
     expect(store.pushDevices.value.map((d) => d.deviceId)).toEqual(["phone"])
   })
 
+  it("reads again when the socket opens after a drop, and not at the first open", async () => {
+    const answers = { user: user("Before"), devices: [] as UserPushTokenPublic[] }
+    const { store } = harness(answers)
+    store.onSocketStatus("connecting")
+    store.onSocketStatus("open")
+    await Promise.resolve()
+    expect(sessionState.value.user).toBe(null)
+
+    store.onSocketStatus("closed")
+    answers.user = user("Missed while down")
+    answers.devices = [device("phone")]
+    store.onSocketStatus("connecting")
+    store.onSocketStatus("open")
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(sessionState.value.user?.firstName).toBe("Missed while down")
+    expect(store.pushDevices.value.map((d) => d.deviceId)).toEqual(["phone"])
+  })
+
   it("forgets the devices on reset", async () => {
     const { store } = harness({ devices: [device("phone")] })
     await store.refresh()
