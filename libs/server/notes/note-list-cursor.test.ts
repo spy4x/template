@@ -2,6 +2,7 @@ import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { NoteError } from "@domain/notes"
 import { createGroupListCursor } from "@server/groups/group-list-cursor.ts"
+import { createKeysetCursorCodec } from "@spy4x/platform/keyset-cursor"
 import { createNoteListCursor } from "./note-list-cursor.ts"
 
 const secret = "note-list-cursor-test-secret-0123456789"
@@ -37,6 +38,18 @@ describe("note list cursor", () => {
     const groupCursor = await (await createGroupListCursor(secret)).encode(7, pageKey)
 
     expect(await codeOf((await createNoteListCursor(secret)).decode(groupCursor, 7, groupId)))
+      .toBe("INVALID_CURSOR")
+  })
+
+  it("refuses a cursor of another purpose with the same secret and scope", async () => {
+    const other = await createKeysetCursorCodec({
+      secret,
+      purpose: "groups.list",
+      scope: ["userId", "groupId"],
+    })
+    const foreign = await other.encode(pageKey, { userId: 7, groupId })
+
+    expect(await codeOf((await createNoteListCursor(secret)).decode(foreign, 7, groupId)))
       .toBe("INVALID_CURSOR")
   })
 

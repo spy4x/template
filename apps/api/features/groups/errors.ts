@@ -58,7 +58,7 @@ const IDEMPOTENCY_CODES: Record<IdempotencyError["code"], GroupFeatureErrorCode>
   INVALID_KEY: "IDEMPOTENCY_KEY_INVALID",
   KEY_REUSED: "IDEMPOTENCY_KEY_REUSED",
   IN_PROGRESS: "IDEMPOTENCY_IN_PROGRESS",
-  INVALID_COMMAND: "INVALID_REQUEST",
+  INVALID_COMMAND: "INTERNAL_ERROR",
 }
 
 export function groupErrorResponse(c: Context<APIContext>, error: unknown): Response {

@@ -341,6 +341,7 @@ describe("toRequestError", () => {
     expect(code(new IdempotencyError("KEY_REUSED", "x"))).toBe("conflict")
     expect(code(new IdempotencyError("IN_PROGRESS", "x"))).toBe("conflict")
     expect(code(new IdempotencyError("INVALID_KEY", "x"))).toBe("bad_request")
+    expect(toRequestError(new IdempotencyError("INVALID_COMMAND", "x"))).toBeNull()
     expect(code(new RealtimeRequestError("rate_limited", "x"))).toBe("rate_limited")
   })
 

@@ -457,6 +457,7 @@ describe("groups route idempotency", () => {
       ["IDEMPOTENCY_KEY_INVALID", 400, new IdempotencyError("INVALID_KEY", "bad key")],
       ["IDEMPOTENCY_KEY_REUSED", 422, new IdempotencyError("KEY_REUSED", "other body")],
       ["IDEMPOTENCY_IN_PROGRESS", 409, new IdempotencyError("IN_PROGRESS", "still running")],
+      ["INTERNAL_ERROR", 500, new IdempotencyError("INVALID_COMMAND", "name too long")],
     ] as const
   ) {
     it(`answers ${status} ${code} when the key is refused`, async () => {

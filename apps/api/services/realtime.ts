@@ -84,9 +84,9 @@ export function toRequestError(error: unknown): RealtimeRequestError | null {
     return new RealtimeRequestError("unauthorized", error.message, { code: error.code })
   }
   if (error instanceof IdempotencyError) {
-    const code = error.code === "INVALID_KEY" || error.code === "INVALID_COMMAND"
-      ? "bad_request"
-      : "conflict"
+    // A command class name over the limit is a server bug, so it is answered as an unexpected error.
+    if (error.code === "INVALID_COMMAND") return null
+    const code = error.code === "INVALID_KEY" ? "bad_request" : "conflict"
     return new RealtimeRequestError(code, error.message, { code: error.code })
   }
   return null
