@@ -1,8 +1,7 @@
 /// <reference lib="deno.ns" />
 import postgres from "postgres"
 import { createSqlFromEnv } from "@spy4x/server/db"
-import { OutboxProcessor, PostgresOutboxRepository } from "@spy4x/server/outbox"
-import { GroupChangeNotifier } from "@server/groups/group-change-notify.ts"
+import { createOutboxProcessor, scheduleNightlyJobs } from "@server/jobs/wiring.ts"
 import { PostgresIdempotencyStore } from "@spy4x/server/idempotency"
 import { shutdownSignal, ShutdownSignalError } from "@spy4x/platform/server/shutdown-signal"
 
@@ -25,11 +24,12 @@ const signal = shutdownSignal()
 console.log("Worker started")
 
 // A committed group change is announced on a Postgres channel; the API process, which holds the
-// sockets, turns it into a hint for the group's members.
-const processor = new OutboxProcessor(
-  new PostgresOutboxRepository(sql),
-  new GroupChangeNotifier(sql),
-)
+// sockets, turns it into a hint for the group's members. The same table holds jobs: a row that
+// belongs to no group and runs when its time has come.
+const processor = createOutboxProcessor(sql)
+
+// Starts the nightly chain the first time; a restart finds the row and adds nothing.
+await scheduleNightlyJobs(sql)
 
 /** How often the outbox is looked at when it is empty; the delay before a push. */
 const OUTBOX_IDLE_MS = 250

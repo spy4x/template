@@ -43,7 +43,8 @@ apps/mpa      Fresh. REST-only, server-rendered client: auth, profile, groups an
               every action a form post that works without JavaScript. Calls the API
               over HTTP (API_URL); in compose under the `mpa` profile.
 apps/worker   Drains outbox_events and announces group changes (pg_notify); sweeps
-              expired idempotency keys. Runs in compose as `worker`, from the API's image.
+              expired idempotency keys; runs delayed and repeating jobs (below). Runs in compose
+              as `worker`, from the API's image.
 
 libs/platform  empty. Its primitives come from spy4x/ts-libs on JSR:
                @spy4x/validation, @spy4x/platform/{cqrs,cache,api,model,
@@ -257,7 +258,16 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 4. Every committed group change bumps `groups.next_change_sequence` and writes an outbox row in
    the same transaction. The worker drains the outbox and sends `pg_notify`; the API turns it into
    a `change.hint` with the sequence for every member's open sockets.
-5. The SPA treats a hint as a reason to read. The read is `GET /api/groups`, the same one it makes
+5. A job is an outbox row with `aggregate_type = 'job'`, no group and no payload, claimed once its
+   `available_at` has come. `scheduleOutboxEvent` (from `@spy4x/server/outbox`) writes one, in the
+   transaction of the change that needs it. Add a handler to the `JobPublisher` in
+   `libs/server/jobs/wiring.ts`; it reads what it needs from the database. A failing job backs off
+   (1 s, 2 s, 4 s, up to 5 minutes) and after 10 attempts stops with its error in
+   `last_error_code`. A repeating job is listed in `repeatEveryMs`: a successful run writes the
+   next one. The worker starts one, `outbox.cleanup`, at 03:00 UTC and then daily: it removes
+   outbox rows processed more than 7 days ago. A job that gave up stays unprocessed, so the
+   worker does not restart it; look for rows with `last_error_code` set.
+6. The SPA treats a hint as a reason to read. The read is `GET /api/groups`, the same one it makes
    at start-up and after every reconnect, so a lost frame costs one read.
 
 ## Next steps, in dependency order
