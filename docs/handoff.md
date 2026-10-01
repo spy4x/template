@@ -196,22 +196,28 @@ deno task mpa:check
 deno task dev              # compose up
 ```
 
-Integration tests need a throwaway Postgres:
+Integration tests need a throwaway Postgres and Valkey (Valkey requires a password, as in
+production):
 
 ```bash
 NAME="template-test-$$"
 PASS=$(openssl rand -hex 24)
+trap 'docker rm -f "$NAME" "$NAME-kv" >/dev/null' EXIT
 docker run -d --name "$NAME" -e POSTGRES_USER=tester -e POSTGRES_PASSWORD="$PASS" \
   -e POSTGRES_DB=template_test -p 127.0.0.1::5432 postgres:16-alpine
+docker run -d --name "$NAME-kv" -e REDISCLI_AUTH="$PASS" -p 127.0.0.1::6379 valkey/valkey:8.1 \
+  valkey-server --requirepass "$PASS"
 PORT=$(docker port "$NAME" 5432/tcp | cut -d: -f2)
+KV_PORT=$(docker port "$NAME-kv" 6379/tcp | head -1 | cut -d: -f2)
 
 # Wait over TCP, not the unix socket - see trap 3 above.
 timeout 90 docker exec "$NAME" sh -c \
   'until pg_isready -h 127.0.0.1 -U tester -d template_test -q; do sleep 0.5; done'
+timeout 30 docker exec "$NAME-kv" sh -c 'until valkey-cli ping | grep -q PONG; do sleep 0.5; done'
 
 DB_HOST=127.0.0.1 DB_PORT="$PORT" DB_USER=tester DB_PASS="$PASS" DB_NAME=template_test \
+  KV_HOSTNAME=127.0.0.1 KV_PORT="$KV_PORT" KV_PASSWORD="$PASS" \
   deno task test:integration
-docker rm -f "$NAME"
 ```
 
 Compose, and so `deno task deploy`, applies migrations itself: the one-shot `migrate` service runs

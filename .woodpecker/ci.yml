@@ -32,21 +32,29 @@ steps:
       DB_USER: tester
       DB_PASS: ci-throwaway
       DB_NAME: template_test
+      KV_HOSTNAME: valkey
+      KV_PORT: "6379"
+      KV_PASSWORD: ci-throwaway
     commands:
       # Wait over TCP. Postgres first runs a temporary server that listens on a unix socket only,
       # so a successful TCP connection means the real server is up (docs/handoff.md, trap 3).
+      # Valkey has no such phase.
       - |
           deno eval '
-          for (let i = 0; i < 120; i++) {
-            try {
-              (await Deno.connect({ hostname: "postgres", port: 5432 })).close()
-              Deno.exit(0)
-            } catch {
-              await new Promise((resolve) => setTimeout(resolve, 500))
+          for (const [hostname, port] of [["postgres", 5432], ["valkey", 6379]]) {
+            for (let i = 0; ; i++) {
+              try {
+                (await Deno.connect({ hostname, port })).close()
+                break
+              } catch {
+                if (i === 120) {
+                  console.error(`${hostname} did not accept connections within 60 s`)
+                  Deno.exit(1)
+                }
+                await new Promise((resolve) => setTimeout(resolve, 500))
+              }
             }
           }
-          console.error("postgres did not accept connections within 60 s")
-          Deno.exit(1)
           '
       - deno task test:integration
     depends_on: [check]
