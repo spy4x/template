@@ -44,6 +44,7 @@ function fakeSignIn(
   calls: string[],
   succeed = true,
   secondFactor = SecondFactorStatus.NotRequired,
+  logins: string[] = [],
 ): SignIn {
   const signedIn = (): Promise<SignedIn> => {
     const { user, session } = buildAuthData({ session: { secondFactor } })
@@ -51,8 +52,12 @@ function fakeSignIn(
   }
   return {
     auth: testSessionGuards(),
-    signUp: () => (calls.push("signUp"), succeed ? signedIn() : Promise.resolve(null)),
-    signIn: () => (calls.push("signIn"), succeed ? signedIn() : Promise.resolve(null)),
+    signUp: (_c, email) => (
+      calls.push("signUp"), logins.push(email), succeed ? signedIn() : Promise.resolve(null)
+    ),
+    signIn: (_c, login) => (
+      calls.push("signIn"), logins.push(login), succeed ? signedIn() : Promise.resolve(null)
+    ),
     signOut: () => (calls.push("signOut"), Promise.resolve()),
     connectTotpStart: () => (
       calls.push("connectTotpStart"), Promise.resolve({ error: null, qrcode: "qr", secret: "s" })
@@ -112,8 +117,10 @@ function buildApp(
   const failureCalls: string[] = []
   /** Every address a reset link was queued for, as the route passed it. */
   const queued: string[] = []
+  /** What the route handed `signUp` and `signIn` as the address or login. */
+  const logins: string[] = []
   const route = createAuthRoute({
-    signIn: fakeSignIn(calls, succeed, secondFactor),
+    signIn: fakeSignIn(calls, succeed, secondFactor, logins),
     emit: () => {},
     mutationGuards: testMutationGuards,
     rateLimits,
@@ -122,7 +129,7 @@ function buildApp(
       calls.push("requestPasswordReset"), queued.push(email), Promise.resolve()
     ),
   })
-  return { app: mountRoute("/auth", route, auth), calls, failureCalls, queued }
+  return { app: mountRoute("/auth", route, auth), calls, failureCalls, queued, logins }
 }
 
 /** `body` with its `email` replaced, or `body` itself when it has none. */
@@ -784,5 +791,49 @@ describe("auth routes reset a password by e-mail link", () => {
 
     expect(response.status).toBe(400)
     expect(calls).toEqual([])
+  })
+})
+
+describe("auth routes sign up with an e-mail address", () => {
+  const signUp = anonymousRoutes.find((route) => route.path === "/auth/password/sign-up")!
+  const signInRoute = anonymousRoutes.find((route) => route.path === "/auth/password/check")!
+
+  it("signs up with the address as normalizeEmail leaves it", async () => {
+    const { app, logins } = buildApp(null)
+
+    const response = await send(
+      app,
+      { ...signUp, body: { ...signUpBody, email: "  Ada@Example.COM " } },
+      sameOriginWithoutCookieHeaders,
+    )
+
+    expect(response.status).toBe(200)
+    expect(logins).toEqual(["ada@example.com"])
+  })
+
+  it("refuses a sign-up with a username instead of an address with 400, before sign-up runs", async () => {
+    const { app, calls } = buildApp(null)
+
+    const response = await send(
+      app,
+      { ...signUp, body: { ...signUpBody, email: "ada" } },
+      sameOriginWithoutCookieHeaders,
+    )
+
+    expect(response.status).toBe(400)
+    expect(calls).toEqual([])
+  })
+
+  it("hands sign-in the login as typed, so an older account's username still reaches it", async () => {
+    const { app, logins } = buildApp(null)
+
+    const response = await send(
+      app,
+      { ...signInRoute, body: { login: "Ada", password: "correct-horse" } },
+      sameOriginWithoutCookieHeaders,
+    )
+
+    expect(response.status).toBe(200)
+    expect(logins).toEqual(["Ada"])
   })
 })

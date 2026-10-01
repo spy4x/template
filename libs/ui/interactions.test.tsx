@@ -179,8 +179,10 @@ describe("ForgotPasswordScreen in the browser", () => {
   })
 
   it("posts the address natively when the app takes nothing over", async () => {
-    await mount(<ForgotPasswordScreen {...forgotDefaults} />)
+    await mount(<ForgotPasswordScreen {...forgotDefaults} email="ada@example.com" />)
 
+    const form = find<HTMLFormElement>(`form[action="${FORM_ACTIONS.forgotPassword}"]`)
+    expect(Object.fromEntries(new FormData(form))).toEqual({ email: "ada@example.com" })
     expect(await submit(FORM_ACTIONS.forgotPassword)).toBe(false)
   })
 
