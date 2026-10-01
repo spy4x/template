@@ -2352,6 +2352,7 @@
           "jsr:@fresh/core@2.3.3",
           "jsr:@fresh/plugin-vite@1.1.2",
           "jsr:@spy4x/net@1.20.0",
+          "jsr:@spy4x/server@1.20.0",
           "npm:@tailwindcss/vite@4.1.12",
           "npm:@types/babel__core@7.20.5",
           "npm:preact@10.29.8",

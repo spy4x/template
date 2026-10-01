@@ -1,12 +1,7 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
 import postgres from "postgres"
-import {
-  createTotpFailures,
-  FIRST_LOCK_MS,
-  FREE_FAILURES,
-  QUIET_RESET_MS,
-} from "../../apps/api/services/totp-failures.ts"
+import { createTotpFailures } from "../../apps/api/services/totp-failures.ts"
 import { requireDbConnection } from "./db-connection.ts"
 
 interface IdRow extends postgres.Row {
@@ -57,21 +52,25 @@ async function insertEnrolledUser(sql: postgres.Sql): Promise<number> {
 
 const T0 = 1_700_000_000_000
 const HOUR = 60 * 60_000
+// The policy written out, not imported from the library, so a changed default fails these tests.
+const FREE_FAILURES = 5
+const FIRST_LOCK_MS = 15 * 60_000
+const QUIET_RESET_MS = 7 * 24 * HOUR
 
 Deno.test("totp failure counter survives an API restart", async () => {
   await withSchema(async (open, sql) => {
     const userId = await insertEnrolledUser(sql)
-    const before = createTotpFailures({ sql, clock: () => T0 })
+    const before = createTotpFailures({ sql, clock: { now: () => T0 } })
     for (let attempt = 0; attempt <= FREE_FAILURES; attempt++) {
       expect(await before.begin(userId)).toBe(0)
     }
     expect(await before.begin(userId)).toBe(FIRST_LOCK_MS)
 
     // A restart: a new connection pool and a new counter, nothing shared but the database.
-    const restarted = createTotpFailures({ sql: open(), clock: () => T0 + 60_000 })
+    const restarted = createTotpFailures({ sql: open(), clock: { now: () => T0 + 60_000 } })
     expect(await restarted.begin(userId)).toBe(FIRST_LOCK_MS - 60_000)
 
-    const later = createTotpFailures({ sql: open(), clock: () => T0 + FIRST_LOCK_MS })
+    const later = createTotpFailures({ sql: open(), clock: { now: () => T0 + FIRST_LOCK_MS } })
     expect(await later.begin(userId)).toBe(0)
   })
 })
@@ -79,7 +78,7 @@ Deno.test("totp failure counter survives an API restart", async () => {
 Deno.test("totp failure counter lets only six of twenty parallel guesses run", async () => {
   await withSchema(async (_open, sql) => {
     const userId = await insertEnrolledUser(sql)
-    const counter = createTotpFailures({ sql, clock: () => T0 })
+    const counter = createTotpFailures({ sql, clock: { now: () => T0 } })
     const waits = await Promise.all(Array.from({ length: 20 }, () => counter.begin(userId)))
     expect(waits.filter((wait) => wait === 0)).toHaveLength(FREE_FAILURES + 1)
   })
@@ -88,7 +87,7 @@ Deno.test("totp failure counter lets only six of twenty parallel guesses run", a
 Deno.test("totp failure counter gives back exactly the slot a correct code took", async () => {
   await withSchema(async (_open, sql) => {
     const userId = await insertEnrolledUser(sql)
-    const counter = createTotpFailures({ sql, clock: () => T0 })
+    const counter = createTotpFailures({ sql, clock: { now: () => T0 } })
     for (let attempt = 0; attempt < FREE_FAILURES; attempt++) await counter.begin(userId)
     await counter.refund(userId)
     // Four failures are left on the count, so one more is free and the next one locks.
@@ -104,17 +103,20 @@ Deno.test("totp failure counter starts again from 0 after seven quiet days", asy
     const late = await insertEnrolledUser(sql)
     for (const userId of [early, late]) {
       for (let attempt = 0; attempt <= FREE_FAILURES; attempt++) {
-        const counter = createTotpFailures({ sql, clock: () => T0 })
+        const counter = createTotpFailures({ sql, clock: { now: () => T0 } })
         await counter.begin(userId)
         await counter.fail(userId)
       }
     }
     // One millisecond short of seven days: the seventh failure counts and doubles the lock.
-    const almost = createTotpFailures({ sql: open(), clock: () => T0 + QUIET_RESET_MS - 1 })
+    const almost = createTotpFailures({
+      sql: open(),
+      clock: { now: () => T0 + QUIET_RESET_MS - 1 },
+    })
     expect(await almost.begin(early)).toBe(0)
     expect(await almost.begin(early)).toBe(2 * FIRST_LOCK_MS)
 
-    const after = createTotpFailures({ sql: open(), clock: () => T0 + QUIET_RESET_MS })
+    const after = createTotpFailures({ sql: open(), clock: { now: () => T0 + QUIET_RESET_MS } })
     for (let attempt = 0; attempt <= FREE_FAILURES; attempt++) {
       expect(await after.begin(late)).toBe(0)
     }
@@ -132,7 +134,7 @@ Deno.test("totp failure counter caps a guesser under 600 guesses in a year", asy
   ): Promise<number> {
     let now = T0
     let guesses = 0
-    const counter = createTotpFailures({ sql, clock: () => now })
+    const counter = createTotpFailures({ sql, clock: { now: () => now } })
     while (now < T0 + year) {
       const waitMs = await counter.begin(userId)
       if (waitMs === 0) {
@@ -168,12 +170,12 @@ Deno.test("totp failure counter caps a guesser under 600 guesses in a year", asy
 Deno.test("totp failure counter lets only six of twenty parallel guesses run after a quiet spell", async () => {
   await withSchema(async (_open, sql) => {
     const userId = await insertEnrolledUser(sql)
-    const before = createTotpFailures({ sql, clock: () => T0 })
+    const before = createTotpFailures({ sql, clock: { now: () => T0 } })
     for (let attempt = 0; attempt < FREE_FAILURES; attempt++) {
       await before.begin(userId)
       await before.fail(userId)
     }
-    const counter = createTotpFailures({ sql, clock: () => T0 + QUIET_RESET_MS })
+    const counter = createTotpFailures({ sql, clock: { now: () => T0 + QUIET_RESET_MS } })
     const waits = await Promise.all(Array.from({ length: 20 }, () => counter.begin(userId)))
     expect(waits.filter((wait) => wait === 0)).toHaveLength(FREE_FAILURES + 1)
   })
@@ -183,7 +185,7 @@ Deno.test("totp failure counter is free again after seven days of only correct c
   await withSchema(async (_open, sql) => {
     const userId = await insertEnrolledUser(sql)
     let now = T0
-    const counter = createTotpFailures({ sql, clock: () => now })
+    const counter = createTotpFailures({ sql, clock: { now: () => now } })
     for (let attempt = 0; attempt < FREE_FAILURES; attempt++) {
       await counter.begin(userId)
       await counter.fail(userId)
@@ -204,7 +206,7 @@ Deno.test("totp failure counter is free again after seven days of only correct c
 Deno.test("totp failure counter ends the lock a correct code's own check set", async () => {
   await withSchema(async (_open, sql) => {
     const userId = await insertEnrolledUser(sql)
-    const counter = createTotpFailures({ sql, clock: () => T0 })
+    const counter = createTotpFailures({ sql, clock: { now: () => T0 } })
     for (let attempt = 0; attempt < FREE_FAILURES; attempt++) {
       await counter.begin(userId)
       await counter.fail(userId)
@@ -220,7 +222,7 @@ Deno.test("totp failure counter leaves no lock behind after a correct code", asy
   await withSchema(async (_open, sql) => {
     const userId = await insertEnrolledUser(sql)
     let now = T0
-    const counter = createTotpFailures({ sql, clock: () => now })
+    const counter = createTotpFailures({ sql, clock: { now: () => now } })
     for (let attempt = 0; attempt <= FREE_FAILURES; attempt++) await counter.begin(userId)
     now = T0 + FIRST_LOCK_MS
     // The seventh check books a lock before its code is known. The code is correct, so the
@@ -234,7 +236,7 @@ Deno.test("totp failure counter leaves no lock behind after a correct code", asy
 
 Deno.test("totp failure counter has nothing to count for a user without an enrolment", async () => {
   await withSchema(async (_open, sql) => {
-    const counter = createTotpFailures({ sql, clock: () => T0 })
+    const counter = createTotpFailures({ sql, clock: { now: () => T0 } })
     for (let attempt = 0; attempt < 10; attempt++) expect(await counter.begin(424242)).toBe(0)
   })
 })

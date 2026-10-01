@@ -1,13 +1,15 @@
 import type { MpaConfig } from "./config.ts"
 import { createApi } from "./api.ts"
 import { FormRejected } from "./forms.ts"
-import { crossSiteRefusal } from "./guard.ts"
 import { define } from "./utils.ts"
+import { createSameOriginCheck } from "@spy4x/server/http/same-origin"
 
 /**
  * Runs around every page and action:
  *
- * 1. refuses a post from another site with 403 before anything else runs;
+ * 1. refuses a post from another site with 403 before anything else runs: the API's own rule
+ *    (`Sec-Fetch-Site: same-origin`, and `Origin` equal to `webAppOrigin` or `null`), without its
+ *    session cookie check, since the sign-in and sign-up forms post before there is a session;
  * 2. gives the route an API client bound to this request;
  * 3. hands the browser every cookie the API set, exactly as the API wrote it (`HttpOnly`, `Secure`
  *    outside development, `SameSite=Lax`);
@@ -19,8 +21,12 @@ export function pageMiddleware(
   config: MpaConfig,
   fetch: typeof globalThis.fetch = globalThis.fetch,
 ) {
+  const crossSiteRefusal = createSameOriginCheck({
+    expectedOrigin: config.webAppOrigin,
+    requireSessionCookie: false,
+  })
   return define.middleware(async (ctx) => {
-    if (crossSiteRefusal(ctx.req, config.webAppOrigin)) {
+    if (crossSiteRefusal(ctx.req)) {
       return withPageHeaders(new Response("Cross-site request refused", { status: 403 }), [])
     }
     const setCookies: string[] = []
