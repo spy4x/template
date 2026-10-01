@@ -7,6 +7,8 @@
   "imports": {
     "@deno/vite-plugin": "npm:@deno/vite-plugin@1.0.6",
     "@preact/preset-vite": "npm:@preact/preset-vite@2.10.2",
+    // Server-renders a view in its test: the version libs/ui already uses.
+    "preact-render-to-string": "npm:preact-render-to-string@6.7.0",
     "@tailwindcss/vite": "npm:@tailwindcss/vite@4.1.12",
     "tailwindcss": "npm:tailwindcss@4.1.12",
     "tailwindcss/": "npm:/tailwindcss@4.1.12/",

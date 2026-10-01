@@ -128,48 +128,48 @@ export function GroupsScreen(
           : (
             <ul class="flex flex-col gap-3" data-e2e="group-list">
               {groups.map((group) => (
-                <li
-                  key={group.id}
-                  class="flex flex-col gap-3 rounded-primary border border-subtle bg-surface px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
-                  data-e2e={`group-${group.id}`}
-                >
-                  <div class="flex min-w-0 flex-col gap-1">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <span class="break-words font-medium" data-e2e="group-item-name">
-                        {group.name}
-                      </span>
-                      {group.id === selectedId && <Badge text="Selected" color="green" />}
-                    </div>
-                    <span class="text-xs text-muted">
-                      {KIND_TEXT[group.kind]} · {ROLE_TEXT[group.role]}
-                    </span>
-                  </div>
-                  <div class="flex flex-wrap items-center gap-2">
-                    <Link
-                      href={GROUP_PATHS.settings(group.id)}
-                      navigate={navigate}
-                      class="pc-link text-sm"
-                      aria-label={`Settings of ${group.name}`}
-                      data-e2e="group-settings"
-                    >
-                      Settings
-                    </Link>
-                    <ScreenForm
-                      action={FORM_ACTIONS.groupSelect}
-                      onSubmit={onOpen && (() => onOpen(group.id))}
-                    >
-                      <input type="hidden" name="groupId" value={group.id} />
-                      <Button
-                        type="submit"
-                        variant="outline"
-                        size="sm"
-                        aria-label={`Open notes in ${group.name}`}
-                        data-e2e="group-open"
-                      >
-                        Open notes
-                      </Button>
-                    </ScreenForm>
-                  </div>
+                <li key={group.id} data-e2e={`group-${group.id}`}>
+                  <Card>
+                    <CardBody class="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                      <div class="flex min-w-0 flex-col gap-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="break-words font-medium" data-e2e="group-item-name">
+                            {group.name}
+                          </span>
+                          {group.id === selectedId && <Badge text="Selected" color="green" />}
+                        </div>
+                        <span class="text-xs text-muted">
+                          {KIND_TEXT[group.kind]} · {ROLE_TEXT[group.role]}
+                        </span>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={GROUP_PATHS.settings(group.id)}
+                          navigate={navigate}
+                          class="pc-link text-sm"
+                          aria-label={`Settings of ${group.name}`}
+                          data-e2e="group-settings"
+                        >
+                          Settings
+                        </Link>
+                        <ScreenForm
+                          action={FORM_ACTIONS.groupSelect}
+                          onSubmit={onOpen && (() => onOpen(group.id))}
+                        >
+                          <input type="hidden" name="groupId" value={group.id} />
+                          <Button
+                            type="submit"
+                            variant="outline"
+                            size="sm"
+                            aria-label={`Open notes in ${group.name}`}
+                            data-e2e="group-open"
+                          >
+                            Open notes
+                          </Button>
+                        </ScreenForm>
+                      </div>
+                    </CardBody>
+                  </Card>
                 </li>
               ))}
             </ul>

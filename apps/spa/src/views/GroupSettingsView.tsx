@@ -14,6 +14,7 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
       selected={selectionStore.groupId.value === groupId}
       // A person always has a group, so an empty list means the first read has not answered yet.
       loading={groupsStore.loading.value || groupsStore.groups.value.length === 0}
+      error={groupsStore.loadError.value}
       navigate={navigate}
       onOpen={(id) => {
         void selectionStore.select(id)

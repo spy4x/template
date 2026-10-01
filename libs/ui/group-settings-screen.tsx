@@ -3,6 +3,7 @@ import { Badge } from "@spy4x/preact-ui/badge"
 import { Button } from "@spy4x/preact-ui/button"
 import { Card, CardBody } from "@spy4x/preact-ui/card"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
+import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Link } from "@spy4x/preact-ui/link"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { KIND_TEXT, ROLE_TEXT } from "./groups-screen.tsx"
@@ -16,6 +17,8 @@ export interface GroupSettingsScreenProps {
   selected: boolean
   /** The group is being read: an unknown group is not "missing" yet. */
   loading: boolean
+  /** Why the group could not be read, or `null`. Shown instead of "loading" or "missing". */
+  error?: string | null
   /** Follows a link without a page load; without it every link is an ordinary one. */
   navigate?: Navigate
   /**
@@ -33,7 +36,7 @@ export interface GroupSettingsScreenProps {
  * use it.
  */
 export function GroupSettingsScreen(
-  { group, selected, loading, navigate, onOpen }: GroupSettingsScreenProps,
+  { group, selected, loading, error = null, navigate, onOpen }: GroupSettingsScreenProps,
 ): JSX.Element {
   const back = (
     <Link href={SCREEN_PATHS.groups} navigate={navigate} class="pc-link text-sm">
@@ -44,11 +47,13 @@ export function GroupSettingsScreen(
     return (
       <Stack gap="lg">
         {back}
-        <EmptyState
-          headingLevel={1}
-          title={loading ? "Loading the group..." : "This group does not exist."}
-          description={loading ? undefined : "It may have been deleted, or you are not a member."}
-        />
+        {error ? <ErrorState message={error} /> : (
+          <EmptyState
+            headingLevel={1}
+            title={loading ? "Loading the group..." : "This group does not exist."}
+            description={loading ? undefined : "It may have been deleted, or you are not a member."}
+          />
+        )}
       </Stack>
     )
   }

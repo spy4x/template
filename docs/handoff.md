@@ -360,8 +360,9 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    `/groups` lists the groups as cards (kind, the person's role, a "Selected" badge, a settings link
    and an "Open notes" form). `/groups/:groupId` is the settings page: `GroupSettingsScreen` in
    `libs/ui`, one `<section>` per concern. Only General exists, read-only for every role, because
-   the API can neither rename a group nor list its members. Each later issue (members #130,
-   invitations #131, ownership #132, moving data #133, fields #134, leave or delete #129) adds its
+   the API can neither rename a group nor list its members. Each later issue (rename, delete and
+   keep-at-least-one #129; members, roles and leaving #130; invitations #131; ownership #132; moving
+   notes #133; the extra fields #134) adds its
    own section to that screen, shown only to the roles that may use it.
 
 ## Next steps, in dependency order

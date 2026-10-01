@@ -22,7 +22,13 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function harness(overrides: { pages?: GroupPage[]; create?: () => Promise<{ group: GroupItem }> }) {
+function harness(
+  overrides: {
+    pages?: GroupPage[]
+    create?: () => Promise<{ group: GroupItem }>
+    read?: () => Promise<GroupPage>
+  },
+) {
   const pages = [...(overrides.pages ?? [{ groups: [], nextCursor: null }])]
   const reads: { cursor: string | null; via: ReadChannel }[] = []
   const advanced: [string, number][] = []
@@ -30,6 +36,7 @@ function harness(overrides: { pages?: GroupPage[]; create?: () => Promise<{ grou
   const store = createGroupsStore({
     fetchPage(cursor, via) {
       reads.push({ cursor, via })
+      if (overrides.read) return overrides.read()
       return Promise.resolve(pages.shift() ?? { groups: [], nextCursor: null })
     },
     create(input) {
@@ -43,6 +50,24 @@ function harness(overrides: { pages?: GroupPage[]; create?: () => Promise<{ grou
 }
 
 describe("groups store", () => {
+  it("keeps the reason a read failed until a read succeeds, apart from the create form's error", async () => {
+    let fail = true
+    const { store } = harness({
+      read: () =>
+        fail
+          ? Promise.reject(new RealtimeRequestError("timeout", "network down"))
+          : Promise.resolve({ groups: [item("a", "1")], nextCursor: null }),
+    })
+
+    await store.refresh().catch(() => {})
+    expect(store.loadError.value).toBe("network down")
+    expect(store.error.value).toBeNull()
+
+    fail = false
+    await store.refresh()
+    expect(store.loadError.value).toBeNull()
+  })
+
   it("reads every page and moves the cursor of each group to its change sequence", async () => {
     const { store, reads, advanced } = harness({
       pages: [
