@@ -6,14 +6,18 @@
  * Usage, with the same `DB_*` values the other `db:*` tasks read (and `AUTH_PEPPER` and
  * `SEED_PASSWORD` for the seed):
  * `ENV=dev deno task db:reset` asks for confirmation; `deno task db:reset --yes` does not.
+ * `--no-prod-check` skips the production-name guard (see below); `--prod-env-file=<path>` reads
+ * the production values from another file, which the tests use.
  *
  * It refuses, before it touches anything, unless all of these hold:
  *
  * - `ENV` is `dev`;
  * - `DB_HOST` is `localhost`, `127.0.0.1` or `db`, the Compose service name of the development
  *   database;
- * - `DB_NAME` is not the `DB_NAME` in `infra/envs/.env.prod`. A machine without that file has
- *   nothing to compare against, so this guard passes there.
+ * - `DB_NAME` is not the `DB_NAME` in `infra/envs/.env.prod`. This guard fails closed: a missing
+ *   file, a missing or empty `DB_NAME`, or a value with `$` (Compose would expand it, so it cannot
+ *   be compared as written) refuses the reset. `--no-prod-check` skips the guard on a machine that
+ *   has no production file; the target line then says so.
  *
  * Refusals never print a host or a database name, so a production value cannot reach a log.
  *
@@ -37,14 +41,30 @@ export class ResetRefusedError extends Error {
   }
 }
 
-/** Reads `DB_NAME` out of `.env.prod` content, or `undefined` when it is not set. */
-export function readProdDbName(content: string | undefined): string | undefined {
-  if (content === undefined) return undefined
-  return parseEnvValues(content, PROD_ENV_PATH).DB_NAME || undefined
+const NO_PROD_FILE = "no production file to compare against"
+
+/**
+ * Reads `DB_NAME` out of `.env.prod` content. Line endings may be CRLF.
+ *
+ * @throws {ResetRefusedError} When the file is missing (`content` undefined), `DB_NAME` is missing
+ *   or empty, or its value contains `$`. The message never carries the value.
+ */
+export function readProdDbName(content: string | undefined): string {
+  if (content === undefined) {
+    throw new ResetRefusedError(
+      `${NO_PROD_FILE}: ${PROD_ENV_PATH} is missing (pass --no-prod-check to skip the check)`,
+    )
+  }
+  const name = parseEnvValues(content.replaceAll("\r\n", "\n"), PROD_ENV_PATH).DB_NAME
+  if (!name) throw new ResetRefusedError("DB_NAME is missing or empty in the production file")
+  if (name.includes("$")) {
+    throw new ResetRefusedError("the production DB_NAME uses variable expansion, which is refused")
+  }
+  return name
 }
 
 /**
- * Checks the three guards.
+ * Checks the three guards. `prodDbName` is `undefined` only when the production check is skipped.
  *
  * @throws {ResetRefusedError} When `ENV` is not `dev`, the host is not local, the name is missing
  *   or the name matches `prodDbName`.
@@ -65,6 +85,8 @@ export function checkGuards(
 
 /** The steps a reset runs, replaceable so tests need no database. */
 export interface ResetSteps {
+  /** Shows the target; called before every reset, with or without a question. */
+  announce(target: string): void
   /** Asks the person to confirm `target`; resolves true to go on. */
   confirm(target: string): boolean | Promise<boolean>
   recreate(env: Record<string, string | undefined>): Promise<void>
@@ -81,11 +103,13 @@ export interface ResetSteps {
 export async function runReset(
   env: Record<string, string | undefined>,
   prodEnvContent: string | undefined,
-  options: { yes: boolean },
+  options: { yes: boolean; skipProdCheck?: boolean },
   steps: ResetSteps,
 ): Promise<boolean> {
-  checkGuards(env, readProdDbName(prodEnvContent))
-  const target = `${env.DB_NAME} on ${env.DB_HOST}:${env.DB_PORT || "5432"}`
+  checkGuards(env, options.skipProdCheck ? undefined : readProdDbName(prodEnvContent))
+  const target = `${env.DB_NAME} on ${env.DB_HOST}:${env.DB_PORT || "5432"}` +
+    (options.skipProdCheck ? ` (${NO_PROD_FILE})` : "")
+  steps.announce(target)
   if (!options.yes && !(await steps.confirm(target))) return false
   await steps.recreate(env)
   await steps.migrate()
@@ -128,14 +152,20 @@ async function runTask(task: string): Promise<void> {
 
 async function main(): Promise<void> {
   const env = Deno.env.toObject()
+  const prodPath = Deno.args.find((a) => a.startsWith("--prod-env-file="))?.slice(16) ??
+    PROD_ENV_PATH
   let prodEnv: string | undefined
   try {
-    prodEnv = await Deno.readTextFile(PROD_ENV_PATH)
+    prodEnv = await Deno.readTextFile(prodPath)
   } catch (error) {
     if (!(error instanceof Deno.errors.NotFound)) throw error
   }
   try {
-    const done = await runReset(env, prodEnv, { yes: Deno.args.includes("--yes") }, {
+    const done = await runReset(env, prodEnv, {
+      yes: Deno.args.includes("--yes"),
+      skipProdCheck: Deno.args.includes("--no-prod-check"),
+    }, {
+      announce: (target) => console.log(`Target: ${target}`),
       confirm: (target) => {
         const answer = prompt(`Drop and recreate ${target}? All its data is lost. [y/N]`)
         return answer?.trim().toLowerCase() === "y"

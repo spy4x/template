@@ -9,6 +9,7 @@ function steps(answer: boolean): ResetSteps & { calls: string[] } {
   const calls: string[] = []
   return {
     calls,
+    announce: () => {},
     confirm: (target) => {
       calls.push(`confirm ${target}`)
       return answer
@@ -68,10 +69,40 @@ Deno.test("refuses when DB_NAME is not set", () => {
   expect(() => checkGuards({ ...DEV, DB_NAME: undefined }, undefined)).toThrow(/DB_NAME/)
 })
 
-Deno.test("passes the name guard when .env.prod is missing or has no DB_NAME", () => {
-  expect(readProdDbName(undefined)).toBeUndefined()
-  expect(readProdDbName("OTHER=1\n")).toBeUndefined()
-  expect(() => checkGuards(DEV, readProdDbName(undefined))).not.toThrow()
+Deno.test("refuses when .env.prod is missing, unless the check is skipped", async () => {
+  const s = steps(true)
+  await expect(runReset(DEV, undefined, { yes: true }, s)).rejects.toThrow(
+    /no production file to compare against/,
+  )
+  expect(s.calls).toEqual([])
+  expect(await runReset(DEV, undefined, { yes: true, skipProdCheck: true }, s)).toBe(true)
+})
+
+Deno.test("refuses when .env.prod has no usable DB_NAME", () => {
+  expect(() => readProdDbName("OTHER=1\n")).toThrow(/missing or empty/)
+  expect(() => readProdDbName("DB_NAME=\n")).toThrow(/missing or empty/)
+})
+
+Deno.test("refuses a production DB_NAME with $ expansion without printing it", () => {
+  const run = () => readProdDbName("DB_NAME=${DB_X:-fixture_victim}\n")
+  expect(run).toThrow(/variable expansion/)
+  try {
+    run()
+  } catch (error) {
+    expect((error as Error).message).not.toContain("fixture_victim")
+  }
+})
+
+Deno.test("reads a CRLF .env.prod without a stray carriage return", () => {
+  expect(readProdDbName("DB_NAME=fixture_prod_db\r\nDB_HOST=db\r\n")).toBe("fixture_prod_db")
+  expect(() => checkGuards({ ...DEV, DB_NAME: "fixture_prod_db" }, "fixture_prod_db")).toThrow()
+})
+
+Deno.test("names the missing production file in the target when the check is skipped", async () => {
+  const targets: string[] = []
+  const s = { ...steps(true), announce: (t: string) => void targets.push(t) }
+  await runReset(DEV, undefined, { yes: true, skipProdCheck: true }, s)
+  expect(targets).toEqual(["dev_db on 127.0.0.1:5432 (no production file to compare against)"])
 })
 
 Deno.test("reads DB_NAME from .env.prod the way Compose does", () => {
