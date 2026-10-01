@@ -2,7 +2,6 @@
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import {
-  ensureScheduledOutboxEvent,
   OutboxProcessor,
   PostgresOutboxRepository,
   scheduleOutboxEvent,
@@ -12,8 +11,8 @@ import {
   JOB_AGGREGATE_ID,
   JobPublisher,
   OUTBOX_CLEANUP_JOB,
-  removeProcessedOutboxEvents,
 } from "@server/jobs/jobs.ts"
+import { createOutboxProcessor, scheduleNightlyJobs } from "@server/jobs/wiring.ts"
 import { requireDbConnection } from "./db-connection.ts"
 
 const JOB = {
@@ -139,19 +138,17 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
         await insertChange(2, "1 day") // recent and processed: kept
         await insertChange(3, null) // not processed: kept
 
-        expect(await ensureScheduledOutboxEvent(sql, JOB, { inMs: 0 })).not.toBeNull()
-        expect(await ensureScheduledOutboxEvent(sql, JOB, { inMs: 0 })).toBeNull()
+        // The worker's own start-up and processor, so what the worker wires is what is tested.
+        await scheduleNightlyJobs(sql, new Date())
+        await scheduleNightlyJobs(sql, new Date())
+        const [{ count: queued }] = await sql<{ count: number }[]>`
+          SELECT count(*)::int AS count FROM outbox_events WHERE event_kind = ${OUTBOX_CLEANUP_JOB}
+        `
+        expect(queued).toBe(1)
 
-        const processor = new OutboxProcessor(
-          new PostgresOutboxRepository(sql),
-          new JobPublisher(
-            { [OUTBOX_CLEANUP_JOB]: async () => void await removeProcessedOutboxEvents(sql) },
-            { publish: () => Promise.resolve() },
-          ),
-          { repeatEveryMs: { [OUTBOX_CLEANUP_JOB]: 24 * 60 * 60_000 } },
-        )
-        // The group rows are claimed too and handed to the stand-in fallback.
-        await processor.drainOnce()
+        await advanceClock(sql, 25 * 60)
+        const result = await createOutboxProcessor(sql).drainOnce()
+        expect(result.failed).toBe(0)
 
         const versions = await sql<{ version: string }[]>`
         SELECT aggregate_version::text AS version FROM outbox_events

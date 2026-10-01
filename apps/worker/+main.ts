@@ -1,20 +1,7 @@
 /// <reference lib="deno.ns" />
 import postgres from "postgres"
 import { createSqlFromEnv } from "@spy4x/server/db"
-import {
-  ensureScheduledOutboxEvent,
-  OutboxProcessor,
-  PostgresOutboxRepository,
-} from "@spy4x/server/outbox"
-import { GroupChangeNotifier } from "@server/groups/group-change-notify.ts"
-import {
-  JOB_AGGREGATE,
-  JOB_AGGREGATE_ID,
-  JobPublisher,
-  nextUtcHour,
-  OUTBOX_CLEANUP_JOB,
-  removeProcessedOutboxEvents,
-} from "@server/jobs/jobs.ts"
+import { createOutboxProcessor, scheduleNightlyJobs } from "@server/jobs/wiring.ts"
 import { PostgresIdempotencyStore } from "@spy4x/server/idempotency"
 import { shutdownSignal, ShutdownSignalError } from "@spy4x/platform/server/shutdown-signal"
 
@@ -39,25 +26,10 @@ console.log("Worker started")
 // A committed group change is announced on a Postgres channel; the API process, which holds the
 // sockets, turns it into a hint for the group's members. The same table holds jobs: a row that
 // belongs to no group and runs when its time has come.
-const DAY_MS = 24 * 60 * 60_000
-const processor = new OutboxProcessor(
-  new PostgresOutboxRepository(sql),
-  new JobPublisher({
-    [OUTBOX_CLEANUP_JOB]: async () => {
-      const removed = await removeProcessedOutboxEvents(sql)
-      if (removed > 0) console.log(`Removed ${removed} old processed outbox row(s)`)
-    },
-  }, new GroupChangeNotifier(sql)),
-  // The nightly job is one row that writes its next run, a day later, once it has succeeded.
-  { repeatEveryMs: { [OUTBOX_CLEANUP_JOB]: DAY_MS } },
-)
+const processor = createOutboxProcessor(sql)
 
-// Starts the nightly chain at 03:00 UTC the first time; a restart finds the row and adds nothing.
-await ensureScheduledOutboxEvent(
-  sql,
-  { eventKind: OUTBOX_CLEANUP_JOB, aggregateType: JOB_AGGREGATE, aggregateId: JOB_AGGREGATE_ID },
-  { at: nextUtcHour(new Date(), 3) },
-)
+// Starts the nightly chain the first time; a restart finds the row and adds nothing.
+await scheduleNightlyJobs(sql)
 
 /** How often the outbox is looked at when it is empty; the delay before a push. */
 const OUTBOX_IDLE_MS = 250
