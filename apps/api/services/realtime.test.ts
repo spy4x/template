@@ -258,6 +258,57 @@ describe("realtime socket revocation", () => {
     h.realtime.shutdown()
   })
 
+  it("reads only the named user's sessions and leaves other users' sockets untouched", async () => {
+    const read: number[] = []
+    const h = harness({
+      entitledSession: (sessionId) => {
+        read.push(sessionId)
+        return Promise.resolve(null)
+      },
+    })
+    const mine = connect(h, 1)
+    const theirs = connect(h, 2)
+
+    const closed = await h.realtime.revalidate(1)
+
+    expect(closed).toBe(1)
+    expect(read).toEqual([10])
+    expect(policyCloses(mine).length).toBe(1)
+    expect(theirs.closeCalls).toEqual([])
+    h.realtime.shutdown()
+  })
+
+  it("closes every socket of the named user and leaves other users' sockets open", () => {
+    const h = harness()
+    const firstTab = connect(h, 1)
+    const secondTab = connect(h, 1, 11)
+    const theirs = connect(h, 2)
+
+    const closed = h.realtime.closeUser(1, `closed by a test`)
+
+    expect(closed).toBe(2)
+    expect(policyCloses(firstTab)).toEqual([{
+      code: POLICY_CLOSE_CODE,
+      reason: `closed by a test`,
+    }])
+    expect(policyCloses(secondTab)).toEqual([{
+      code: POLICY_CLOSE_CODE,
+      reason: `closed by a test`,
+    }])
+    expect(theirs.closeCalls).toEqual([])
+    expect(h.realtime.count(2)).toBe(1)
+    h.realtime.shutdown()
+  })
+
+  it("closes nothing when the named user has no sockets", () => {
+    const h = harness()
+    const theirs = connect(h, 2)
+
+    expect(h.realtime.closeUser(3, `closed by a test`)).toBe(0)
+    expect(theirs.closeCalls).toEqual([])
+    h.realtime.shutdown()
+  })
+
   it("closes a revoked socket when the revalidation interval passes, and not before", async () => {
     const h = harness()
     const socket = connect(h, 1)
