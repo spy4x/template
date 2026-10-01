@@ -80,6 +80,11 @@ async function serverNotes(page: Page, groupId: string): Promise<{ title: string
 }
 
 test.describe("offline notes", () => {
+  // Each spec signs in up to twice, loads the app three times so the service worker holds it, and
+  // goes offline and back. That takes 15 s on an idle machine and more than the 30 s default when
+  // other suites share the CPU (one run timed out in the cleanup after its last step).
+  test.describe.configure({ timeout: 90_000 })
+
   test("a person with no network opens the app, reads notes, adds one, and it syncs when the network is back", async ({ browser, request }) => {
     const user = "e2e_offline_writer@example.com"
     await cleanup(request, user)
