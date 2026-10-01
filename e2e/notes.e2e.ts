@@ -201,8 +201,8 @@ test.describe("notes in a shared group", () => {
   })
 
   test("a viewer opens a note as text, with no way to save, delete or add", async ({ browser, request }) => {
-    const owner = "e2e_notes_view_owner"
-    const member = "e2e_notes_view_viewer"
+    const owner = "e2e_notes_view_owner@example.com"
+    const member = "e2e_notes_view_viewer@example.com"
     const baseURL = test.info().project.use.baseURL
     for (const username of [owner, member]) await cleanup(request, username)
     const ownerContext = await browser.newContext({ baseURL })
@@ -242,7 +242,7 @@ test.describe("notes in a shared group", () => {
   })
 
   test("a note of another group is not found, and opening it does not change the selected group", async ({ browser, request }) => {
-    const owner = "e2e_notes_other_group"
+    const owner = "e2e_notes_other_group@example.com"
     await cleanup(request, owner)
     const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
     try {
@@ -280,7 +280,7 @@ test.describe("notes in a shared group", () => {
   })
 
   test("leaving the note page with unsaved text asks first, and staying keeps the text", async ({ browser, request }) => {
-    const owner = "e2e_notes_unsaved"
+    const owner = "e2e_notes_unsaved@example.com"
     await cleanup(request, owner)
     const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
     try {

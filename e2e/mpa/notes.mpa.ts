@@ -107,8 +107,8 @@ test("a person without JavaScript signs up, signs out, signs in, picks a group a
 })
 
 test("a viewer without JavaScript reads a note as text, with no form and no way to add one", async ({ browser, request }) => {
-  const owner = `mpa-${crypto.randomUUID().slice(0, 8)}`
-  const viewer = `mpa-${crypto.randomUUID().slice(0, 8)}`
+  const owner = `mpa-${crypto.randomUUID().slice(0, 8)}@example.com`
+  const viewer = `mpa-${crypto.randomUUID().slice(0, 8)}@example.com`
   const baseURL = test.info().project.use.baseURL
   const ownerContext = await browser.newContext({ baseURL, javaScriptEnabled: false })
   const viewerContext = await browser.newContext({ baseURL, javaScriptEnabled: false })
@@ -136,7 +136,7 @@ test("a viewer without JavaScript reads a note as text, with no form and no way 
     await submitCredentials(viewerPage, viewer)
     await expect(viewerPage).toHaveURL("/")
     const added = await request.post("/api/test/add-member", {
-      data: { username: viewer, groupId, role: 1 },
+      data: { login: viewer, groupId, role: 1 },
     })
     expect(added.status(), await added.text()).toBe(200)
 
