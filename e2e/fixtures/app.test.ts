@@ -32,6 +32,10 @@ function fakePage(outcomes: Outcome[]) {
     const outcome = outcomes[starts.length - 1]
     if (outcome === "blank after network change") {
       emit("requestfailed", failedRequest(`${APP}/src/main.tsx`, "net::ERR_NETWORK_CHANGED"))
+      emit("console", {
+        type: () => "error",
+        text: () => "Failed to load resource: net::ERR_NETWORK_CHANGED",
+      } as ConsoleMessage)
     } else if (outcome === "blank after a network change of another origin") {
       emit(
         "requestfailed",
@@ -82,6 +86,21 @@ Deno.test("gotoApp opens the url itself after a network change broke the load a 
   const fake = fakePage(["blank after network change", "boots"])
   await gotoApp(fake.page, "/", fake.ready, () => fake.click("/"))
   expect(fake.starts()).toEqual(["click", "goto"])
+})
+
+Deno.test("gotoApp throws after the second load when only the first was broken by a network change", async () => {
+  const fake = fakePage(["blank after network change", "stays blank", "boots"])
+  await expect(gotoApp(fake.page, "/sign-in", fake.ready)).rejects.toThrow("Timeout")
+  expect(fake.loads()).toBe(2)
+})
+
+Deno.test("gotoApp reports only the failed requests and the console of its last load", async () => {
+  const fake = fakePage(["blank after network change", "stays blank"])
+  const error = await gotoApp(fake.page, "/sign-in", fake.ready).catch((e: Error) => e)
+  expect((error as Error).message).toContain("Attempt 2 of /sign-in.")
+  expect((error as Error).message).toContain("Failed requests (1):")
+  expect((error as Error).message).toContain("Console (1):")
+  expect((error as Error).message).not.toContain("net::ERR_NETWORK_CHANGED")
 })
 
 Deno.test("gotoApp does not load again for a network change of a request to another origin", async () => {

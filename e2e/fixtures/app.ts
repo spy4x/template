@@ -51,7 +51,6 @@ export async function gotoApp(
   try {
     for (let attempt = 1;; attempt++) {
       networkChanged = false
-      appOrigin = ""
       failed = []
       consoleLines = []
       try {
