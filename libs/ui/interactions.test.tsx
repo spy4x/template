@@ -19,6 +19,12 @@ import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
 import { NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
 import { FORM_ACTIONS, NOTE_PATHS } from "./progressive.tsx"
+import {
+  ForgotPasswordScreen,
+  type ForgotPasswordScreenProps,
+  ResetPasswordScreen,
+  type ResetPasswordScreenProps,
+} from "./password-reset-screen.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
 const own = { document: globalThis.document, FormData: globalThis.FormData }
@@ -123,11 +129,11 @@ describe("AuthScreen in the browser", () => {
     const signIn = spy<[{ login: string; password: string }]>()
     await mount(<AuthScreen {...authDefaults} onSignIn={signIn.fn} />)
 
-    await type("input[name=username]", "ada")
+    await type("input[name=login]", "ada@example.com")
     await type("input[name=password]", "long-enough")
 
     expect(await submit(FORM_ACTIONS.signIn)).toBe(true)
-    expect(signIn.calls).toEqual([[{ login: "ada", password: "long-enough" }]])
+    expect(signIn.calls).toEqual([[{ login: "ada@example.com", password: "long-enough" }]])
   })
 
   it("posts the sign-in natively when the app takes nothing over", async () => {
@@ -146,6 +152,108 @@ describe("AuthScreen in the browser", () => {
 
     expect(await submit(FORM_ACTIONS.oneTimeCode)).toBe(true)
     expect(code.calls).toEqual([["012345"]])
+  })
+})
+
+const forgotDefaults: ForgotPasswordScreenProps = {
+  email: "",
+  onEmailChange: () => {},
+  sent: false,
+  error: null,
+  pending: false,
+}
+
+describe("ForgotPasswordScreen in the browser", () => {
+  it("reports the typed address and asks for the link through the app's callback", async () => {
+    const change = spy<[string]>()
+    const send = spy<[]>()
+    await mount(
+      <ForgotPasswordScreen {...forgotDefaults} onEmailChange={change.fn} onSubmit={send.fn} />,
+    )
+
+    await type("[data-e2e=forgot-password-email]", "ada@example.com")
+
+    expect(change.calls).toEqual([["ada@example.com"]])
+    expect(await submit(FORM_ACTIONS.forgotPassword)).toBe(true)
+    expect(send.calls).toHaveLength(1)
+  })
+
+  it("posts the address natively when the app takes nothing over", async () => {
+    await mount(<ForgotPasswordScreen {...forgotDefaults} />)
+
+    expect(await submit(FORM_ACTIONS.forgotPassword)).toBe(false)
+  })
+
+  it("ties an error to the address field and moves focus there", async () => {
+    await mount(<ForgotPasswordScreen {...forgotDefaults} />)
+    find("[data-e2e=forgot-password-submit]").focus()
+
+    await rerender(
+      <ForgotPasswordScreen {...forgotDefaults} error="Enter a valid e-mail address" />,
+    )
+
+    const field = find("[data-e2e=forgot-password-email]")
+    const describedBy = field.getAttribute("aria-describedby") ?? ""
+    expect(field.getAttribute("aria-invalid")).toBe("true")
+    expect(describedBy.split(" ").map((id) => document.getElementById(id)?.textContent))
+      .toContain("Enter a valid e-mail address")
+    expect(focused()).toBe("forgot-password-email")
+  })
+})
+
+const resetDefaults: ResetPasswordScreenProps = {
+  email: "ada@example.com",
+  code: "code-from-the-link",
+  newPassword: "",
+  onNewPasswordChange: () => {},
+  done: false,
+  error: null,
+  pending: false,
+}
+
+describe("ResetPasswordScreen in the browser", () => {
+  it("reports the new password and saves it through the app's callback", async () => {
+    const change = spy<[string]>()
+    const save = spy<[]>()
+    await mount(
+      <ResetPasswordScreen
+        {...resetDefaults}
+        onNewPasswordChange={change.fn}
+        onSubmit={save.fn}
+      />,
+    )
+
+    await type("[data-e2e=reset-password-new]", "battery-staple")
+
+    expect(change.calls).toEqual([["battery-staple"]])
+    expect(await submit(FORM_ACTIONS.resetPassword)).toBe(true)
+    expect(save.calls).toHaveLength(1)
+  })
+
+  it("posts the link's address and code with the new password when the app takes nothing over", async () => {
+    await mount(<ResetPasswordScreen {...resetDefaults} newPassword="battery-staple" />)
+
+    const form = find<HTMLFormElement>(`form[action="${FORM_ACTIONS.resetPassword}"]`)
+    const sent = Object.fromEntries(new FormData(form))
+    expect(sent).toEqual({
+      email: "ada@example.com",
+      code: "code-from-the-link",
+      newPassword: "battery-staple",
+    })
+    expect(await submit(FORM_ACTIONS.resetPassword)).toBe(false)
+  })
+
+  it("ties an error to the new password field and moves focus there", async () => {
+    await mount(<ResetPasswordScreen {...resetDefaults} />)
+    find("[data-e2e=reset-password-submit]").focus()
+
+    await rerender(<ResetPasswordScreen {...resetDefaults} error="This link is used" />)
+
+    const field = find("[data-e2e=reset-password-new]")
+    const describedBy = field.getAttribute("aria-describedby") ?? ""
+    expect(describedBy.split(" ").map((id) => document.getElementById(id)?.textContent))
+      .toContain("This link is used")
+    expect(focused()).toBe("reset-password-new")
   })
 })
 
