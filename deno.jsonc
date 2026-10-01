@@ -36,6 +36,7 @@
 
     // #region Scripts
     "db:migrate": "deno run -N=$DB_HOST:$DB_PORT -E -R=./libs/server/db/migrations ./infra/scripts/db-migrate.ts",
+    "db:reset": "deno run -N=$DB_HOST:$DB_PORT -E -R=./infra/envs --allow-run=deno ./infra/scripts/db-reset.ts", // drop, migrate, seed; dev only, see the script
     "db:seed": "deno run -N=$DB_HOST:$DB_PORT -E ./infra/scripts/seed-data.ts", // demo user and group, see the script
     "deps:check": "deno outdated -r",
     "deps:update": "deno outdated -r -u -i",
