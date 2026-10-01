@@ -266,6 +266,7 @@ test.describe("notes in a shared group", () => {
 
       await page.goto(`/notes/${noteId}`)
       await expect(page.getByRole("heading", { level: 1, name: "Note not found" })).toBeVisible()
+      await expect(page.locator("[data-e2e=note-not-found]")).toBeVisible()
       await expect(page.locator("[data-e2e=note-title]")).toHaveCount(0)
       const selectedAfter = await (await page.request.get(`${apiBase}/api/groups/selected`)).json()
       expect(selectedAfter.groupId).toBe(selectedBefore.groupId)
