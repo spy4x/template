@@ -16,7 +16,7 @@
  *   password and signs out every session of the user. It signs nobody in: the person signs in again
  *   with the new password, and their second factor if they have one.
  * - **One sign-up transaction.** The auth user and key, the session, the `users` profile row (same
- *   id) and the personal group are written in one `db.begin()`: the sign-up provider is built over
+ *   id) and the first group are written in one `db.begin()`: the sign-up provider is built over
  *   that transaction's stores.
  * - **Authenticator app.** Secret and last accepted time step live in `user_totp`; `users.mfa`
  *   keeps its three states.
@@ -96,17 +96,17 @@ export interface SignIn {
   /** Middleware and guards from `createAuth`. */
   auth: Auth<AuthSessionRecord, User>
   /**
-   * Creates the auth user, password key, profile, personal group and session in one transaction
+   * Creates the auth user, password key, profile, first group and session in one transaction
    * and sets the cookie. `null` when the address is not one `normalizeEmail` accepts, or an account
    * already signs in with it.
    *
-   * @param personalGroupId The id of the new personal group. Defaults to a random UUID.
+   * @param firstGroupId The id of the person's first group. Defaults to a random UUID.
    */
   signUp(
     c: Context,
     email: string,
     password: string,
-    personalGroupId?: string,
+    firstGroupId?: string,
   ): Promise<SignedIn | null>
   /**
    * Checks the password of the account that signs in with `login`, an address or an older
@@ -186,7 +186,7 @@ export function createSignIn(options: SignInOptions): SignIn {
     const user = await db.user.findOne({ id: userId })
     if (!user) return null
     try {
-      await db.group.ensurePersonal({ id: crypto.randomUUID(), name: "Personal" }, user.id)
+      await db.group.ensureFirst({ id: crypto.randomUUID(), name: "Personal" }, user.id)
     } catch (error) {
       if (error instanceof GroupError && error.code === "USER_NOT_ACTIVE") return null
       throw error
@@ -248,7 +248,7 @@ export function createSignIn(options: SignInOptions): SignIn {
   return {
     auth,
 
-    async signUp(c, rawEmail, password, personalGroupId = crypto.randomUUID()) {
+    async signUp(c, rawEmail, password, firstGroupId = crypto.randomUUID()) {
       // Checked here too, so a refused address opens no transaction and makes no provider.
       if (normalizeEmail(rawEmail) === null) return null
       // Hashed before `db.begin()`, as before the package provider, so no pool connection is held
@@ -288,7 +288,7 @@ export function createSignIn(options: SignInOptions): SignIn {
             role: UserRole.VIEWER,
             lastLoginAt: new Date(),
           })
-          await tx.group.createPersonal({ id: personalGroupId, name: "Personal" }, user.id)
+          await tx.group.createFirst({ id: firstGroupId, name: "Personal" }, user.id)
           return { user, ...signedUp.session }
         })
       } catch (error) {

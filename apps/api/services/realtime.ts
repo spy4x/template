@@ -104,8 +104,8 @@ const GROUP_ERROR_CODES: Record<
   ID_ALREADY_EXISTS: "conflict",
   INVALID_CURSOR: "bad_request",
   INVALID_REQUEST: "bad_request",
+  LAST_GROUP: "conflict",
   LAST_OWNER: "conflict",
-  PERSONAL_GROUP_IMMUTABLE: "conflict",
   ROLE_INSUFFICIENT: "forbidden",
   USER_NOT_ACTIVE: "unauthorized",
 }

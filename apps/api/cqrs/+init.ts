@@ -12,8 +12,12 @@ import {
 import { PushListQuery, UserProfileGetQuery } from "@api/cqrs/queries.ts"
 import {
   GroupCreateCommand,
+  GroupDeleteCommand,
+  GroupDeletedListQuery,
   GroupGetQuery,
   GroupListQuery,
+  GroupRenameCommand,
+  GroupRestoreCommand,
   GroupSelectCommand,
   GroupSelectedQuery,
 } from "@domain/groups"
@@ -26,6 +30,10 @@ import { groupCreateHandler } from "@api/cqrs/command-handlers/group-create.ts"
 import { groupGetHandler } from "@api/cqrs/query-handlers/group-get.ts"
 import { groupListHandler } from "@api/cqrs/query-handlers/group-list.ts"
 import { groupSelectHandler } from "@api/cqrs/command-handlers/group-select.ts"
+import { groupRenameHandler } from "@api/cqrs/command-handlers/group-rename.ts"
+import { groupDeleteHandler } from "@api/cqrs/command-handlers/group-delete.ts"
+import { groupRestoreHandler } from "@api/cqrs/command-handlers/group-restore.ts"
+import { groupDeletedListHandler } from "@api/cqrs/query-handlers/group-deleted-list.ts"
 import { groupSelectedHandler } from "@api/cqrs/query-handlers/group-selected.ts"
 import {
   NoteCreateCommand,
@@ -88,6 +96,9 @@ commandBus.register(PushRegisterCommand, pushRegisterHandler)
 commandBus.register(PushRemoveCommand, pushRemoveHandler)
 commandBus.register(GroupCreateCommand, groupCreateHandler)
 commandBus.register(GroupSelectCommand, groupSelectHandler)
+commandBus.register(GroupRenameCommand, groupRenameHandler)
+commandBus.register(GroupDeleteCommand, groupDeleteHandler)
+commandBus.register(GroupRestoreCommand, groupRestoreHandler)
 commandBus.register(NoteCreateCommand, noteCreateHandler)
 commandBus.register(NoteUpdateCommand, noteUpdateHandler)
 commandBus.register(NoteDeleteCommand, noteDeleteHandler)
@@ -96,6 +107,7 @@ queryBus.register(PushListQuery, pushListHandler)
 queryBus.register(GroupListQuery, groupListHandler)
 queryBus.register(GroupGetQuery, groupGetHandler)
 queryBus.register(GroupSelectedQuery, groupSelectedHandler)
+queryBus.register(GroupDeletedListQuery, groupDeletedListHandler)
 queryBus.register(NoteListQuery, noteListHandler)
 queryBus.register(NoteGetQuery, noteGetHandler)
 

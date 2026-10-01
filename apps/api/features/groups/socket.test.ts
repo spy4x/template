@@ -1,6 +1,6 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
-import { GroupCreateCommand, GroupError, GroupKind, GroupRole } from "@domain/groups"
+import { GroupCreateCommand, GroupError, GroupRole } from "@domain/groups"
 import type {
   GroupGetQuery,
   GroupListQuery,
@@ -24,6 +24,14 @@ const actor = {
 
 const signal = new AbortController().signal
 
+/** The rename, delete and restore requests, which these tests never call. */
+const UNUSED_GROUP_CHANGES = {
+  rename: () => Promise.reject(new Error("not used")),
+  delete: () => Promise.reject(new Error("not used")),
+  restore: () => Promise.reject(new Error("not used")),
+  deleted: () => Promise.reject(new Error("not used")),
+}
+
 function harness() {
   const seen: {
     command: GroupCreateCommand | null
@@ -45,7 +53,6 @@ function harness() {
         created: true,
         group: {
           id,
-          kind: GroupKind.SHARED,
           name: command.data.name,
           role: GroupRole.OWNER,
           authorizationRevision: "1",
@@ -59,7 +66,6 @@ function harness() {
       return Promise.resolve({
         group: {
           id: query.data.groupId,
-          kind: GroupKind.SHARED,
           name: "Team",
           role: GroupRole.VIEWER,
           authorizationRevision: "1",
@@ -76,6 +82,7 @@ function harness() {
       seen.selected = query
       return Promise.resolve({ groupId: id, version: 2 })
     },
+    ...UNUSED_GROUP_CHANGES,
     list(query) {
       seen.query = query
       return Promise.resolve({ groups: [], nextPageKey: { updatedAt: new Date(0), id } })
@@ -104,13 +111,12 @@ describe("group socket requests", () => {
       requestId: "req-1",
       signal,
       idempotencyKey: "key-1",
-      payload: { id, kind: GroupKind.SHARED, name: " Team " },
+      payload: { id, name: " Team " },
     })
 
     expect(seen.command?.data).toEqual({
       actor,
       id,
-      kind: GroupKind.SHARED,
       name: "Team",
       requestId: "req-1",
       idempotencyKey: "key-1",
@@ -125,7 +131,7 @@ describe("group socket requests", () => {
       requestId: "req-1",
       signal,
       idempotencyKey: "key-1",
-      payload: { id, kind: GroupKind.SHARED, name: "Team", userId: 999 },
+      payload: { id, name: "Team", userId: 999 },
     })).rejects.toBeInstanceOf(GroupError)
     expect(seen.command).toBe(null)
   })
@@ -169,7 +175,6 @@ describe("group socket requests", () => {
           groupId === ownGroup && userId === 19
             ? {
               id: ownGroup,
-              kind: GroupKind.SHARED,
               name: "Team",
               role: GroupRole.OWNER,
               authorizationRevision: "1",
@@ -185,6 +190,7 @@ describe("group socket requests", () => {
       get: handler,
       select: () => Promise.reject(new Error("not used")),
       selected: () => Promise.reject(new Error("not used")),
+      ...UNUSED_GROUP_CHANGES,
       cursor: { encode: () => Promise.resolve(""), decode: () => Promise.reject(new Error("x")) },
     })
     const ask = async (groupId: string) => {

@@ -1,19 +1,25 @@
 import { Hono } from "hono"
-import type { MiddlewareHandler } from "hono"
+import type { Context, MiddlewareHandler } from "hono"
 import {
+  type DeletedGroupSummary,
   GroupCreateCommand,
   GroupCreateResult,
+  GroupDeleteCommand,
+  GroupDeletedListQuery,
   GroupGetQuery,
   GroupGetResult,
-  GroupKind,
   GroupListPageKey,
   GroupListQuery,
   GroupListResult,
+  GroupRenameCommand,
+  GroupRestoreCommand,
   GroupSelectCommand,
   GroupSelectedQuery,
-  parseCreateSharedGroupRequest,
+  type GroupSummary,
+  parseCreateGroupRequest,
   parseGroupId,
-  parseSelectGroupRequest,
+  parseGroupIdRequest,
+  parseRenameGroupBody,
   type SelectedGroup,
 } from "@domain/groups"
 import { createSameOriginMutationGuard } from "@spy4x/server/http/same-origin"
@@ -29,6 +35,10 @@ export interface GroupsRouteDependencies {
   get(query: GroupGetQuery): Promise<GroupGetResult>
   select(command: GroupSelectCommand): Promise<SelectedGroup>
   selected(query: GroupSelectedQuery): Promise<SelectedGroup>
+  rename(command: GroupRenameCommand): Promise<{ group: GroupSummary }>
+  delete(command: GroupDeleteCommand): Promise<{ group: DeletedGroupSummary }>
+  restore(command: GroupRestoreCommand): Promise<{ group: GroupSummary }>
+  deleted(query: GroupDeletedListQuery): Promise<{ groups: DeletedGroupSummary[] }>
   cursor: {
     encode(userId: number, pageKey: GroupListPageKey): Promise<string>
     decode(cursor: string, expectedUserId: number): Promise<GroupListPageKey>
@@ -67,17 +77,13 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
       const actor = actorFromAuth(c.get("auth")!)
       return c.json(await dependencies.selected(new GroupSelectedQuery({ actor })))
     })
+    // Before "/:groupId" too: "deleted" is not a group id.
+    .get("/deleted", async (c) => {
+      const actor = actorFromAuth(c.get("auth")!)
+      return c.json(await dependencies.deleted(new GroupDeletedListQuery({ actor })))
+    })
     .put("/selected", requireSameOrigin, async (c) => {
-      if (!c.req.header("content-type")?.toLowerCase().includes("application/json")) {
-        throw new GroupFeatureError("INVALID_REQUEST", "Content type must be JSON")
-      }
-      let body: unknown
-      try {
-        body = await readApiJson(c)
-      } catch {
-        throw new GroupFeatureError("INVALID_REQUEST", "Request body must be JSON")
-      }
-      const { groupId } = parseSelectGroupRequest(body)
+      const { groupId } = parseGroupIdRequest(await readJsonBody(c))
       return c.json(
         await dependencies.select(
           new GroupSelectCommand({
@@ -97,22 +103,53 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
         ),
       )
     })
+    .patch("/:groupId", requireSameOrigin, async (c) => {
+      const groupId = parseGroupId(c.req.param("groupId"))
+      const { name } = parseRenameGroupBody(await readJsonBody(c))
+      return c.json(
+        await dependencies.rename(
+          new GroupRenameCommand({
+            actor: actorFromAuth(c.get("auth")!),
+            groupId,
+            name,
+            requestId: c.get("requestId"),
+            idempotencyKey: c.req.header("idempotency-key"),
+          }),
+        ),
+      )
+    })
+    .delete("/:groupId", requireSameOrigin, async (c) => {
+      const groupId = parseGroupId(c.req.param("groupId"))
+      return c.json(
+        await dependencies.delete(
+          new GroupDeleteCommand({
+            actor: actorFromAuth(c.get("auth")!),
+            groupId,
+            requestId: c.get("requestId"),
+            idempotencyKey: c.req.header("idempotency-key"),
+          }),
+        ),
+      )
+    })
+    .post("/:groupId/restore", requireSameOrigin, async (c) => {
+      const groupId = parseGroupId(c.req.param("groupId"))
+      return c.json(
+        await dependencies.restore(
+          new GroupRestoreCommand({
+            actor: actorFromAuth(c.get("auth")!),
+            groupId,
+            requestId: c.get("requestId"),
+            idempotencyKey: c.req.header("idempotency-key"),
+          }),
+        ),
+      )
+    })
     .post("/", requireSameOrigin, async (c) => {
-      if (!c.req.header("content-type")?.toLowerCase().includes("application/json")) {
-        throw new GroupFeatureError("INVALID_REQUEST", "Content type must be JSON")
-      }
-      let body: unknown
-      try {
-        body = await readApiJson(c)
-      } catch {
-        throw new GroupFeatureError("INVALID_REQUEST", "Request body must be JSON")
-      }
-      const input = parseCreateSharedGroupRequest(body)
+      const input = parseCreateGroupRequest(await readJsonBody(c))
       const result = await dependencies.create(
         new GroupCreateCommand({
           actor: actorFromAuth(c.get("auth")!),
           id: input.id,
-          kind: GroupKind.SHARED,
           name: input.name,
           requestId: c.get("requestId"),
           idempotencyKey: c.req.header("idempotency-key"),
@@ -120,6 +157,18 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
       )
       return c.json({ group: result.group }, result.created ? 201 : 200)
     })
+}
+
+/** The request's JSON body, or `INVALID_REQUEST` when it is not JSON or is declared as another type. */
+async function readJsonBody(c: Context<APIContext>): Promise<unknown> {
+  if (!c.req.header("content-type")?.toLowerCase().includes("application/json")) {
+    throw new GroupFeatureError("INVALID_REQUEST", "Content type must be JSON")
+  }
+  try {
+    return await readApiJson(c)
+  } catch {
+    throw new GroupFeatureError("INVALID_REQUEST", "Request body must be JSON")
+  }
 }
 
 /**

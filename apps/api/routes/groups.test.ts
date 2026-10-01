@@ -5,7 +5,6 @@ import {
   GroupCreateCommand,
   GroupError,
   GroupGetQuery,
-  GroupKind,
   GroupListQuery,
   GroupRepository,
   GroupRole,
@@ -67,7 +66,6 @@ function dependencies(): GroupsRouteDependencies & {
         created: true,
         group: {
           id: command.data.id,
-          kind: GroupKind.SHARED,
           name: command.data.name,
           role: GroupRole.OWNER,
           authorizationRevision: "1",
@@ -81,7 +79,6 @@ function dependencies(): GroupsRouteDependencies & {
       return Promise.resolve({
         group: {
           id: query.data.groupId,
-          kind: GroupKind.SHARED,
           name: "Team",
           role: GroupRole.OWNER,
           authorizationRevision: "1",
@@ -90,6 +87,10 @@ function dependencies(): GroupsRouteDependencies & {
         },
       })
     },
+    rename: () => Promise.reject(new Error("not used")),
+    delete: () => Promise.reject(new Error("not used")),
+    restore: () => Promise.reject(new Error("not used")),
+    deleted: () => Promise.reject(new Error("not used")),
     list(query) {
       this.listQuery = query
       return Promise.resolve({ groups: [], nextPageKey: null })
@@ -115,7 +116,7 @@ describe("groups route", () => {
     const response = await app.request("http://local/groups", {
       method: "POST",
       headers: mutationHeaders,
-      body: JSON.stringify({ id, kind: GroupKind.SHARED, name: " Team " }),
+      body: JSON.stringify({ id, name: " Team " }),
     })
 
     expect(response.status).toBe(201)
@@ -126,7 +127,6 @@ describe("groups route", () => {
         sessionSecondFactor: SecondFactorStatus.NotRequired,
       },
       id,
-      kind: GroupKind.SHARED,
       name: "Team",
       requestId: "req-groups-1",
     })
@@ -138,7 +138,7 @@ describe("groups route", () => {
     const response = await app.request("http://local/groups", {
       method: "POST",
       headers: mutationHeaders,
-      body: JSON.stringify({ id, kind: GroupKind.SHARED, name: "Team", userId: 999 }),
+      body: JSON.stringify({ id, name: "Team", userId: 999 }),
     })
 
     expect(response.status).toBe(400)
@@ -258,7 +258,6 @@ describe("groups route", () => {
           groupId === ownGroup && userId === 19
             ? {
               id: ownGroup,
-              kind: GroupKind.SHARED,
               name: "Team",
               role: GroupRole.OWNER,
               authorizationRevision: "1",
@@ -357,7 +356,7 @@ describe("groups route", () => {
       const response = await app.request("http://local/groups", {
         method: "POST",
         headers: mutationHeaders,
-        body: JSON.stringify({ id: "not-a-uuid", kind: GroupKind.SHARED, name: "Team" }),
+        body: JSON.stringify({ id: "not-a-uuid", name: "Team" }),
       })
 
       expect(response.status).toBe(400)
@@ -371,7 +370,7 @@ describe("groups route", () => {
       const response = await app.request("http://local/groups", {
         method: "POST",
         headers: mutationHeaders,
-        body: JSON.stringify({ id, kind: GroupKind.SHARED, name: "Team" }),
+        body: JSON.stringify({ id, name: "Team" }),
       })
 
       expect(response.status).toBe(401)
@@ -389,7 +388,7 @@ describe("groups route", () => {
     const response = await app.request("http://local/groups", {
       method: "POST",
       headers: mutationHeaders,
-      body: JSON.stringify({ id, kind: GroupKind.SHARED, name: "Team" }),
+      body: JSON.stringify({ id, name: "Team" }),
     })
 
     expect(response.status).toBe(409)
@@ -438,7 +437,7 @@ describe("groups route same-origin guard", () => {
     const response = await buildApp(deps, auth).request("http://local/groups", {
       method: "POST",
       headers,
-      body: JSON.stringify({ id, kind: GroupKind.SHARED, name: "Team" }),
+      body: JSON.stringify({ id, name: "Team" }),
     })
     return { deps, response }
   }
@@ -529,7 +528,7 @@ describe("groups route same-origin guard", () => {
       const response = await buildApp(deps).request("http://app.example.com/groups", {
         method: "POST",
         headers: { ...mutationHeaders, origin },
-        body: JSON.stringify({ id, kind: GroupKind.SHARED, name: "Team" }),
+        body: JSON.stringify({ id, name: "Team" }),
       })
       return { deps, response }
     }
@@ -558,7 +557,7 @@ describe("groups route caps the JSON body", () => {
     const response = await buildApp(deps).request("http://local/groups", {
       method: "POST",
       headers: mutationHeaders,
-      body: oversizedJson({ id, kind: GroupKind.SHARED, name: "Team" }),
+      body: oversizedJson({ id, name: "Team" }),
     })
 
     expect(response.status).toBe(400)
@@ -578,7 +577,7 @@ describe("groups route idempotency", () => {
     app.request("http://local/groups", {
       method: "POST",
       headers: { ...mutationHeaders, ...extra },
-      body: JSON.stringify({ id, kind: GroupKind.SHARED, name: "Team" }),
+      body: JSON.stringify({ id, name: "Team" }),
     })
 
   it("passes the Idempotency-Key header to the create command", async () => {

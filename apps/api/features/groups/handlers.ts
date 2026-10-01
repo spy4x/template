@@ -2,10 +2,16 @@ import type { CommandHandler, QueryHandler } from "@spy4x/platform/cqrs"
 import type { GroupRepository } from "@domain/groups"
 import { GroupSelectedEvent } from "../../cqrs/events.ts"
 import {
+  assertCanDelete,
+  assertCanRename,
   GroupCreateCommand,
+  GroupDeleteCommand,
+  GroupDeletedListQuery,
   GroupError,
   GroupGetQuery,
   GroupListQuery,
+  GroupRenameCommand,
+  GroupRestoreCommand,
   GroupSelectCommand,
   GroupSelectedQuery,
 } from "@domain/groups"
@@ -20,7 +26,7 @@ export function createGroupCreateHandler(
   repository: GroupRepository,
 ): CommandHandler<GroupCreateCommand> {
   return async (command) => {
-    return await repository.createShared(
+    return await repository.create(
       { id: command.data.id, name: command.data.name, requestId: command.data.requestId },
       command.data.actor.userId,
     )
@@ -62,4 +68,56 @@ export function createGroupSelectedHandler(
   repository: GroupRepository,
 ): QueryHandler<GroupSelectedQuery> {
   return async ({ data }) => await repository.getSelected(data.actor.userId)
+}
+
+/**
+ * Renames a group. The role is read from the group's membership in Postgres and checked first:
+ * an admin or the owner may, a viewer or editor is refused, and a person who is not a member is
+ * told the group does not exist.
+ */
+export function createGroupRenameHandler(
+  repository: GroupRepository,
+): CommandHandler<GroupRenameCommand> {
+  return async ({ data }) => {
+    const access = await repository.getForMember(data.groupId, data.actor.userId)
+    assertCanRename(access?.role ?? null)
+    const group = await repository.rename(data.groupId, data.name, data.actor.userId)
+    if (!group) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+    return { group }
+  }
+}
+
+/**
+ * Deletes a group, softly: only the owner may, and the repository refuses the owner's last group.
+ * Every member's page learns of it from the group's change hint, which the worker announces.
+ */
+export function createGroupDeleteHandler(
+  repository: GroupRepository,
+): CommandHandler<GroupDeleteCommand> {
+  return async ({ data }) => {
+    const access = await repository.getForMember(data.groupId, data.actor.userId)
+    assertCanDelete(access?.role ?? null)
+    const group = await repository.softDelete(data.groupId, data.actor.userId)
+    if (!group) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+    return { group }
+  }
+}
+
+/** Restores a group deleted in the last 30 days: only its owner may. */
+export function createGroupRestoreHandler(
+  repository: GroupRepository,
+): CommandHandler<GroupRestoreCommand> {
+  return async ({ data }) => {
+    const access = await repository.getRestorableForMember(data.groupId, data.actor.userId)
+    assertCanDelete(access?.role ?? null)
+    const group = await repository.restore(data.groupId, data.actor.userId)
+    if (!group) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+    return { group }
+  }
+}
+
+export function createGroupDeletedListHandler(
+  repository: GroupRepository,
+): QueryHandler<GroupDeletedListQuery> {
+  return async ({ data }) => ({ groups: await repository.listRestorable(data.actor.userId) })
 }
