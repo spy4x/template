@@ -549,12 +549,13 @@ never floating point.
 
 `⚠ MIGRATION REQUIRED — additive`
 
-- `id UUID PRIMARY KEY`, `group_id UUID NOT NULL`, event kind, aggregate ID/version, bounded JSONB
+- `id UUID PRIMARY KEY`, `group_id UUID` and `actor_user_id` (both null for a job, both set for a
+  group change, enforced by a check), event kind, aggregate ID/version, bounded JSONB
   payload, attempt count, available/claimed/processed timestamps, last error code, and created time.
 - Unique `(group_id, aggregate_id, aggregate_version, event_kind)` makes publication idempotent.
 - Partial index `(available_at, created_at) WHERE processed_at IS NULL` serves `FOR UPDATE SKIP
   LOCKED` claims.
-- Processed rows remain 30 days. Unprocessed rows are never retention-deleted.
+- Processed rows remain 7 days; the worker's nightly `outbox.cleanup` job removes older ones. Unprocessed rows are never retention-deleted.
 
 ### Existing-table and backfill changes
 

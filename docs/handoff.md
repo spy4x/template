@@ -261,13 +261,13 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 5. A job is an outbox row with `aggregate_type = 'job'`, no group and no payload, claimed once its
    `available_at` has come. `scheduleOutboxEvent` (from `@spy4x/server/outbox`) writes one, in the
    transaction of the change that needs it. Add a handler to the `JobPublisher` in
-   `apps/worker/+main.ts`; it reads what it needs from the database. A failing job backs off
+   `libs/server/jobs/wiring.ts`; it reads what it needs from the database. A failing job backs off
    (1 s, 2 s, 4 s, up to 5 minutes) and after 10 attempts stops with its error in
    `last_error_code`. A repeating job is listed in `repeatEveryMs`: a successful run writes the
    next one. The worker starts one, `outbox.cleanup`, at 03:00 UTC and then daily: it removes
    outbox rows processed more than 7 days ago. A job that gave up stays unprocessed, so the
    worker does not restart it; look for rows with `last_error_code` set.
-5. The SPA treats a hint as a reason to read. The read is `GET /api/groups`, the same one it makes
+6. The SPA treats a hint as a reason to read. The read is `GET /api/groups`, the same one it makes
    at start-up and after every reconnect, so a lost frame costs one read.
 
 ## Next steps, in dependency order

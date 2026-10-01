@@ -164,5 +164,31 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
         expect(next).toEqual({ hours: 24, count: 2 })
       },
     )
+
+    await t.step("a row names both its group and its actor, or neither", async () => {
+      const [{ groupId, userId }] = await sql<{ groupId: string; userId: number }[]>`
+        WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id),
+        u AS (INSERT INTO users (id) SELECT id FROM auth_user RETURNING id)
+        SELECT u.id AS user_id, gen_random_uuid() AS group_id FROM u
+      `
+      await sql`
+        INSERT INTO groups (id, kind, name, owner_user_id, created_by_user_id)
+        VALUES (${groupId}, 2, 'check fixture', ${userId}, ${userId})
+      `
+      const insert = (group: string | null, actor: number | null, version: number) =>
+        sql`
+          INSERT INTO outbox_events (
+            id, event_kind, aggregate_type, aggregate_id, aggregate_version, group_id,
+            actor_user_id
+          ) VALUES (
+            ${crypto.randomUUID()}, 'group.created', 'group', ${groupId}, ${version}, ${group},
+            ${actor}
+          )
+        `
+      await expect(insert(groupId, null, 1)).rejects.toThrow("outbox_events_group_actor_check")
+      await expect(insert(null, userId, 2)).rejects.toThrow("outbox_events_group_actor_check")
+      await insert(groupId, userId, 3)
+      await insert(null, null, 4)
+    })
   })
 })
