@@ -3,10 +3,13 @@ import {
   GroupError,
   GroupGetQuery,
   GroupKind,
+  GroupSelectCommand,
+  GroupSelectedQuery,
   parseCreateSharedGroupRequest,
   parseGroupId,
+  parseSelectGroupRequest,
 } from "@domain/groups"
-import type { GroupCreateResult, GroupGetResult } from "@domain/groups"
+import type { GroupCreateResult, GroupGetResult, SelectedGroup } from "@domain/groups"
 import type { SocketRequests } from "../../services/realtime.ts"
 import { type GroupListDependencies, listGroupsPage, parseListPayload } from "./list.ts"
 
@@ -14,6 +17,8 @@ import { type GroupListDependencies, listGroupsPage, parseListPayload } from "./
 export interface GroupSocketDependencies extends GroupListDependencies {
   create(command: GroupCreateCommand): Promise<GroupCreateResult>
   get(query: GroupGetQuery): Promise<GroupGetResult>
+  select(command: GroupSelectCommand): Promise<SelectedGroup>
+  selected(query: GroupSelectedQuery): Promise<SelectedGroup>
 }
 
 /**
@@ -49,6 +54,19 @@ export function createGroupSocketRequests(dependencies: GroupSocketDependencies)
         const groupId = parseGroupId((payload as { groupId: unknown }).groupId)
         return await dependencies.get(new GroupGetQuery({ actor, groupId }))
       },
+    },
+    "group.select": {
+      kind: "command",
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
+        const { groupId } = parseSelectGroupRequest(payload)
+        return await dependencies.select(
+          new GroupSelectCommand({ actor, groupId, requestId, idempotencyKey }),
+        )
+      },
+    },
+    "group.selected": {
+      kind: "query",
+      handle: async ({ actor }) => await dependencies.selected(new GroupSelectedQuery({ actor })),
     },
     "group.list": {
       kind: "query",

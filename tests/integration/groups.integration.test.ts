@@ -59,6 +59,7 @@ Deno.test({
       await applyMigration(sql, "2026_10_03_0001_idempotency_claim_token.sql")
       await applyMigration(sql, "2026_10_03_0002_outbox_jobs.sql")
       await applyMigration(sql, "2026_10_04_0001_groups_ms_precision.sql")
+      await applyMigration(sql, "2026_10_05_0001_user_settings.sql")
 
       await t.step("backfill is rerunnable and covers only active users", async () => {
         await applyMigration(sql, "2026_08_18_0002_personal_group_backfill.sql")
@@ -401,6 +402,7 @@ const SNAPSHOT_TABLES = [
   "auth_challenges",
   "idempotency_keys",
   "notes",
+  "user_settings",
 ]
 
 async function groupMetadata(sql: postgres.Sql, schema: string): Promise<string[]> {

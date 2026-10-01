@@ -10,7 +10,13 @@ import {
   UserProfileUpdateCommand,
 } from "@api/cqrs/commands.ts"
 import { PushListQuery, UserProfileGetQuery } from "@api/cqrs/queries.ts"
-import { GroupCreateCommand, GroupGetQuery, GroupListQuery } from "@domain/groups"
+import {
+  GroupCreateCommand,
+  GroupGetQuery,
+  GroupListQuery,
+  GroupSelectCommand,
+  GroupSelectedQuery,
+} from "@domain/groups"
 import { userProfileUpdateHandler } from "@api/cqrs/command-handlers/user-profile-update.ts"
 import { userProfileGetHandler } from "@api/cqrs/query-handlers/user-profile-get.ts"
 import { pushRegisterHandler } from "@api/cqrs/command-handlers/push-register.ts"
@@ -19,6 +25,8 @@ import { pushListHandler } from "@api/cqrs/query-handlers/push-list.ts"
 import { groupCreateHandler } from "@api/cqrs/command-handlers/group-create.ts"
 import { groupGetHandler } from "@api/cqrs/query-handlers/group-get.ts"
 import { groupListHandler } from "@api/cqrs/query-handlers/group-list.ts"
+import { groupSelectHandler } from "@api/cqrs/command-handlers/group-select.ts"
+import { groupSelectedHandler } from "@api/cqrs/query-handlers/group-selected.ts"
 import {
   NoteCreateCommand,
   NoteDeleteCommand,
@@ -32,6 +40,7 @@ import { noteDeleteHandler } from "@api/cqrs/command-handlers/note-delete.ts"
 import { noteListHandler } from "@api/cqrs/query-handlers/note-list.ts"
 import { noteGetHandler } from "@api/cqrs/query-handlers/note-get.ts"
 import {
+  GroupSelectedEvent,
   PushDevicesUpdatedEvent,
   UserProfileUpdatedEvent,
   UserSignedInEvent,
@@ -43,6 +52,7 @@ import { authAuditOnUserSignedInHandler } from "@api/cqrs/event-handlers/auth-au
 import { authAuditOnUserSignedOutHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-signed-out.ts"
 import { authAuditOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-profile-updated.ts"
 import { realtimeOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/realtime-on-user-profile-updated.ts"
+import { realtimeOnGroupSelectedHandler } from "@api/cqrs/event-handlers/realtime-on-group-selected.ts"
 import { realtimeOnPushDevicesUpdatedHandler } from "@api/cqrs/event-handlers/realtime-on-push-devices-updated.ts"
 import { realtimeOnUserSignedOutHandler } from "@api/cqrs/event-handlers/realtime-on-user-signed-out.ts"
 
@@ -65,6 +75,7 @@ subscribe(UserProfileUpdatedEvent, authAuditOnUserProfileUpdatedHandler)
 subscribe(UserSignedOutEvent, realtimeOnUserSignedOutHandler)
 subscribe(UserProfileUpdatedEvent, realtimeOnUserProfileUpdatedHandler)
 subscribe(PushDevicesUpdatedEvent, realtimeOnPushDevicesUpdatedHandler)
+subscribe(GroupSelectedEvent, realtimeOnGroupSelectedHandler)
 
 // After the session gate (added where the bus is built): a command from a session that may not act
 // never reaches the key store. It needs the database, so it is attached here and not there.
@@ -76,6 +87,7 @@ commandBus.register(UserProfileUpdateCommand, userProfileUpdateHandler)
 commandBus.register(PushRegisterCommand, pushRegisterHandler)
 commandBus.register(PushRemoveCommand, pushRemoveHandler)
 commandBus.register(GroupCreateCommand, groupCreateHandler)
+commandBus.register(GroupSelectCommand, groupSelectHandler)
 commandBus.register(NoteCreateCommand, noteCreateHandler)
 commandBus.register(NoteUpdateCommand, noteUpdateHandler)
 commandBus.register(NoteDeleteCommand, noteDeleteHandler)
@@ -83,6 +95,7 @@ queryBus.register(UserProfileGetQuery, userProfileGetHandler)
 queryBus.register(PushListQuery, pushListHandler)
 queryBus.register(GroupListQuery, groupListHandler)
 queryBus.register(GroupGetQuery, groupGetHandler)
+queryBus.register(GroupSelectedQuery, groupSelectedHandler)
 queryBus.register(NoteListQuery, noteListHandler)
 queryBus.register(NoteGetQuery, noteGetHandler)
 

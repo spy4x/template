@@ -18,6 +18,11 @@ export class UserProfileUpdatedEvent implements Event<{ user: User; request: Req
   constructor(public data: { user: User; request: RequestInfo }) {}
 }
 
+/** A person chose another group for `/notes`. Their other open tabs read the selection again. */
+export class GroupSelectedEvent implements Event<{ userId: number; groupId: string }> {
+  constructor(public data: { userId: number; groupId: string }) {}
+}
+
 export class PushDevicesUpdatedEvent
   implements Event<{ userId: number; devices: UserPushTokenPublic[]; request: RequestInfo }> {
   constructor(

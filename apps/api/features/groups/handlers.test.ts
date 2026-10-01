@@ -14,12 +14,18 @@ import {
   GroupListQuery,
   GroupRepository,
   GroupRole,
+  GroupSelectCommand,
+  GroupSelectedQuery,
   GroupSummary,
+  SelectedGroup,
 } from "@domain/groups"
+import type { GroupSelectedEvent } from "../../cqrs/events.ts"
 import {
   createGroupCreateHandler,
   createGroupGetHandler,
   createGroupListHandler,
+  createGroupSelectedHandler,
+  createGroupSelectHandler,
 } from "./handlers.ts"
 
 const now = new Date("2026-08-18T10:00:00.000Z")
@@ -65,6 +71,20 @@ class FakeGroupRepository implements GroupRepository {
 
   ensurePersonal(_input: CreatePersonalGroupInput, _userId: number): Promise<Group> {
     throw new Error("Not used")
+  }
+
+  selectedUserId: number | null = null
+
+  getSelected(userId: number): Promise<SelectedGroup> {
+    this.selectedUserId = userId
+    return Promise.resolve({ groupId: summary.id, version: 3 })
+  }
+
+  /** Only user 84 belongs to the group. */
+  select(userId: number, groupId: string): Promise<SelectedGroup | null> {
+    return Promise.resolve(
+      groupId === summary.id && userId === 84 ? { groupId, version: 4 } : null,
+    )
   }
 }
 
@@ -121,5 +141,45 @@ describe("group CQRS handlers", () => {
     expect(stranger).toBeInstanceOf(GroupError)
     expect(stranger.code).toBe("GROUP_NOT_FOUND")
     expect([stranger.code, stranger.message]).toEqual([missing.code, missing.message])
+  })
+
+  it("selects a group for a member and returns the new version", async () => {
+    const emitted: GroupSelectedEvent[] = []
+    const handler = createGroupSelectHandler(new FakeGroupRepository(), {
+      emit: (event) => emitted.push(event),
+    })
+    const result = await handler(new GroupSelectCommand({ actor: actor(84), groupId: summary.id }))
+
+    expect(result).toEqual({ groupId: summary.id, version: 4 })
+    // The person's other tabs are told, with the user and the group chosen.
+    expect(emitted.map((event) => event.data)).toEqual([{ userId: 84, groupId: summary.id }])
+  })
+
+  it("refuses to select a group of which the person is not a member, as a missing group", async () => {
+    const emitted: GroupSelectedEvent[] = []
+    const handler = createGroupSelectHandler(new FakeGroupRepository(), {
+      emit: (event) => emitted.push(event),
+    })
+    const stranger = await handler(
+      new GroupSelectCommand({ actor: actor(85), groupId: summary.id }),
+    ).catch((error) => error)
+    const missing = await handler(
+      new GroupSelectCommand({ actor: actor(84), groupId: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d119999" }),
+    ).catch((error) => error)
+
+    expect(stranger).toBeInstanceOf(GroupError)
+    expect(stranger.code).toBe("GROUP_NOT_FOUND")
+    expect([stranger.code, stranger.message]).toEqual([missing.code, missing.message])
+    expect(emitted).toEqual([])
+  })
+
+  it("reads the selected group of the query's user", async () => {
+    const repository = new FakeGroupRepository()
+    const result = await createGroupSelectedHandler(repository)(
+      new GroupSelectedQuery({ actor: actor(84) }),
+    )
+
+    expect(repository.selectedUserId).toBe(84)
+    expect(result).toEqual({ groupId: summary.id, version: 3 })
   })
 })

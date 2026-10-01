@@ -9,8 +9,12 @@ import {
   GroupListPageKey,
   GroupListQuery,
   GroupListResult,
+  GroupSelectCommand,
+  GroupSelectedQuery,
   parseCreateSharedGroupRequest,
   parseGroupId,
+  parseSelectGroupRequest,
+  type SelectedGroup,
 } from "@domain/groups"
 import { createSameOriginMutationGuard } from "@spy4x/server/http/same-origin"
 import { actorFromAuth } from "../cqrs/actor.ts"
@@ -23,6 +27,8 @@ export interface GroupsRouteDependencies {
   create(command: GroupCreateCommand): Promise<GroupCreateResult>
   list(query: GroupListQuery): Promise<GroupListResult>
   get(query: GroupGetQuery): Promise<GroupGetResult>
+  select(command: GroupSelectCommand): Promise<SelectedGroup>
+  selected(query: GroupSelectedQuery): Promise<SelectedGroup>
   cursor: {
     encode(userId: number, pageKey: GroupListPageKey): Promise<string>
     decode(cursor: string, expectedUserId: number): Promise<GroupListPageKey>
@@ -55,6 +61,33 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
         cursor: c.req.query("cursor"),
       })
       return c.json(page)
+    })
+    // Before "/:groupId", which would otherwise read "selected" as a group id.
+    .get("/selected", async (c) => {
+      const actor = actorFromAuth(c.get("auth")!)
+      return c.json(await dependencies.selected(new GroupSelectedQuery({ actor })))
+    })
+    .put("/selected", requireSameOrigin, async (c) => {
+      if (!c.req.header("content-type")?.toLowerCase().includes("application/json")) {
+        throw new GroupFeatureError("INVALID_REQUEST", "Content type must be JSON")
+      }
+      let body: unknown
+      try {
+        body = await readApiJson(c)
+      } catch {
+        throw new GroupFeatureError("INVALID_REQUEST", "Request body must be JSON")
+      }
+      const { groupId } = parseSelectGroupRequest(body)
+      return c.json(
+        await dependencies.select(
+          new GroupSelectCommand({
+            actor: actorFromAuth(c.get("auth")!),
+            groupId,
+            requestId: c.get("requestId"),
+            idempotencyKey: c.req.header("idempotency-key"),
+          }),
+        ),
+      )
     })
     .get("/:groupId", async (c) => {
       const groupId = parseGroupId(c.req.param("groupId"))
