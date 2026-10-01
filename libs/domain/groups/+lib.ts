@@ -8,10 +8,11 @@ import type { Actor } from "@domain/identity"
  */
 export const GROUP_AGGREGATE = "group"
 
-export enum GroupKind {
-  PERSONAL = 1,
-  SHARED = 2,
-}
+/**
+ * How long a deleted group can be restored. After this many days the worker removes the group and
+ * its data for good, and the group is gone for its owner too.
+ */
+export const GROUP_RESTORE_DAYS = 30
 
 export enum GroupRole {
   VIEWER = 1,
@@ -25,8 +26,8 @@ export type GroupErrorCode =
   | "ID_ALREADY_EXISTS"
   | "INVALID_CURSOR"
   | "INVALID_REQUEST"
+  | "LAST_GROUP"
   | "LAST_OWNER"
-  | "PERSONAL_GROUP_IMMUTABLE"
   | "ROLE_INSUFFICIENT"
   | "USER_NOT_ACTIVE"
 
@@ -42,7 +43,6 @@ export class GroupError extends Error {
 
 export interface Group {
   id: string
-  kind: GroupKind
   name: string
   ownerUserId: number
   createdByUserId: number
@@ -64,7 +64,6 @@ export interface GroupMembership {
 
 export interface GroupSummary {
   id: string
-  kind: GroupKind
   name: string
   role: GroupRole
   authorizationRevision: string
@@ -77,24 +76,29 @@ export interface GroupSummary {
   updatedAt: Date
 }
 
+/** A deleted group its owner can still restore; `deletedAt` is when it was deleted. */
+export interface DeletedGroupSummary extends GroupSummary {
+  deletedAt: Date
+}
+
 export interface GroupAccess {
   group: Group
   role: GroupRole
 }
 
-export interface CreateSharedGroupRequest {
+export interface CreateGroupRequest {
   id: string
-  kind: GroupKind.SHARED
   name: string
 }
 
-export interface CreateSharedGroupInput {
+export interface CreateGroupInput {
   id: string
   name: string
   requestId?: string
 }
 
-export interface CreatePersonalGroupInput {
+/** The first group a person gets, when they sign up or when they somehow have none. */
+export interface FirstGroupInput {
   id: string
   name: string
 }
@@ -122,7 +126,6 @@ export interface GroupListResult {
 export interface GroupCreatePayload {
   actor: Actor
   id: string
-  kind: GroupKind.SHARED
   name: string
   requestId?: string
   /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
@@ -134,6 +137,71 @@ export type GroupCreateResult = CreatedGroup
 export class GroupCreateCommand implements Command<GroupCreatePayload, GroupCreateResult> {
   __resultType?: GroupCreateResult
   constructor(public data: GroupCreatePayload) {}
+}
+
+export interface GroupRenamePayload {
+  actor: Actor
+  groupId: string
+  name: string
+  requestId?: string
+  /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
+  idempotencyKey?: string
+}
+
+/**
+ * Renames a group. An admin or the owner may; a viewer or editor is refused with
+ * `ROLE_INSUFFICIENT`, and a non-member is told `GROUP_NOT_FOUND`.
+ */
+export class GroupRenameCommand implements Command<GroupRenamePayload, { group: GroupSummary }> {
+  __resultType?: { group: GroupSummary }
+  constructor(public data: GroupRenamePayload) {}
+}
+
+export interface GroupDeletePayload {
+  actor: Actor
+  groupId: string
+  requestId?: string
+  /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
+  idempotencyKey?: string
+}
+
+/**
+ * Soft-deletes a group: it is hidden from every member and its owner can restore it for
+ * {@link GROUP_RESTORE_DAYS} days. Only the owner may. The actor's last group is refused with
+ * `LAST_GROUP`.
+ */
+export class GroupDeleteCommand
+  implements Command<GroupDeletePayload, { group: DeletedGroupSummary }> {
+  __resultType?: { group: DeletedGroupSummary }
+  constructor(public data: GroupDeletePayload) {}
+}
+
+export interface GroupRestorePayload {
+  actor: Actor
+  groupId: string
+  requestId?: string
+  /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
+  idempotencyKey?: string
+}
+
+/**
+ * Brings back a group deleted less than {@link GROUP_RESTORE_DAYS} days ago, with all its data.
+ * Only the owner may; an older or never-deleted group answers `GROUP_NOT_FOUND`.
+ */
+export class GroupRestoreCommand implements Command<GroupRestorePayload, { group: GroupSummary }> {
+  __resultType?: { group: GroupSummary }
+  constructor(public data: GroupRestorePayload) {}
+}
+
+export interface GroupDeletedListPayload {
+  actor: Actor
+}
+
+/** The groups the actor owns that can still be restored, most recently deleted first. */
+export class GroupDeletedListQuery
+  implements Query<GroupDeletedListPayload, { groups: DeletedGroupSummary[] }> {
+  __resultType?: { groups: DeletedGroupSummary[] }
+  constructor(public data: GroupDeletedListPayload) {}
 }
 
 export interface GroupListPayload {
@@ -195,8 +263,8 @@ export interface GroupSelectedPayload {
 
 /**
  * The actor's selected group. When the stored one is gone (the group was deleted, or the person
- * left it) or never chosen, the answer is another of their groups, their personal one first, and
- * it is stored: the server decides, so every device gets the same answer.
+ * left it) or never chosen, the answer is another of their groups, the oldest one: the server
+ * decides, so every device gets the same answer. A deleted group is never the answer.
  */
 export class GroupSelectedQuery implements Query<GroupSelectedPayload, SelectedGroup> {
   __resultType?: SelectedGroup
@@ -215,49 +283,96 @@ export interface GroupRepository {
   listForUser(userId: number, page: GroupListPage): Promise<GroupListResult>
   /** The group as the list shows it, or `null` when it is missing or the user is not a member. */
   getSummaryForMember(groupId: string, userId: number): Promise<GroupSummary | null>
-  /** The ids of the active users who are members of an active group; who a change is pushed to. */
+  /**
+   * The ids of the active users who are members of a group, deleted or not; who a change is pushed
+   * to. A deleted group counts, so the hint of its deletion (and of its restore) reaches the members
+   * whose page still shows it.
+   */
   listMemberUserIds(groupId: string): Promise<number[]>
+  /** The actor's access to an active group, or `null` for a missing, deleted or foreign group. */
   getForMember(groupId: string, userId: number): Promise<GroupAccess | null>
-  createShared(input: CreateSharedGroupInput, actorId: number): Promise<CreatedGroup>
-  createPersonal(input: CreatePersonalGroupInput, userId: number): Promise<Group>
-  ensurePersonal(input: CreatePersonalGroupInput, userId: number): Promise<Group>
+  /**
+   * The actor's access to a group deleted less than {@link GROUP_RESTORE_DAYS} days ago, or `null`
+   * for any other group: active, purged, older or not theirs.
+   */
+  getRestorableForMember(groupId: string, userId: number): Promise<GroupAccess | null>
+  create(input: CreateGroupInput, actorId: number): Promise<CreatedGroup>
+  /**
+   * Creates the person's first group in the caller's transaction, as sign-up does. The group is an
+   * ordinary one: the person owns it, and it follows every rule other groups follow.
+   */
+  createFirst(input: FirstGroupInput, userId: number): Promise<void>
+  /**
+   * Gives a person with no active group one, in its own transaction; does nothing for a person who
+   * has a group. Sign-in calls it, so an account always has somewhere to work.
+   */
+  ensureFirst(input: FirstGroupInput, userId: number): Promise<void>
+  /** Renames the group and announces the change. `null` when it is missing or deleted. */
+  rename(groupId: string, name: string, actorId: number): Promise<GroupSummary | null>
+  /**
+   * Soft-deletes the group, in one transaction: refuses with `LAST_GROUP` when it is the actor's
+   * only active group; gives every other member who would be left with no group a new one; and
+   * announces the change. `null` when the group is missing or already deleted.
+   */
+  softDelete(groupId: string, actorId: number): Promise<DeletedGroupSummary | null>
+  /** Brings a group back inside its restore window. `null` when it is not restorable. */
+  restore(groupId: string, actorId: number): Promise<GroupSummary | null>
+  /** The groups the user owns that can still be restored, most recently deleted first. */
+  listRestorable(userId: number): Promise<DeletedGroupSummary[]>
 }
 
-export type PersonalGroupOperation =
-  | "delete"
-  | "invite"
-  | "manual-create"
-  | "remove-owner"
-  | "transfer-owner"
-
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-const SELECT_KEYS = ["groupId"]
-const CREATE_SHARED_KEYS = ["id", "kind", "name"]
+const GROUP_ID_KEYS = ["groupId"]
+const CREATE_KEYS = ["id", "name"]
+const RENAME_BODY_KEYS = ["name"]
+const RENAME_KEYS = ["groupId", "name"]
 
-export function parseCreateSharedGroupRequest(value: unknown): CreateSharedGroupRequest {
-  if (!isRecord(value) || Object.keys(value).sort().join(",") !== CREATE_SHARED_KEYS.join(",")) {
-    throw new GroupError("INVALID_REQUEST", "Expected exactly id, kind, and name")
-  }
-  if (typeof value.id !== "string" || !UUID_V4_PATTERN.test(value.id)) {
-    throw new GroupError("INVALID_REQUEST", "Group id must be a lowercase UUID v4")
-  }
-  if (value.kind !== GroupKind.SHARED) {
-    throw new GroupError("INVALID_REQUEST", "Only shared groups can be created")
-  }
-  if (typeof value.name !== "string") {
+function hasExactKeys(value: unknown, keys: string[]): value is Record<string, unknown> {
+  return isRecord(value) && Object.keys(value).sort().join(",") === keys.join(",")
+}
+
+/** A group name from a request: trimmed, 1 to 100 characters. */
+export function parseGroupName(value: unknown): string {
+  if (typeof value !== "string") {
     throw new GroupError("INVALID_REQUEST", "Group name must be a string")
   }
-  const name = value.name.trim()
+  const name = value.trim()
   const nameLength = Array.from(name).length
   if (nameLength < 1 || nameLength > 100) {
     throw new GroupError("INVALID_REQUEST", "Group name must contain 1 to 100 characters")
   }
-  return { id: value.id, kind: GroupKind.SHARED, name }
+  return name
 }
 
-/** The body of a request to select a group: exactly `{ groupId }`, a lowercase UUID v4. */
-export function parseSelectGroupRequest(value: unknown): { groupId: string } {
-  if (!isRecord(value) || Object.keys(value).sort().join(",") !== SELECT_KEYS.join(",")) {
+export function parseCreateGroupRequest(value: unknown): CreateGroupRequest {
+  if (!hasExactKeys(value, CREATE_KEYS)) {
+    throw new GroupError("INVALID_REQUEST", "Expected exactly id and name")
+  }
+  return { id: parseGroupId(value.id), name: parseGroupName(value.name) }
+}
+
+/** The body of a rename over REST, where the path names the group: exactly `{ name }`. */
+export function parseRenameGroupBody(value: unknown): { name: string } {
+  if (!hasExactKeys(value, RENAME_BODY_KEYS)) {
+    throw new GroupError("INVALID_REQUEST", "Expected exactly name")
+  }
+  return { name: parseGroupName(value.name) }
+}
+
+/** The payload of a rename over the socket: exactly `{ groupId, name }`. */
+export function parseRenameGroupRequest(value: unknown): { groupId: string; name: string } {
+  if (!hasExactKeys(value, RENAME_KEYS)) {
+    throw new GroupError("INVALID_REQUEST", "Expected exactly groupId and name")
+  }
+  return { groupId: parseGroupId(value.groupId), name: parseGroupName(value.name) }
+}
+
+/**
+ * The body of a request that names one group (select, delete, restore): exactly `{ groupId }`, a
+ * lowercase UUID v4.
+ */
+export function parseGroupIdRequest(value: unknown): { groupId: string } {
+  if (!hasExactKeys(value, GROUP_ID_KEYS)) {
     throw new GroupError("INVALID_REQUEST", "Expected exactly groupId")
   }
   return { groupId: parseGroupId(value.groupId) }
@@ -296,15 +411,34 @@ export function canManageMember(
   return next === undefined || next <= GroupRole.EDITOR
 }
 
-export function assertPersonalInvariant(
-  group: Pick<Group, "kind">,
-  operation: PersonalGroupOperation,
-): void {
-  if (group.kind === GroupKind.PERSONAL) {
-    throw new GroupError(
-      "PERSONAL_GROUP_IMMUTABLE",
-      `Personal group does not allow ${operation}`,
-    )
+/**
+ * Whether `role` may rename the group: an admin or the owner. Every group follows the same rule.
+ */
+export function canRename(role: GroupRole): boolean {
+  return isGroupRole(role) && role >= GroupRole.ADMIN
+}
+
+/** Whether `role` may delete or restore the group: only the owner. */
+export function canDelete(role: GroupRole): boolean {
+  return isGroupRole(role) && role === GroupRole.OWNER
+}
+
+/**
+ * Throws unless `role` may rename the group. `null` means the actor is not a member, which answers
+ * "group not found" so a stranger cannot tell a group exists.
+ */
+export function assertCanRename(role: GroupRole | null): void {
+  if (role === null || !canRead(role)) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+  if (!canRename(role)) {
+    throw new GroupError("ROLE_INSUFFICIENT", "Only an admin or the owner can rename a group")
+  }
+}
+
+/** Throws unless `role` may delete or restore the group: only the owner. See {@link assertCanRename}. */
+export function assertCanDelete(role: GroupRole | null): void {
+  if (role === null || !canRead(role)) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+  if (!canDelete(role)) {
+    throw new GroupError("ROLE_INSUFFICIENT", "Only the owner can delete or restore a group")
   }
 }
 
