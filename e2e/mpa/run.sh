@@ -41,13 +41,15 @@ wait_for() { # <name> <pid> <url>
 }
 
 # Throw-away secrets, never printed. The origin check compares the browser's Origin with
-# http://$DOMAIN, port included.
+# http://$DOMAIN, port included. The address is `127.0.0.1`, not `app.localhost`: Chromium resolves
+# the latter itself, but the Node side of Playwright (its `request` fixture) asks the system
+# resolver, which in the CI container does not know it.
 AUTH_COOKIE_SECRET=$(openssl rand -hex 32)
 AUTH_PEPPER=$(openssl rand -hex 32)
 AUTH_TOTP=$(openssl rand -hex 20)
 export AUTH_COOKIE_SECRET AUTH_PEPPER AUTH_TOTP
 export ENV=dev
-export DOMAIN="app.localhost:$FRONT_PORT"
+export DOMAIN="127.0.0.1:$FRONT_PORT"
 export DEV_EMAIL=dev@example.com
 export TIMEZONE=Etc/UTC
 export RATE_LIMITER_WINDOW_MS=60000
