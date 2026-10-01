@@ -27,11 +27,22 @@ async function warmUp(browser: Browser, api: APIRequestContext, baseURL: string,
   try {
     const page = await context.newPage()
     await signIn(page, email, WARM_PASSWORD)
-    const status = page.locator("[data-e2e=shell-ws-status]")
-    await gotoApp(page, "/groups", status)
-    // The notes of the selected group, which is the personal group sign-up creates, and its editor.
+    // The selected group is the personal group sign-up creates; one note in it opens the editor.
+    const selected = await page.request.get("/api/groups/selected")
+    const { groupId } = await selected.json()
+    if (!groupId) throw new Error(`warm-up found no selected group: ${selected.status()}`)
+    const noteId = crypto.randomUUID()
+    const note = await page.request.post(`/api/groups/${groupId}/notes`, {
+      headers,
+      data: { id: noteId, title: "Warm-up", body: "" },
+    })
+    if (note.status() !== 201) {
+      throw new Error(`warm-up note failed: ${note.status()} ${await note.text()}`)
+    }
+    await gotoApp(page, "/groups", page.locator("[data-e2e=shell-ws-status]"))
+    await gotoApp(page, `/groups/${groupId}`, page.locator("[data-e2e=group-general-name]"))
     await gotoApp(page, "/notes", page.locator("[data-e2e=note-new]"))
-    await gotoApp(page, "/notes/new", page.locator("[data-e2e=note-title]"))
+    await gotoApp(page, `/notes/${noteId}`, page.locator("[data-e2e=note-title]"))
     await page.waitForLoadState("networkidle")
   } catch (error) {
     // The warm-up's own error is the one to report; a cleanup that fails as well is added to it.
