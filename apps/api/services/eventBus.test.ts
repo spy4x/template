@@ -98,4 +98,26 @@ describe("the event bus's listener failure report", () => {
     expect(lines).toHaveLength(1)
     expect(lines[0][0]).toBe("req-abc")
   })
+
+  it("leaves the code that raised the event unaffected when a listener throws", async () => {
+    const throwingListener = () => {
+      throw new Error("boom")
+    }
+    const off = subscribe(ListenerProbeEvent, throwingListener)
+    let afterEmit = false
+    const app = new Hono<APIContext>().get("/", (c) => {
+      expect(() => eventBus.emit(new ListenerProbeEvent({ n: 4 }))).not.toThrow()
+      afterEmit = true
+      return c.text("ok")
+    })
+
+    let response: Response | undefined
+    await captureLogs(async () => {
+      response = await app.request("/")
+    })
+    off()
+
+    expect(response?.status).toBe(200)
+    expect(afterEmit).toBe(true)
+  })
 })
