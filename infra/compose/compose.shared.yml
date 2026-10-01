@@ -584,6 +584,57 @@ services:
       timeout: 5s
       retries: 5
 
+  # The MPA (apps/mpa) in place of the SPA: `COMPOSE_PROFILES=mpa` in the env file starts it, and
+  # `deno task deploy` then deploys it. Without the profile it does not exist, and nothing else
+  # changes. It takes DOMAIN's traffic except `/api` and `/ws`, which still reach the API. Its
+  # router outranks the SPA's (priority below), so the SPA container keeps running but gets no
+  # requests. Built into the image: no bind mounts.
+  mpa:
+    container_name: ${PROJECT}-mpa
+    profiles: [mpa]
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: apps/mpa/dockerfile.prod
+      args:
+        - DENO_VERSION=${DENO_VERSION}
+    environment:
+      - ENV=${ENV}
+      - DOMAIN=${DOMAIN}
+      - API_URL=http://api:${API_PORT}
+      - DENO_LOG=${DENO_LOG}
+    user: "1000:1000"
+    deploy:
+      resources:
+        limits:
+          # Defaults, so an env file written before this service existed still deploys.
+          cpus: '${MPA_CPU_LIMIT:-1}'
+          memory: '${MPA_MEM_LIMIT:-512M}'
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      api:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mpa-${PROJECT}.rule=Host(`${DOMAIN}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`)"
+      - "traefik.http.routers.mpa-${PROJECT}.priority=1000"
+      - "traefik.http.routers.mpa-${PROJECT}.entrypoints=web"
+      - "traefik.http.routers.mpa-${PROJECT}.service=mpa-${PROJECT}"
+      - "traefik.http.services.mpa-${PROJECT}.loadbalancer.server.port=8080"
+      - "traefik.docker.network=proxy"
+    networks:
+      - default
+      - proxy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://127.0.0.1:8080/sign-in"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # endregion API & SPA
 
 # region Networking

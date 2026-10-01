@@ -62,3 +62,11 @@ services:
       - "traefik.http.routers.spa-${PROJECT}.entrypoints=websecure"
       - "traefik.http.routers.spa-${PROJECT}.tls=true"
       - "traefik.http.routers.spa-${PROJECT}.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-myresolver}"
+
+  # Only with COMPOSE_PROFILES=mpa. Overrides compose.shared.yml's mpa-${PROJECT} router by name.
+  mpa:
+    labels:
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.mpa-${PROJECT}.entrypoints=websecure"
+      - "traefik.http.routers.mpa-${PROJECT}.tls=true"
+      - "traefik.http.routers.mpa-${PROJECT}.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-myresolver}"

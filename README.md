@@ -99,9 +99,13 @@ touches the database itself. It needs `ENV` and `DOMAIN` (the same values as the
 `API_URL`, the address the MPA's server reaches the API at, such as `http://api:8000`. The browser
 must reach the MPA at `DOMAIN`, with `/api` still going to the API: the API accepts a form only
 from `http(s)://DOMAIN`, and the MPA passes the browser's `Origin` on unchanged. Compose serves
-the SPA there today; to serve the MPA instead, route `DOMAIN` to `deno task mpa:start` (after
-`deno task mpa:build`) where the SPA is. Its end-to-end tests run with `deno task --cwd apps/mpa
-e2e` against such a stack.
+the SPA there by default. To serve the MPA instead, set `COMPOSE_PROFILES=mpa` in the env file
+(join it with other profiles by commas) and run `deno task deploy` as usual: Compose then builds
+the `mpa` service from `apps/mpa/dockerfile.prod`, and its Traefik router outranks the SPA's for
+`DOMAIN`, leaving `/api` and `/ws` to the API. The SPA container still runs, unused. Without the
+profile nothing about the deploy changes. The MPA's end-to-end test runs in CI on every pull
+request, and locally with `e2e/mpa/run.sh` against a running Postgres and Valkey (see the header
+of that script).
 
 ## Quick start
 
@@ -123,7 +127,7 @@ deno task dev                # Postgres, Valkey, MinIO, API, worker, SPA, Loki, 
 Promtail, node-exporter and cAdvisor watch the whole host, so they are off by default. Set
 `COMPOSE_PROFILES=host-monitoring` in the env file to start them too.
 
-The MPA is not in Compose; run it on the host. Stop the proxy with
+To try the MPA in Compose, see "SPA or MPA". Stop the proxy with
 `deno task proxy:stop`. Compose applies pending migrations on every start, in the one-shot
 `migrate` service that the API and the worker wait for; a failed migration stops the start. To apply
 them from the host instead, for an API run outside Compose, use the values from your `.env` and the

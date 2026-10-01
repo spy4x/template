@@ -41,7 +41,7 @@ apps/spa      Preact + Vite PWA. Wires the libs/ui auth, profile and groups scre
               group commands and queries go over the socket.
 apps/mpa      Fresh. REST-only, server-rendered client: auth, profile, groups and notes,
               every action a form post that works without JavaScript. Calls the API
-              over HTTP (API_URL); not in compose yet (#122).
+              over HTTP (API_URL); in compose under the `mpa` profile.
 apps/worker   Drains outbox_events and announces group changes (pg_notify); sweeps
               expired idempotency keys. Runs in compose as `worker`, from the API's image.
 
@@ -236,8 +236,7 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 - Only the group and note calls go over the socket. The profile, password, two-factor and
   push calls are still REST, and the profile page no longer receives live updates (a profile change
   in another tab shows after a reload).
-- The MPA is not in Compose, and its end-to-end spec (`e2e/mpa`) does not run in CI (#122). It
-  finds a group by paging through the whole list, since the API cannot read one group (#123).
+- The MPA finds a group by paging through the whole list, since the API cannot read one group (#123).
 - Group membership cannot be changed through the product: tests seed a second member with `POST /api/test/add-member`.
 - No local projection in the SPA, no offline outbox, no conflict UI. The page keeps its cursors in
   `localStorage` and rereads the whole group list to catch up.

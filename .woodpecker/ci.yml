@@ -62,6 +62,44 @@ steps:
       - deno task e2e url-filters
     depends_on: [check]
 
+  e2e-mpa:
+    # The MPA's browser test: with JavaScript turned off, one person signs up, signs in and manages
+    # notes. e2e/mpa/run.sh migrates, starts the API and the MPA behind one origin and runs it.
+    image: mcr.microsoft.com/playwright:v1.57.0-noble
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: tester
+      DB_PASS: ci-throwaway
+      DB_NAME: template_test
+      KV_HOSTNAME: valkey
+      KV_PORT: "6379"
+      KV_PASSWORD: ci-throwaway
+    commands:
+      - npm install --global deno@2.9.0
+      - deno --version
+      # Postgres first runs a temporary server that listens on a unix socket only, so a TCP
+      # connection means the real one is up (docs/handoff.md, trap 3). Valkey has no such phase.
+      - |
+          deno eval '
+          for (const [hostname, port] of [["postgres", 5432], ["valkey", 6379]]) {
+            for (let i = 0; ; i++) {
+              try {
+                (await Deno.connect({ hostname, port })).close()
+                break
+              } catch {
+                if (i >= 120) {
+                  console.error(`$${hostname} did not accept connections within 60 s`)
+                  Deno.exit(1)
+                }
+                await new Promise((resolve) => setTimeout(resolve, 500))
+              }
+            }
+          }
+          '
+      - e2e/mpa/run.sh
+    depends_on: [check]
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -69,3 +107,7 @@ services:
       POSTGRES_USER: tester
       POSTGRES_PASSWORD: ci-throwaway
       POSTGRES_DB: template_test
+  valkey:
+    image: valkey/valkey:8.1
+    commands:
+      - valkey-server --requirepass ci-throwaway
