@@ -124,7 +124,8 @@ These cost real time to find. Do not rediscover them.
 1. **Deno workspace test discovery.** `deno test <dir>` only collects from
    workspace _members_ once the directory contains any. Moving tests under
    `libs/platform` silently dropped 10 of 20 tests, with the step count unchanged
-   so it looked fine. Every lib holding tests is registered in the `workspace`
+   so it looked fine. The same hid `libs/server/jobs`'s tests from `deno task check`
+   until #139 made it, `libs/server/auth` and `libs/server/mail` members. Every lib holding tests is registered in the `workspace`
    array in `deno.jsonc`; add new ones there or their tests will not run.
 2. **`deno fmt` from the repo root, always.** Running it inside a member
    directory picks up that member's `deno.json`, which has no `fmt` block, so it
@@ -187,6 +188,55 @@ These cost real time to find. Do not rediscover them.
    valkey-cli --scan --pattern 'api:user_*' | xargs -r valkey-cli del
    ```
 
+8. **Accounts sign in with an e-mail address; older accounts keep their username
+   (#139).** Sign-up takes an address, normalised by `normalizeEmail`
+   (`@spy4x/server/auth`), and stores it on the password key twice: as `subject`,
+   which is what sign-in looks up, and as `email`. The address is never stored on
+   `users`. An account made before #139 keeps its username as `subject` and
+   `email` stays `NULL`; it signs in with the username as before, through the
+   same field (`login`): a value `normalizeEmail` accepts is looked up as an
+   address, anything else as a username. An address is attached to a key only at
+   sign-up, so it is nullable, unique when set (`UNIQUE (method, subject)`), and
+   compared after normalising. A username account has no address, so it cannot ask
+   for a reset link; attaching one to it is not built yet.
+
+   **Password reset.** `POST /api/auth/password/forgot` with `{ email }` answers the
+   same body for every valid address and queues the `auth.password-reset-mail` job
+   with the address in `password_reset_requests`, never in the job row. The
+   worker issues the code (a challenge of `@spy4x/server/auth`: only its SHA-256
+   is stored, one per address, 30 minutes, with no practical cap on wrong guesses: a small cap would let anyone lock an address's reset, and the per-IP limit stops floods) and mails the link
+   in the same step, so the raw code exists only in the mail. `POST
+   /api/auth/password/reset` with `{ email, code, newPassword }` spends the code,
+   marks the address proven, sets the password and signs out every session of
+   the user; it signs nobody in. Limits: the IP limit of the other anonymous auth
+   routes, and 3 requests an hour per address (`ratelimit-reset` in Valkey,
+   keyed by a hash of the address, refusing when Valkey is down).
+
+   **Known gap: a squatted address.** Addresses are not verified at sign-up, so
+   anyone can sign up first with someone else's address. A reset gives the
+   owner the account back (new password, address proven, every session signed
+   out), unless the squatter turned on an authenticator app: that stays, and
+   the owner stops at the one-time-code step. Sign-up also answers 401 for a
+   taken address, which tells that an account uses it; avoiding that needs
+   verified addresses too. Both close with
+   [#140](https://github.com/spy4x/template/issues/140) (verify the address
+   with a one-time code).
+
+   **Mail.** `libs/server/mail` picks the transport: with `ENV=dev` the console
+   sender of `@spy4x/email` plus a copy in the `dev_mail` table, which the e2e
+   specs read through `POST /api/test/last-mail`; any other `ENV` uses SMTP when
+   `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` and `SMTP_FROM` are all set,
+   and otherwise sends nothing. The console sender never runs in production: it
+   prints the link, and container logs are shipped. The SPA's nginx logs paths
+   without the query string, and the reset pages send no referrer.
+
+   **Owner step before reset mails go out in production.** Production has no
+   SMTP account yet. Until all five `SMTP_*` keys are in the production env file,
+   the API and the worker start, each logs one warning naming the missing keys,
+   `/forgot-password` gives its usual answer and sends nothing, and everything
+   else works. Add the five keys (see `infra/envs/.env.example`) and deploy; the
+   worker reads them at start-up.
+
 ## Running it
 
 ```sh
@@ -235,7 +285,8 @@ missing; `deno task deploy` generates it on the server.
 Live updates between tabs need the worker too: without it a group created in one tab shows in
 another only after a reconnect or a reload, and the e2e test "a group created in one tab appears in
 the other tab without a reload or reconnect" fails. Compose runs it as `worker`; outside compose,
-start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `DB_*` values.
+start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `DB_*`, `ENV` and
+`DOMAIN` values. It also sends the password reset mails (trap 8).
 
 ## What is not built yet
 

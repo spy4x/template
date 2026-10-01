@@ -15,6 +15,10 @@ export const FORM_ACTIONS = {
   signIn: "/sign-in",
   signUp: "/sign-up",
   oneTimeCode: "/totp",
+  /** Asks for a reset link: `{ email }`. */
+  forgotPassword: "/forgot-password",
+  /** Sets a new password with the link's code: `{ email, code, newPassword }`. */
+  resetPassword: "/reset-password",
   signOut: "/sign-out",
   profile: "/profile/name",
   password: "/profile/password",
@@ -54,6 +58,7 @@ export const SCREEN_PATHS = {
   signIn: "/sign-in",
   signUp: "/sign-up",
   oneTimeCode: "/totp",
+  forgotPassword: "/forgot-password",
   profile: "/",
   groups: "/groups",
 } as const

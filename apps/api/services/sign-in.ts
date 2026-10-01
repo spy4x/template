@@ -3,10 +3,18 @@
  * session cookie, the guards, password hashing and authenticator-app codes all come from the
  * package; this file decides what the template adds on top of them.
  *
- * - **Usernames, not addresses.** The template signs in with a free username: the package's
- *   `createPasswordSignIn` with `normalizeSubject: normalizeUsername` writes one `password` key per
- *   user whose subject is the normalised username. Password reset is not wired; the package refuses
- *   it in this mode, because it mails the subject.
+ * - **E-mail addresses, and the usernames of older accounts.** Sign-up takes an address: the
+ *   package's `createPasswordSignIn` writes one `password` key whose subject and `email` are the
+ *   address as `normalizeEmail` leaves it (trimmed, lower-cased), unproven. Accounts made before
+ *   that signed up with a username: their key's subject is the normalised username and its `email`
+ *   is null. Sign-in takes either: a login `normalizeEmail` accepts goes to the address provider,
+ *   anything else to a username provider over the same keys, so an older account signs in as before.
+ *   The address is attached to the key, not to `users`: nullable (older keys), unique through the
+ *   key's `(method, subject)` constraint, and compared after normalisation.
+ * - **Password reset by link.** `resetPassword` spends a code from `password-reset.ts`, proves the
+ *   address (whoever holds the mailbox owns the account that signs in with it), sets the new
+ *   password and signs out every session of the user. It signs nobody in: the person signs in again
+ *   with the new password, and their second factor if they have one.
  * - **One sign-up transaction.** The auth user and key, the session, the `users` profile row (same
  *   id) and the personal group are written in one `db.begin()`: the sign-up provider is built over
  *   that transaction's stores.
@@ -36,9 +44,10 @@ import {
   totpEnrolment,
   verifyTotp,
 } from "@spy4x/server/sign-in"
-import type { AuthSessionRecord } from "@spy4x/server/auth"
+import { AuthConflictError, type AuthSessionRecord, normalizeEmail } from "@spy4x/server/auth"
 import {
   createPasswordSignIn,
+  PASSWORD_METHOD,
   type PasswordSignIn,
   PasswordSignInError,
   type PasswordSignInOptions,
@@ -46,6 +55,7 @@ import {
 import { GroupError } from "@domain/groups"
 import { type User, UserMFAStatus, UserRole } from "@domain/identity"
 import type { AppDbBase } from "./db-base.ts"
+import { consumePasswordReset } from "@server/auth/password-reset.ts"
 
 /** Longest username, in characters (code points), after normalisation. */
 export const USERNAME_MAX_LENGTH = 50
@@ -87,18 +97,22 @@ export interface SignIn {
   auth: Auth<AuthSessionRecord, User>
   /**
    * Creates the auth user, password key, profile, personal group and session in one transaction
-   * and sets the cookie. `null` when the username is empty, too long or taken.
+   * and sets the cookie. `null` when the address is not one `normalizeEmail` accepts, or an account
+   * already signs in with it.
    *
    * @param personalGroupId The id of the new personal group. Defaults to a random UUID.
    */
   signUp(
     c: Context,
-    username: string,
+    email: string,
     password: string,
     personalGroupId?: string,
   ): Promise<SignedIn | null>
-  /** Checks the password, starts a session and sets the cookie. `null` when refused. */
-  signIn(c: Context, username: string, password: string): Promise<SignedIn | null>
+  /**
+   * Checks the password of the account that signs in with `login`, an address or an older
+   * account's username, starts a session and sets the cookie. `null` when refused.
+   */
+  signIn(c: Context, login: string, password: string): Promise<SignedIn | null>
   /** Signs out the session in the request's cookie, if any, and clears the cookie. */
   signOut(c: Context): Promise<void>
   /** Starts authenticator-app enrolment, or returns the unfinished one. */
@@ -122,6 +136,13 @@ export interface SignIn {
     password: string,
     newPassword: string,
   ): Promise<boolean>
+  /**
+   * Spends the reset code for `email` and, when it was the live one, proves the address, replaces
+   * the password and signs out every session of the user. `false`, and the password unchanged, when
+   * the code is wrong, expired, already used or replaced, the new password is refused, or no live
+   * account signs in with the address.
+   */
+  resetPassword(email: string, code: string, newPassword: string): Promise<boolean>
   /** Marks every active session that has run out as expired. */
   expireSessions(): Promise<void>
   /**
@@ -188,17 +209,16 @@ export function createSignIn(options: SignInOptions): SignIn {
       decide(await db.user.findOne({ id: authUser.id }) ?? null)
 
   /**
-   * The package's password provider, by username. Each instance makes one dummy hash with its
+   * The package's password provider, by address. Each instance makes one dummy hash with its
    * hasher when it is created, for the equal work of a sign-in to a missing account.
    */
   const passwordsOver = (
     options: Pick<PasswordSignInOptions, "store" | "sessions"> & Partial<PasswordSignInOptions>,
-  ): PasswordSignIn =>
-    createPasswordSignIn({ hasher, normalizeSubject: normalizeUsername, ...options })
+  ): PasswordSignIn => createPasswordSignIn({ hasher, ...options })
 
   // Sign-in: a user with an authenticator app owes it. A user without a profile row gets no
   // session at all, as before: the throw stops the provider before `sessions.create`.
-  const signInPasswords = passwordsOver({
+  const signInOptions = {
     store: db.authStore,
     sessions,
     secondFactorFor: secondFactorFrom((user) => {
@@ -207,6 +227,12 @@ export function createSignIn(options: SignInOptions): SignIn {
         ? SecondFactorStatus.Pending
         : SecondFactorStatus.NotRequired
     }),
+  }
+  const signInByAddress = passwordsOver(signInOptions)
+  // Older accounts sign in with their username. Both providers read the same `password` keys.
+  const signInByUsername = passwordsOver({
+    ...signInOptions,
+    normalizeSubject: normalizeUsername,
   })
   // Password change: the session that changed it already gave the second factor.
   const changePasswords = passwordsOver({
@@ -222,9 +248,9 @@ export function createSignIn(options: SignInOptions): SignIn {
   return {
     auth,
 
-    async signUp(c, rawUsername, password, personalGroupId = crypto.randomUUID()) {
-      // Checked here too, so a refused username opens no transaction and makes no provider.
-      if (normalizeUsername(rawUsername) === null) return null
+    async signUp(c, rawEmail, password, personalGroupId = crypto.randomUUID()) {
+      // Checked here too, so a refused address opens no transaction and makes no provider.
+      if (normalizeEmail(rawEmail) === null) return null
       // Hashed before `db.begin()`, as before the package provider, so no pool connection is held
       // for the length of a PBKDF2 hash. A password the hasher refuses (not a string, too long) is
       // the same refusal the provider gives it: `invalid-password`, answered as `null`.
@@ -254,7 +280,7 @@ export function createSignIn(options: SignInOptions): SignIn {
             // The route schema is the sign-up length rule (8 to 50 UTF-16 units), as before; the
             // package's own minimum counts code points and would refuse some passwords it accepts.
             minPasswordLength: 1,
-          }).signUp({ email: rawUsername, password })
+          }).signUp({ email: rawEmail, password })
           const user = await tx.user.createForAuthUser(signedUp.user.id, {
             firstName: "",
             lastName: "",
@@ -273,10 +299,12 @@ export function createSignIn(options: SignInOptions): SignIn {
       return { user: created.user, session: created.session }
     },
 
-    async signIn(c, rawUsername, password) {
+    async signIn(c, login, password) {
+      // Either path runs exactly one hash verification, so neither tells an unknown login apart.
+      const provider = normalizeEmail(login) === null ? signInByUsername : signInByAddress
       let result
       try {
-        result = await signInPasswords.signIn({ email: rawUsername, password })
+        result = await provider.signIn({ email: login, password })
       } catch (error) {
         if (error instanceof PasswordSignInError || error instanceof MissingProfileError) {
           return null
@@ -394,6 +422,41 @@ export function createSignIn(options: SignInOptions): SignIn {
       }
       await cookie.set(c, result.session.session, result.session.cookieValue)
       return true
+    },
+
+    async resetPassword(rawEmail, code, newPassword) {
+      const email = normalizeEmail(rawEmail)
+      if (email === null) return false
+      // Hashed before the transaction, as at sign-up, so no pool connection waits on PBKDF2.
+      let secret: string
+      try {
+        secret = await hasher.hash(newPassword)
+      } catch (error) {
+        if (error instanceof RangeError || error instanceof TypeError) return false
+        throw error
+      }
+      const now = new Date()
+      // One transaction, but a wrong code still counts: the refusal returns, it does not throw.
+      return await db.begin(async (tx) => {
+        if (!(await consumePasswordReset(tx.authStore, email, code, now))) return false
+        const key = await tx.authStore.findKey(PASSWORD_METHOD, email)
+        if (!key || key.email === null) return false
+        const user = await tx.authStore.findUser(key.userId)
+        if (!user || user.deletedAt !== null) return false
+        // The link reached the mailbox, so the address is proven: this user now owns it. Another
+        // user owning it already is a refusal; the code stays spent.
+        if (key.provenAt === null) {
+          try {
+            await tx.authStore.proveKey(key.id, now)
+          } catch (error) {
+            if (error instanceof AuthConflictError) return false
+            throw error
+          }
+        }
+        await tx.authStore.updateKeySecret(key.id, secret)
+        await sessionsOver(tx.sessionStore).signOutUser(user.id)
+        return true
+      })
     },
 
     async expireSessions() {

@@ -30,9 +30,15 @@ import { realtime } from "./services/realtimeHub.ts"
 import { createHealthRoute } from "./routes/health.ts"
 import { isCacheConnected, kv } from "./services/cache.ts"
 import { createRedisRateLimitStore } from "@spy4x/server/kv"
+import { enqueuePasswordResetMail } from "@server/jobs/password-reset-mail.ts"
+import { mailOffWarning, readMailSetup } from "@server/mail/mail.ts"
 import "./cqrs/+init.ts"
 
 const REALTIME_REVALIDATE_INTERVAL_MS = 15_000
+
+// The worker sends the mail; the API only says once, at start-up, when production has no SMTP.
+const mailWarning = mailOffWarning(readMailSetup(Deno.env))
+if (mailWarning) log(mailWarning)
 
 const app = new Hono<APIContext>().basePath("/api")
 app.use(
@@ -67,6 +73,7 @@ app.route(
     mutationGuards,
     rateLimits,
     totpFailures: createTotpFailures({ sql }),
+    requestPasswordReset: (email) => enqueuePasswordResetMail(sql, email),
   }),
 )
 app.route(

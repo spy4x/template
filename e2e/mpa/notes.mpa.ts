@@ -2,13 +2,13 @@ import { type APIRequestContext, expect, type Page, test } from "@playwright/tes
 
 const password = "Passw0rd!"
 
-async function cleanup(request: APIRequestContext, username: string): Promise<void> {
-  const response = await request.post("/api/test/cleanup-user", { data: { username } })
+async function cleanup(request: APIRequestContext, email: string): Promise<void> {
+  const response = await request.post("/api/test/cleanup-user", { data: { login: email } })
   expect.soft(response.status(), await response.text()).toBe(200)
 }
 
-async function submitCredentials(page: Page, username: string): Promise<void> {
-  await page.locator("[data-e2e=auth-form-login]").fill(username)
+async function submitCredentials(page: Page, email: string): Promise<void> {
+  await page.locator("[data-e2e=auth-form-login]").fill(email)
   await page.locator("[data-e2e=auth-form-password]").fill(password)
   await page.locator("[data-e2e=auth-form-submit]").click()
 }
@@ -20,11 +20,11 @@ test("a person without JavaScript signs up, signs out, signs in, picks a group a
   await page.goto("data:text/html,<title>before</title><script>document.title = 'ran'</script>")
   await expect(page, "the browser runs no script").toHaveTitle("before")
 
-  const username = `mpa-${crypto.randomUUID().slice(0, 8)}`
-  await cleanup(request, username)
+  const email = `mpa-${crypto.randomUUID().slice(0, 8)}@example.com`
+  await cleanup(request, email)
   try {
     await page.goto("/sign-up")
-    await submitCredentials(page, username)
+    await submitCredentials(page, email)
     await expect(page).toHaveURL("/")
     await expect(page.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible()
 
@@ -33,7 +33,7 @@ test("a person without JavaScript signs up, signs out, signs in, picks a group a
     await page.goto("/groups")
     await expect(page, "a signed-out visitor is sent to sign in").toHaveURL("/sign-in")
 
-    await submitCredentials(page, username)
+    await submitCredentials(page, email)
     await expect(page).toHaveURL("/")
 
     await page.getByRole("navigation", { name: "Main navigation" })
@@ -71,7 +71,7 @@ test("a person without JavaScript signs up, signs out, signs in, picks a group a
     await expect(page.getByRole("heading", { level: 1, name: "Notes in Personal" }))
       .toBeVisible()
   } finally {
-    await cleanup(request, username)
+    await cleanup(request, email)
   }
 })
 
@@ -79,7 +79,7 @@ test("a form another site posts to an action is refused, sign-out included", asy
   for (const action of ["/sign-out", "/sign-in", "/groups"]) {
     const response = await request.post(action, {
       headers: { origin: "https://attacker.example", "sec-fetch-site": "cross-site" },
-      form: { username: "someone", password },
+      form: { login: "someone@example.com", password },
     })
     expect(response.status(), action).toBe(403)
   }

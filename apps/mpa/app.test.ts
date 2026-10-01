@@ -3,6 +3,8 @@ import { describe, it } from "@std/testing/bdd"
 import { App } from "fresh"
 import { handler as signIn } from "./routes/sign-in.ts"
 import { handler as signOut } from "./routes/sign-out.ts"
+import { handler as forgotPassword } from "./routes/forgot-password.ts"
+import { handler as resetPassword } from "./routes/reset-password.ts"
 import { handler as home } from "./routes/index.tsx"
 import { handler as password } from "./routes/profile/password.ts"
 import { handler as notes } from "./routes/notes/index.tsx"
@@ -47,6 +49,9 @@ function appWith(fetch: typeof globalThis.fetch) {
     .post("/groups/select", selectGroup.POST!)
     .get("/groups/:groupId/notes", oldNotes.GET!)
     .get("/groups/:groupId/notes/:noteId", oldNote.GET!)
+    .post("/forgot-password", forgotPassword.POST!)
+    .get("/reset-password", resetPassword.GET!)
+    .post("/reset-password", resetPassword.POST!)
     .handler()
 }
 
@@ -99,7 +104,7 @@ describe("pageMiddleware", () => {
     const { calls, fetch } = fakeApi(() => Response.json({}))
 
     const response = await appWith(fetch)(
-      formPost("/sign-in", { username: "x".repeat(300 * 1024), password: "p" }),
+      formPost("/sign-in", { login: "x".repeat(300 * 1024), password: "p" }),
       info,
     )
 
@@ -126,14 +131,14 @@ describe("the sign-in page", () => {
     )
 
     const response = await appWith(fetch)(
-      formPost("/sign-in", { username: "ada", password: "long-enough" }),
+      formPost("/sign-in", { login: "ada@example.com", password: "long-enough" }),
       info,
     )
 
     expect(calls).toEqual([{
       method: "POST",
       path: "/api/auth/password/check",
-      body: { username: "ada", password: "long-enough" },
+      body: { login: "ada@example.com", password: "long-enough" },
     }])
     expect(response.status).toBe(303)
     expect(response.headers.get("location")).toBe("/")
@@ -144,7 +149,7 @@ describe("the sign-in page", () => {
     const { fetch } = fakeApi(() => Response.json({ secondFactor: "Pending" }, { status: 202 }))
 
     const response = await appWith(fetch)(
-      formPost("/sign-in", { username: "ada", password: "long-enough" }),
+      formPost("/sign-in", { login: "ada@example.com", password: "long-enough" }),
       info,
     )
 
@@ -164,13 +169,97 @@ describe("the sign-in page when the API says to wait", () => {
     )
 
     const response = await appWith(fetch)(
-      formPost("/sign-in", { username: "ada", password: "long-enough" }),
+      formPost("/sign-in", { login: "ada@example.com", password: "long-enough" }),
       info,
     )
 
     expect(response.status).toBe(429)
     expect(response.headers.get("retry-after")).toBe("30")
     expect(await response.text()).toContain("Too many requests")
+  })
+})
+
+describe("the password reset pages", () => {
+  /** Nobody is signed in; every other call answers with `answer`. */
+  const signedOut = (answer: () => Response) => (path: string) =>
+    path === "/api/auth/me"
+      ? Response.json({ error: "User not signed in" }, { status: 401 })
+      : answer()
+  const link = "/reset-password?email=ada%40example.com&code=code-from-the-link"
+
+  it("asks the API for a link with the address and says it is on its way", async () => {
+    const message = "If an account uses this address, a link to reset its password is on its way."
+    const { calls, fetch } = fakeApi(signedOut(() => Response.json({ success: true, message })))
+
+    const response = await appWith(fetch)(
+      formPost("/forgot-password", { email: "ada@example.com" }),
+      info,
+    )
+
+    expect(calls[0]).toEqual({
+      method: "POST",
+      path: "/api/auth/password/forgot",
+      body: { email: "ada@example.com" },
+    })
+    expect(response.status).toBe(200)
+    const page = await response.text()
+    expect(page).toContain("Check your inbox")
+    expect(page).toContain(message)
+  })
+
+  it("shows the reset form with the link's address and code, and sends no Referer from it", async () => {
+    const { fetch } = fakeApi(signedOut(() => Response.json({})))
+
+    const response = await appWith(fetch)(
+      new Request(`${config.webAppOrigin}${link}`),
+      info,
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer")
+    const page = await response.text()
+    expect(page).toContain(`name="email" value="ada@example.com"`)
+    expect(page).toContain(`name="code" value="code-from-the-link"`)
+  })
+
+  it("sends the address, code and new password to the API and points to sign-in", async () => {
+    const { calls, fetch } = fakeApi(signedOut(() => Response.json({ success: true })))
+
+    const response = await appWith(fetch)(
+      formPost("/reset-password", {
+        email: "ada@example.com",
+        code: "code-from-the-link",
+        newPassword: "battery-staple",
+      }),
+      info,
+    )
+
+    expect(calls[0]).toEqual({
+      method: "POST",
+      path: "/api/auth/password/reset",
+      body: { email: "ada@example.com", code: "code-from-the-link", newPassword: "battery-staple" },
+    })
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain("Password changed")
+  })
+
+  it("shows the API's refusal of a used link with its status, keeping the link's fields", async () => {
+    const refusal = "This link is invalid, used or expired. Ask for a new one."
+    const { fetch } = fakeApi(signedOut(() => Response.json({ error: refusal }, { status: 400 })))
+
+    const response = await appWith(fetch)(
+      formPost("/reset-password", {
+        email: "ada@example.com",
+        code: "used-code",
+        newPassword: "battery-staple",
+      }),
+      info,
+    )
+
+    expect(response.status).toBe(400)
+    const page = await response.text()
+    expect(page).toContain(refusal)
+    expect(page).toContain(`name="code" value="used-code"`)
   })
 })
 

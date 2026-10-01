@@ -1,9 +1,10 @@
 import { Event } from "@spy4x/platform/cqrs"
 import { RequestInfo } from "@spy4x/platform/request-info"
 import { User, UserPushTokenPublic } from "@domain/identity"
+/** `email` is the address the user signed up with, normalised. */
 export class UserSignedUpEvent
-  implements Event<{ user: User; username: string; request: RequestInfo }> {
-  constructor(public data: { user: User; username: string; request: RequestInfo }) {}
+  implements Event<{ user: User; email: string; request: RequestInfo }> {
+  constructor(public data: { user: User; email: string; request: RequestInfo }) {}
 }
 
 export class UserSignedInEvent implements Event<{ user: User; request: RequestInfo }> {

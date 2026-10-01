@@ -5,22 +5,24 @@ const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 const password = "Passw0rd!"
 const SHARED_GROUP = 2
 
-async function cleanup(request: APIRequestContext, username: string): Promise<void> {
-  const response = await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+async function cleanup(request: APIRequestContext, email: string): Promise<void> {
+  const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
+    data: { login: email },
+  })
   expect.soft(response.status(), await response.text()).toBe(200)
 }
 
-async function signUp(request: APIRequestContext, username: string): Promise<void> {
+async function signUp(request: APIRequestContext, email: string): Promise<void> {
   const response = await request.post(`${apiBase}/api/auth/password/sign-up`, {
     headers,
-    data: { username, password },
+    data: { email, password },
   })
   expect(response.ok(), await response.text()).toBe(true)
 }
 
-async function signIn(page: Page, username: string): Promise<void> {
+async function signIn(page: Page, email: string): Promise<void> {
   await page.goto("/sign-in")
-  await page.locator("[data-e2e=auth-form-login]").fill(username)
+  await page.locator("[data-e2e=auth-form-login]").fill(email)
   await page.locator("[data-e2e=auth-form-password]").fill(password)
   await page.locator("[data-e2e=auth-form-submit]").click()
   await page.waitForURL("/")
@@ -69,7 +71,7 @@ async function pickWithKeyboard(page: Page, groupName: string): Promise<void> {
 
 test.describe("notes at /notes with a group picker", () => {
   test("/notes shows only the selected group's notes, and the picker switches groups with the keyboard alone", async ({ browser, request }) => {
-    const user = "e2e_picker_keyboard"
+    const user = "e2e_picker_keyboard@example.com"
     await cleanup(request, user)
     const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
     try {
@@ -107,7 +109,7 @@ test.describe("notes at /notes with a group picker", () => {
   })
 
   test("a group chosen on one device moves the person's other device, without a reload", async ({ browser, request }) => {
-    const user = "e2e_picker_devices"
+    const user = "e2e_picker_devices@example.com"
     await cleanup(request, user)
     const baseURL = test.info().project.use.baseURL
     const laptopContext = await browser.newContext({ baseURL })
@@ -143,7 +145,7 @@ test.describe("notes at /notes with a group picker", () => {
   })
 
   test("an old /groups/:groupId/notes link opens /notes for the selected group and /groups for any other, and selects nothing", async ({ browser, request }) => {
-    const user = "e2e_picker_redirect"
+    const user = "e2e_picker_redirect@example.com"
     await cleanup(request, user)
     const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
     try {
@@ -170,7 +172,7 @@ test.describe("notes at /notes with a group picker", () => {
   })
 
   test("a group the person cannot see cannot be selected, and the server keeps their current one", async ({ browser, request }) => {
-    const user = "e2e_picker_refused"
+    const user = "e2e_picker_refused@example.com"
     await cleanup(request, user)
     const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
     try {

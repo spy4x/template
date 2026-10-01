@@ -11,22 +11,24 @@ const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 const password = "Passw0rd!"
 const SHARED_GROUP = 2
 
-async function cleanup(request: APIRequestContext, username: string): Promise<void> {
-  const response = await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+async function cleanup(request: APIRequestContext, email: string): Promise<void> {
+  const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
+    data: { login: email },
+  })
   expect.soft(response.status(), await response.text()).toBe(200)
 }
 
-async function signUp(request: APIRequestContext, username: string): Promise<void> {
+async function signUp(request: APIRequestContext, email: string): Promise<void> {
   const response = await request.post(`${apiBase}/api/auth/password/sign-up`, {
     headers,
-    data: { username, password },
+    data: { email, password },
   })
   expect(response.ok(), await response.text()).toBe(true)
 }
 
-async function signIn(page: Page, username: string): Promise<void> {
+async function signIn(page: Page, email: string): Promise<void> {
   await page.goto("/sign-in")
-  await page.locator("[data-e2e=auth-form-login]").fill(username)
+  await page.locator("[data-e2e=auth-form-login]").fill(email)
   await page.locator("[data-e2e=auth-form-password]").fill(password)
   await page.locator("[data-e2e=auth-form-submit]").click()
   await page.waitForURL("/")
@@ -82,7 +84,7 @@ async function serverNotes(page: Page, groupId: string): Promise<{ title: string
 
 test.describe("offline notes", () => {
   test("a person with no network opens the app, reads notes, adds one, and it syncs when the network is back", async ({ browser, request }) => {
-    const user = "e2e_offline_writer"
+    const user = "e2e_offline_writer@example.com"
     await cleanup(request, user)
     const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
     try {
@@ -136,7 +138,7 @@ test.describe("offline notes", () => {
   })
 
   test("a person with no network switches between groups already on the device, and the server learns the choice when the network is back", async ({ browser, request }) => {
-    const user = "e2e_offline_picker"
+    const user = "e2e_offline_picker@example.com"
     await cleanup(request, user)
     const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
     try {
@@ -179,7 +181,7 @@ test.describe("offline notes", () => {
   test("two devices editing the same note offline end with one visible conflict and no lost edit", async ({ browser, request }) => {
     // Two browsers, two offline reloads and a 20 s wait for sync: 28 s on main, which is too close to 30 s.
     test.setTimeout(60_000)
-    const user = "e2e_offline_pair"
+    const user = "e2e_offline_pair@example.com"
     await cleanup(request, user)
     const baseURL = test.info().project.use.baseURL
     const contextA = await browser.newContext({ baseURL })
@@ -232,7 +234,7 @@ test.describe("offline notes", () => {
   test("choosing the server's version drops the offline edit and shows the server's note", async ({ browser, request }) => {
     // Two browsers, two offline reloads and a 20 s wait for sync: 28 s on main, which is too close to 30 s.
     test.setTimeout(60_000)
-    const user = "e2e_offline_theirs"
+    const user = "e2e_offline_theirs@example.com"
     await cleanup(request, user)
     const baseURL = test.info().project.use.baseURL
     const contextA = await browser.newContext({ baseURL })

@@ -4,6 +4,8 @@ import { createSqlFromEnv } from "@spy4x/server/db"
 import { createOutboxProcessor, scheduleNightlyJobs } from "@server/jobs/wiring.ts"
 import { PostgresIdempotencyStore } from "@spy4x/server/idempotency"
 import { shutdownSignal, ShutdownSignalError } from "@spy4x/platform/server/shutdown-signal"
+import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
+import { createMailSender, mailOffWarning, readMailSetup } from "@server/mail/mail.ts"
 
 const sql = createSqlFromEnv(Deno.env.toObject(), {
   transform: postgres.camel,
@@ -23,10 +25,26 @@ const signal = shutdownSignal()
 
 console.log("Worker started")
 
+// Mail goes out from here, never from the API: a reset link is made and sent in one step.
+const domain = Deno.env.get("DOMAIN")
+if (!domain) {
+  console.error("❌ Missing environment variable: DOMAIN")
+  Deno.exit(1)
+}
+const mailSetup = readMailSetup(Deno.env)
+const mailWarning = mailOffWarning(mailSetup)
+if (mailWarning) console.warn(mailWarning)
+
 // A committed group change is announced on a Postgres channel; the API process, which holds the
 // sockets, turns it into a hint for the group's members. The same table holds jobs: a row that
 // belongs to no group and runs when its time has come.
-const processor = createOutboxProcessor(sql)
+const processor = createOutboxProcessor(sql, {
+  store: createPostgresAuthStore(sql),
+  sender: createMailSender(mailSetup, sql),
+  // The API's own rule (apps/api/services/config.ts): plain HTTP only in development.
+  brand: { webAppUrl: `http${Deno.env.get("ENV") === "dev" ? "" : "s"}://${domain}` },
+  log: (line) => console.error(line),
+})
 
 // Starts the nightly chain the first time; a restart finds the row and adds nothing.
 await scheduleNightlyJobs(sql)

@@ -20,8 +20,22 @@ const ACTIONS: Record<AuthScreenKind, string> = {
   "one-time-code": FORM_ACTIONS.oneTimeCode,
 }
 
-/** The API schemas call the fields `username` and `otp`, so the forms post those names. */
-const FIELD_NAMES = { login: "username", code: "otp" }
+/**
+ * Each screen posts its API schema's field names: sign-in takes `login` (an address, or an older
+ * account's username), sign-up takes `email`, and the second factor takes `otp`.
+ */
+const FIELD_NAMES: Record<AuthScreenKind, { login: string; code: string }> = {
+  "sign-in": { login: "login", code: "otp" },
+  "sign-up": { login: "email", code: "otp" },
+  "one-time-code": { login: "login", code: "otp" },
+}
+
+/** What the login field is called on each credential screen. */
+const LOGIN_LABELS: Record<AuthScreenKind, string> = {
+  "sign-in": "E-mail or username",
+  "sign-up": "E-mail",
+  "one-time-code": "E-mail or username",
+}
 
 /** The mode switch is a link to the other page, so it works before any script runs. */
 const MODE_HREFS = { "sign-in": SCREEN_PATHS.signIn, "sign-up": SCREEN_PATHS.signUp }
@@ -34,7 +48,7 @@ const COPY: Record<AuthScreenKind, { title: string; description: string; failure
   },
   "sign-up": {
     title: "Create account",
-    description: "Start with a username and password.",
+    description: "Start with your e-mail address and a password.",
     failure: "Sign up failed",
   },
   "one-time-code": {
@@ -143,21 +157,36 @@ export function AuthScreen(
           action={ACTIONS[screen]}
           busy={busy}
           error={error}
-          labels={{ login: "Username", codeHint: "Six digits from your authenticator app." }}
-          names={FIELD_NAMES}
+          labels={{
+            login: LOGIN_LABELS[screen],
+            codeHint: "Six digits from your authenticator app.",
+          }}
+          names={FIELD_NAMES[screen]}
           onModeChange={onModeChange}
           modeHrefs={MODE_HREFS}
           onSignIn={onSignIn}
           onSignUp={onSignUp}
           onOneTimeCode={onOneTimeCode}
-          footer={screen === "one-time-code" && (
-            <p class="text-sm">
-              Need help?{" "}
-              <Link href={SCREEN_PATHS.signIn} navigate={navigate} class="pc-link">
-                Back to sign in
-              </Link>
-            </p>
-          )}
+          footer={screen === "one-time-code"
+            ? (
+              <p class="text-sm">
+                Need help?{" "}
+                <Link href={SCREEN_PATHS.signIn} navigate={navigate} class="pc-link">
+                  Back to sign in
+                </Link>
+              </p>
+            )
+            : screen === "sign-in" && (
+              <p class="text-sm">
+                <Link
+                  href={SCREEN_PATHS.forgotPassword}
+                  navigate={navigate}
+                  class="pc-link"
+                >
+                  Forgot your password?
+                </Link>
+              </p>
+            )}
         />
       </CardBody>
     </Card>

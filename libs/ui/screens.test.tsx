@@ -5,7 +5,10 @@ import { renderToString } from "preact-render-to-string"
 import {
   authOTPSchema,
   authPasswordChangeSchema,
-  authUsernamePasswordSchema,
+  authPasswordForgotSchema,
+  authPasswordResetSchema,
+  authSignInSchema,
+  authSignUpSchema,
   UserMFAStatus,
   userProfileBaseSchema,
   type UserPushTokenPublic,
@@ -16,13 +19,14 @@ import { AppFrame, PublicFrame } from "./frame.tsx"
 import { GroupKind, GroupRole, parseSelectGroupRequest } from "@domain/groups"
 import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
-import { FORM_ACTIONS, NOTE_PATHS } from "./progressive.tsx"
+import { FORM_ACTIONS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 import {
   noteCreateRequestSchema,
   noteDeleteRequestSchema,
   noteUpdateRequestSchema,
 } from "@domain/notes"
 import { NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
+import { ForgotPasswordScreen, ResetPasswordScreen } from "./password-reset-screen.tsx"
 
 /** One `<form>` in rendered HTML: its attributes and the names of the fields it submits. */
 interface RenderedForm {
@@ -88,20 +92,25 @@ const authDefaults: AuthScreenProps = {
 }
 
 describe("AuthScreen without JavaScript", () => {
-  it("posts the sign-in credentials to the sign-in route", () => {
+  it("posts the sign-in credentials to the sign-in route and links to a password reset", () => {
     const surface = noScriptSurface(<AuthScreen {...authDefaults} />)
     expect(surface.forms).toEqual([
       {
         action: FORM_ACTIONS.signIn,
         method: "post",
-        fields: schemaKeys(authUsernamePasswordSchema),
+        fields: schemaKeys(authSignInSchema),
       },
     ])
+    expect(surface.links).toEqual([SCREEN_PATHS.signUp, SCREEN_PATHS.forgotPassword])
     expect(surface.scriptOnlyButtons).toEqual(["auth-form-password-toggle"])
   })
 
   it("switches between sign in and sign up with a plain link", () => {
-    expect(noScriptSurface(<AuthScreen {...authDefaults} />).links).toEqual(["/sign-up"])
+    // Sign-in also links to a password reset.
+    expect(noScriptSurface(<AuthScreen {...authDefaults} />).links).toEqual([
+      "/sign-up",
+      SCREEN_PATHS.forgotPassword,
+    ])
     expect(noScriptSurface(<AuthScreen {...authDefaults} screen="sign-up" />).links)
       .toEqual(["/sign-in"])
   })
@@ -112,7 +121,7 @@ describe("AuthScreen without JavaScript", () => {
       {
         action: FORM_ACTIONS.signUp,
         method: "post",
-        fields: schemaKeys(authUsernamePasswordSchema),
+        fields: schemaKeys(authSignUpSchema),
       },
     ])
   })
@@ -134,6 +143,71 @@ describe("AuthScreen without JavaScript", () => {
     for (const surface of [signedIn, noCodeOwed]) {
       expect(surface.forms).toEqual([])
       expect(surface.links).toEqual(["/"])
+    }
+  })
+})
+
+describe("ForgotPasswordScreen without JavaScript", () => {
+  const props = { email: "", onEmailChange: () => {}, error: null, pending: false }
+
+  it("posts the address to the forgot-password route and links back to sign in", () => {
+    const surface = noScriptSurface(<ForgotPasswordScreen {...props} sent={false} />)
+    expect(surface.forms).toEqual([
+      {
+        action: FORM_ACTIONS.forgotPassword,
+        method: "post",
+        fields: schemaKeys(authPasswordForgotSchema),
+      },
+    ])
+    expect(surface.links).toEqual([SCREEN_PATHS.signIn])
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("says the link is on its way and asks nothing more once it is sent", () => {
+    const surface = noScriptSurface(<ForgotPasswordScreen {...props} sent />)
+    expect(surface.forms).toEqual([])
+    expect(surface.links).toEqual([SCREEN_PATHS.signIn])
+  })
+})
+
+describe("ResetPasswordScreen without JavaScript", () => {
+  const props = {
+    email: "ada@example.com",
+    code: "code-from-the-link",
+    newPassword: "",
+    onNewPasswordChange: () => {},
+    done: false,
+    error: null,
+    pending: false,
+  }
+
+  it("posts the link's address and code with the new password to the reset route", () => {
+    const node = <ResetPasswordScreen {...props} />
+    const surface = noScriptSurface(node)
+    expect(surface.forms).toEqual([
+      {
+        action: FORM_ACTIONS.resetPassword,
+        method: "post",
+        fields: schemaKeys(authPasswordResetSchema),
+      },
+    ])
+    expect(surface.links).toEqual([SCREEN_PATHS.forgotPassword])
+    const html = renderToString(node)
+    expect(html).toContain(`name="email" value="ada@example.com"`)
+    expect(html).toContain(`name="code" value="code-from-the-link"`)
+  })
+
+  it("points to sign-in once the password is changed", () => {
+    const surface = noScriptSurface(<ResetPasswordScreen {...props} done />)
+    expect(surface.forms).toEqual([])
+    expect(surface.links).toEqual([SCREEN_PATHS.signIn])
+  })
+
+  it("offers a new link instead of a form when the link lacks its address or code", () => {
+    for (const broken of [{ email: "" }, { code: "" }]) {
+      const surface = noScriptSurface(<ResetPasswordScreen {...props} {...broken} />)
+      expect(surface.forms).toEqual([])
+      expect(surface.links).toEqual([SCREEN_PATHS.forgotPassword])
     }
   })
 })

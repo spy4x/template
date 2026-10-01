@@ -75,8 +75,8 @@ function buildApp(sql: postgres.Sql, isDev: boolean) {
   const app = new Hono<APIContext>()
   app.use(signIn.auth.parseAuth)
   app.post("/sign-up", async (c) => {
-    const { username, password } = await c.req.json()
-    const result = await signIn.signUp(c, username, password)
+    const { email, password } = await c.req.json()
+    const result = await signIn.signUp(c, email, password)
     return result ? c.json(result.user) : c.json({ error: "refused" }, 401)
   })
   app.route("/test", createDevRoute({ isDev, db, sql, closeSockets: () => 0 }))
@@ -89,8 +89,9 @@ function buildApp(sql: postgres.Sql, isDev: boolean) {
   return { db, post }
 }
 
-async function signUp(app: ReturnType<typeof buildApp>, username: string): Promise<number> {
-  const response = await app.post("/sign-up", { username, password: PASSWORD })
+/** Signs up `<name>@example.com`. */
+async function signUp(app: ReturnType<typeof buildApp>, name: string): Promise<number> {
+  const response = await app.post("/sign-up", { email: `${name}@example.com`, password: PASSWORD })
   expect(response.status).toBe(200)
   return ((await response.json()) as { id: number }).id
 }
@@ -135,7 +136,7 @@ Deno.test("dev cleanup-user route", async (t) => {
       >`SELECT id FROM groups WHERE owner_user_id = ${userId}`
       expect(personal.length).toBe(1)
 
-      const response = await app.post("/test/cleanup-user", { username: "personal-only" })
+      const response = await app.post("/test/cleanup-user", { login: "personal-only@example.com" })
 
       expect(response.status).toBe(200)
       expect(await rowsOf(sql, userId)).toEqual(NONE)
@@ -151,7 +152,7 @@ Deno.test("dev cleanup-user route", async (t) => {
       // One event for the personal group made at sign-up, one for the shared group.
       expect((await rowsOf(sql, userId)).outbox_events).toBe(2)
 
-      const response = await app.post("/test/cleanup-user", { username: "shared-owner" })
+      const response = await app.post("/test/cleanup-user", { login: "shared-owner@example.com" })
 
       expect(response.status).toBe(200)
       expect(await rowsOf(sql, userId)).toEqual(NONE)
@@ -175,7 +176,7 @@ Deno.test("dev cleanup-user route", async (t) => {
         VALUES ('group.member_added', ${leaverId}, ${bystanderGroup})
       `
 
-        const response = await app.post("/test/cleanup-user", { username: "leaver" })
+        const response = await app.post("/test/cleanup-user", { login: "leaver@example.com" })
 
         expect(response.status).toBe(200)
         expect(await rowsOf(sql, leaverId)).toEqual(NONE)
@@ -197,7 +198,7 @@ Deno.test("dev cleanup-user route", async (t) => {
       await app.db.group.createShared({ id: groupId, name: "Notes" }, ownerId)
       expect(
         (await app.post("/test/add-member", {
-          username: "notes-writer",
+          login: "notes-writer@example.com",
           groupId,
           role: 2,
         })).status,
@@ -211,7 +212,7 @@ Deno.test("dev cleanup-user route", async (t) => {
         ownerId,
       )
 
-      const response = await app.post("/test/cleanup-user", { username: "notes-writer" })
+      const response = await app.post("/test/cleanup-user", { login: "notes-writer@example.com" })
 
       expect(response.status).toBe(200)
       expect(await rowsOf(sql, writerId)).toEqual(NONE)
@@ -230,12 +231,20 @@ Deno.test("dev cleanup-user route", async (t) => {
         `).map((row) => row.role)
 
       expect(
-        (await app.post("/test/add-member", { username: "member-joiner", groupId, role: 1 }))
+        (await app.post("/test/add-member", {
+          login: "member-joiner@example.com",
+          groupId,
+          role: 1,
+        }))
           .status,
       ).toBe(200)
       expect(await roleOf()).toEqual([1])
       expect(
-        (await app.post("/test/add-member", { username: "member-joiner", groupId, role: 2 }))
+        (await app.post("/test/add-member", {
+          login: "member-joiner@example.com",
+          groupId,
+          role: 2,
+        }))
           .status,
       ).toBe(200)
       expect(await roleOf()).toEqual([2])
@@ -247,7 +256,7 @@ Deno.test("dev cleanup-user route", async (t) => {
       await app.db.group.createShared({ id: groupId, name: "Team" }, ownerId)
 
       const response = await app.post("/test/add-member", {
-        username: "member-kept-owner",
+        login: "member-kept-owner@example.com",
         groupId,
         role: 1,
       })
@@ -273,28 +282,28 @@ Deno.test("dev cleanup-user route", async (t) => {
 
         expect(
           (await app.post("/test/add-member", {
-            username: "member-refused",
+            login: "member-refused@example.com",
             groupId: shared,
             role: 4,
           })).status,
         ).toBe(400)
         expect(
           (await app.post("/test/add-member", {
-            username: "member-refused",
+            login: "member-refused@example.com",
             groupId: personal,
             role: 1,
           })).status,
         ).toBe(404)
         expect(
           (await app.post("/test/add-member", {
-            username: "never-signed-up",
+            login: "never-signed-up@example.com",
             groupId: shared,
             role: 1,
           })).status,
         ).toBe(404)
         expect(
           (await buildApp(sql, false).post("/test/add-member", {
-            username: "member-refused",
+            login: "member-refused@example.com",
             groupId: shared,
             role: 1,
           })).status,
@@ -302,8 +311,10 @@ Deno.test("dev cleanup-user route", async (t) => {
       },
     )
 
-    await t.step("answers 200 for a username that has no user", async () => {
-      const response = await app.post("/test/cleanup-user", { username: "never-signed-up" })
+    await t.step("answers 200 for a login that has no user", async () => {
+      const response = await app.post("/test/cleanup-user", {
+        login: "never-signed-up@example.com",
+      })
 
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual({ success: true })
@@ -313,12 +324,48 @@ Deno.test("dev cleanup-user route", async (t) => {
       const userId = await signUp(app, "kept-in-prod")
 
       const response = await buildApp(sql, false).post("/test/cleanup-user", {
-        username: "kept-in-prod",
+        login: "kept-in-prod@example.com",
       })
 
       expect(response.status).toBe(403)
       const rows = await sql<IdRow[]>`SELECT id FROM auth_users WHERE id = ${userId}`
       expect(rows.length).toBe(1)
+    })
+  })
+})
+
+Deno.test("dev last-mail route", async (t) => {
+  await withSchema(async (sql) => {
+    await sql`
+      INSERT INTO dev_mail (to_address, subject, text_body) VALUES
+        ('ann@example.com', 'First', 'one'),
+        ('ann@example.com', 'Second', 'two'),
+        ('bob@example.com', 'Other', 'three')
+    `
+
+    await t.step("answers the newest mail to the address, matched after normalising", async () => {
+      const response = await buildApp(sql, true).post("/test/last-mail", {
+        email: " Ann@Example.com",
+      })
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ subject: "Second", text: "two" })
+    })
+
+    await t.step("answers 404 for an address with no mail", async () => {
+      const response = await buildApp(sql, true).post("/test/last-mail", {
+        email: "nobody@example.com",
+      })
+
+      expect(response.status).toBe(404)
+    })
+
+    await t.step("refuses with 403 outside development", async () => {
+      const response = await buildApp(sql, false).post("/test/last-mail", {
+        email: "ann@example.com",
+      })
+
+      expect(response.status).toBe(403)
     })
   })
 })

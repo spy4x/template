@@ -5,12 +5,12 @@ const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 
 test.describe("groups over the socket", () => {
   test("creates over the socket and catches up after a dropped connection", async ({ page, request }) => {
-    const username = "e2e_groups_socket_user"
+    const email = "e2e_groups_socket_user@example.com"
     const password = "Passw0rd!"
 
     const cleanup = async ({ soft = false } = {}) => {
       const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
-        data: { username },
+        data: { login: email },
       })
       ;(soft ? expect.soft : expect)(response.status(), await response.text()).toBe(200)
     }
@@ -19,7 +19,7 @@ test.describe("groups over the socket", () => {
     try {
       const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
         headers,
-        data: { username, password },
+        data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
 
@@ -36,7 +36,7 @@ test.describe("groups over the socket", () => {
       })
 
       await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await page.locator("[data-e2e=auth-form-submit]").click()
       await page.waitForURL("/")
@@ -63,7 +63,9 @@ test.describe("groups over the socket", () => {
 
       // Lose the connection, and create a group behind the page's back while it is down.
       await page.context().setOffline(true)
-      const closed = await request.post(`${apiBase}/api/test/close-sockets`, { data: { username } })
+      const closed = await request.post(`${apiBase}/api/test/close-sockets`, {
+        data: { login: email },
+      })
       expect(closed.status(), await closed.text()).toBe(200)
       const behindItsBack = await page.request.post(`${apiBase}/api/groups`, {
         headers,
@@ -86,18 +88,18 @@ test.describe("groups over the socket", () => {
   })
 
   test("refuses the socket upgrade after sign-out", async ({ page, request }) => {
-    const username = "e2e_groups_socket_signout"
+    const email = "e2e_groups_socket_signout@example.com"
     const password = "Passw0rd!"
-    await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+    await request.post(`${apiBase}/api/test/cleanup-user`, { data: { login: email } })
     try {
       const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
         headers,
-        data: { username, password },
+        data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
 
       await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await page.locator("[data-e2e=auth-form-submit]").click()
       await page.waitForURL("/")
@@ -113,22 +115,22 @@ test.describe("groups over the socket", () => {
       })
       expect(upgrade.status()).toBe(401)
     } finally {
-      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { login: email } })
     }
   })
   test("signing out in one tab signs the other tab out within seconds", async ({ page, request }) => {
-    const username = "e2e_groups_socket_twotabs"
+    const email = "e2e_groups_socket_twotabs@example.com"
     const password = "Passw0rd!"
-    await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+    await request.post(`${apiBase}/api/test/cleanup-user`, { data: { login: email } })
     try {
       const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
         headers,
-        data: { username, password },
+        data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
 
       await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await page.locator("[data-e2e=auth-form-submit]").click()
       await page.waitForURL("/")
@@ -147,22 +149,22 @@ test.describe("groups over the socket", () => {
       // for the 15 second sweep.
       await expect(other.locator("[data-e2e=signin-required]")).toBeVisible({ timeout: 5_000 })
     } finally {
-      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { login: email } })
     }
   })
   test("a group created in one tab appears in the other tab without a reload or reconnect", async ({ page, request }) => {
-    const username = "e2e_groups_socket_live"
+    const email = "e2e_groups_socket_live@example.com"
     const password = "Passw0rd!"
-    await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+    await request.post(`${apiBase}/api/test/cleanup-user`, { data: { login: email } })
     try {
       const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
         headers,
-        data: { username, password },
+        data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
 
       await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await page.locator("[data-e2e=auth-form-submit]").click()
       await page.waitForURL("/")
@@ -195,34 +197,34 @@ test.describe("groups over the socket", () => {
       await expect(otherNames.filter({ hasText: "Seen live" })).toHaveCount(1, { timeout: 3_000 })
       expect({ otherSockets, otherLoads }).toEqual({ otherSockets: 1, otherLoads: 1 })
     } finally {
-      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { login: email } })
     }
   })
   test("a periodic sweep signs a tab out when its user is removed", async ({ page, request }) => {
     // No sign-out event fires here, so only the 15 second revalidation can close the socket.
     test.setTimeout(60_000)
-    const username = "e2e_groups_socket_sweep"
+    const email = "e2e_groups_socket_sweep@example.com"
     const password = "Passw0rd!"
-    await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+    await request.post(`${apiBase}/api/test/cleanup-user`, { data: { login: email } })
     try {
       const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
         headers,
-        data: { username, password },
+        data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
 
       await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await page.locator("[data-e2e=auth-form-submit]").click()
       await page.waitForURL("/")
       await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 
-      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { login: email } })
 
       await expect(page.locator("[data-e2e=signin-required]")).toBeVisible({ timeout: 30_000 })
     } finally {
-      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+      await request.post(`${apiBase}/api/test/cleanup-user`, { data: { login: email } })
     }
   })
 })

@@ -13,8 +13,8 @@ export const OUTBOX_CLEANUP_JOB = "outbox.cleanup"
 /** Processed outbox rows are kept this long, so a recent change can still be looked at. */
 export const OUTBOX_RETENTION_DAYS = 7
 
-/** What the worker does when a job's time has come. */
-export type JobHandler = () => Promise<void>
+/** What the worker does when a job's time has come. `event.aggregateId` names what it is about. */
+export type JobHandler = (event: OutboxEvent) => Promise<void>
 
 /**
  * Runs the outbox rows that are jobs and passes every other row to `fallback`. A job kind with no
@@ -30,7 +30,7 @@ export class JobPublisher implements OutboxPublisher {
     if (event.aggregateType !== JOB_AGGREGATE) return await this.fallback.publish(event)
     const handler = this.handlers[event.eventKind]
     if (!handler) throw new RangeError(`no handler for job ${event.eventKind}`)
-    await handler()
+    await handler(event)
   }
 }
 

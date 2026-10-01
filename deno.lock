@@ -17,6 +17,7 @@
     "jsr:@libs/qrcode@3.1.0": "3.1.0",
     "jsr:@negrel/http-ece@0.7.0": "0.7.0",
     "jsr:@negrel/webpush@0.5.0": "0.5.0",
+    "jsr:@spy4x/email@1.25.0": "1.25.0",
     "jsr:@spy4x/email@^1.25.0": "1.25.0",
     "jsr:@spy4x/integrations@1.25.0": "1.25.0",
     "jsr:@spy4x/net@1.25.0": "1.25.0",
@@ -113,6 +114,7 @@
     "npm:esbuild@0.25.7": "0.25.7",
     "npm:esbuild@~0.25.5": "0.25.12",
     "npm:happy-dom@20.14.5": "20.14.5",
+    "npm:nodemailer@10.0.10": "10.0.10",
     "npm:playwright@1.57.0": "1.57.0",
     "npm:postgres@3.4.7": "3.4.7",
     "npm:preact-render-to-string@6.7.0": "6.7.0_preact@10.29.8",
@@ -242,7 +244,12 @@
       ]
     },
     "@spy4x/email@1.25.0": {
-      "integrity": "47c86bb247382fc1c8a53012136617e69656033a22b00d5c0b4697e07366b1d9"
+      "integrity": "47c86bb247382fc1c8a53012136617e69656033a22b00d5c0b4697e07366b1d9",
+      "dependencies": [
+        "jsr:@spy4x/time@^1.25.0",
+        "jsr:@std/encoding@1.0.11",
+        "npm:nodemailer"
+      ]
     },
     "@spy4x/integrations@1.25.0": {
       "integrity": "7f2bf92c97e6538e05967d4efe0aaa115686337d898e51107f6d86370f2b1a1c",
@@ -268,7 +275,7 @@
       "integrity": "97a92a0166921cde75985432521a34d9ea701e7694ca43dc9a38768c69f93053",
       "dependencies": [
         "jsr:@hono/hono",
-        "jsr:@spy4x/email",
+        "jsr:@spy4x/email@^1.25.0",
         "jsr:@spy4x/net@^1.25.0",
         "jsr:@spy4x/time@^1.25.0",
         "jsr:@spy4x/validation@^1.25.0",
@@ -348,7 +355,7 @@
         "jsr:@hono/hono",
         "jsr:@iuioiua/redis",
         "jsr:@libs/qrcode",
-        "jsr:@spy4x/email",
+        "jsr:@spy4x/email@^1.25.0",
         "jsr:@spy4x/net@^1.25.0",
         "jsr:@spy4x/platform@^1.25.0",
         "jsr:@spy4x/validation@^1.25.0",
@@ -1897,6 +1904,9 @@
     "node-releases@2.0.57": {
       "integrity": "sha512-kQK9LGGFiHtrWiNhZtA7Qbw17AQz+dmsEKODRIVTXA9+e5MS/2gZEBhYJt13GrAz5/IOZKddH/0Z3TP/Zgo+yw=="
     },
+    "nodemailer@10.0.10": {
+      "integrity": "sha512-He9XskOFms62SyAKkLu8CcGcYHAo+BSHSsORI8s4PJH8qZgZY4L4lDfvyN0twvmbpyG+eGrxpyBlskj9d9rJ8A=="
+    },
     "nth-check@2.1.1": {
       "integrity": "sha512-lqjrjmaOoAnWfMmBPL+XNnynZh2+swxiX3WUE0s4yEHI6m+AwrK2UZOimIRl3X/4QctVqS8AiZjFqyOGrMXb/w==",
       "dependencies": [
@@ -2383,6 +2393,7 @@
       "jsr:@hono/hono@4.13.8",
       "jsr:@iuioiua/redis@1.1.10",
       "jsr:@libs/qrcode@3.1.0",
+      "jsr:@spy4x/email@1.25.0",
       "jsr:@spy4x/integrations@1.25.0",
       "jsr:@spy4x/platform@1.25.0",
       "jsr:@spy4x/preact-icons@2.2.0",

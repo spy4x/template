@@ -4,7 +4,7 @@ const apiBase = "http://app.localhost"
 
 test.describe("auth profile ws push flow", () => {
   test("sign-up sign-in profile ws sign-out", async ({ page, request }) => {
-    const username = "e2e_auth_profile_user"
+    const email = "e2e_auth_profile_user@example.com"
     const password = "Passw0rd!"
     const firstName = "John"
     const lastName = "Doe"
@@ -13,7 +13,7 @@ test.describe("auth profile ws push flow", () => {
     // `soft` in `finally`: a failed cleanup is reported next to the spec's own error, not over it.
     const cleanup = async ({ soft = false } = {}) => {
       const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
-        data: { username },
+        data: { login: email },
       })
       ;(soft ? expect.soft : expect)(response.status(), await response.text()).toBe(200)
     }
@@ -23,13 +23,13 @@ test.describe("auth profile ws push flow", () => {
       // The API refuses a mutation without the headers a browser sends from the app's own page.
       const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
         headers: { origin: apiBase, "sec-fetch-site": "same-origin" },
-        data: { username, password },
+        data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
 
       await page.goto("/sign-in")
       await expect(page.getByRole("heading", { level: 1, name: "Welcome back" })).toBeVisible()
-      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await page.locator("[data-e2e=auth-form-submit]").click()
 

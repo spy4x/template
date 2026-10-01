@@ -134,28 +134,58 @@ async function handleAuthResponse(
   return { ok: true, mfaRequired }
 }
 
-export async function signIn(username: string, password: string): Promise<{
+/** Signs in with an e-mail address, or the username of an account made before addresses. */
+export async function signIn(login: string, password: string): Promise<{
   ok: boolean
   mfaRequired: boolean
   error?: string
 }> {
   const result = await apiFetch<SessionUser | PendingSecondFactor>("/api/auth/password/check", {
     method: "POST",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ login, password }),
   })
   return handleAuthResponse(result)
 }
 
-export async function signUp(username: string, password: string): Promise<{
+export async function signUp(email: string, password: string): Promise<{
   ok: boolean
   mfaRequired: boolean
   error?: string
 }> {
   const result = await apiFetch<SessionUser | PendingSecondFactor>("/api/auth/password/sign-up", {
     method: "POST",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ email, password }),
   })
   return handleAuthResponse(result)
+}
+
+/**
+ * Asks for a reset link to `email`. The answer is the same whether or not an account uses it;
+ * `message` is the API's wording of it.
+ */
+export async function requestPasswordReset(
+  email: string,
+): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  const result = await apiFetch<{ success: boolean; message: string }>(
+    "/api/auth/password/forgot",
+    { method: "POST", body: JSON.stringify({ email }) },
+  )
+  if (!result.ok) return { ok: false, error: result.error.message }
+  return { ok: true, message: result.data.message }
+}
+
+/** Sets a new password with the address and code of a reset link. Signs nobody in. */
+export async function resetPassword(
+  email: string,
+  code: string,
+  newPassword: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const result = await apiFetch<ApiSuccessResponse>("/api/auth/password/reset", {
+    method: "POST",
+    body: JSON.stringify({ email, code, newPassword }),
+  })
+  if (!result.ok) return { ok: false, error: result.error.message }
+  return { ok: true }
 }
 
 export async function signOut(): Promise<void> {

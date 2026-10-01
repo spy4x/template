@@ -315,3 +315,22 @@ CREATE TABLE user_settings (
 CREATE INDEX idx_user_settings_selected_group
     ON user_settings (selected_group_id)
     WHERE selected_group_id IS NOT NULL;
+
+-- Password reset by e-mail. See migration 2026_10_06_0001_password_reset.sql.
+CREATE TABLE password_reset_requests (
+    id UUID PRIMARY KEY,
+    email TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT password_reset_requests_email_check CHECK (length(email) BETWEEN 3 AND 254)
+);
+
+-- Development only: the worker copies every mail here with ENV=dev, for the e2e specs.
+CREATE TABLE dev_mail (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    to_address TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    text_body TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE INDEX dev_mail_to_address_idx ON dev_mail (to_address, id);

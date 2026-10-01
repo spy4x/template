@@ -25,6 +25,19 @@ describe("JobPublisher", () => {
     expect(calls).toEqual(["job"])
   })
 
+  it("hands the handler the row it runs for, so the job can read what it is about", async () => {
+    const seen: string[] = []
+    const publisher = new JobPublisher(
+      { [OUTBOX_CLEANUP_JOB]: (row) => Promise.resolve(void seen.push(row.aggregateId)) },
+      { publish: () => Promise.resolve() },
+    )
+    const job = event(JOB_AGGREGATE, OUTBOX_CLEANUP_JOB)
+
+    await publisher.publish(job)
+
+    expect(seen).toEqual([job.aggregateId])
+  })
+
   it("passes a row that is not a job to the fallback", async () => {
     const calls: string[] = []
     const publisher = new JobPublisher(
