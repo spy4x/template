@@ -342,6 +342,20 @@ describe("outbox when the server answers", () => {
     expect(outcome.kind).toBe("failed")
     expect(outbox.entries()).toEqual([])
   })
+
+  it("keeps a write queued while the server says the same key is still running", async () => {
+    const { outbox, state } = harness()
+    state.server = () => {
+      throw refused("IN_PROGRESS")
+    }
+    const outcome = await outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "Mine", body: "" },
+      version: 1,
+    })
+    expect([outcome.kind, outbox.entries()[0]?.status]).toEqual(["queued", "pending"])
+  })
 })
 
 describe("outbox conflicts found after a reconnect", () => {
