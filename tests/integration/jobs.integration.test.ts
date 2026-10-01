@@ -282,6 +282,35 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
       },
     )
 
+    await t.step(
+      "the nightly cleanup removes a group deleted over 30 days ago and keeps a recent one",
+      async () => {
+        const [{ userId }] = await sql<{ userId: number }[]>`
+          WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id)
+          INSERT INTO users (id) SELECT id FROM auth_user RETURNING id AS user_id
+        `
+        const insertDeleted = async (name: string, days: number) => {
+          const id = crypto.randomUUID()
+          await sql`
+            INSERT INTO groups (id, name, owner_user_id, created_by_user_id, deleted_at)
+            VALUES (${id}, ${name}, ${userId}, ${userId}, now() - make_interval(days => ${days}))
+          `
+          return id
+        }
+        await insertDeleted("expired", 31)
+        const recent = await insertDeleted("recent", 29)
+
+        await advanceClock(sql, 25 * 60)
+        const result = await createOutboxProcessor(sql, mailOff(sql)).drainOnce()
+        expect(result.failed).toBe(0)
+
+        const names = await sql<{ name: string; id: string }[]>`
+          SELECT name, id FROM groups WHERE deleted_at IS NOT NULL
+        `
+        expect(names).toEqual([{ name: "recent", id: recent }])
+      },
+    )
+
     await t.step("a row names both its group and its actor, or neither", async () => {
       const [{ groupId, userId }] = await sql<{ groupId: string; userId: number }[]>`
         WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id),
