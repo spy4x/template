@@ -266,7 +266,13 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
    next one. The worker starts one, `outbox.cleanup`, at 03:00 UTC and then daily: it removes
    outbox rows processed more than 7 days ago. A job that gave up stays unprocessed, so the
    worker does not restart it; look for rows with `last_error_code` set.
-6. The SPA treats a hint as a reason to read. The read is `GET /api/groups`, the same one it makes
+6. A listener on the in-process event bus that throws is isolated, logged as one JSON line with the
+   event and listener names and the request id, and counted in `event_listener_failures_total`
+   (a `createCounter` from `@spy4x/platform/universal/metrics`). Register listeners with `subscribe` (not `eventBus.on`) so the
+   name is known, and mark each best-effort or durable in `apps/api/cqrs/+init.ts`. Nothing exports
+   the counter yet (`renderPrometheus` prints it); the scrape endpoint and the alert rule are #159. An outbox row has no payload,
+   so a listener that needs the event's data cannot be durable until it has one.
+7. The SPA treats a hint as a reason to read. The read is `GET /api/groups`, the same one it makes
    at start-up and after every reconnect, so a lost frame costs one read.
 
 ## Next steps, in dependency order
