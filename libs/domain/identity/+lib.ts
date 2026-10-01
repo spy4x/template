@@ -55,20 +55,50 @@ export const authOTPSchema = type({
 })
 export type AuthOTP = typeof authOTPSchema.infer
 
-export const authUsernameSchema = type({
-  username: "string <= 50",
+/**
+ * Longest address a form accepts before the server normalises it: the 254 characters
+ * `normalizeEmail` (`@spy4x/server/auth`) allows, with room for the spaces it trims.
+ */
+export const EMAIL_INPUT_MAX_LENGTH = 320
+
+/** An e-mail address as typed. The server normalises it with `normalizeEmail` and refuses junk. */
+export const authEmailSchema = type({
+  email: `string <= ${EMAIL_INPUT_MAX_LENGTH}`,
 })
-export type AuthUsername = typeof authUsernameSchema.infer
+export type AuthEmail = typeof authEmailSchema.infer
+
+/**
+ * What a person signs in with: an e-mail address, or the username of an account made before
+ * sign-up took addresses.
+ */
+export const authLoginSchema = type({
+  login: `string <= ${EMAIL_INPUT_MAX_LENGTH}`,
+})
+export type AuthLogin = typeof authLoginSchema.infer
 
 export const authPasswordSchema = type({
   password: "8 <= string <= 50",
 })
 export type AuthPassword = typeof authPasswordSchema.infer
 
-export const authUsernamePasswordSchema = authUsernameSchema.and(
-  authPasswordSchema,
-)
-export type AuthUsernamePassword = typeof authUsernamePasswordSchema.infer
+/** The body of sign-up. */
+export const authSignUpSchema = authEmailSchema.and(authPasswordSchema)
+export type AuthSignUp = typeof authSignUpSchema.infer
+
+/** The body of sign-in. */
+export const authSignInSchema = authLoginSchema.and(authPasswordSchema)
+export type AuthSignIn = typeof authSignInSchema.infer
+
+/** The body of "forgot password": the address the reset link goes to. */
+export const authPasswordForgotSchema = authEmailSchema
+export type AuthPasswordForgot = typeof authPasswordForgotSchema.infer
+
+/** The body of a password reset: the address and code from the link, and the new password. */
+export const authPasswordResetSchema = authEmailSchema.and({
+  code: "string <= 128",
+  newPassword: "8 <= string <= 50",
+})
+export type AuthPasswordReset = typeof authPasswordResetSchema.infer
 
 export const authPasswordChangeSchema = authPasswordSchema.and({
   newPassword: "8 <= string <= 50",

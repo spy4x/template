@@ -454,6 +454,12 @@ services:
       - RATE_LIMITER_LIMIT=${RATE_LIMITER_LIMIT}
       - RATE_LIMITER_OTP_WINDOW_MS=${RATE_LIMITER_OTP_WINDOW_MS}
       - RATE_LIMITER_OTP_LIMIT=${RATE_LIMITER_OTP_LIMIT}
+      # Mail. Production sends nothing until all five are set; see infra/envs/.env.example.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
     deploy:
       resources:
         limits:
@@ -514,6 +520,8 @@ services:
     user: "1000:1000"
     environment:
       - HOME=/home/deno
+      - ENV=${ENV}
+      - DOMAIN=${DOMAIN}
       - DENO_DIR=/tmp/deno-cache
       - DENO_LOG=${DENO_LOG}
       - DB_HOST=db
@@ -521,6 +529,12 @@ services:
       - DB_USER=${DB_USER}
       - DB_PASS=${DB_PASS}
       - DB_NAME=${DB_NAME}
+      # Mail. Production sends nothing until all five are set; see infra/envs/.env.example.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
     deploy:
       resources:
         limits:

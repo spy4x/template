@@ -172,11 +172,11 @@ async function withValkeyApp(
     const app = new Hono<APIContext>()
     app.use(signIn.auth.parseAuth)
     app.post("/sign-up", async (c) => {
-      const result = await signIn.signUp(c, "alice", "Passw0rd!")
+      const result = await signIn.signUp(c, "alice@example.com", "Passw0rd!")
       return result ? c.json(result.user) : c.json({ error: "refused" }, 401)
     })
     app.post("/sign-in", async (c) => {
-      const result = await signIn.signIn(c, "alice", "Passw0rd!")
+      const result = await signIn.signIn(c, "alice@example.com", "Passw0rd!")
       if (!result) return c.json({ error: "refused" }, 401)
       return c.json(
         result.user,

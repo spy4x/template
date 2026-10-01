@@ -3,10 +3,14 @@ import type { Context } from "hono"
 import { validate } from "@spy4x/validation"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
+import { normalizeEmail } from "@spy4x/server/auth"
 import {
   authOTPSchema,
   authPasswordChangeSchema,
-  authUsernamePasswordSchema,
+  authPasswordForgotSchema,
+  authPasswordResetSchema,
+  authSignInSchema,
+  authSignUpSchema,
   type User,
 } from "@domain/identity"
 import type { SignIn } from "@api/services/sign-in.ts"
@@ -25,7 +29,21 @@ export interface AuthRouteDependencies {
   rateLimits: AuthRateLimits
   /** Persistent count of wrong one-time codes per user, with a growing lock. */
   totpFailures: Lockout
+  /**
+   * Queues a reset link for a normalised address. The worker sends it only when an account signs
+   * in with the address, so this call does the same work either way.
+   */
+  requestPasswordReset(email: string): Promise<void>
 }
+
+/** The answer to a reset request that was accepted, whether or not the address has an account. */
+export const PASSWORD_RESET_REQUESTED = {
+  success: true,
+  message: "If an account uses this address, a link to reset its password is on its way.",
+}
+
+/** The answer to a reset link that cannot be used. */
+export const PASSWORD_RESET_REFUSED = "This link is invalid, used or expired. Ask for a new one."
 
 /**
  * Runs one one-time-code check under the failure counter. While the user is locked the check does
@@ -67,7 +85,8 @@ function signInAnswer(
 }
 
 export function createAuthRoute(
-  { signIn, emit, mutationGuards, rateLimits, totpFailures }: AuthRouteDependencies,
+  { signIn, emit, mutationGuards, rateLimits, totpFailures, requestPasswordReset }:
+    AuthRouteDependencies,
 ): Hono<APIContext> {
   const { isAuthenticated1FA, isAuthenticated2FA } = signIn.auth
   return new Hono<APIContext>()
@@ -96,14 +115,14 @@ export function createAuthRoute(
     })
     .post(`password/check`, mutationGuards.anonymous, rateLimits.strictByIp, async (c) => {
       const body = await readApiJson(c)
-      const validationResult = validate(authUsernamePasswordSchema, body)
+      const validationResult = validate(authSignInSchema, body)
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
       }
-      const { username, password } = validationResult.data
-      const signedIn = await signIn.signIn(c, username, password)
+      const { login, password } = validationResult.data
+      const signedIn = await signIn.signIn(c, login, password)
       if (!signedIn) {
-        return c.json({ error: "Invalid username or password" }, 401)
+        return c.json({ error: "Invalid e-mail, username or password" }, 401)
       }
       emit(
         new UserSignedInEvent({
@@ -116,24 +135,59 @@ export function createAuthRoute(
     })
     .post(`/password/sign-up`, mutationGuards.anonymous, rateLimits.strictByIp, async (c) => {
       const body = await readApiJson(c)
-      const validationResult = validate(authUsernamePasswordSchema, body)
+      const validationResult = validate(authSignUpSchema, body)
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
       }
-      const { username, password } = validationResult.data
-      const signedUp = await signIn.signUp(c, username, password)
+      const email = normalizeEmail(validationResult.data.email)
+      if (email === null) {
+        return c.json({ error: "Enter a valid e-mail address" }, 400)
+      }
+      const signedUp = await signIn.signUp(c, email, validationResult.data.password)
       if (!signedUp) {
-        return c.json({ error: "Invalid username or password" }, 401)
+        // Sign-up necessarily tells that an address is taken; "Forgot password" is the way in.
+        return c.json({ error: "This e-mail address cannot be used to sign up" }, 401)
       }
       emit(
         new UserSignedUpEvent({
           user: signedUp.user,
-          username,
+          email,
           // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
           request: requestInfoFromContext(c, { trustedProxy: true }),
         }),
       )
       return signInAnswer(c, signedUp)
+    })
+    .post(`/password/forgot`, mutationGuards.anonymous, rateLimits.strictByIp, async (c) => {
+      const body = await readApiJson(c)
+      const validationResult = validate(authPasswordForgotSchema, body)
+      if (validationResult.error) {
+        return c.json({ error: validationResult.error.description }, 400)
+      }
+      const email = normalizeEmail(validationResult.data.email)
+      if (email === null) {
+        return c.json({ error: "Enter a valid e-mail address" }, 400)
+      }
+      // Spent for every address, known or not, so a refusal tells nothing about an account.
+      const decision = await rateLimits.resetByAddress(email)
+      if (!decision.allowed) {
+        c.header("Retry-After", String(Math.ceil(decision.retryAfterMs / 1000)))
+        return c.json({ error: "Too many reset links for this address, try again later." }, 429)
+      }
+      await requestPasswordReset(email)
+      return c.json(PASSWORD_RESET_REQUESTED)
+    })
+    .post(`/password/reset`, mutationGuards.anonymous, rateLimits.strictByIp, async (c) => {
+      const body = await readApiJson(c)
+      const validationResult = validate(authPasswordResetSchema, body)
+      if (validationResult.error) {
+        return c.json({ error: validationResult.error.description }, 400)
+      }
+      const { email, code, newPassword } = validationResult.data
+      if (!(await signIn.resetPassword(email, code, newPassword))) {
+        return c.json({ error: PASSWORD_RESET_REFUSED }, 400)
+      }
+      return c.json({ success: true })
     })
     .use(isAuthenticated1FA)
     .use(mutationGuards.signedIn)

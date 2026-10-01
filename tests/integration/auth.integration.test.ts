@@ -14,6 +14,7 @@ import { UserMFAStatus } from "@domain/identity"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
+import { issuePasswordReset } from "../../libs/server/auth/password-reset.ts"
 import { requireDbConnection } from "./db-connection.ts"
 
 /**
@@ -75,13 +76,13 @@ function buildApp(signIn: SignIn) {
   const app = new Hono<APIContext>()
   app.use(signIn.auth.parseAuth)
   app.post("/sign-up", async (c) => {
-    const { username, password, groupId } = await c.req.json()
-    const result = await signIn.signUp(c, username, password, groupId)
+    const { email, password, groupId } = await c.req.json()
+    const result = await signIn.signUp(c, email, password, groupId)
     return result ? c.json(result.user) : c.json({ error: "refused" }, 401)
   })
   app.post("/sign-in", async (c) => {
-    const { username, password } = await c.req.json()
-    const result = await signIn.signIn(c, username, password)
+    const { login, password } = await c.req.json()
+    const result = await signIn.signIn(c, login, password)
     if (!result) return c.json({ error: "refused" }, 401)
     return c.json(
       result.user,
@@ -195,24 +196,30 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       const client = buildApp(signIn)
       const before = await signUpRowCounts(sql)
       const response = await client.request("POST", "/sign-up", {
-        username: "  Alice  ",
+        email: "  Alice@Example.com  ",
         password: "Passw0rd!",
       })
       expect(response.status).toBe(200)
       const user = await response.json()
       expect(await signUpRowCounts(sql)).toEqual(before.map((count) => count + 1))
-      const [key] = await sql<{ userId: number; subject: string; secret: string }[]>`
-        SELECT user_id AS "userId", subject, secret FROM auth_keys WHERE subject = 'alice'
+      const [key] = await sql<
+        { userId: number; email: string; secret: string; provenAt: Date | null }[]
+      >`
+        SELECT user_id AS "userId", email, secret, proven_at AS "provenAt" FROM auth_keys
+        WHERE subject = 'alice@example.com'
       `
       expect(key.userId).toBe(user.id)
+      // The address is kept on the key, normalised, and unproven until a reset link proves it.
+      expect(key.email).toBe("alice@example.com")
+      expect(key.provenAt).toBeNull()
       expect(key.secret).toMatch(/^pbkdf2-sha256\$600000\$/)
       expect((await client.request("GET", "/me")).status).toBe(200)
     })
 
-    await t.step("a taken username is refused and writes nothing", async () => {
+    await t.step("a taken address is refused and writes nothing", async () => {
       const before = await signUpRowCounts(sql)
       const response = await buildApp(signIn).request("POST", "/sign-up", {
-        username: "ALICE",
+        email: "ALICE@example.com",
         password: "Passw0rd!",
       })
       expect(response.status).toBe(401)
@@ -222,7 +229,7 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
     await t.step("accepts an eight-unit password of four code points at sign-up", async () => {
       // Four emoji: 8 UTF-16 units, so the route rule "8 <= string" allows it; 4 code points.
       const response = await buildApp(signIn).request("POST", "/sign-up", {
-        username: "emoji-pass",
+        email: "emoji-pass@example.com",
         password: "😀😀😀😀",
       })
       expect(response.status).toBe(200)
@@ -235,7 +242,7 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       const before = await signUpRowCounts(sql)
       await expect(
         buildApp(signIn).request("POST", "/sign-up", {
-          username: "half-way",
+          email: "half-way@example.com",
           password: "Passw0rd!",
           groupId: taken.id,
         }).then(async (response) => {
@@ -245,7 +252,7 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       ).rejects.toThrow()
       expect(await signUpRowCounts(sql)).toEqual(before)
       const retry = await buildApp(signIn).request("POST", "/sign-up", {
-        username: "half-way",
+        email: "half-way@example.com",
         password: "Passw0rd!",
       })
       expect(retry.status).toBe(200)
@@ -256,7 +263,7 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       const responses = await Promise.all(
         Array.from({ length: 20 }, (_, index) =>
           buildApp(signIn).request("POST", "/sign-up", {
-            username: index % 2 ? "  ConcurrentUser  " : "concurrentuser",
+            email: index % 2 ? "  ConcurrentUser@Example.com  " : "concurrentuser@example.com",
             password: "Passw0rd!",
           })),
       )
@@ -268,7 +275,7 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
     await t.step("sign-in with the right password starts a session", async () => {
       const client = buildApp(signIn)
       const response = await client.request("POST", "/sign-in", {
-        username: "alice",
+        login: " ALICE@example.com",
         password: "Passw0rd!",
       })
       expect(response.status).toBe(200)
@@ -280,8 +287,9 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       const sessionsBefore = await sql<CountRow[]>`SELECT COUNT(*)::int AS count FROM auth_sessions`
       for (
         const credentials of [
-          { username: "alice", password: "wrong-password" },
-          { username: "nobody", password: "Passw0rd!" },
+          { login: "alice@example.com", password: "wrong-password" },
+          { login: "nobody@example.com", password: "Passw0rd!" },
+          { login: "nobody", password: "Passw0rd!" },
         ]
       ) {
         expect((await client.request("POST", "/sign-in", credentials)).status).toBe(401)
@@ -305,12 +313,13 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
         },
       }
       const client = buildApp(buildSignIn(sql, counting))
-      for (const username of ["alice", "nobody", "   "]) {
+      // An address and a username each take their own path; both cost the same.
+      for (const login of ["alice@example.com", "nobody@example.com", "nobody", "   "]) {
         const before = verifications
-        const password = username === "alice" ? "wrong-password" : "Passw0rd!"
-        expect((await client.request("POST", "/sign-in", { username, password })).status).toBe(401)
-        expect({ username, verifications: verifications - before }).toEqual({
-          username,
+        const password = login === "alice@example.com" ? "wrong-password" : "Passw0rd!"
+        expect((await client.request("POST", "/sign-in", { login, password })).status).toBe(401)
+        expect({ login, verifications: verifications - before }).toEqual({
+          login,
           verifications: 1,
         })
       }
@@ -328,7 +337,7 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
       const sessionsBefore = await sql<CountRow[]>`SELECT COUNT(*)::int AS count FROM auth_sessions`
       const client = buildApp(signIn)
       const response = await client.request("POST", "/sign-in", {
-        username: "no-profile",
+        login: "no-profile",
         password: "Passw0rd!",
       })
       expect(response.status).toBe(401)
@@ -339,7 +348,10 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
 
     await t.step("sign-out ends the session, not only the cookie", async () => {
       const client = buildApp(signIn)
-      await client.request("POST", "/sign-in", { username: "alice", password: "Passw0rd!" })
+      await client.request("POST", "/sign-in", {
+        login: "alice@example.com",
+        password: "Passw0rd!",
+      })
       const signedIn = client.saveCookies()
       expect((await client.request("GET", "/me")).status).toBe(200)
       // What a live socket asks with the session id alone.
@@ -361,7 +373,10 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
 
     await t.step("a session past its expiry is no longer entitled, before any sweep", async () => {
       const client = buildApp(signIn)
-      await client.request("POST", "/sign-in", { username: "alice", password: "Passw0rd!" })
+      await client.request("POST", "/sign-in", {
+        login: "alice@example.com",
+        password: "Passw0rd!",
+      })
       const id = sessionIdOf(client.saveCookies())
       expect(await signIn.entitledSession(id)).not.toBeNull()
 
@@ -377,12 +392,85 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
   })
 })
 
+Deno.test("username accounts and the password reset link", async (t) => {
+  await withSchema([...MASTER_MIGRATIONS, AUTH_MIGRATION], async (sql) => {
+    const signIn = buildSignIn(sql)
+    const db = new AppDbBase({ sql })
+    const ann = { email: "ann@example.com", password: "Passw0rd!" }
+    expect((await buildApp(signIn).request("POST", "/sign-up", ann)).status).toBe(200)
+
+    await t.step("an account made before addresses still signs in with its username", async () => {
+      const legacy = { email: "legacy@example.com", password: "Passw0rd!" }
+      expect((await buildApp(signIn).request("POST", "/sign-up", legacy)).status).toBe(200)
+      // What a username sign-up wrote: the username as subject, and no address.
+      await sql`
+        UPDATE auth_keys SET subject = 'legacyuser', email = NULL
+        WHERE subject = 'legacy@example.com'
+      `
+
+      const client = buildApp(signIn)
+      const response = await client.request("POST", "/sign-in", {
+        login: "  LegacyUser ",
+        password: "Passw0rd!",
+      })
+      expect(response.status).toBe(200)
+      expect((await client.request("GET", "/me")).status).toBe(200)
+      // A username account has no address, so no link can be sent for it.
+      expect(await issuePasswordReset(db.authStore, "legacyuser", new Date())).toBe(null)
+    })
+
+    await t.step("the link sets the new password and signs out every session", async () => {
+      const first = buildApp(signIn)
+      const second = buildApp(signIn)
+      const login = { login: ann.email, password: ann.password }
+      expect((await first.request("POST", "/sign-in", login)).status).toBe(200)
+      expect((await second.request("POST", "/sign-in", login)).status).toBe(200)
+      const issued = (await issuePasswordReset(db.authStore, " Ann@Example.com", new Date()))!
+      const stored = await sql<{ secretHash: string }[]>`SELECT secret_hash FROM auth_challenges`
+      expect(stored.length).toBe(1)
+      expect(stored[0].secretHash).not.toContain(issued.code)
+
+      expect(await signIn.resetPassword("ANN@example.com", issued.code, "N3w-Passw0rd")).toBe(true)
+
+      expect((await first.request("GET", "/me")).status).toBe(401)
+      expect((await second.request("GET", "/me")).status).toBe(401)
+      const client = buildApp(signIn)
+      expect((await client.request("POST", "/sign-in", login)).status).toBe(401)
+      const renewed = { login: ann.email, password: "N3w-Passw0rd" }
+      expect((await client.request("POST", "/sign-in", renewed)).status).toBe(200)
+      const [key] = await sql<{ provenAt: Date | null }[]>`
+        SELECT proven_at AS "provenAt" FROM auth_keys WHERE subject = ${ann.email}
+      `
+      expect(key.provenAt).not.toBeNull()
+    })
+
+    await t.step("the same link never works twice", async () => {
+      const issued = (await issuePasswordReset(db.authStore, ann.email, new Date()))!
+      expect(await signIn.resetPassword(ann.email, issued.code, "Once-Passw0rd")).toBe(true)
+      expect(await signIn.resetPassword(ann.email, issued.code, "Twice-Passw0rd")).toBe(false)
+      const client = buildApp(signIn)
+      const twice = { login: ann.email, password: "Twice-Passw0rd" }
+      expect((await client.request("POST", "/sign-in", twice)).status).toBe(401)
+    })
+
+    await t.step("a link past its 30 minutes is refused and changes nothing", async () => {
+      const issued = (await issuePasswordReset(db.authStore, ann.email, new Date()))!
+      await sql`UPDATE auth_challenges SET expires_at = now() - interval '1 second'`
+      expect(await signIn.resetPassword(ann.email, issued.code, "Late-Passw0rd")).toBe(false)
+      const client = buildApp(signIn)
+      const late = { login: ann.email, password: "Late-Passw0rd" }
+      expect((await client.request("POST", "/sign-in", late)).status).toBe(401)
+    })
+  })
+})
+
 Deno.test("authenticator-app enrolment, second factor and replay", async (t) => {
   await withSchema([...MASTER_MIGRATIONS, AUTH_MIGRATION], async (sql) => {
     const signIn = buildSignIn(sql)
-    const credentials = { username: "totp-user", password: "Passw0rd!" }
+    const signUpBody = { email: "totp-user@example.com", password: "Passw0rd!" }
+    const credentials = { login: signUpBody.email, password: signUpBody.password }
     const enrolling = buildApp(signIn)
-    expect((await enrolling.request("POST", "/sign-up", credentials)).status).toBe(200)
+    expect((await enrolling.request("POST", "/sign-up", signUpBody)).status).toBe(200)
     let secret = ""
     let enrolmentCode = ""
 
@@ -485,14 +573,14 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
     await t.step("disconnecting lets the user's pending sessions through", async () => {
       const pending = buildApp(signIn)
       const signedIn = await pending.request("POST", "/sign-in", {
-        username: credentials.username,
+        login: credentials.login,
         password,
       })
       expect(signedIn.status).toBe(202)
       expect((await pending.request("GET", "/me")).status).toBe(401)
       // Another user's pending session must stay pending.
       const other = buildApp(signIn)
-      const otherCredentials = { username: "totp-bystander", password: "Passw0rd!" }
+      const otherCredentials = { email: "totp-bystander@example.com", password: "Passw0rd!" }
       expect((await other.request("POST", "/sign-up", otherCredentials)).status).toBe(200)
       const [bystander] = await sql<{ id: number }[]>`
         SELECT id FROM auth_sessions WHERE id = ${sessionIdOf(other.saveCookies())}
@@ -583,12 +671,12 @@ Deno.test("the auth migration applies on top of the previous schema", async () =
     const signIn = buildSignIn(sql)
     const client = buildApp(signIn)
     const refused = await client.request("POST", "/sign-in", {
-      username: "olduser",
+      login: "olduser",
       password: "Passw0rd!",
     })
     expect(refused.status).toBe(401)
     const signedUp = await client.request("POST", "/sign-up", {
-      username: "olduser",
+      email: "olduser@example.com",
       password: "Passw0rd!",
     })
     expect(signedUp.status).toBe(200)

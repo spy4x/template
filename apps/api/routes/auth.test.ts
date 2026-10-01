@@ -15,10 +15,14 @@ import {
   testSessionGuards,
 } from "../_testing/mutation-requests.ts"
 import { MALFORMED_JSON, oversizedJson } from "../_testing/json-bodies.ts"
-import { type AuthRateLimits, createAuthRateLimits } from "../middlewares/auth-rate-limits.ts"
+import {
+  type AuthRateLimits,
+  createAuthRateLimits,
+  RESET_MAILS_PER_ADDRESS,
+} from "../middlewares/auth-rate-limits.ts"
 import type { Lockout } from "@spy4x/server/lockout"
 import { createKvStore, type RateLimitStore } from "@spy4x/platform/rate-limit"
-import { createAuthRoute } from "./auth.ts"
+import { createAuthRoute, PASSWORD_RESET_REFUSED, PASSWORD_RESET_REQUESTED } from "./auth.ts"
 
 /**
  * A failure counter that records its calls in `calls`, and answers `lockedForMs` to `begin`
@@ -57,6 +61,7 @@ function fakeSignIn(
     checkTotp: () => (calls.push("checkTotp"), Promise.resolve(succeed)),
     disconnectTotp: () => (calls.push("disconnectTotp"), Promise.resolve(true)),
     changePassword: () => (calls.push("changePassword"), Promise.resolve(succeed)),
+    resetPassword: () => (calls.push("resetPassword"), Promise.resolve(succeed)),
     expireSessions: () => Promise.resolve(),
     entitledSession: () => Promise.resolve(null),
   }
@@ -105,14 +110,24 @@ function buildApp(
 ) {
   const calls: string[] = []
   const failureCalls: string[] = []
+  /** Every address a reset link was queued for, as the route passed it. */
+  const queued: string[] = []
   const route = createAuthRoute({
     signIn: fakeSignIn(calls, succeed, secondFactor),
     emit: () => {},
     mutationGuards: testMutationGuards,
     rateLimits,
     totpFailures: fakeTotpFailures(failureCalls, lockedForMs),
+    requestPasswordReset: (email) => (
+      calls.push("requestPasswordReset"), queued.push(email), Promise.resolve()
+    ),
   })
-  return { app: mountRoute("/auth", route, auth), calls, failureCalls }
+  return { app: mountRoute("/auth", route, auth), calls, failureCalls, queued }
+}
+
+/** `body` with its `email` replaced, or `body` itself when it has none. */
+function withEmail(body: unknown, email: string): unknown {
+  return typeof body === "object" && body !== null && "email" in body ? { ...body, email } : body
 }
 
 function send(
@@ -127,13 +142,26 @@ function send(
   })
 }
 
-const credentials = { username: "alice", password: "correct-horse" }
+const credentials = { login: "alice@example.com", password: "correct-horse" }
+const signUpBody = { email: "alice@example.com", password: "correct-horse" }
+const resetBody = {
+  email: "alice@example.com",
+  code: "a-code-from-the-link",
+  newPassword: "battery-staple",
+}
 
 /** Routes a browser without a session may call. */
 const anonymousRoutes: (MutationCase & { operation: string })[] = [
   { method: "POST", path: "/auth/sign-out", body: undefined, operation: "signOut" },
   { method: "POST", path: "/auth/password/check", body: credentials, operation: "signIn" },
-  { method: "POST", path: "/auth/password/sign-up", body: credentials, operation: "signUp" },
+  { method: "POST", path: "/auth/password/sign-up", body: signUpBody, operation: "signUp" },
+  {
+    method: "POST",
+    path: "/auth/password/forgot",
+    body: { email: "alice@example.com" },
+    operation: "requestPasswordReset",
+  },
+  { method: "POST", path: "/auth/password/reset", body: resetBody, operation: "resetPassword" },
 ]
 
 /** Routes behind `isAuthenticated1FA` or `isAuthenticated2FA`. */
@@ -271,10 +299,13 @@ describe("auth routes rate-limit", () => {
       const headers = { ...sameOriginWithoutCookieHeaders, "x-real-ip": "192.0.2.1" }
       const responses = []
       for (let attempt = 0; attempt < 4; attempt++) {
-        responses.push(await send(app, route, headers))
+        // A fresh address each time, so only the IP's budget can run out.
+        const body = withEmail(route.body, `person${attempt}@example.com`)
+        responses.push(await send(app, { ...route, body }, headers))
       }
 
-      expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 429])
+      expect(responses.slice(0, 3).map((response) => response.status)).not.toContain(429)
+      expect(responses[3].status).toBe(429)
       expect(Number(responses[3].headers.get("retry-after"))).toBeGreaterThan(0)
       expect(calls).toEqual([route.operation, route.operation, route.operation])
     })
@@ -383,6 +414,7 @@ describe("auth routes rate-limit", () => {
         mutationGuards: testMutationGuards,
         rateLimits: createAuthRateLimits(tightLimits),
         totpFailures: fakeTotpFailures([]),
+        requestPasswordReset: () => Promise.resolve(),
       }),
       buildAuthData(),
     )
@@ -646,4 +678,111 @@ describe("auth routes count wrong one-time codes per user", () => {
       expect(calls).toEqual([route.operation])
     })
   }
+})
+
+describe("auth routes reset a password by e-mail link", () => {
+  const forgot = anonymousRoutes.find((route) => route.path === "/auth/password/forgot")!
+  const reset = anonymousRoutes.find((route) => route.path === "/auth/password/reset")!
+  const json = (body: unknown) => ({ ...forgot, body })
+
+  it("queues the link for the address as normalizeEmail leaves it", async () => {
+    const { app, queued } = buildApp(null)
+
+    const response = await send(
+      app,
+      json({ email: "  Alice@Example.COM " }),
+      sameOriginWithoutCookieHeaders,
+    )
+
+    expect(response.status).toBe(200)
+    expect(queued).toEqual(["alice@example.com"])
+  })
+
+  it("answers with the same body whatever the address, so it tells nothing about an account", async () => {
+    const { app } = buildApp(null)
+    const bodies = []
+    for (const email of ["alice@example.com", "nobody@example.com"]) {
+      const response = await send(app, json({ email }), sameOriginWithoutCookieHeaders)
+      bodies.push({ status: response.status, body: await response.json() })
+    }
+
+    expect(bodies[0]).toEqual({ status: 200, body: PASSWORD_RESET_REQUESTED })
+    expect(bodies[1]).toEqual(bodies[0])
+  })
+
+  it("refuses a value that is not an e-mail address with 400 and queues nothing", async () => {
+    const { app, calls } = buildApp(null)
+
+    const response = await send(app, json({ email: "alice" }), sameOriginWithoutCookieHeaders)
+
+    expect(response.status).toBe(400)
+    expect(calls).toEqual([])
+  })
+
+  it(`answers request ${RESET_MAILS_PER_ADDRESS + 1} for one address in an hour with 429, from any IP`, async () => {
+    const { app, queued } = buildApp(null)
+    const statuses = []
+    for (let attempt = 0; attempt <= RESET_MAILS_PER_ADDRESS; attempt++) {
+      const headers = { ...sameOriginWithoutCookieHeaders, "x-real-ip": `192.0.2.${attempt + 1}` }
+      // The case changes too: the budget belongs to the normalised address.
+      const email = attempt % 2 ? "ALICE@example.com" : "alice@example.com"
+      statuses.push((await send(app, json({ email }), headers)).status)
+    }
+
+    expect(statuses).toEqual([...Array(RESET_MAILS_PER_ADDRESS).fill(200), 429])
+    expect(queued).toHaveLength(RESET_MAILS_PER_ADDRESS)
+  })
+
+  it("gives each address its own reset budget", async () => {
+    const { app, queued } = buildApp(null)
+    for (let attempt = 0; attempt < RESET_MAILS_PER_ADDRESS; attempt++) {
+      await send(app, json({ email: "alice@example.com" }), sameOriginWithoutCookieHeaders)
+    }
+
+    const other = await send(
+      app,
+      json({ email: "bob@example.com" }),
+      sameOriginWithoutCookieHeaders,
+    )
+
+    expect(other.status).toBe(200)
+    expect(queued.at(-1)).toBe("bob@example.com")
+  })
+
+  it("refuses a reset request without queueing it while the address budget's store is down", async () => {
+    const { app, calls } = buildApp(null, {
+      rateLimits: createAuthRateLimits({
+        ...generousLimits,
+        store: (name) => name === "ratelimit-reset" ? brokenStore() : memoryStore(),
+      }),
+    })
+
+    const response = await send(app, forgot, sameOriginWithoutCookieHeaders)
+
+    expect(response.status).toBe(500)
+    expect(calls).toEqual([])
+  })
+
+  it("answers a link the sign-in refuses with 400 and says to ask for a new one", async () => {
+    const { app, calls } = buildApp(null, { succeed: false })
+
+    const response = await send(app, reset, sameOriginWithoutCookieHeaders)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: PASSWORD_RESET_REFUSED })
+    expect(calls).toEqual(["resetPassword"])
+  })
+
+  it("refuses a new password shorter than 8 characters before spending the link", async () => {
+    const { app, calls } = buildApp(null)
+
+    const response = await send(
+      app,
+      { ...reset, body: { ...resetBody, newPassword: "short" } },
+      sameOriginWithoutCookieHeaders,
+    )
+
+    expect(response.status).toBe(400)
+    expect(calls).toEqual([])
+  })
 })

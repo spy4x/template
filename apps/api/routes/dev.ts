@@ -3,18 +3,20 @@ import type { Context } from "hono"
 import { APIContext } from "../_types.ts"
 import { validate } from "@spy4x/validation"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
-import { authUsernameSchema } from "@domain/identity"
+import { normalizeEmail } from "@spy4x/server/auth"
+import { authEmailSchema, authLoginSchema } from "@domain/identity"
 import { GroupKind, GroupRole } from "@domain/groups"
 import { type } from "arktype"
 import type { Sql, Transaction } from "@spy4x/server/db"
 import type { AppDbBase } from "@api/services/db-base.ts"
 import { readApiJson } from "@api/services/json-body.ts"
+import { normalizeUsername } from "@api/services/sign-in.ts"
 
 /** What the development-only routes need. */
 export interface DevRouteDeps {
   /** Refuses every request with 403 when false, in case the route is ever mounted outside dev. */
   isDev: boolean
-  /** Finds the user behind a password username. */
+  /** Finds the user behind a sign-in name. */
   db: Pick<AppDbBase, "authStore">
   /** The client the cleanup's transaction runs on. */
   sql: Sql
@@ -25,26 +27,33 @@ export interface DevRouteDeps {
 /**
  * Routes that exist only in development, for the e2e specs and local scripts.
  *
- * `POST /cleanup-user` with `{ username }` deletes that user and everything that would stop the
+ * Each route that names a user takes `{ login }`: what the user signs in with, an e-mail address or
+ * an older account's username.
+ *
+ * `POST /cleanup-user` with `{ login }` deletes that user and everything that would stop the
  * delete: the groups they own or created (with their memberships, audit and outbox events), the
  * audit and outbox events they are the actor of, the notes they wrote, and the memberships they
  * granted in other groups.
- * It answers 200 when the username has no user, so a spec can call it before its own sign-up.
+ * It answers 200 when the login has no user, so a spec can call it before its own sign-up.
  *
- * `POST /add-member` with `{ username, groupId, role }` makes that user a member of a shared group
+ * `POST /add-member` with `{ login, groupId, role }` makes that user a member of a shared group
  * with the role (1 viewer, 2 editor, 3 admin), or changes the role of one who is. The product has
  * no way to add a member yet, and the notes e2e spec needs a second member of one group. It
  * answers 404 when the user or the shared group does not exist, and 409 for the group's owner,
  * whose role it never changes: a group has exactly one owner.
  *
- * `POST /close-sockets` with `{ username }` closes that user's WebSockets the way a dropped network
+ * `POST /close-sockets` with `{ login }` closes that user's WebSockets the way a dropped network
  * would, so an e2e spec can check that the app catches up after a reconnect. It answers with how
  * many sockets it closed.
+ *
+ * `POST /last-mail` with `{ email }` answers the newest mail the worker sent to that address in
+ * development (`dev_mail`): `{ subject, text }`, or 404 when there is none. The e2e specs read a
+ * password reset link this way.
  */
 export function createDevRoute(deps: DevRouteDeps) {
   return new Hono<APIContext>()
     .post("/cleanup-user", async (c) => {
-      const user = await readUsername(c, deps)
+      const user = await readLogin(c, deps)
       if (user instanceof Response) return user
       if (user.userId !== null) {
         await deleteUser(deps.sql, user.userId)
@@ -63,8 +72,8 @@ export function createDevRoute(deps: DevRouteDeps) {
       if (validation.error) {
         return c.json({ error: validation.error.description }, 400)
       }
-      const { username, groupId, role } = validation.data
-      const key = await deps.db.authStore.findKey(PASSWORD_METHOD, username)
+      const { login, groupId, role } = validation.data
+      const key = await findPasswordKey(deps, login)
       if (!key) return c.json({ error: "No such user" }, 404)
       const added = await deps.sql`
         INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
@@ -87,24 +96,50 @@ export function createDevRoute(deps: DevRouteDeps) {
       return c.json({ success: true })
     })
     .post("/close-sockets", async (c) => {
-      const user = await readUsername(c, deps)
+      const user = await readLogin(c, deps)
       if (user instanceof Response) return user
       const closed = user.userId === null ? 0 : deps.closeSockets(user.userId)
       return c.json({ success: true, closed })
     })
+    .post("/last-mail", async (c) => {
+      if (!deps.isDev) return c.json({ error: "Not allowed" }, 403)
+      let body: unknown = null
+      try {
+        body = await readApiJson(c)
+      } catch (_error) {
+        body = null
+      }
+      const validation = validate(authEmailSchema, body)
+      if (validation.error) {
+        return c.json({ error: validation.error.description }, 400)
+      }
+      const email = normalizeEmail(validation.data.email) ?? validation.data.email
+      const [mail] = await deps.sql<{ subject: string; textBody: string }[]>`
+        SELECT subject, text_body FROM dev_mail WHERE to_address = ${email}
+        ORDER BY id DESC LIMIT 1
+      `
+      if (!mail) return c.json({ error: "No mail for this address" }, 404)
+      return c.json({ subject: mail.subject, text: mail.textBody })
+    })
+}
+
+/** The password key of `login`, an address or an older account's username, normalised first. */
+function findPasswordKey(deps: DevRouteDeps, login: string) {
+  const subject = normalizeEmail(login) ?? normalizeUsername(login)
+  return subject === null ? null : deps.db.authStore.findKey(PASSWORD_METHOD, subject)
 }
 
 /** The body of `POST /add-member`. Owner is left out: a group has one, and it is not moved here. */
-const addMemberSchema = authUsernameSchema.and({
+const addMemberSchema = authLoginSchema.and({
   groupId: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
   role: type.enumerated(GroupRole.VIEWER, GroupRole.EDITOR, GroupRole.ADMIN),
 })
 
 /**
- * Reads `{ username }` from the body and finds the user behind it (`null` when there is none), or
- * answers with the refusal: 403 outside development, 400 for a body that names no username.
+ * Reads `{ login }` from the body and finds the user behind it (`null` when there is none), or
+ * answers with the refusal: 403 outside development, 400 for a body that names no login.
  */
-async function readUsername(
+async function readLogin(
   c: Context<APIContext>,
   deps: DevRouteDeps,
 ): Promise<{ userId: number | null } | Response> {
@@ -117,11 +152,11 @@ async function readUsername(
   } catch (_error) {
     body = null
   }
-  const validation = validate(authUsernameSchema, body)
+  const validation = validate(authLoginSchema, body)
   if (validation.error) {
     return c.json({ error: validation.error.description }, 400)
   }
-  const key = await deps.db.authStore.findKey(PASSWORD_METHOD, validation.data.username)
+  const key = await findPasswordKey(deps, validation.data.login)
   return { userId: key ? key.userId : null }
 }
 
