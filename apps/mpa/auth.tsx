@@ -9,8 +9,8 @@ import { define, type State } from "./utils.ts"
 /** The API call behind each auth form, and how its fields are translated. */
 const CALLS: Record<AuthScreenKind, { path: `/api/${string}`; body: (form: FormData) => unknown }> =
   {
-    "sign-in": { path: "/api/auth/password/check", body: API_BODIES.credentials },
-    "sign-up": { path: "/api/auth/password/sign-up", body: API_BODIES.credentials },
+    "sign-in": { path: "/api/auth/password/check", body: API_BODIES.signIn },
+    "sign-up": { path: "/api/auth/password/sign-up", body: API_BODIES.signUp },
     "one-time-code": { path: "/api/auth/totp/check", body: API_BODIES.oneTimeCode },
   }
 

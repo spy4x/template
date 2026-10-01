@@ -9,10 +9,17 @@ function form(fields: Record<string, string>): FormData {
 }
 
 describe("API_BODIES", () => {
-  it("sends the auth forms' username, password and otp as the API names them", () => {
-    expect(API_BODIES.credentials(form({ username: "ada", password: "secret-pass" })))
-      .toEqual({ username: "ada", password: "secret-pass" })
+  it("sends the auth forms' fields as the API names them", () => {
+    expect(API_BODIES.signIn(form({ login: "ada@example.com", password: "secret-pass" })))
+      .toEqual({ login: "ada@example.com", password: "secret-pass" })
+    expect(API_BODIES.signUp(form({ email: "ada@example.com", password: "secret-pass" })))
+      .toEqual({ email: "ada@example.com", password: "secret-pass" })
     expect(API_BODIES.oneTimeCode(form({ otp: "012345" }))).toEqual({ otp: "012345" })
+    expect(API_BODIES.forgotPassword(form({ email: "ada@example.com" })))
+      .toEqual({ email: "ada@example.com" })
+    expect(
+      API_BODIES.resetPassword(form({ email: "ada@example.com", code: "c", newPassword: "pw" })),
+    ).toEqual({ email: "ada@example.com", code: "c", newPassword: "pw" })
   })
 
   it("sends a note's version and a group's kind as numbers, the way the API's schema takes them", () => {

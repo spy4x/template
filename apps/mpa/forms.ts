@@ -55,9 +55,19 @@ function numberField(form: FormData, name: string): number | string {
  * lives here.
  */
 export const API_BODIES = {
-  credentials: (form: FormData) => ({
-    username: field(form, "username"),
+  signIn: (form: FormData) => ({
+    login: field(form, "login"),
     password: field(form, "password"),
+  }),
+  signUp: (form: FormData) => ({
+    email: field(form, "email"),
+    password: field(form, "password"),
+  }),
+  forgotPassword: (form: FormData) => ({ email: field(form, "email") }),
+  resetPassword: (form: FormData) => ({
+    email: field(form, "email"),
+    code: field(form, "code"),
+    newPassword: field(form, "newPassword"),
   }),
   oneTimeCode: (form: FormData) => ({ otp: field(form, "otp") }),
   profile: (form: FormData) => ({
