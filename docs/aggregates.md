@@ -103,7 +103,7 @@ sequence as its version, so it is announced exactly like a group change.
 
 | File                 | What it holds                                                                                                                                                                         |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `progressive.tsx`    | `NOTE_PATHS`: the routes the forms post to and the pages link to, built from the ids.                                                                                                  |
+| `progressive.tsx`    | `NOTE_PATHS`: the routes the forms post to and the pages link to. They carry no group id: `/notes`, `/notes/:id` and `/notes/:id/delete` act on the person's selected group (see "How a group call travels", item 8, in `docs/handoff.md`).                                                                                                  |
 | `notes-screen.tsx`   | `NotesScreen`: props in, callbacks out. The create and edit forms post the API's field names; delete is a form with the version; "Edit" is a link. A viewer gets the list and no form. |
 | `screens.test.tsx`   | Renders the screen on the server and checks that every action is a working form or link whose fields match the request schema.                                                         |
 
@@ -135,8 +135,8 @@ development). Teach `POST /api/test/cleanup-user` to delete the new table's rows
 
 ## What is left to the next aggregate
 
-- The MPA pages that post to `NOTE_PATHS` are not built yet
-  ([#82](https://github.com/spy4x/template/issues/82)).
+- A create posted to `/notes` goes to the group selected when the post arrives. If another device
+  switched groups after the page was drawn, the note lands in the new group.
 - The role check and the write are two steps, not one transaction. Membership cannot change
   through the product yet; when it can, the check moves into the write's transaction.
 - The SPA reads the whole list again on every hint. A pull of only the notes changed after the
