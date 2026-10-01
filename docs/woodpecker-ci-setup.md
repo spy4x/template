@@ -11,15 +11,16 @@ It runs on every pull request and every push to `main`, in this order:
 
 ```
 check ──┬── build
-        ├── integration   (Postgres service)
+        ├── integration   (Postgres and Valkey services)
         └── e2e           (Playwright image, `deno task e2e url-filters`)
 ```
 
 - `check` runs `deno task check`: format, lint, type check and unit tests.
 - `build` runs `deno task build` (the SPA production build).
 - `integration` runs `deno task test:integration` against a throw-away `postgres:16-alpine` service
-  (user `tester`, password `ci-throwaway`, database `template_test`, reachable as host `postgres`).
-  It waits over TCP for the server, see docs/handoff.md trap 3.
+  (user `tester`, password `ci-throwaway`, database `template_test`, reachable as host `postgres`)
+  and a `valkey/valkey:8.1` service (password `ci-throwaway`, host `valkey`). It waits over TCP for
+  both servers, see docs/handoff.md trap 3.
 - `e2e` runs `deno task e2e url-filters` in `mcr.microsoft.com/playwright`, which ships Chromium and
   its system libraries, and installs Deno with npm. Playwright's own browser download, run through
   Deno in the plain Deno image, hangs. The image tag must equal the Playwright version in

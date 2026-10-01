@@ -1,5 +1,10 @@
 import type { MiddlewareHandler } from "hono"
-import { type Clock, createMemoryRateLimiter } from "@spy4x/platform/rate-limit"
+import {
+  type Clock,
+  createStoreLimiter,
+  failOpenLimiter,
+  type RateLimitStore,
+} from "@spy4x/platform/rate-limit"
 import {
   createRateLimitMiddleware,
   type RateLimitContext,
@@ -32,13 +37,38 @@ export interface AuthRateLimitSettings {
   otpWindowMs: number
   /** One-time-code checks per `otpWindowMs`. */
   otpLimit: number
+  /**
+   * Builds the store one limiter keeps its budgets in. `name` is that limiter's own key prefix:
+   * `ratelimit-strict`, `ratelimit-otp` or `ratelimit-normal`. Production passes
+   * `createRedisRateLimitStore` over Valkey; tests pass an in-process store.
+   */
+  store: (name: string) => RateLimitStore
+  /**
+   * Told each time a store failure is let pass: the normal limit allowing a request, or a correct
+   * one-time code whose slot could not be given back.
+   */
+  onStoreError: (error: unknown) => void
   /** Injected by tests. */
   clock?: Clock
 }
 
 /**
- * Build the auth rate limits over in-memory limiters, which is enough while the API runs as one
- * instance. A second instance needs a shared store, such as Valkey. A restart empties every budget.
+ * Build the auth rate limits over the stores `settings.store` builds. In production that is Valkey
+ * through the atomic `createRedisRateLimitStore`, so every budget survives an API restart or
+ * deploy, and any number of API instances share one exact budget per client. Compose runs Valkey
+ * without persistence (`--save ""`), so restarting Valkey itself still empties every budget. Compose
+ * also runs Valkey with `--maxmemory-policy allkeys-lru`, so under memory pressure a budget may be
+ * evicted like any cached key; a budget under attack is touched on every attempt and is the last to
+ * go, and the Postgres failure counter still bounds one-time-code guesses.
+ *
+ * When Valkey fails, the strict and one-time-code limits refuse the request (the error reaches
+ * Hono's error handler, which answers 500): they stand between a guesser and a password or a
+ * six-digit code, and letting guesses through unseen is the attack they exist to stop. The normal
+ * limit lets the request through and reports the error through `settings.onStoreError`, so sign-out
+ * and `/me` keep working while Valkey is down, as the rest of the signed-in API does. The normal
+ * limit uses `failOpenLimiter` for that; the other two must never be wrapped in it. A correct
+ * one-time code whose slot cannot be given back keeps its response (the session cookie included),
+ * and the slot stays spent; that error is reported through `settings.onStoreError` too.
  *
  * Shared budgets, on purpose: sign-in and sign-up from one IP spend one strict budget, since both
  * guess or probe passwords. `/totp/check` and `/totp/connect/finish` spend one user's one-time-code
@@ -49,8 +79,8 @@ export interface AuthRateLimitSettings {
  * The one-time-code limit is separate because a six-digit code is a small secret: one random guess
  * succeeds about once in 333,000 tries, so it needs far fewer attempts per day than a password.
  * Only wrong codes spend it (`skipSuccessful`), so a user who signs in six times in one window is
- * never refused. It forgets everything on restart; the failure counter in
- * `services/totp-failures.ts` does not, and is what limits guesses over days and years.
+ * never refused. The failure counter in `services/totp-failures.ts` lives in Postgres and is what
+ * limits guesses over days and years.
  *
  * Proxy assumption: the client IP comes from `X-Real-IP` because Traefik alone sits in front of the
  * API and overwrites that header on every request. The connection's own address, which
@@ -61,14 +91,21 @@ export interface AuthRateLimitSettings {
  * budgets per Cloudflare edge instead of per client.
  */
 export function createAuthRateLimits(settings: AuthRateLimitSettings): AuthRateLimits {
-  const { windowMs, clock } = settings
-  const strict = createMemoryRateLimiter({ windowMs, limit: settings.strictLimit, clock })
-  const normal = createMemoryRateLimiter({ windowMs, limit: settings.limit, clock })
-  const otp = createMemoryRateLimiter({
+  const { windowMs, clock, store } = settings
+  const strict = createStoreLimiter(store("ratelimit-strict"), {
+    windowMs,
+    limit: settings.strictLimit,
+    clock,
+  })
+  const otp = createStoreLimiter(store("ratelimit-otp"), {
     windowMs: settings.otpWindowMs,
     limit: settings.otpLimit,
     clock,
   })
+  const normal = failOpenLimiter(
+    createStoreLimiter(store("ratelimit-normal"), { windowMs, limit: settings.limit, clock }),
+    { limit: settings.limit, onError: settings.onStoreError },
+  )
   const remoteAddr = ({ env }: RateLimitContext<APIContext>) =>
     (env as { remoteAddr?: { hostname?: string } } | undefined)?.remoteAddr?.hostname
   const userId = (_: Request, context: RateLimitContext<APIContext>) =>
@@ -93,6 +130,7 @@ export function createAuthRateLimits(settings: AuthRateLimitSettings): AuthRateL
       keyPrefix: "auth-otp:",
       // A correct code gives its slot back: only wrong codes run the budget out.
       skipSuccessful: true,
+      onRefundError: (error) => settings.onStoreError(error),
     }),
     normal: createRateLimitMiddleware(normal, {
       remoteAddr,

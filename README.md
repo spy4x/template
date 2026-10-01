@@ -172,7 +172,7 @@ Current tasks come from [`deno.jsonc`](deno.jsonc).
 | Task                         | What it does                                           |
 | ---------------------------- | ------------------------------------------------------ |
 | `deno task check`            | Lint, format check, type check and unit tests          |
-| `deno task test:integration` | Integration tests against a Postgres you provide       |
+| `deno task test:integration` | Integration tests against your Postgres and Valkey     |
 | `deno task e2e`              | Playwright end-to-end tests                            |
 | `deno task db:migrate`       | Apply the SQL migrations in `libs/server/db`           |
 | `deno task db:reset`         | Drop, migrate and seed a dev database (`ENV=dev` only) |
