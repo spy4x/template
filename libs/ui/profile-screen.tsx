@@ -112,7 +112,7 @@ export function ProfileScreen(
         <CardBody>
           <Stack>
             <p>Verify OTP to access profile.</p>
-            <ScreenLink href={SCREEN_PATHS.oneTimeCode} navigate={navigate} class="link">
+            <ScreenLink href={SCREEN_PATHS.oneTimeCode} navigate={navigate} class="pc-link">
               Go to OTP
             </ScreenLink>
           </Stack>

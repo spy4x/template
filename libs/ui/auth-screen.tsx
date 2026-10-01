@@ -73,7 +73,7 @@ function Notice(
       </CardHeader>
       <CardBody>
         <p class="mb-4">{text}</p>
-        <ScreenLink href={SCREEN_PATHS.profile} navigate={navigate} class="link">
+        <ScreenLink href={SCREEN_PATHS.profile} navigate={navigate} class="pc-link">
           {link}
         </ScreenLink>
       </CardBody>
@@ -144,7 +144,7 @@ export function AuthScreen(
           footer={screen === "one-time-code" && (
             <p class="text-sm">
               Need help?{" "}
-              <ScreenLink href={SCREEN_PATHS.signIn} navigate={navigate} class="link">
+              <ScreenLink href={SCREEN_PATHS.signIn} navigate={navigate} class="pc-link">
                 Back to sign in
               </ScreenLink>
             </p>

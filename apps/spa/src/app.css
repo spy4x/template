@@ -6,3 +6,7 @@
 @import "@spy4x/preact-theme/preset.css";
 /* libs/ui holds the screens; Tailwind does not scan outside this app on its own. */
 @source "../../../libs/ui";
+/* preact-theme sets no font since 2.0.0. The app keeps Poppins, which index.html loads. */
+@theme {
+  --font-sans: "Poppins", ui-sans-serif, system-ui, sans-serif;
+}

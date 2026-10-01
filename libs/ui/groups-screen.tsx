@@ -115,7 +115,7 @@ export function GroupsScreen(
                       <ScreenLink
                         href={NOTE_PATHS.list(group.id)}
                         navigate={navigate}
-                        class="link font-medium"
+                        class="pc-link font-medium"
                       >
                         <span data-e2e="group-item-name">{group.name}</span>
                       </ScreenLink>

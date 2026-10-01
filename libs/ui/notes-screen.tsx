@@ -96,7 +96,7 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
         <CardBody>
           <Stack>
             <EmptyState title={loading ? "Loading the group..." : "This group was not found."} />
-            <ScreenLink href={SCREEN_PATHS.groups} navigate={navigate} class="link">
+            <ScreenLink href={SCREEN_PATHS.groups} navigate={navigate} class="pc-link">
               Back to groups
             </ScreenLink>
           </Stack>
@@ -110,7 +110,7 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
       <Card>
         <CardHeader>
           <h1 class="text-lg font-semibold">Notes in {group.name}</h1>
-          <ScreenLink href={SCREEN_PATHS.groups} navigate={navigate} class="link text-sm">
+          <ScreenLink href={SCREEN_PATHS.groups} navigate={navigate} class="pc-link text-sm">
             All groups
           </ScreenLink>
         </CardHeader>
@@ -142,7 +142,7 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
                 </ul>
               )}
             {props.nextPageHref && (
-              <ScreenLink href={props.nextPageHref} navigate={navigate} class="link text-sm">
+              <ScreenLink href={props.nextPageHref} navigate={navigate} class="pc-link text-sm">
                 Older notes
               </ScreenLink>
             )}
@@ -205,7 +205,7 @@ function EditForm(
           <ScreenLink
             href={notePath}
             navigate={onReloadLatest ? () => onReloadLatest() : navigate}
-            class="link"
+            class="pc-link"
           >
             Load the latest version
           </ScreenLink>{" "}
@@ -293,7 +293,7 @@ function NoteItem(
           <ScreenLink
             href={NOTE_PATHS.note(group.id, note.id)}
             navigate={navigate}
-            class="link text-sm"
+            class="pc-link text-sm"
           >
             Edit<span class="sr-only">{` ${note.title}`}</span>
           </ScreenLink>
