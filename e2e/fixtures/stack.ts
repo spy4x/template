@@ -29,11 +29,8 @@ async function warmUp(browser: Browser, api: APIRequestContext, baseURL: string,
     await signIn(page, email, WARM_PASSWORD)
     const status = page.locator("[data-e2e=shell-ws-status]")
     await gotoApp(page, "/groups", status)
-    const groups = await (await context.request.get("/api/groups?limit=100")).json()
-    const groupId = groups.groups?.[0]?.id
-    // Sign-up always creates the personal group, so its notes screen is there to warm.
-    if (!groupId) throw new Error(`warm-up found no group: ${JSON.stringify(groups)}`)
-    await gotoApp(page, `/groups/${groupId}/notes`, status)
+    // The notes of the selected group, which is the personal group sign-up creates.
+    await gotoApp(page, "/notes", page.locator("[data-e2e=note-new-title]"))
     await page.waitForLoadState("networkidle")
   } catch (error) {
     // The warm-up's own error is the one to report; a cleanup that fails as well is added to it.
