@@ -15,46 +15,53 @@ type Handler = (arg: never) => void
 const failedRequest = (url: string, errorText: string) =>
   ({ url: () => url, failure: () => ({ errorText }) }) as unknown as Request
 
-/** A page whose n-th load ends as `outcomes[n]`, and that records what the helper does to it. */
+/**
+ * A page whose n-th load ends as `outcomes[n]`, and that records what the helper does to it. A load
+ * starts with `page.goto` or with `click`, which stands for a click after which the app loads `url`
+ * itself; `starts` lists which one began each load.
+ */
 function fakePage(outcomes: Outcome[]) {
   const handlers = new Map<string, Set<Handler>>()
   const emit = (event: string, arg: unknown) => {
     for (const handler of handlers.get(event) ?? []) (handler as (arg: unknown) => void)(arg)
   }
-  let loads = 0
+  const starts: string[] = []
+  const load = (start: string, url: string) => {
+    starts.push(start)
+    emit("request", { isNavigationRequest: () => true, url: () => `${APP}${url}` })
+    const outcome = outcomes[starts.length - 1]
+    if (outcome === "blank after network change") {
+      emit("requestfailed", failedRequest(`${APP}/src/main.tsx`, "net::ERR_NETWORK_CHANGED"))
+    } else if (outcome === "blank after a network change of another origin") {
+      emit(
+        "requestfailed",
+        failedRequest("https://fonts.example/a.css", "net::ERR_NETWORK_CHANGED"),
+      )
+    } else if (outcome === "stays blank") {
+      emit("requestfailed", failedRequest(`${APP}/src/app.tsx`, "net::ERR_CONNECTION_REFUSED"))
+      emit("console", { type: () => "error", text: () => "boom in the module" } as ConsoleMessage)
+    }
+    return Promise.resolve()
+  }
   const page = {
     on: (event: string, handler: Handler) => {
       handlers.set(event, (handlers.get(event) ?? new Set()).add(handler))
     },
     off: (event: string, handler: Handler) => handlers.get(event)?.delete(handler),
-    goto: (url: string) => {
-      loads++
-      emit("request", { isNavigationRequest: () => true, url: () => `${APP}${url}` })
-      const outcome = outcomes[loads - 1]
-      if (outcome === "blank after network change") {
-        emit("requestfailed", failedRequest(`${APP}/src/main.tsx`, "net::ERR_NETWORK_CHANGED"))
-      } else if (outcome === "blank after a network change of another origin") {
-        emit(
-          "requestfailed",
-          failedRequest("https://fonts.example/a.css", "net::ERR_NETWORK_CHANGED"),
-        )
-      } else if (outcome === "stays blank") {
-        emit("requestfailed", failedRequest(`${APP}/src/app.tsx`, "net::ERR_CONNECTION_REFUSED"))
-        emit("console", { type: () => "error", text: () => "boom in the module" } as ConsoleMessage)
-      }
-      return Promise.resolve()
-    },
+    goto: (url: string) => load("goto", url),
   }
   const ready = {
     waitFor: () =>
-      outcomes[loads - 1] === "boots"
+      outcomes[starts.length - 1] === "boots"
         ? Promise.resolve()
         : Promise.reject(new Error("Timeout 10000ms exceeded")),
   }
   return {
     page: page as unknown as Page,
     ready: ready as unknown as Locator,
-    loads: () => loads,
+    click: (url: string) => load("click", url),
+    starts: () => starts,
+    loads: () => starts.length,
     listeners: () => [...handlers.values()].reduce((sum, set) => sum + set.size, 0),
   }
 }
@@ -69,6 +76,12 @@ Deno.test("gotoApp throws without a second load when the page stays blank for an
   const fake = fakePage(["stays blank", "boots"])
   await expect(gotoApp(fake.page, "/sign-in", fake.ready)).rejects.toThrow("Timeout")
   expect(fake.loads()).toBe(1)
+})
+
+Deno.test("gotoApp opens the url itself after a network change broke the load a click started", async () => {
+  const fake = fakePage(["blank after network change", "boots"])
+  await gotoApp(fake.page, "/", fake.ready, () => fake.click("/"))
+  expect(fake.starts()).toEqual(["click", "goto"])
 })
 
 Deno.test("gotoApp does not load again for a network change of a request to another origin", async () => {

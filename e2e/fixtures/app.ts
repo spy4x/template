@@ -17,8 +17,17 @@ const MAX_LOGGED = 30
  * again, up to three times. Any other failure, or the same failure on the last attempt, throws
  * at once, with the failed requests and the console of the last attempt added to the message so a
  * red run explains itself without a trace.
+ *
+ * `open` makes the first load and defaults to `page.goto(url)`. Where the app loads `url` itself
+ * after a click, the click is passed instead (see `submitAuthForm`); every later attempt is
+ * `page.goto(url)`.
  */
-export async function gotoApp(page: Page, url: string, ready: Locator): Promise<void> {
+export async function gotoApp(
+  page: Page,
+  url: string,
+  ready: Locator,
+  open: () => Promise<unknown> = () => page.goto(url),
+): Promise<void> {
   let networkChanged = false
   let appOrigin = ""
   let failed: string[] = []
@@ -46,7 +55,7 @@ export async function gotoApp(page: Page, url: string, ready: Locator): Promise<
       failed = []
       consoleLines = []
       try {
-        await page.goto(url)
+        await (attempt === 1 ? open() : page.goto(url))
         await ready.waitFor()
         return
       } catch (error) {
@@ -67,11 +76,21 @@ export async function gotoApp(page: Page, url: string, ready: Locator): Promise<
   }
 }
 
-/** Signs `email` in through the form and waits until the app is on its home page. */
+/**
+ * Submits the auth form, after which the app loads `url` itself, and waits for `ready` there. A
+ * load that a network change broke is made again, as in `gotoApp`.
+ */
+export async function submitAuthForm(page: Page, url: string, ready: Locator): Promise<void> {
+  await gotoApp(page, url, ready, async () => {
+    await page.locator("[data-e2e=auth-form-submit]").click()
+    await page.waitForURL(url)
+  })
+}
+
+/** Signs `email` in through the form and waits until the app has booted on its home page. */
 export async function signIn(page: Page, email: string, password: string): Promise<void> {
   await gotoApp(page, "/sign-in", page.locator("[data-e2e=auth-form-login]"))
   await page.locator("[data-e2e=auth-form-login]").fill(email)
   await page.locator("[data-e2e=auth-form-password]").fill(password)
-  await page.locator("[data-e2e=auth-form-submit]").click()
-  await page.waitForURL("/")
+  await submitAuthForm(page, "/", page.locator("[data-e2e=shell-ws-status]"))
 }

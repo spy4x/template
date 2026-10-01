@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures/stack.ts"
-import { gotoApp } from "./fixtures/app.ts"
+import { gotoApp, submitAuthForm } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const STEP_SECONDS = 30
@@ -75,12 +75,9 @@ test.describe("two-factor sign-in", () => {
       await gotoApp(page, "/sign-in", page.locator("[data-e2e=auth-form-login]"))
       await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      await page.waitForURL("**/totp")
-      await page.goto("/")
-      await expect(page.getByRole("heading", { level: 1, name: "Finish MFA" })).toBeVisible()
-      await page.goto("/totp")
-      await expect(page.locator("[data-e2e=auth-form-code]")).toBeVisible()
+      await submitAuthForm(page, "/totp", page.locator("[data-e2e=auth-form-code]"))
+      await gotoApp(page, "/", page.getByRole("heading", { level: 1, name: "Finish MFA" }))
+      await gotoApp(page, "/totp", page.locator("[data-e2e=auth-form-code]"))
       await expect(page.getByRole("heading", { level: 1, name: "MFA not required" }))
         .toHaveCount(0)
 
@@ -88,10 +85,8 @@ test.describe("two-factor sign-in", () => {
       // server accepts one step ahead.
       const step = Math.max(currentStep(), enrolStep + 1)
       await page.locator("[data-e2e=auth-form-code]").fill(await totpCode(secret, step))
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      await page.waitForURL((url) => url.pathname === "/")
+      await submitAuthForm(page, "/", page.getByRole("heading", { level: 1, name: "Profile" }))
 
-      await expect(page.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible()
       const me = await page.request.get("/api/auth/me")
       expect(me.status()).toBe(200)
     } finally {

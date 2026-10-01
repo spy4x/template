@@ -57,8 +57,7 @@ async function openNotesAndCacheShell(page: Page, groupId: string): Promise<void
     await navigator.serviceWorker.ready
   })
   // One more load under the worker's control, so everything the page needs is cached.
-  await page.reload()
-  await expect(page.locator("[data-e2e=note-list]")).toBeVisible()
+  await gotoApp(page, page.url(), page.locator("[data-e2e=note-list]"))
 }
 
 /** Goes offline and loads the page again: the app must start from the cache alone. */
@@ -129,7 +128,7 @@ test.describe("offline notes", () => {
         .toEqual(["Written offline", "Written online"])
 
       // Still there after a fresh load.
-      await page.reload()
+      await gotoApp(page, page.url(), page.locator("[data-e2e=shell-ws-status]"))
       await expect(titles).toHaveText(["Written offline", "Written online"])
     } finally {
       await context.close()
