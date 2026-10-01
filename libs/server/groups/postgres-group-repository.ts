@@ -225,8 +225,9 @@ export class PostgresGroupRepository implements GroupRepository {
   }
 
   /**
-   * Stores the selection and, when it changed, moves the version and announces it. Selecting the
-   * group already selected changes nothing and sends nothing. Runs in the caller's transaction.
+   * Stores the selection and, when it changed, moves the version. Selecting the group already
+   * selected changes nothing. It announces nothing: the handler emits `GroupSelectedEvent`. Runs in
+   * the caller's transaction.
    */
   private async storeSelection(userId: number, groupId: string): Promise<SelectedGroup> {
     const changed = (

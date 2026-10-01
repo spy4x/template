@@ -353,6 +353,17 @@ describe("the group picker without JavaScript", () => {
     expect(parseSelectGroupRequest(body)).toEqual(body)
   })
 
+  it("draws the form through ScreenForm, so it has EnhancedForm's status line and not a plain form's", () => {
+    const html = renderToString(frame())
+    const forms = [...html.matchAll(/<form\b[^>]*action="\/groups\/select"[^>]*>[\s\S]*?<\/form>/g)]
+
+    expect(forms).toHaveLength(2)
+    for (const [form] of forms) {
+      expect(form).toContain('class="space-y-0 ')
+      expect(form).toContain('<p role="status" aria-live="polite"')
+    }
+  })
+
   it("lists every group with the person's role, marks the selected one, and gives each copy its own ids", () => {
     const html = renderToString(frame())
 

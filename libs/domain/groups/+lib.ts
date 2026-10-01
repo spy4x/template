@@ -207,8 +207,9 @@ export interface GroupRepository {
   /** See {@link GroupSelectedQuery}. */
   getSelected(userId: number): Promise<SelectedGroup>
   /**
-   * Stores the user's selection and announces it to their devices, in one transaction. `null` when
-   * the user is not a member of the group (or it is missing): nothing is stored.
+   * Stores the user's selection, in one transaction. `null` when the user is not a member of the
+   * group (or it is missing): nothing is stored. The repository announces nothing: the handler
+   * emits `GroupSelectedEvent`, which tells the user's other devices.
    */
   select(userId: number, groupId: string): Promise<SelectedGroup | null>
   listForUser(userId: number, page: GroupListPage): Promise<GroupListResult>
