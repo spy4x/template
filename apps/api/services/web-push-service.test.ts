@@ -187,7 +187,7 @@ describe("createWebPushService with today's key file", () => {
       .toBe(encodeBase64Url(await crypto.subtle.exportKey("raw", file.publicKey)))
   })
 
-  it("signs each push with the file's key pair", async () => {
+  it("signs the welcome push and every later push with the file's key pair", async () => {
     const file = await todaysKeyFile()
     const push = fakePushService()
     const webPush = await createWebPushService(file.json, push.options, memoryStore())
@@ -196,20 +196,20 @@ describe("createWebPushService with today's key file", () => {
       "device-1",
       1,
     )
-    const match = /^vapid t=([^.]+)\.([^.]+)\.([^,]+), k=(.+)$/.exec(
-      push.requests[0].headers.Authorization,
-    )
-    if (!match) {
-      throw new Error(`unexpected Authorization: ${push.requests[0].headers.Authorization}`)
+    await webPush.send(1, message)
+    expect(push.requests.length).toBe(2)
+    for (const { headers } of push.requests) {
+      const match = /^vapid t=([^.]+)\.([^.]+)\.([^,]+), k=(.+)$/.exec(headers.Authorization)
+      if (!match) throw new Error(`unexpected Authorization: ${headers.Authorization}`)
+      const [, header, payload, signature, key] = match
+      expect(key).toBe(webPush.getPublicKey())
+      const verified = await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        file.publicKey,
+        decodeBase64Url(signature),
+        new TextEncoder().encode(`${header}.${payload}`),
+      )
+      expect(verified).toBe(true)
     }
-    const [, header, payload, signature, key] = match
-    expect(key).toBe(webPush.getPublicKey())
-    const verified = await crypto.subtle.verify(
-      { name: "ECDSA", hash: "SHA-256" },
-      file.publicKey,
-      decodeBase64Url(signature),
-      new TextEncoder().encode(`${header}.${payload}`),
-    )
-    expect(verified).toBe(true)
   })
 })
