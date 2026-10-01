@@ -5,7 +5,7 @@ import { RealtimeRequestError } from "@spy4x/realtime"
 import { GroupError } from "@domain/groups"
 import { NoteError, NoteVersionConflictError } from "@domain/notes"
 import { AccessError, UserMFAStatus } from "@domain/identity"
-import { IdempotencyError } from "@server/idempotency/idempotency.ts"
+import { IdempotencyError } from "@spy4x/server/idempotency"
 import { buildAuthData } from "../_testing/fake-auth.ts"
 import {
   POLICY_CLOSE_CODE,
@@ -341,6 +341,7 @@ describe("toRequestError", () => {
     expect(code(new IdempotencyError("KEY_REUSED", "x"))).toBe("conflict")
     expect(code(new IdempotencyError("IN_PROGRESS", "x"))).toBe("conflict")
     expect(code(new IdempotencyError("INVALID_KEY", "x"))).toBe("bad_request")
+    expect(toRequestError(new IdempotencyError("INVALID_COMMAND", "x"))).toBeNull()
     expect(code(new RealtimeRequestError("rate_limited", "x"))).toBe("rate_limited")
   })
 

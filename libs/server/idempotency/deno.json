@@ -1,6 +1,0 @@
-{
-  "tasks": {
-    "check": "deno check idempotency.ts postgres-idempotency-store.ts",
-    "test": "deno test idempotency.test.ts"
-  }
-}

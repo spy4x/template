@@ -51,7 +51,7 @@ libs/platform  empty. Its primitives come from spy4x/ts-libs on JSR:
 libs/domain    groups (enums, policy, commands/queries), identity (user, session,
                auth). May depend on platform only.
 libs/server    db (migrations and schema.sql only), groups (Postgres repository,
-               cursor, change notification), idempotency (middleware and store). Database access, outbox, key-value store, config,
+               cursor, change notification). Database access, outbox, key-value store, config,
                request logging, sign-in and auth come from @spy4x/server/*.
 libs/client    vite. Icons, useUrlFilters and the signed-in Shell come from
                @spy4x/preact-icons, @spy4x/preact-signals and @spy4x/preact-system.
@@ -251,9 +251,9 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 2. `group.create` and `group.list` are dispatched on the same command and query buses REST uses,
    from `apps/api/features/groups/socket.ts`. Each frame reads the session again from the database,
    so a signed-out or expired session is refused. Authorization stays in the buses.
-3. A command needs an idempotency key. `libs/server/idempotency` stores it for 7 days per user and
-   runs the command once; a repeat returns the first result, and a repeat while the first still
-   runs waits, then answers `conflict`. The worker sweeps expired keys hourly.
+3. A command needs an idempotency key. `@spy4x/server/idempotency` (ts-libs) stores it for 7 days
+   per user and runs the command once; a repeat returns the first result, and a repeat while the
+   first still runs waits, then answers `conflict`. The worker sweeps expired keys hourly.
 4. Every committed group change bumps `groups.next_change_sequence` and writes an outbox row in
    the same transaction. The worker drains the outbox and sends `pg_notify`; the API turns it into
    a `change.hint` with the sequence for every member's open sockets.

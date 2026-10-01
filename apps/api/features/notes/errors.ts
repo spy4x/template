@@ -2,7 +2,7 @@ import type { Context } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { NoteError, type NoteErrorCode, NoteVersionConflictError } from "@domain/notes"
 import { AccessError } from "@domain/identity"
-import { IdempotencyError } from "@server/idempotency/idempotency.ts"
+import { IdempotencyError } from "@spy4x/server/idempotency"
 import type { APIContext } from "../../_types.ts"
 
 export type NoteFeatureErrorCode =
@@ -58,6 +58,7 @@ const IDEMPOTENCY_CODES: Record<IdempotencyError["code"], NoteFeatureErrorCode> 
   INVALID_KEY: "IDEMPOTENCY_KEY_INVALID",
   KEY_REUSED: "IDEMPOTENCY_KEY_REUSED",
   IN_PROGRESS: "IDEMPOTENCY_IN_PROGRESS",
+  INVALID_COMMAND: "INTERNAL_ERROR",
 }
 
 /**

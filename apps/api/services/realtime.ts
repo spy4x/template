@@ -12,7 +12,7 @@ import {
 import { GROUP_AGGREGATE, GroupError } from "@domain/groups"
 import { AccessError, type Actor } from "@domain/identity"
 import { NoteError, NoteVersionConflictError } from "@domain/notes"
-import { IdempotencyError } from "@server/idempotency/idempotency.ts"
+import { IdempotencyError } from "@spy4x/server/idempotency"
 import { actorFromAuth } from "../cqrs/actor.ts"
 import type { AppAuthState } from "./sign-in.ts"
 
@@ -84,6 +84,8 @@ export function toRequestError(error: unknown): RealtimeRequestError | null {
     return new RealtimeRequestError("unauthorized", error.message, { code: error.code })
   }
   if (error instanceof IdempotencyError) {
+    // A command class name over the limit is a server bug, so it is answered as an unexpected error.
+    if (error.code === "INVALID_COMMAND") return null
     const code = error.code === "INVALID_KEY" ? "bad_request" : "conflict"
     return new RealtimeRequestError(code, error.message, { code: error.code })
   }

@@ -14,7 +14,7 @@ import { CommandBus } from "@spy4x/platform/cqrs"
 import { createSessionGate } from "../cqrs/session-gate.ts"
 import type { APIContext } from "../_types.ts"
 import { oversizedJson } from "../_testing/json-bodies.ts"
-import { IdempotencyError } from "@server/idempotency/idempotency.ts"
+import { IdempotencyError } from "@spy4x/server/idempotency"
 import { createGroupsRoute, GroupsRouteDependencies } from "./groups.ts"
 import { buildAuthData } from "../_testing/fake-auth.ts"
 
@@ -457,6 +457,7 @@ describe("groups route idempotency", () => {
       ["IDEMPOTENCY_KEY_INVALID", 400, new IdempotencyError("INVALID_KEY", "bad key")],
       ["IDEMPOTENCY_KEY_REUSED", 422, new IdempotencyError("KEY_REUSED", "other body")],
       ["IDEMPOTENCY_IN_PROGRESS", 409, new IdempotencyError("IN_PROGRESS", "still running")],
+      ["INTERNAL_ERROR", 500, new IdempotencyError("INVALID_COMMAND", "name too long")],
     ] as const
   ) {
     it(`answers ${status} ${code} when the key is refused`, async () => {
