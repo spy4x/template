@@ -15,6 +15,7 @@ import { UserMFAStatus, type UserPushTokenPublic } from "@domain/identity"
 import { GroupKind, GroupRole } from "@domain/groups"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
+import { GroupSettingsScreen } from "./group-settings-screen.tsx"
 import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
 import { NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
@@ -437,6 +438,7 @@ describe("NotesScreen in the browser", () => {
 
 const groupsDefaults: GroupsScreenProps = {
   groups: [{ id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER }],
+  selectedId: "g-1",
   name: "",
   creating: false,
   loading: false,
@@ -572,5 +574,33 @@ describe("frames in the browser", () => {
 
     expect(await click('a[href="/"]')).toBe(true)
     expect(navigate.calls).toEqual([["/"]])
+  })
+})
+
+describe("GroupsScreen links in the browser", () => {
+  it("follows a group's settings link through the app's navigate instead of loading a page", async () => {
+    const navigate = spy<[string]>()
+    await mount(<GroupsScreen {...groupsDefaults} navigate={navigate.fn} />)
+
+    await click("[data-e2e=group-settings]")
+
+    expect(navigate.calls).toEqual([["/groups/g-1"]])
+  })
+})
+
+describe("GroupSettingsScreen in the browser", () => {
+  const group = { id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER }
+
+  it("opens the group's notes through the app's callback, and posts natively without one", async () => {
+    const open = spy<[string]>()
+    await mount(
+      <GroupSettingsScreen group={group} selected={false} loading={false} onOpen={open.fn} />,
+    )
+
+    expect(await submit(FORM_ACTIONS.groupSelect)).toBe(true)
+    expect(open.calls).toEqual([["g-1"]])
+
+    await rerender(<GroupSettingsScreen group={group} selected={false} loading={false} />)
+    expect(await submit(FORM_ACTIONS.groupSelect)).toBe(false)
   })
 })

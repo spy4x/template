@@ -10,6 +10,8 @@ import { handler as password } from "./routes/profile/password.ts"
 import { handler as notes } from "./routes/notes/index.tsx"
 import { handler as note } from "./routes/notes/[noteId]/index.tsx"
 import { handler as selectGroup } from "./routes/groups/select.ts"
+import { handler as groupsPage } from "./routes/groups/index.tsx"
+import { handler as groupSettings } from "./routes/groups/[groupId]/index.tsx"
 import { handler as oldNotes } from "./routes/groups/[groupId]/notes/index.tsx"
 import { handler as oldNote } from "./routes/groups/[groupId]/notes/[noteId]/index.tsx"
 import { pageMiddleware } from "./middleware.ts"
@@ -47,6 +49,8 @@ function appWith(fetch: typeof globalThis.fetch) {
     .post("/notes", notes.POST!)
     .post("/notes/:noteId", note.POST!)
     .post("/groups/select", selectGroup.POST!)
+    .get("/groups", groupsPage.GET!)
+    .get("/groups/:groupId", groupSettings.GET!)
     .get("/groups/:groupId/notes", oldNotes.GET!)
     .get("/groups/:groupId/notes/:noteId", oldNote.GET!)
     .post("/forgot-password", forgotPassword.POST!)
@@ -300,6 +304,7 @@ describe("the profile page", () => {
 
 const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
 const otherGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111003"
+const farGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111098"
 const noteId = "0f4a3c1e-9d2b-4e8f-a6c5-1b2d3e4f5a6b"
 
 /**
@@ -540,5 +545,47 @@ describe("old notes links", () => {
 
     expect([response.status, response.headers.get("location")]).toEqual([303, "/groups"])
     expect(calls.some((call) => call.method !== "GET")).toBe(false)
+  })
+})
+
+describe("the groups pages", () => {
+  const get = (fetch: typeof globalThis.fetch, path: string) =>
+    appWith(fetch)(new Request(`${config.webAppOrigin}${path}`), info)
+
+  it("marks only the selected group on the list, and links each group to its settings", async () => {
+    const { fetch } = notesApi(otherGroupId)
+
+    const html = await (await get(fetch, "/groups")).text()
+
+    expect(html.match(/>Selected</g)).toHaveLength(1)
+    expect(html).toContain(`href="/groups/${groupId}"`)
+    expect(html).toContain(`href="/groups/${otherGroupId}"`)
+  })
+
+  it("shows a group's settings with the person's role in it", async () => {
+    const { fetch } = notesApi(
+      groupId,
+      (path) =>
+        path === `/api/groups/${otherGroupId}`
+          ? Response.json({ group: { id: otherGroupId, name: "Work", kind: 2, role: 1 } })
+          : notesList(),
+    )
+
+    const response = await get(fetch, `/groups/${otherGroupId}`)
+    const html = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(html).toContain("Work")
+    expect(html).toContain("Viewer")
+    expect(html).not.toContain(">Selected<")
+  })
+
+  it("answers 404 for a group the person does not belong to", async () => {
+    const { fetch } = notesApi(groupId, () => Response.json({ error: {} }, { status: 404 }))
+
+    const response = await get(fetch, `/groups/${farGroupId}`)
+
+    expect(response.status).toBe(404)
+    expect(await response.text()).toContain("This group does not exist.")
   })
 })

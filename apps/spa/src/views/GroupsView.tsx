@@ -11,6 +11,8 @@ export function GroupsView() {
   return (
     <GroupsScreen
       groups={store.groups.value}
+      selectedId={selectionStore.groupId.value}
+      navigate={navigate}
       name={store.name.value}
       onNameChange={(name) => (store.name.value = name)}
       creating={store.creating.value}
