@@ -11,7 +11,7 @@ import { notesStore } from "./state/notes.ts"
 import { selectionStore } from "./state/selection.ts"
 import { connectRealtime, disconnectRealtime } from "./state/realtime.ts"
 import { profileStore } from "./state/profile.ts"
-import { userChangeGroupId } from "@domain/identity"
+import { createPull } from "./state/pull.ts"
 import { flushOutbox, startOffline, stopOffline } from "./offline/index.ts"
 import { forgetUser, recallUser, rememberUser } from "./offline/session-cache.ts"
 import { toasts } from "./state/toasts.ts"
@@ -133,21 +133,14 @@ export function App() {
     // The REST read is the pull: it runs at start-up, after every reconnect and for every push
     // that is news, so a missed frame costs one read and never leaves the list wrong. A note
     // change moves its group's sequence, so the open group's notes are read again too.
-    const pull = async (gap?: { groupId: string }) => {
-      // The hint for this person's own changes (profile, push devices, selected group), sent after
-      // a change in another tab.
-      if (gap?.groupId === userChangeGroupId(userId)) {
-        return await Promise.all([profileStore.refresh(), selectionStore.refresh()]).then(() => {})
-      }
-      // Writes made offline go out before anything is read, so the read shows their result.
-      await flushOutbox()
-      const openGroup = notesStore.groupId.value
-      await Promise.all([
-        selectionStore.refresh(),
-        groupsStore.refresh(),
-        openGroup && (!gap || gap.groupId === openGroup) ? notesStore.refresh() : undefined,
-      ])
-    }
+    const pull = createPull({
+      userId,
+      flushOutbox,
+      profile: profileStore,
+      selection: selectionStore,
+      groups: groupsStore,
+      notes: notesStore,
+    })
     startOffline(userId)
     selectionStore.start(userId)
     void pull().catch(() => {})
