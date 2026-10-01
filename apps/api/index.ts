@@ -7,7 +7,8 @@ import { config } from "@api/services/config.ts"
 import { log } from "@api/services/log.ts"
 import { parseAuth, signIn } from "@api/services/auth.ts"
 import { eventBus } from "@api/services/eventBus.ts"
-import { webPushService } from "@api/services/webPush.ts"
+import { createWebPushService } from "@api/services/web-push-service.ts"
+import { createPushTokenStore } from "@api/services/push-token-store.ts"
 import { APIContext } from "./_types.ts"
 import { randomBase64Url } from "@spy4x/platform/tokens"
 import { ONE_HOUR_IN_MILLISECONDS } from "@spy4x/platform/universal/time-constants"
@@ -73,9 +74,14 @@ app.route(
     updateProfile: (command) => commandBus.execute(command),
   }),
 )
+const webPush = await createWebPushService(
+  await Deno.readTextFile(config.vapidKeysPath),
+  { subject: `mailto:${config.devEmail}` },
+  createPushTokenStore(sql),
+)
 app.route(
   "/push",
-  createPushNotificationRoute({ auth: signIn.auth, webPush: webPushService, emit, mutationGuards }),
+  createPushNotificationRoute({ auth: signIn.auth, webPush, emit, mutationGuards }),
 )
 app.route("/ws", wsRoute)
 // Before "/groups": its authentication middleware would otherwise answer for these paths too.

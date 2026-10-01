@@ -2,7 +2,9 @@
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import { createPushTokenStore } from "../../apps/api/services/push-token-store.ts"
-import { type PushSender, WebPushService } from "../../apps/api/services/web-push-service.ts"
+import { createWebPushService } from "../../apps/api/services/web-push-service.ts"
+import { browserKeys, fakePushService } from "../../apps/api/_testing/web-push.ts"
+import { generateVapidKeyPair } from "@spy4x/integrations/push"
 import { requireDbConnection } from "./db-connection.ts"
 
 interface IdRow extends postgres.Row {
@@ -16,23 +18,14 @@ interface CountRow extends postgres.Row {
 const MIGRATIONS = "libs/server/db/migrations"
 const PUSH_MIGRATION = "2026_09_30_0001_push_token_one_per_device.sql"
 
-function recordingSender(failures: Record<string, number> = {}) {
-  const endpoints: string[] = []
-  const sender: PushSender = {
-    subscribe: (subscription) => ({
-      pushTextMessage: () => {
-        const status = failures[subscription.endpoint]
-        if (status) {
-          return Promise.reject(Object.assign(new Error("gone"), {
-            response: new Response(null, { status }),
-          }))
-        }
-        endpoints.push(subscription.endpoint)
-        return Promise.resolve()
-      },
-    }),
-  }
-  return { sender, endpoints }
+const KEYS = await browserKeys()
+const VAPID_JSON = JSON.stringify((await generateVapidKeyPair()).keys)
+
+/** A service over `sql` whose push service is in memory and answers `failures` per endpoint. */
+async function serviceOver(sql: postgres.Sql, failures: Record<string, number> = {}) {
+  const push = fakePushService(failures)
+  const service = await createWebPushService(VAPID_JSON, push.options, createPushTokenStore(sql))
+  return { service, endpoints: () => push.requests.map((request) => request.endpoint) }
 }
 
 async function applyMigration(sql: postgres.Sql, name: string): Promise<void> {
@@ -81,11 +74,11 @@ Deno.test({
       // the live subscription and must survive.
       await sql`
         INSERT INTO user_push_tokens (user_id, device_id, endpoint, auth, p256dh, updated_at)
-        VALUES (${userA}, ${"phone"}, ${"https://push.example/new"}, ${"auth"}, ${"p256dh"},
+        VALUES (${userA}, ${"phone"}, ${"https://push.example/new"}, ${KEYS.auth}, ${KEYS.p256dh},
           '2026-09-02T00:00:00Z')`
       await sql`
         INSERT INTO user_push_tokens (user_id, device_id, endpoint, auth, p256dh, updated_at)
-        VALUES (${userA}, ${"phone"}, ${"https://push.example/old"}, ${"auth"}, ${"p256dh"},
+        VALUES (${userA}, ${"phone"}, ${"https://push.example/old"}, ${KEYS.auth}, ${KEYS.p256dh},
           '2026-09-01T00:00:00Z')`
       await applyMigration(sql, PUSH_MIGRATION)
 
@@ -99,14 +92,10 @@ Deno.test({
       )
 
       await t.step("subscribing twice from one device keeps one live subscription", async () => {
-        const service = new WebPushService(
-          recordingSender().sender,
-          createPushTokenStore(sql),
-          "key",
-        )
+        const { service } = await serviceOver(sql)
         for (const endpoint of ["https://push.example/a1", "https://push.example/a2"]) {
           await service.subscribe(
-            { endpoint, keys: { auth: "a", p256dh: "p" }, expirationTime: null },
+            { endpoint, keys: KEYS, expirationTime: null },
             "tablet",
             userB,
           )
@@ -118,15 +107,11 @@ Deno.test({
       })
 
       await t.step("subscriptions survive an API restart and send stays per user", async () => {
-        const before = new WebPushService(
-          recordingSender().sender,
-          createPushTokenStore(sql),
-          "key",
-        )
+        const { service: before } = await serviceOver(sql)
         await before.subscribe(
           {
             endpoint: "https://push.example/a-laptop",
-            keys: { auth: "a", p256dh: "p" },
+            keys: KEYS,
             expirationTime: null,
           },
           "laptop",
@@ -134,35 +119,33 @@ Deno.test({
         )
         // A restart: a new client and a new service over the same database, nothing in memory.
         const restartedSql = connect()
-        const { sender, endpoints } = recordingSender()
-        const restarted = new WebPushService(sender, createPushTokenStore(restartedSql), "key")
+        const { service: restarted, endpoints } = await serviceOver(restartedSql)
         await restarted.send(userA, { title: "Hi", body: "There", url: null })
-        expect(endpoints.sort()).toEqual([
+        expect(endpoints().sort()).toEqual([
           "https://push.example/a-laptop",
           "https://push.example/new",
         ])
       })
 
-      await t.step("a subscription the push service reports gone is deleted", async () => {
-        const { sender } = recordingSender({ "https://push.example/new": 410 })
-        const service = new WebPushService(sender, createPushTokenStore(sql), "key")
+      await t.step("a gone subscription is deleted for its user only", async () => {
+        // The same browser signed in as user B holds the same endpoint; it is not A's to delete.
+        await sql`
+          INSERT INTO user_push_tokens (user_id, device_id, endpoint, auth, p256dh)
+          VALUES (${userB}, ${"phone"}, ${"https://push.example/new"}, ${KEYS.auth}, ${KEYS.p256dh})`
+        const { service } = await serviceOver(sql, { "https://push.example/new": 410 })
         await service.send(userA, { title: "Hi", body: "There", url: null })
         const devices = await service.deviceList(userA)
         expect(devices.map((device) => device.deviceId)).toEqual(["laptop"])
-        expect((await service.deviceList(userB)).length).toBe(1)
+        expect((await service.deviceList(userB)).length).toBe(2)
       })
 
       await t.step("unsubscribing one user leaves another user's same device id live", async () => {
-        const service = new WebPushService(
-          recordingSender().sender,
-          createPushTokenStore(sql),
-          "key",
-        )
+        const { service } = await serviceOver(sql)
         for (const user of [userA, userB]) {
           await service.subscribe(
             {
               endpoint: `https://push.example/shared-${user}`,
-              keys: { auth: "a", p256dh: "p" },
+              keys: KEYS,
               expirationTime: null,
             },
             "shared",

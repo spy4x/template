@@ -18,6 +18,7 @@
     "jsr:@negrel/http-ece@0.7.0": "0.7.0",
     "jsr:@negrel/webpush@0.5.0": "0.5.0",
     "jsr:@spy4x/email@^1.20.0": "1.20.0",
+    "jsr:@spy4x/integrations@1.20.0": "1.20.0",
     "jsr:@spy4x/net@1.20.0": "1.20.0",
     "jsr:@spy4x/net@^1.20.0": "1.20.0",
     "jsr:@spy4x/platform@1.10.0": "1.10.0",
@@ -238,6 +239,17 @@
     },
     "@spy4x/email@1.20.0": {
       "integrity": "80e41d15367d76d9862a4a85cc53a4d023d3ca2c6144f4002cd00deabd1fc523"
+    },
+    "@spy4x/integrations@1.20.0": {
+      "integrity": "00ea0f32d6a257e233bcb9e53b8ed663f8c23cdd0737eecf72dc22bedc20250f",
+      "dependencies": [
+        "jsr:@negrel/http-ece",
+        "jsr:@negrel/webpush",
+        "jsr:@spy4x/net@^1.20.0",
+        "jsr:@spy4x/platform@^1.20.0",
+        "jsr:@std/encoding@1.0.11",
+        "npm:arktype"
+      ]
     },
     "@spy4x/net@1.20.0": {
       "integrity": "d1b666256aaca2472a185bf6614913ae970d40a878662b2c5fcb2e56ac2ac9d0"
@@ -2319,7 +2331,7 @@
       "jsr:@hono/hono@4.13.8",
       "jsr:@iuioiua/redis@1.1.10",
       "jsr:@libs/qrcode@3.1.0",
-      "jsr:@negrel/webpush@0.5.0",
+      "jsr:@spy4x/integrations@1.20.0",
       "jsr:@spy4x/platform@1.20.0",
       "jsr:@spy4x/preact-icons@1.3.0",
       "jsr:@spy4x/preact-signals@1.3.0",

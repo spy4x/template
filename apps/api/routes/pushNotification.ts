@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
-import type { WebPushService } from "@api/services/webPush.ts"
+import type { WebPushService } from "@api/services/web-push-service.ts"
 import type { SignIn } from "@api/services/sign-in.ts"
 import { PushDevicesUpdatedEvent } from "@api/cqrs/events.ts"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
