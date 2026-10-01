@@ -29,7 +29,8 @@ import { groupListCursor } from "./services/group-list-cursor.ts"
 import { noteListCursor } from "./services/note-list-cursor.ts"
 import { realtime } from "./services/realtimeHub.ts"
 import { createHealthRoute } from "./routes/health.ts"
-import { isCacheConnected } from "./services/cache.ts"
+import { isCacheConnected, kv } from "./services/cache.ts"
+import { createRedisRateLimitStore } from "@spy4x/server/kv"
 import "./cqrs/+init.ts"
 
 const REALTIME_REVALIDATE_INTERVAL_MS = 15_000
@@ -54,7 +55,11 @@ const expectedOrigin = new URL(config.webAppUrl).origin
 const mutationGuards = createMutationGuards(config.webAppUrl)
 const emit = (event: Parameters<typeof eventBus.emit>[0]) => eventBus.emit(event)
 // has some public routes and some more protected
-const rateLimits = createAuthRateLimits(config.rateLimiter)
+const rateLimits = createAuthRateLimits({
+  ...config.rateLimiter,
+  store: (keyPrefix) => createRedisRateLimitStore(kv, { keyPrefix }),
+  onStoreError: (error) => log("error: auth rate limit store failed, request allowed", error),
+})
 app.route(
   "/auth",
   createAuthRoute({

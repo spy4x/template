@@ -17,6 +17,7 @@ import {
 import { MALFORMED_JSON, oversizedJson } from "../_testing/json-bodies.ts"
 import { type AuthRateLimits, createAuthRateLimits } from "../middlewares/auth-rate-limits.ts"
 import type { Lockout } from "@spy4x/server/lockout"
+import { createKvStore, type RateLimitStore } from "@spy4x/platform/rate-limit"
 import { createAuthRoute } from "./auth.ts"
 
 /**
@@ -61,6 +62,24 @@ function fakeSignIn(
   }
 }
 
+/** A new in-process store each call, standing in for one limiter's share of Valkey. */
+function memoryStore(): RateLimitStore {
+  const entries = new Map<string, unknown>()
+  return createKvStore({
+    backend: {
+      get: (key) => Promise.resolve(entries.get(key)),
+      set: (key, value) => Promise.resolve(void entries.set(key, value)),
+      delete: (key) => Promise.resolve(void entries.delete(key)),
+    },
+  })
+}
+
+/** A store whose every call fails, as Valkey does while it is down. */
+function brokenStore(): RateLimitStore {
+  const down = () => Promise.reject(new Error("valkey is down"))
+  return { read: down, write: down, delete: down, consume: down, release: down }
+}
+
 /** Limits no test outside the rate-limit block reaches. */
 const generousLimits = {
   windowMs: 60_000,
@@ -68,6 +87,8 @@ const generousLimits = {
   limit: 1_000,
   otpWindowMs: 900_000,
   otpLimit: 1_000,
+  store: memoryStore,
+  onStoreError: () => {},
 }
 
 function buildApp(
@@ -226,6 +247,8 @@ describe("auth routes rate-limit", () => {
     limit: 2,
     otpWindowMs: 900_000,
     otpLimit: 5,
+    store: memoryStore,
+    onStoreError: () => {},
   }
 
   const otpPaths = ["/auth/totp/check", "/auth/totp/connect/finish"]
@@ -517,6 +540,47 @@ describe("auth routes rate-limit", () => {
     }
 
     expect(statuses).toEqual([200, 200, 429])
+  })
+
+  const guessingRoutes = [
+    ...strictByIpRoutes.map((route) => ({
+      route,
+      auth: null,
+      headers: sameOriginWithoutCookieHeaders,
+    })),
+    ...[...strictByUserRoutes, ...otpRoutes].map((route) => ({
+      route,
+      auth: undefined,
+      headers: sameOriginHeaders,
+    })),
+  ]
+  for (const { route, auth, headers } of guessingRoutes) {
+    it(`refuses ${route.path} without calling ${route.operation} while its limit's store is down`, async () => {
+      const { app, calls } = buildApp(auth, {
+        rateLimits: createAuthRateLimits({ ...tightLimits, store: brokenStore }),
+      })
+
+      const response = await send(app, route, headers)
+
+      expect(response.status).toBe(500)
+      expect(calls).toEqual([])
+    })
+  }
+
+  it("lets GET /auth/me through and reports the error while the normal limit's store is down", async () => {
+    const errors: unknown[] = []
+    const { app } = buildApp(undefined, {
+      rateLimits: createAuthRateLimits({
+        ...tightLimits,
+        store: brokenStore,
+        onStoreError: (error) => errors.push(error),
+      }),
+    })
+
+    const response = await app.request(`${API_URL}/auth/me`, { headers: sameOriginHeaders })
+
+    expect(response.status).toBe(200)
+    expect(errors.map((error) => (error as Error).message)).toEqual(["valkey is down"])
   })
 })
 
