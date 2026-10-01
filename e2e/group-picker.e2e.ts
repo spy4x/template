@@ -1,4 +1,6 @@
-import { type APIRequestContext, expect, type Page, test } from "@playwright/test"
+import { type APIRequestContext, type Page } from "@playwright/test"
+import { expect, test } from "./fixtures/stack.ts"
+import { gotoApp, signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -20,12 +22,8 @@ async function signUp(request: APIRequestContext, email: string): Promise<void> 
   expect(response.ok(), await response.text()).toBe(true)
 }
 
-async function signIn(page: Page, email: string): Promise<void> {
-  await page.goto("/sign-in")
-  await page.locator("[data-e2e=auth-form-login]").fill(email)
-  await page.locator("[data-e2e=auth-form-password]").fill(password)
-  await page.locator("[data-e2e=auth-form-submit]").click()
-  await page.waitForURL("/")
+async function signInOnline(page: Page, email: string): Promise<void> {
+  await signIn(page, email, password)
   await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 }
 
@@ -59,6 +57,10 @@ async function personalGroup(page: Page): Promise<{ id: string; name: string }> 
 const heading = (page: Page, name: string) =>
   page.getByRole("heading", { level: 1, name: `Notes in ${name}` })
 
+/** Opens `path` and waits until the app has booted there. */
+const open = (page: Page, path: string) =>
+  gotoApp(page, path, page.locator("[data-e2e=shell-ws-status]"))
+
 /** Picks a group from the side menu's picker with the keyboard alone: type, then Enter. */
 async function pickWithKeyboard(page: Page, groupName: string): Promise<void> {
   const picker = page.locator("#sidebar-group-picker")
@@ -77,13 +79,13 @@ test.describe("notes at /notes with a group picker", () => {
     try {
       await signUp(request, user)
       const page = await context.newPage()
-      await signIn(page, user)
+      await signInOnline(page, user)
       const personal = await personalGroup(page)
       const team = await sharedGroup(page, "Team B")
       await noteIn(page, personal.id, "Only in personal")
       await noteIn(page, team, "Only in team")
 
-      await page.goto("/notes")
+      await open(page, "/notes")
       await expect(heading(page, personal.name)).toBeVisible()
       const titles = page.locator("[data-e2e=note-item-title]")
       await expect(titles).toHaveText(["Only in personal"])
@@ -94,7 +96,7 @@ test.describe("notes at /notes with a group picker", () => {
       await expect(page).toHaveURL("/notes")
 
       // The choice is the server's: it survives a reload.
-      await page.reload()
+      await open(page, page.url())
       await expect(heading(page, "Team B")).toBeVisible()
       await expect(titles).toHaveText(["Only in team"])
 
@@ -118,14 +120,14 @@ test.describe("notes at /notes with a group picker", () => {
       await signUp(request, user)
       const laptop = await laptopContext.newPage()
       const phone = await phoneContext.newPage()
-      await signIn(laptop, user)
-      await signIn(phone, user)
+      await signInOnline(laptop, user)
+      await signInOnline(phone, user)
       const personal = await personalGroup(laptop)
       const team = await sharedGroup(laptop, "Shared view")
       await noteIn(laptop, team, "Seen on both")
 
-      await laptop.goto("/notes")
-      await phone.goto("/notes")
+      await open(laptop, "/notes")
+      await open(phone, "/notes")
       await expect(heading(phone, personal.name)).toBeVisible()
       await expect(phone.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
       let phoneLoads = 0
@@ -151,17 +153,17 @@ test.describe("notes at /notes with a group picker", () => {
     try {
       await signUp(request, user)
       const page = await context.newPage()
-      await signIn(page, user)
+      await signInOnline(page, user)
       const personal = await personalGroup(page)
       const team = await sharedGroup(page, "Old link team")
       await noteIn(page, personal.id, "In the selected group")
 
-      await page.goto(`/groups/${personal.id}/notes`)
+      await open(page, `/groups/${personal.id}/notes`)
       await expect(page).toHaveURL("/notes")
       await expect(heading(page, personal.name)).toBeVisible()
 
       // A link to a group that is not selected must not select it.
-      await page.goto(`/groups/${team}/notes`)
+      await open(page, `/groups/${team}/notes`)
       await expect(page).toHaveURL("/groups")
       const selected = await page.request.get(`${apiBase}/api/groups/selected`)
       expect((await selected.json()).groupId).toBe(personal.id)
@@ -178,7 +180,7 @@ test.describe("notes at /notes with a group picker", () => {
     try {
       await signUp(request, user)
       const page = await context.newPage()
-      await signIn(page, user)
+      await signInOnline(page, user)
       const personal = await personalGroup(page)
 
       const refused = await page.request.put(`${apiBase}/api/groups/selected`, {
