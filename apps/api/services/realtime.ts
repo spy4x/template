@@ -3,6 +3,7 @@ import {
   type Clock,
   ConnectionRegistry,
   type ConnectionRegistryOptions,
+  createHint,
   createSystemClock,
   type ManagedSocket,
   NotifyStatus,
@@ -10,7 +11,7 @@ import {
   type RequestContext,
 } from "@spy4x/realtime"
 import { GROUP_AGGREGATE, GroupError } from "@domain/groups"
-import { AccessError, type Actor } from "@domain/identity"
+import { AccessError, type Actor, userChangeGroupId } from "@domain/identity"
 import { NoteError, NoteVersionConflictError } from "@domain/notes"
 import { IdempotencyError } from "@spy4x/server/idempotency"
 import { actorFromAuth } from "../cqrs/actor.ts"
@@ -18,6 +19,9 @@ import type { AppAuthState } from "./sign-in.ts"
 
 /** WebSocket close code "policy violation": the session may no longer use the connection. */
 export const POLICY_CLOSE_CODE = 1008
+
+/** The aggregate name of the hints sent by {@link Realtime.notifyUserChange}. */
+export const USER_AGGREGATE = "user"
 
 const REVOKED_REASON = "session is no longer valid"
 
@@ -134,6 +138,8 @@ const NOTE_ERROR_CODES: Record<
  *   when a user signs out, on a timer, and before any request is served.
  * - **A group change reaches its members.** {@link notifyGroupChange} sends a sequence-stamped
  *   `change.hint` to each member's sockets. The hint carries no data; a client that is behind pulls.
+ * - **A user's own change reaches their other tabs.** {@link notifyUserChange} sends a hint for the
+ *   profile or push devices to every socket of that user.
  */
 export class Realtime {
   readonly registry: ConnectionRegistry
@@ -237,6 +243,25 @@ export class Realtime {
   async notifyGroupChange(groupId: string, sequence: number): Promise<NotifyStatus> {
     const outcome = await this.#notifier.notify({ groupId, aggregate: GROUP_AGGREGATE, sequence })
     return outcome.status
+  }
+
+  /**
+   * Sends every socket of one user the hint that their own profile or push devices changed, so a
+   * second tab reads them again. Returns how many sockets it reached.
+   *
+   * The hint is stamped with the clock's time in milliseconds: it only has to grow across changes
+   * and restarts, and it is never contiguous with the client's cursor, so each hint makes the page
+   * read again, which is what a change to a single record needs.
+   */
+  notifyUserChange(userId: number): number {
+    return this.registry.sendToUser(
+      String(userId),
+      createHint({
+        groupId: userChangeGroupId(userId),
+        aggregate: USER_AGGREGATE,
+        sequence: this.#clock.now(),
+      }),
+    )
   }
 
   /**

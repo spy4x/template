@@ -381,6 +381,52 @@ describe("realtime group hints", () => {
   })
 })
 
+describe("realtime user hints", () => {
+  it("hints every socket of the user who changed, and nobody else", async () => {
+    const h = harness()
+    await h.clock.advance(1_700_000_000_000)
+    const firstTab = connect(h, 1)
+    const secondTab = connect(h, 1, 11)
+    const stranger = connect(h, 2)
+
+    expect(h.realtime.notifyUserChange(1)).toBe(2)
+
+    const hint = {
+      kind: "change.hint",
+      groupId: "user:1",
+      aggregate: "user",
+      sequence: 1_700_000_000_000,
+    }
+    expect(firstTab.frames()).toEqual([hint])
+    expect(secondTab.frames()).toEqual([hint])
+    expect(stranger.frames()).toEqual([])
+    h.realtime.shutdown()
+  })
+
+  it("stamps a later change with a later sequence", async () => {
+    const h = harness()
+    const socket = connect(h, 1)
+    await h.clock.advance(1_000)
+    h.realtime.notifyUserChange(1)
+    await h.clock.advance(1_000)
+    h.realtime.notifyUserChange(1)
+
+    expect(socket.frames().map((frame) => (frame as { sequence: number }).sequence)).toEqual([
+      1_000,
+      2_000,
+    ])
+    h.realtime.shutdown()
+  })
+
+  it("reaches no socket for a user who has none open", () => {
+    const h = harness()
+    connect(h, 2)
+
+    expect(h.realtime.notifyUserChange(1)).toBe(0)
+    h.realtime.shutdown()
+  })
+})
+
 describe("toRequestError", () => {
   it("maps each domain failure to a closed error code", () => {
     const code = (error: unknown) => toRequestError(error)?.code

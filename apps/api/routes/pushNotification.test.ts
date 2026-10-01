@@ -20,17 +20,22 @@ function buildApp(auth: APIContext["Variables"]["auth"] = buildAuthData()) {
   const route = createPushNotificationRoute({
     auth: testSessionGuards(),
     mutationGuards: testMutationGuards,
-    emit: () => {},
-    webPush: {
-      getPublicKey: () => "public-key",
-      deviceList: () => Promise.resolve([]),
-      subscribe: (_subscription, deviceId, userId) => {
-        calls.push("subscribe")
-        const now = new Date("2026-09-26T10:00:00.000Z")
-        return Promise.resolve({ id: 1, userId, deviceId, createdAt: now, updatedAt: now })
-      },
-      unsubscribe: () => (calls.push("unsubscribe"), Promise.resolve()),
+    getPublicKey: () => "public-key",
+    list: () => Promise.resolve({ devices: [] }),
+    register: ({ data }) => {
+      calls.push("subscribe")
+      const now = new Date("2026-09-26T10:00:00.000Z")
+      return Promise.resolve({
+        userPushToken: {
+          id: 1,
+          userId: data.actor.userId,
+          deviceId: data.deviceId,
+          createdAt: now,
+          updatedAt: now,
+        },
+      })
     },
+    remove: () => (calls.push("unsubscribe"), Promise.resolve({ isSuccess: true as const })),
   })
   return { app: mountRoute("/push", route, auth), calls }
 }

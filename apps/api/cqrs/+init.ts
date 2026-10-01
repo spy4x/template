@@ -4,11 +4,18 @@ import { subscribe } from "@api/services/eventBus.ts"
 import { sql } from "@api/services/db.ts"
 import { log } from "@api/services/log.ts"
 import { createIdempotencyMiddleware, PostgresIdempotencyStore } from "@spy4x/server/idempotency"
-import { UserProfileUpdateCommand } from "@api/cqrs/commands.ts"
-import { UserProfileGetQuery } from "@api/cqrs/queries.ts"
+import {
+  PushRegisterCommand,
+  PushRemoveCommand,
+  UserProfileUpdateCommand,
+} from "@api/cqrs/commands.ts"
+import { PushListQuery, UserProfileGetQuery } from "@api/cqrs/queries.ts"
 import { GroupCreateCommand, GroupGetQuery, GroupListQuery } from "@domain/groups"
 import { userProfileUpdateHandler } from "@api/cqrs/command-handlers/user-profile-update.ts"
 import { userProfileGetHandler } from "@api/cqrs/query-handlers/user-profile-get.ts"
+import { pushRegisterHandler } from "@api/cqrs/command-handlers/push-register.ts"
+import { pushRemoveHandler } from "@api/cqrs/command-handlers/push-remove.ts"
+import { pushListHandler } from "@api/cqrs/query-handlers/push-list.ts"
 import { groupCreateHandler } from "@api/cqrs/command-handlers/group-create.ts"
 import { groupGetHandler } from "@api/cqrs/query-handlers/group-get.ts"
 import { groupListHandler } from "@api/cqrs/query-handlers/group-list.ts"
@@ -25,6 +32,7 @@ import { noteDeleteHandler } from "@api/cqrs/command-handlers/note-delete.ts"
 import { noteListHandler } from "@api/cqrs/query-handlers/note-list.ts"
 import { noteGetHandler } from "@api/cqrs/query-handlers/note-get.ts"
 import {
+  PushDevicesUpdatedEvent,
   UserProfileUpdatedEvent,
   UserSignedInEvent,
   UserSignedOutEvent,
@@ -34,6 +42,8 @@ import { authAuditOnUserSignedUpHandler } from "@api/cqrs/event-handlers/auth-au
 import { authAuditOnUserSignedInHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-signed-in.ts"
 import { authAuditOnUserSignedOutHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-signed-out.ts"
 import { authAuditOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-profile-updated.ts"
+import { realtimeOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/realtime-on-user-profile-updated.ts"
+import { realtimeOnPushDevicesUpdatedHandler } from "@api/cqrs/event-handlers/realtime-on-push-devices-updated.ts"
 import { realtimeOnUserSignedOutHandler } from "@api/cqrs/event-handlers/realtime-on-user-signed-out.ts"
 
 // Every listener is best-effort: a failure is logged and counted (`services/eventBus.ts`) and
@@ -42,7 +52,7 @@ import { realtimeOnUserSignedOutHandler } from "@api/cqrs/event-handlers/realtim
 // - The four audit listeners ought to be durable, since a lost row is a lost audit record. They
 //   stay best-effort until an outbox row can carry the event: today a row has no payload, and the
 //   audit row needs the address and user agent, which cannot be read back later.
-// - The socket-closing listener is best-effort by nature: sockets live in this process and the
+// - The socket-closing and hint listeners is best-effort by nature: sockets live in this process and the
 //   worker, which runs outbox jobs, cannot close them. Its durable backstop is already in place:
 //   every socket is revalidated on a timer (`realtime.startRevalidation`) and before each
 //   request, so a failure here delays the close by one interval at most.
@@ -51,6 +61,8 @@ subscribe(UserSignedInEvent, authAuditOnUserSignedInHandler)
 subscribe(UserSignedOutEvent, authAuditOnUserSignedOutHandler)
 subscribe(UserProfileUpdatedEvent, authAuditOnUserProfileUpdatedHandler)
 subscribe(UserSignedOutEvent, realtimeOnUserSignedOutHandler)
+subscribe(UserProfileUpdatedEvent, realtimeOnUserProfileUpdatedHandler)
+subscribe(PushDevicesUpdatedEvent, realtimeOnPushDevicesUpdatedHandler)
 
 // After the session gate (added where the bus is built): a command from a session that may not act
 // never reaches the key store. It needs the database, so it is attached here and not there.
@@ -59,11 +71,14 @@ commandBus.use(
 )
 
 commandBus.register(UserProfileUpdateCommand, userProfileUpdateHandler)
+commandBus.register(PushRegisterCommand, pushRegisterHandler)
+commandBus.register(PushRemoveCommand, pushRemoveHandler)
 commandBus.register(GroupCreateCommand, groupCreateHandler)
 commandBus.register(NoteCreateCommand, noteCreateHandler)
 commandBus.register(NoteUpdateCommand, noteUpdateHandler)
 commandBus.register(NoteDeleteCommand, noteDeleteHandler)
 queryBus.register(UserProfileGetQuery, userProfileGetHandler)
+queryBus.register(PushListQuery, pushListHandler)
 queryBus.register(GroupListQuery, groupListHandler)
 queryBus.register(GroupGetQuery, groupGetHandler)
 queryBus.register(NoteListQuery, noteListHandler)

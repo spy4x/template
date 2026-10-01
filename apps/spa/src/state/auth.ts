@@ -207,24 +207,6 @@ export async function changePassword(
   return { ok: true }
 }
 
-export async function profileUpdate(
-  firstName: string,
-  lastName: string,
-): Promise<{ ok: boolean; error?: string }> {
-  const result = await apiFetch<{ user: User }>("/api/users/me", {
-    method: "PATCH",
-    body: JSON.stringify({ firstName, lastName }),
-  })
-  if (!result.ok) {
-    return { ok: false, error: result.error.message }
-  }
-  sessionState.value = {
-    ...sessionState.value,
-    user: result.data.user,
-  }
-  return { ok: true }
-}
-
 export async function totpConnectStart(): Promise<
   | { ok: true; qrcode: string; secret: string }
   | { ok: false; error: string }

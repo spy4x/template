@@ -1,4 +1,6 @@
 import { createGroupSocketRequests } from "../features/groups/socket.ts"
+import { createProfileSocketRequests } from "../features/profile/socket.ts"
+import { createPushSocketRequests } from "../features/push/socket.ts"
 import { createNoteSocketRequests } from "../features/notes/socket.ts"
 import { signIn } from "./auth.ts"
 import { commandBus } from "./commandBus.ts"
@@ -19,6 +21,15 @@ export const realtime = new Realtime({
       list: (query) => queryBus.execute(query),
       get: (query) => queryBus.execute(query),
       cursor: groupListCursor,
+    }),
+    ...createProfileSocketRequests({
+      get: (query) => queryBus.execute(query),
+      update: (command) => commandBus.execute(command),
+    }),
+    ...createPushSocketRequests({
+      register: (command) => commandBus.execute(command),
+      remove: (command) => commandBus.execute(command),
+      list: (query) => queryBus.execute(query),
     }),
     ...createNoteSocketRequests({
       create: (command) => commandBus.execute(command),

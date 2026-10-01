@@ -10,24 +10,18 @@ import {
 } from "@ui/profile-screen.tsx"
 import {
   changePassword,
-  profileUpdate,
   totpConnectFinish,
   totpConnectStart,
   totpDisconnect,
 } from "../state/auth.ts"
 import { sessionState } from "../state/session.ts"
 import { apiFetch } from "../state/api.ts"
+import { profileStore } from "../state/profile.ts"
 import { toasts } from "../state/toasts.ts"
-import type { PushSubscribeRequest, PushUnsubscribeRequest } from "@spy4x/platform/model"
+import type { PushSubscribeRequest } from "@spy4x/platform/model"
 import { validate } from "@spy4x/validation"
 import { authOTPSchema, authPasswordChangeSchema, userProfileBaseSchema } from "@domain/identity"
-import type {
-  ApiIsSuccessResponse,
-  PushDevicesResponse,
-  PushPublicKeyResponse,
-  PushSubscribeResponse,
-  UserPushTokenPublic,
-} from "@domain/identity"
+import type { PushPublicKeyResponse } from "@domain/identity"
 
 /**
  * Wires `ProfileScreen` to this app's session store, the auth calls and the push endpoints. Holds
@@ -51,7 +45,6 @@ export function ProfileView() {
   const [busyPassword, setBusyPassword] = useState(false)
   const [totpBusy, setTotpBusy] = useState(false)
   const [enrolment, setEnrolment] = useState<TotpEnrolment | null>(null)
-  const [pushDevices, setPushDevices] = useState<UserPushTokenPublic[]>([])
   const [pushPublicKey, setPushPublicKey] = useState<string | null>(null)
   const [pushError, setPushError] = useState<string | null>(null)
   const [pushBusy, setPushBusy] = useState(false)
@@ -67,14 +60,10 @@ export function ProfileView() {
     }))
   }, [session.user?.firstName, session.user?.lastName])
 
-  const loadPushDevices = async () => {
-    const res = await apiFetch<PushDevicesResponse>("/api/push/devices")
-    if (res.ok) setPushDevices(res.data.data)
-  }
-
   useEffect(() => {
     if (!session.user || session.isMfaRequired) return
-    void loadPushDevices()
+    // A change made in another tab reaches this page as a hint that runs the same read.
+    void profileStore.refresh().catch(() => {})
     apiFetch<PushPublicKeyResponse>("/api/push/public-key").then((res) => {
       if (res.ok) setPushPublicKey(res.data.publicKey)
     })
@@ -94,7 +83,7 @@ export function ProfileView() {
     const { firstName, lastName } = values
     if (!fieldsPass(refusedFields(userProfileBaseSchema, { firstName, lastName }))) return
     setBusyProfile(true)
-    const result = await profileUpdate(values.firstName, values.lastName)
+    const result = await profileStore.saveProfile(values.firstName, values.lastName)
     setBusyProfile(false)
     if (!result.ok) {
       setProfileError(result.error || PROFILE_FAILURES.profile)
@@ -168,21 +157,11 @@ export function ProfileView() {
         userVisibleOnly: true,
         applicationServerKey: decodeBase64Url(pushPublicKey),
       })
-      const deviceId = crypto.randomUUID()
-      const result = await apiFetch<PushSubscribeResponse>("/api/push", {
-        method: "POST",
-        body: JSON.stringify(
-          {
-            subscription: subscriptionToPayload(subscription),
-            deviceId,
-          } satisfies PushSubscribeRequest,
-        ),
-      })
-      if (!result.ok) {
-        setPushError(result.error.message)
-      } else {
-        await loadPushDevices()
-      }
+      const result = await profileStore.registerPush(
+        crypto.randomUUID(),
+        subscriptionToPayload(subscription),
+      )
+      if (!result.ok) setPushError(result.error || PROFILE_FAILURES.push)
     } catch (_error) {
       setPushError(PROFILE_FAILURES.push)
     } finally {
@@ -191,13 +170,11 @@ export function ProfileView() {
   }
 
   const removePush = async (deviceId: string) => {
+    setPushError(null)
     setPushBusy(true)
-    await apiFetch<ApiIsSuccessResponse>("/api/push", {
-      method: "DELETE",
-      body: JSON.stringify({ deviceId } satisfies PushUnsubscribeRequest),
-    })
-    await loadPushDevices()
+    const result = await profileStore.removePush(deviceId)
     setPushBusy(false)
+    if (!result.ok) setPushError(result.error || PROFILE_FAILURES.push)
   }
 
   return (
@@ -216,7 +193,7 @@ export function ProfileView() {
       }}
       pending={{ profile: busyProfile, password: busyPassword, totp: totpBusy, push: pushBusy }}
       enrolment={enrolment}
-      pushDevices={pushDevices}
+      pushDevices={profileStore.pushDevices.value}
       onSaveProfile={submitProfile}
       onChangePassword={submitPassword}
       onStartTotp={startTotp}
