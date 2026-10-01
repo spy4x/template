@@ -1,4 +1,5 @@
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test"
+import { signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -21,12 +22,8 @@ async function signUp(request: APIRequestContext, email: string): Promise<void> 
   expect(response.ok(), await response.text()).toBe(true)
 }
 
-async function signIn(page: Page, email: string): Promise<void> {
-  await page.goto("/sign-in")
-  await page.locator("[data-e2e=auth-form-login]").fill(email)
-  await page.locator("[data-e2e=auth-form-password]").fill(password)
-  await page.locator("[data-e2e=auth-form-submit]").click()
-  await page.waitForURL("/")
+async function signInOnline(page: Page, email: string): Promise<void> {
+  await signIn(page, email, password)
   await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 }
 
@@ -75,7 +72,7 @@ test.describe("notes in a shared group", () => {
       ownerPage.on("websocket", (socket) => {
         socket.on("framesent", (frame) => framesSent.push(String(frame.payload)))
       })
-      await signIn(ownerPage, owner)
+      await signInOnline(ownerPage, owner)
       await sharedGroup(ownerPage, request, "Notes team", member)
 
       // The viewer's tab counts the app's sockets and its page loads, so a reconnect or a reload,
@@ -87,7 +84,7 @@ test.describe("notes in a shared group", () => {
       })
       let memberLoads = 0
       memberPage.on("load", () => memberLoads++)
-      await signIn(memberPage, member)
+      await signInOnline(memberPage, member)
       await openNotes(memberPage, "Notes team")
       await expect(memberPage.locator("[data-e2e=notes-read-only]")).toBeVisible()
       const memberTitles = memberPage.locator("[data-e2e=note-item-title]")
@@ -161,7 +158,7 @@ test.describe("notes in a shared group", () => {
     try {
       for (const email of [owner, member]) await signUp(request, email)
       const ownerPage = await ownerContext.newPage()
-      await signIn(ownerPage, owner)
+      await signInOnline(ownerPage, owner)
       const groupId = await sharedGroup(ownerPage, request, "Read only", member)
       const notes = `${apiBase}/api/groups/${groupId}/notes`
       const noteId = crypto.randomUUID()
@@ -172,7 +169,7 @@ test.describe("notes in a shared group", () => {
       expect(created.status(), await created.text()).toBe(201)
 
       const memberPage = await memberContext.newPage()
-      await signIn(memberPage, member)
+      await signInOnline(memberPage, member)
       const refused = [
         await memberPage.request.post(notes, {
           headers,

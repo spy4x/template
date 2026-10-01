@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { gotoApp } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 
@@ -27,8 +28,11 @@ test.describe("auth profile ws push flow", () => {
       })
       expect(signUp.ok()).toBe(true)
 
-      await page.goto("/sign-in")
-      await expect(page.getByRole("heading", { level: 1, name: "Welcome back" })).toBeVisible()
+      await gotoApp(
+        page,
+        "/sign-in",
+        page.getByRole("heading", { level: 1, name: "Welcome back" }),
+      )
       await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await page.locator("[data-e2e=auth-form-submit]").click()

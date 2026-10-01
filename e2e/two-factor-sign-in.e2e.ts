@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { gotoApp } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const STEP_SECONDS = 30
@@ -53,8 +54,7 @@ test.describe("two-factor sign-in", () => {
 
       // Turn two-factor auth on through the profile screen and read the secret it shows.
       // Without an authenticator app the page offers Enable only, never Disable next to it.
-      await page.goto("/")
-      await expect(page.locator("[data-e2e=totp-start]")).toBeVisible()
+      await gotoApp(page, "/", page.locator("[data-e2e=totp-start]"))
       await expect(page.locator("[data-e2e=totp-disable]")).toHaveCount(0)
       await page.locator("[data-e2e=totp-start]").click()
       const shown = await page.getByText(/^Secret: /).innerText()
@@ -72,7 +72,7 @@ test.describe("two-factor sign-in", () => {
       await page.locator("[data-e2e=signin-required]").waitFor()
 
       // Password step: the app reloads onto the code screen, which must still ask for the code.
-      await page.goto("/sign-in")
+      await gotoApp(page, "/sign-in", page.locator("[data-e2e=auth-form-login]"))
       await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await page.locator("[data-e2e=auth-form-submit]").click()

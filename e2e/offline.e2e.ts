@@ -5,6 +5,7 @@ import {
   type Page,
   test,
 } from "@playwright/test"
+import { gotoApp, signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -26,12 +27,8 @@ async function signUp(request: APIRequestContext, email: string): Promise<void> 
   expect(response.ok(), await response.text()).toBe(true)
 }
 
-async function signIn(page: Page, email: string): Promise<void> {
-  await page.goto("/sign-in")
-  await page.locator("[data-e2e=auth-form-login]").fill(email)
-  await page.locator("[data-e2e=auth-form-password]").fill(password)
-  await page.locator("[data-e2e=auth-form-submit]").click()
-  await page.waitForURL("/")
+async function signInOnline(page: Page, email: string): Promise<void> {
+  await signIn(page, email, password)
   await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 }
 
@@ -59,7 +56,7 @@ async function openNotesAndCacheShell(page: Page, groupId: string): Promise<void
     data: { groupId },
   })
   expect(selected.ok(), await selected.text()).toBe(true)
-  await page.goto("/notes")
+  await gotoApp(page, "/notes", page.locator("[data-e2e=shell-ws-status]"))
   await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready
@@ -90,7 +87,7 @@ test.describe("offline notes", () => {
     try {
       await signUp(request, user)
       const page = await context.newPage()
-      await signIn(page, user)
+      await signInOnline(page, user)
       const { groupId } = await groupWithNote(page, "Offline team", "Written online")
       await openNotesAndCacheShell(page, groupId)
 
@@ -147,7 +144,7 @@ test.describe("offline notes", () => {
     try {
       await signUp(request, user)
       const page = await context.newPage()
-      await signIn(page, user)
+      await signInOnline(page, user)
       const first = await groupWithNote(page, "Offline first", "In the first")
       const second = await groupWithNote(page, "Offline second", "In the second")
       // Open both online so their notes are in the local store.
@@ -193,8 +190,8 @@ test.describe("offline notes", () => {
       await signUp(request, user)
       const a = await contextA.newPage()
       const b = await contextB.newPage()
-      await signIn(a, user)
-      await signIn(b, user)
+      await signInOnline(a, user)
+      await signInOnline(b, user)
       const { groupId } = await groupWithNote(a, "Pair team", "Shared note")
       for (const page of [a, b]) await openNotesAndCacheShell(page, groupId)
       await reloadOffline(contextA, a)
@@ -246,8 +243,8 @@ test.describe("offline notes", () => {
       await signUp(request, user)
       const a = await contextA.newPage()
       const b = await contextB.newPage()
-      await signIn(a, user)
-      await signIn(b, user)
+      await signInOnline(a, user)
+      await signInOnline(b, user)
       const { groupId, noteId } = await groupWithNote(a, "Theirs team", "Shared note")
       for (const page of [a, b]) await openNotesAndCacheShell(page, groupId)
       await reloadOffline(contextB, b)

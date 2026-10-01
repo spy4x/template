@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { gotoApp, signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -35,11 +36,7 @@ test.describe("groups over the socket", () => {
         }
       })
 
-      await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(email)
-      await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      await page.waitForURL("/")
+      await signIn(page, email, password)
 
       const nav = page.getByRole("navigation", { name: "Main navigation" })
       await nav.getByRole("link", { name: "Groups" }).click()
@@ -98,11 +95,7 @@ test.describe("groups over the socket", () => {
       })
       expect(signUp.ok()).toBe(true)
 
-      await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(email)
-      await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      await page.waitForURL("/")
+      await signIn(page, email, password)
       await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 
       await page.locator("[data-e2e=shell-user-menu-button]").click()
@@ -129,16 +122,12 @@ test.describe("groups over the socket", () => {
       })
       expect(signUp.ok()).toBe(true)
 
-      await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(email)
-      await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      await page.waitForURL("/")
+      await signIn(page, email, password)
       await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 
       // A second tab of the same browser shares the session cookie and opens its own socket.
       const other = await page.context().newPage()
-      await other.goto("/")
+      await gotoApp(other, "/", other.locator("[data-e2e=shell-ws-status]"))
       await expect(other.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 
       await page.locator("[data-e2e=shell-user-menu-button]").click()
@@ -163,11 +152,7 @@ test.describe("groups over the socket", () => {
       })
       expect(signUp.ok()).toBe(true)
 
-      await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(email)
-      await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      await page.waitForURL("/")
+      await signIn(page, email, password)
 
       // The second tab counts the sockets it opens and the documents it loads, so a reconnect or
       // a reload, which would pull the list on its own, fails the test instead of passing it.
@@ -179,14 +164,14 @@ test.describe("groups over the socket", () => {
       })
       let otherLoads = 0
       other.on("load", () => otherLoads++)
-      await other.goto("/groups")
+      await gotoApp(other, "/groups", other.locator("[data-e2e=shell-ws-status]"))
       await expect(other.getByRole("heading", { level: 1, name: "Groups" })).toBeVisible()
       await expect(other.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
       const otherNames = other.locator("[data-e2e=group-item-name]")
       await expect(otherNames).toHaveCount(1)
       expect({ otherSockets, otherLoads }).toEqual({ otherSockets: 1, otherLoads: 1 })
 
-      await page.goto("/groups")
+      await gotoApp(page, "/groups", page.locator("[data-e2e=shell-ws-status]"))
       await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
       await page.locator("[data-e2e=group-name]").fill("Seen live")
       await page.locator("[data-e2e=group-create]").click()
@@ -213,11 +198,7 @@ test.describe("groups over the socket", () => {
       })
       expect(signUp.ok()).toBe(true)
 
-      await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(email)
-      await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      await page.waitForURL("/")
+      await signIn(page, email, password)
       await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 
       await request.post(`${apiBase}/api/test/cleanup-user`, { data: { login: email } })
