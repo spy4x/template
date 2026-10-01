@@ -31,9 +31,9 @@ across real projects, a CLI last.
 
 ## State of main
 
-Green: `deno task check` (110 tests in six runs), `deno task test:integration` (29 tests, 58
-steps, needs Postgres), `deno task spa:build`, `deno task mpa:check`, and the Playwright e2e suite
-(9 tests).
+Green: `deno task check` (181 tests in nine runs), `deno task test:integration` (36 tests, 78
+steps, needs Postgres), `deno task spa:build`, `deno task mpa:check`, the Playwright e2e suite
+(19 tests) and the MPA's browser test (`e2e/mpa/run.sh`, 2 tests).
 
 ```
 apps/api      REST, the /api/ws socket, auth, CQRS dispatch. The only app with real behaviour.
@@ -264,7 +264,7 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
 1. `apps/spa/src/state/realtime.ts` opens `/api/ws`. The upgrade runs the same session gate as
    REST and the `Origin` check, then `apps/api/services/realtime.ts` remembers which session each
    socket belongs to.
-2. `group.create`, `group.list` and `group.get` are dispatched on the same command and query buses REST uses,
+2. `group.create`, `group.list`, `group.get`, `group.select` and `group.selected` are dispatched on the same command and query buses REST uses,
    from `apps/api/features/groups/socket.ts`. Each frame reads the session again from the database,
    so a signed-out or expired session is refused. Authorization stays in the buses.
 3. A command needs an idempotency key. `@spy4x/server/idempotency` (ts-libs) stores it for 7 days
@@ -290,6 +290,22 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    so a listener that needs the event's data cannot be durable until it has one.
 7. The SPA treats a hint as a reason to read. The read is `GET /api/groups`, the same one it makes
    at start-up and after every reconnect, so a lost frame costs one read.
+8. The selected group is per person, not per group: a `user_settings` row holds `selected_group_id`
+   and a `version`. It is read through `getSelected`, which checks membership at read time and, when
+   nothing is stored or the stored group is gone or was left, answers with their personal group
+   (then the oldest shared one). That read stores nothing and announces nothing, so it can never
+   overwrite a choice committed at the same moment; only `select` writes. A `select` emits `GroupSelectedEvent`;
+   its listener calls `Realtime.notifyUserChange`, the same one-person hint the profile and push
+   devices use (cursor `user:<id>`), and the SPA answers that hint by reading the profile and the
+   selection again. The event bus is in-process, so only the API instance that took the `select`
+   reaches the person's sockets; another instance's sockets catch up on their next reconnect.
+   Notes live at `/notes`, in the SPA and the MPA: both show the selected group's notes, and the
+   MPA changes the choice with `POST /groups/select`. An old `/groups/:groupId/notes` link only
+   redirects, in both apps: to `/notes` when that group is already the selected one, otherwise to
+   `/groups`. It never selects, because a link another site controls must not switch a person's
+   group (the API refuses a select that is not a post from the app's own page). The create form
+   names the group on screen (`/notes?group=<id>`); the MPA refuses the post when that is no longer
+   the selected group.
 
 ## Next steps, in dependency order
 
