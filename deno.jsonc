@@ -7,7 +7,10 @@
     "./libs/domain/groups",
     "./libs/domain/identity",
     "./libs/domain/notes",
+    "./libs/server/auth",
     "./libs/server/groups",
+    "./libs/server/jobs",
+    "./libs/server/mail",
     "./libs/server/notes",
     "./libs/ui"
   ],
@@ -108,8 +111,10 @@
     "@domain/groups": "./libs/domain/groups/+lib.ts",
     "@domain/identity": "./libs/domain/identity/+lib.ts",
     "@domain/notes": "./libs/domain/notes/+lib.ts",
+    "@server/auth/": "./libs/server/auth/",
     "@server/groups/": "./libs/server/groups/",
     "@server/jobs/": "./libs/server/jobs/",
+    "@server/mail/": "./libs/server/mail/",
     "@server/notes/": "./libs/server/notes/",
     "@client/vite/": "./libs/client/vite/",
     // #endregion Aliases
@@ -123,6 +128,7 @@
     "@spy4x/server": "jsr:@spy4x/server@1.25.0",
     "@spy4x/realtime": "jsr:@spy4x/realtime@1.25.0",
     "@spy4x/integrations": "jsr:@spy4x/integrations@1.25.0",
+    "@spy4x/email": "jsr:@spy4x/email@1.25.0",
 
     // apps/api
     "hono": "jsr:@hono/hono@4.13.8",

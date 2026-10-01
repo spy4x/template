@@ -13,6 +13,14 @@ import {
   OUTBOX_CLEANUP_JOB,
 } from "@server/jobs/jobs.ts"
 import { createOutboxProcessor, scheduleNightlyJobs } from "@server/jobs/wiring.ts"
+import {
+  enqueuePasswordResetMail,
+  removeStalePasswordResetRequests,
+} from "@server/jobs/password-reset-mail.ts"
+import type { EmailMessage } from "@spy4x/email/message"
+import type { EmailSender } from "@spy4x/email/sender"
+import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
+import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import { requireDbConnection } from "./db-connection.ts"
 
 const JOB = {
@@ -55,6 +63,115 @@ async function advanceClock(sql: postgres.Sql, minutes: number): Promise<void> {
         processed_at = processed_at - make_interval(mins => ${minutes})
   `
 }
+
+const BRAND = { webAppUrl: "http://app.localhost" }
+
+/** The reset mail settings of a worker whose mail is off. */
+function mailOff(sql: postgres.Sql) {
+  return { store: createPostgresAuthStore(sql), sender: null, brand: BRAND, log: () => {} }
+}
+
+/** A sender that keeps what it is given, and fails while `failing` is set. */
+function recordingSender(): EmailSender & { sent: EmailMessage[]; failing: boolean } {
+  const sender = {
+    sent: [] as EmailMessage[],
+    failing: false,
+    send(message: EmailMessage) {
+      if (sender.failing) return Promise.resolve({ ok: false as const, error: "refused" })
+      sender.sent.push(message)
+      return Promise.resolve({ ok: true as const, id: String(sender.sent.length) })
+    },
+  }
+  return sender as unknown as EmailSender & { sent: EmailMessage[]; failing: boolean }
+}
+
+Deno.test("password reset mails go through the worker's queue", async (t) => {
+  await withSchema(async (sql) => {
+    const store = createPostgresAuthStore(sql)
+    await store.createUserWithKey({
+      method: PASSWORD_METHOD,
+      subject: "ann@example.com",
+      email: "ann@example.com",
+      secret: "hash",
+      provenAt: null,
+    })
+    const count = async (table: string) =>
+      (await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM ${sql(table)}`)[0].count
+
+    await t.step(
+      "only the address an account uses gets a mail, and no code is stored",
+      async () => {
+        const sender = recordingSender()
+        const processor = createOutboxProcessor(sql, { store, sender, brand: BRAND, log: () => {} })
+        await enqueuePasswordResetMail(sql, "ann@example.com")
+        await enqueuePasswordResetMail(sql, "nobody@example.com")
+
+        const result = await processor.drainOnce()
+
+        expect({ published: result.published, failed: result.failed }).toEqual({
+          published: 2,
+          failed: 0,
+        })
+        expect(sender.sent.map((mail) => mail.to)).toEqual(["ann@example.com"])
+        const code = new URL(sender.sent[0].text!.match(/http\S+/)![0]).searchParams.get("code")!
+        expect(code.length).toBeGreaterThan(40)
+        const dump = JSON.stringify(
+          await sql`
+          SELECT (SELECT json_agg(c) FROM auth_challenges c) AS challenges,
+            (SELECT json_agg(o) FROM outbox_events o) AS outbox
+        `,
+        )
+        expect(dump).not.toContain(code)
+        expect(await count("password_reset_requests")).toBe(0)
+      },
+    )
+
+    await t.step("a failed send keeps the request and is retried", async () => {
+      const sender = recordingSender()
+      sender.failing = true
+      const logged: string[] = []
+      const processor = createOutboxProcessor(sql, {
+        store,
+        sender,
+        brand: BRAND,
+        log: (line) => logged.push(line),
+      })
+      await enqueuePasswordResetMail(sql, "ann@example.com")
+
+      expect((await processor.drainOnce()).failed).toBe(1)
+      expect(await count("password_reset_requests")).toBe(1)
+      expect(logged.join("\n")).not.toContain("ann@example.com")
+
+      sender.failing = false
+      await advanceClock(sql, 60)
+      expect((await processor.drainOnce()).published).toBe(1)
+      expect(sender.sent.length).toBe(1)
+      expect(await count("password_reset_requests")).toBe(0)
+    })
+
+    await t.step("with mail off the request is dropped and nothing is issued", async () => {
+      await sql`DELETE FROM auth_challenges`
+      await enqueuePasswordResetMail(sql, "ann@example.com")
+
+      expect((await createOutboxProcessor(sql, mailOff(sql)).drainOnce()).published).toBe(1)
+
+      expect(await count("auth_challenges")).toBe(0)
+      expect(await count("password_reset_requests")).toBe(0)
+    })
+
+    await t.step("a request older than a day is removed by the cleanup", async () => {
+      await sql`
+        INSERT INTO password_reset_requests (id, email, created_at) VALUES
+          (${crypto.randomUUID()}, 'old@example.com', now() - interval '25 hours'),
+          (${crypto.randomUUID()}, 'new@example.com', now() - interval '23 hours')
+      `
+
+      expect(await removeStalePasswordResetRequests(sql)).toBe(1)
+      const left = await sql<{ email: string }[]>`SELECT email FROM password_reset_requests`
+      expect(left.map((row) => row.email)).toEqual(["new@example.com"])
+    })
+  })
+})
 
 Deno.test("delayed and repeating jobs in Postgres", async (t) => {
   await withSchema(async (sql) => {
@@ -147,7 +264,7 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
         expect(queued).toBe(1)
 
         await advanceClock(sql, 25 * 60)
-        const result = await createOutboxProcessor(sql).drainOnce()
+        const result = await createOutboxProcessor(sql, mailOff(sql)).drainOnce()
         expect(result.failed).toBe(0)
 
         const versions = await sql<{ version: string }[]>`
