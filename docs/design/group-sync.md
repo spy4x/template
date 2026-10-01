@@ -1,5 +1,10 @@
 # Group Sync Technical Design
 
+> **Group kinds were dropped (#129).** Wherever this document says `GroupKind`, `PERSONAL`,
+> `SHARED`, `createPersonal`, `createShared` or `PERSONAL_GROUP_IMMUTABLE`, read an ordinary group:
+> there is no `kind` column and no personal-group invariant. Sign-up creates a group named
+> "Personal". `docs/handoff.md` ("How a group call travels", items 9 and 10) is current.
+
 > **Status: superseded in part by [ADR 002](../decisions/002-realtime-transport-and-sync.md).**
 >
 > This document predates ADR 002 and assumes WebSockets are an optional wakeup

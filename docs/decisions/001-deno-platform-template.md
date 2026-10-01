@@ -51,10 +51,10 @@ packages. They still execute through Deno.
 
 ### Group model
 
-`PERSONAL` and `SHARED` are group kinds. Personal data belongs to a `PERSONAL` group; collaborative
-data belongs to a `SHARED` group. Both kinds use same group IDs, membership checks, commands,
-events, REST resources, and sync protocol. Authorization policy differs by group kind and member
-role, not by separate personal and collaborative pipelines.
+Every group uses the same IDs, membership checks, commands, events, REST resources, and sync
+protocol. Authorization policy differs by member role only. (This ADR first named a `PERSONAL` and
+a `SHARED` kind; the kind was dropped in #129, and sign-up now creates an ordinary group named
+"Personal".)
 
 ### Data, CQRS, and sync
 

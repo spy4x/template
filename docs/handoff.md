@@ -24,7 +24,8 @@ across real projects, a CLI last.
 - Money is integers.
 - `BIGINT` crosses JSON as a decimal string (`::text` in SQL), because
   `Number.MAX_SAFE_INTEGER` is smaller than a Postgres bigint.
-- Tenancy has exactly one boundary: the **group** (`PERSONAL = 1`, `SHARED = 2`).
+- Tenancy has exactly one boundary: the **group** (there is no
+  "personal" kind: sign-up makes an ordinary group named "Personal").
   Roles are `VIEWER = 1`, `EDITOR = 2`, `ADMIN = 3`, `OWNER = 4`.
 - Postgres is authoritative. The browser's local store is a disposable projection
   and never resolves a conflict.
@@ -61,7 +62,7 @@ libs/ui        Product screens shared by the SPA and the MPA (alias @ui/): auth,
 ```
 
 What genuinely works end to end: sign-up creates the auth user and password key
-(`@spy4x/server` auth tables), the `users` profile row, the personal group and
+(`@spy4x/server` auth tables), the `users` profile row, the first group and
 the session in one transaction; `GET/POST /api/groups` with MFA-aware auth, CSRF
 guard and signed keyset pagination; the worker claims and publishes outbox rows.
 
@@ -350,8 +351,8 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    at start-up and after every reconnect, so a lost frame costs one read.
 8. The selected group is per person, not per group: a `user_settings` row holds `selected_group_id`
    and a `version`. It is read through `getSelected`, which checks membership at read time and, when
-   nothing is stored or the stored group is gone or was left, answers with their personal group
-   (then the oldest shared one). That read stores nothing and announces nothing, so it can never
+   nothing is stored or the stored group is gone, deleted or was left, answers with their oldest
+   group. That read stores nothing and announces nothing, so it can never
    overwrite a choice committed at the same moment; only `select` writes. A `select` emits `GroupSelectedEvent`;
    its listener calls `Realtime.notifyUserChange`, the same one-person hint the profile and push
    devices use (cursor `user:<id>`), and the SPA answers that hint by reading the profile and the
@@ -364,13 +365,33 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    group (the API refuses a select that is not a post from the app's own page). The create form
    names the group on screen (`/notes?group=<id>`); the MPA refuses the post when that is no longer
    the selected group.
-   `/groups` lists the groups as cards (kind, the person's role, a "Selected" badge, a settings link
+   `/groups` lists the groups as cards (the person's role, a "Selected" badge, a settings link
    and an "Open notes" form). `/groups/:groupId` is the settings page: `GroupSettingsScreen` in
-   `libs/ui`, one `<section>` per concern. Only General exists, read-only for every role, because
-   the API can neither rename a group nor list its members. Each later issue (rename, delete and
-   keep-at-least-one #129; members, roles and leaving #130; invitations #131; ownership #132; moving
-   notes #133; the extra fields #134) adds its
-   own section to that screen, shown only to the roles that may use it.
+   `libs/ui`, one `<section>` per concern. General shows the name and the role, and a rename form
+   for an admin or the owner (`PATCH /api/groups/:id`, `group.rename`, the MPA's
+   `POST /groups/:id/rename`). A "Delete group" section, for the owner only, holds the confirmation
+   text and the delete (`DELETE /api/groups/:id`, `group.delete`, `POST /groups/:id/delete`). Each
+   later issue (members, roles and leaving #130; invitations #131; ownership #132; moving notes
+   #133; the extra fields #134) adds its own section to that screen, shown only to the roles that
+   may use it.
+9. **Deleting a group.** A delete is soft: `groups.deleted_at` is set and the row, its members and
+   its notes stay. The server refuses it with `LAST_GROUP` (409) when it is the actor's last active
+   group, and the settings page then shows the button disabled with the reason. A member whose only
+   group it was gets a new group named "Personal" in the same transaction. Every read of groups
+   filters `deleted_at`, so the selection falls back to the oldest remaining group at read time;
+   nothing has to clear a stored choice. `listMemberUserIds` deliberately includes a deleted group,
+   so the group-change hint of the delete reaches every member's socket and their pages read
+   again. The owner restores it from the "Deleted groups" section of `/groups`
+   (`POST /api/groups/:id/restore`, `group.restore`, `POST /groups/:id/restore`; the list is
+   `GET /api/groups/deleted`, `group.deleted`) for `GROUP_RESTORE_DAYS` (30) days, by the database
+   clock. The nightly `outbox.cleanup` job also runs `purgeDeletedGroups`, which removes groups past
+   that for good, with their notes, members and audit rows, so a group may live up to a day longer
+   than 30 days but can no longer be restored. The settings page of a deleted group is a 404.
+10. **The personal kind is gone** (migration `2026_10_07_0001_group_kind_removed.sql`: it drops
+   `groups.kind` and its indexes and rewrites no row, so every group, membership and note stays).
+   `createFirst` and `ensureFirst` replace `createPersonal` and `ensurePersonal`; the create body
+   is `{ id, name }`; the picker and list show the role only; the seed and the dev add-member
+   route no longer look at a kind.
 
 ## Next steps, in dependency order
 

@@ -23,9 +23,9 @@ gh repo create my-product --template spy4x/template --private --clone
 
 Create your repository from it, fill in the env file, and you start with a product that already
 has accounts, a second factor, tenancy and a place for background work. A new user signs up and
-gets an account, a session and a personal group in one database transaction. Groups are the only
-tenancy boundary, so the same membership checks and roles cover personal data and shared
-workspaces.
+gets an account, a session and a first group in one database transaction. Groups are the only
+tenancy boundary, so the same membership checks and roles cover a person's own data and
+shared workspaces.
 
 It exists because every SaaS MVP needs the same groundwork before its first feature. The reusable
 parts live here and in the published [`@spy4x/*`](https://jsr.io/@spy4x) packages; product rules
@@ -56,8 +56,9 @@ The screenshots and the GIF use a throw-away database and a made-up user;
 
 ## Why template
 
-- **Tenancy from day one.** Every user gets a `PERSONAL` group at sign-up; `SHARED` groups use the
-  same IDs, membership checks and roles, from viewer to owner.
+- **Tenancy from day one.** Every user gets a group at sign-up; every group uses the same IDs,
+  membership checks and roles, from viewer to owner. A group can be renamed, deleted and, for 30
+  days, restored, and a person always keeps at least one.
 - **Auth that is done.** Sign-up, sign-in, sessions and an authenticator-app second factor, with
   PBKDF2-SHA-256 password hashes. Web push subscriptions are built in too.
 - **Offline-first SPA.** The SPA keeps the last notes and groups in IndexedDB (Dexie), opens with no
@@ -143,7 +144,7 @@ seeds it, after you confirm; `--yes` skips the question. It refuses unless `ENV=
 `localhost`, `127.0.0.1` or `db`, and `DB_NAME` differs from the one in `infra/envs/.env.prod`. A
 missing or unreadable `.env.prod` also refuses; on a machine without one, add `--no-prod-check`.
 
-To add a demo user `demo` who owns a shared group, run `deno task db:seed` with the same values plus
+To add a demo user `demo` who owns a group, run `deno task db:seed` with the same values plus
 `AUTH_PEPPER` (the API's) and `SEED_PASSWORD` (the demo user's password, 8 to 50 characters).
 
 ## Production certificates
