@@ -267,6 +267,9 @@ describe("notes store", () => {
     expect(store.unsaved.value).toBe(true)
     store.editing.value = { ...store.editing.value!, title: "a" }
     expect(store.unsaved.value).toBe(false)
+    store.editing.value = { ...store.editing.value!, body: "Typed text" }
+    expect(store.unsaved.value).toBe(true)
+    store.editing.value = { ...store.editing.value!, body: "" }
     store.editing.value = { ...store.editing.value!, title: "Changed" }
     await store.save()
     expect(store.unsaved.value).toBe(false)
