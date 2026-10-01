@@ -3,7 +3,8 @@ import { describe, it } from "@std/testing/bdd"
 import { ConnectionLostError, RealtimeRequestError } from "@spy4x/realtime"
 import type { NoteItem } from "../state/notes.ts"
 import { createMemoryStore } from "./memory-store.ts"
-import { createOutbox, createPromiseLock } from "./outbox.ts"
+import { createPromiseLock } from "@spy4x/realtime/outbox"
+import { createNotesOutbox, overlayNotes } from "./notes-outbox.ts"
 
 const groupId = "g-1"
 
@@ -36,6 +37,7 @@ interface Sent {
 function harness() {
   const store = createMemoryStore()
   const sent: Sent[] = []
+  const fetched: string[][] = []
   const state = {
     /** Throws to simulate the server; returns the answer otherwise. */
     server: (_sent: Sent): unknown => ({ note: note("n-1", 2) }),
@@ -45,9 +47,8 @@ function harness() {
     onSend: undefined as undefined | (() => Promise<void>),
   }
   let keys = 0
-  const outbox = createOutbox({
+  const outbox = createNotesOutbox({
     store,
-    userId: 1,
     lock: createPromiseLock(),
     isOnline: () => state.online,
     newKey: () => `key-${++keys}`,
@@ -58,7 +59,10 @@ function harness() {
       await state.onSend?.()
       return state.server(call)
     },
-    fetchNote: () => Promise.resolve(state.current),
+    fetchNote(group, id) {
+      fetched.push([group, id])
+      return Promise.resolve(state.current)
+    },
   })
   const offline = () => {
     state.online = false
@@ -66,32 +70,33 @@ function harness() {
       throw new ConnectionLostError("the socket is not open")
     }
   }
-  return { store, outbox, sent, state, offline }
+  return { store, outbox, sent, fetched, state, offline }
 }
 
 describe("outbox while the socket is down", () => {
   it("keeps a note created offline and shows it in the list", async () => {
-    const { outbox, offline } = harness()
+    const { store, outbox, offline } = harness()
     offline()
     const outcome = await outbox.submit({
       kind: "create",
-      groupId,
-      noteId: "n-new",
-      title: "Written offline",
-      body: "text",
+      entityId: "n-new",
+      payload: { groupId, title: "Written offline", body: "text" },
     })
     expect(outcome.kind).toBe("queued")
-    const shown = await outbox.overlay(groupId, [note("n-1")])
+    const shown = overlayNotes(await store.readOutbox(), 1, groupId, [note("n-1")])
     expect(shown.map((n) => n.title)).toEqual(["Written offline", "n-1"])
   })
 
   it("keeps a queued write across a restart of the layer", async () => {
     const { store, outbox, offline } = harness()
     offline()
-    await outbox.submit({ kind: "create", groupId, noteId: "n-new", title: "T", body: "" })
-    const again = createOutbox({
+    await outbox.submit({
+      kind: "create",
+      entityId: "n-new",
+      payload: { groupId, title: "T", body: "" },
+    })
+    const again = createNotesOutbox({
       store,
-      userId: 1,
       lock: createPromiseLock(),
       isOnline: () => true,
       newKey: () => "other",
@@ -99,14 +104,22 @@ describe("outbox while the socket is down", () => {
       send: () => Promise.resolve({ note: note("n-new") }),
       fetchNote: () => Promise.resolve(null),
     })
-    expect((await again.reload()).map((e) => e.noteId)).toEqual(["n-new"])
+    expect((await again.reload()).map((e) => e.entityId)).toEqual(["n-new"])
   })
 
   it("sends the queue in order with the original keys once the socket is back", async () => {
     const { outbox, sent, state, offline } = harness()
     offline()
-    await outbox.submit({ kind: "create", groupId, noteId: "a", title: "A", body: "" })
-    await outbox.submit({ kind: "create", groupId, noteId: "b", title: "B", body: "" })
+    await outbox.submit({
+      kind: "create",
+      entityId: "a",
+      payload: { groupId, title: "A", body: "" },
+    })
+    await outbox.submit({
+      kind: "create",
+      entityId: "b",
+      payload: { groupId, title: "B", body: "" },
+    })
     state.online = true
     state.server = ({ payload }) => ({ note: note(String(payload.id)) })
     await outbox.flush()
@@ -114,42 +127,54 @@ describe("outbox while the socket is down", () => {
       ["note.create", "a", "key-1"],
       ["note.create", "b", "key-2"],
     ])
-    expect(outbox.entries.value).toEqual([])
+    expect(outbox.entries()).toEqual([])
   })
 
   it("stops at the first write that cannot reach the server and keeps the rest", async () => {
     const { outbox, sent, state, offline } = harness()
     offline()
-    await outbox.submit({ kind: "create", groupId, noteId: "a", title: "A", body: "" })
-    await outbox.submit({ kind: "create", groupId, noteId: "b", title: "B", body: "" })
+    await outbox.submit({
+      kind: "create",
+      entityId: "a",
+      payload: { groupId, title: "A", body: "" },
+    })
+    await outbox.submit({
+      kind: "create",
+      entityId: "b",
+      payload: { groupId, title: "B", body: "" },
+    })
     sent.length = 0
     state.online = true
     await outbox.flush()
     expect(sent.length).toBe(1)
-    expect(outbox.entries.value.length).toBe(2)
+    expect(outbox.entries().length).toBe(2)
   })
 })
 
 describe("outbox list overlay", () => {
   it("hides a note deleted offline", async () => {
-    const { outbox, offline } = harness()
+    const { store, outbox, offline } = harness()
     offline()
-    await outbox.submit({ kind: "delete", groupId, noteId: "n", title: "n", body: "", version: 1 })
-    expect(await outbox.overlay(groupId, [note("n"), note("m")])).toEqual([note("m")])
+    await outbox.submit({
+      kind: "delete",
+      entityId: "n",
+      payload: { groupId, title: "n", body: "" },
+      version: 1,
+    })
+    const queued = await store.readOutbox()
+    expect(overlayNotes(queued, 1, groupId, [note("n"), note("m")])).toEqual([note("m")])
   })
 
   it("shows the text of a note edited offline", async () => {
-    const { outbox, offline } = harness()
+    const { store, outbox, offline } = harness()
     offline()
     await outbox.submit({
       kind: "update",
-      groupId,
-      noteId: "n",
-      title: "New",
-      body: "b",
+      entityId: "n",
+      payload: { groupId, title: "New", body: "b" },
       version: 1,
     })
-    const [shown] = await outbox.overlay(groupId, [note("n")])
+    const [shown] = overlayNotes(await store.readOutbox(), 1, groupId, [note("n")])
     expect([shown.title, shown.body, shown.version]).toEqual(["New", "b", 1])
   })
 
@@ -159,7 +184,11 @@ describe("outbox list overlay", () => {
     state.onSend = async () => {
       during = (await store.readOutbox())[0]?.attempted
     }
-    await outbox.submit({ kind: "create", groupId, noteId: "n", title: "T", body: "" })
+    await outbox.submit({
+      kind: "create",
+      entityId: "n",
+      payload: { groupId, title: "T", body: "" },
+    })
     expect(during).toBe(true)
   })
 })
@@ -168,13 +197,15 @@ describe("outbox merging edits of one note", () => {
   it("sends a note created and edited offline as one create with the last text", async () => {
     const { outbox, sent, state, offline } = harness()
     offline()
-    await outbox.submit({ kind: "create", groupId, noteId: "n", title: "First", body: "" })
+    await outbox.submit({
+      kind: "create",
+      entityId: "n",
+      payload: { groupId, title: "First", body: "" },
+    })
     await outbox.submit({
       kind: "update",
-      groupId,
-      noteId: "n",
-      title: "Second",
-      body: "b",
+      entityId: "n",
+      payload: { groupId, title: "Second", body: "b" },
       version: 0,
     })
     state.online = true
@@ -186,25 +217,37 @@ describe("outbox merging edits of one note", () => {
   it("sends nothing for a note created and deleted before any send", async () => {
     const { outbox, sent, offline } = harness()
     offline()
-    await outbox.submit({ kind: "create", groupId, noteId: "n", title: "T", body: "" })
+    await outbox.submit({
+      kind: "create",
+      entityId: "n",
+      payload: { groupId, title: "T", body: "" },
+    })
     const outcome = await outbox.submit({
       kind: "delete",
-      groupId,
-      noteId: "n",
-      title: "T",
-      body: "",
+      entityId: "n",
+      payload: { groupId, title: "T", body: "" },
       version: 0,
     })
     expect(outcome.kind).toBe("dropped")
-    expect(outbox.entries.value).toEqual([])
+    expect(outbox.entries()).toEqual([])
     expect(sent.filter((s) => s.name !== "note.create").length).toBe(0)
   })
 
   it("sends a second edit of a note as one update on the first edit's base version", async () => {
     const { outbox, sent, state, offline } = harness()
     offline()
-    await outbox.submit({ kind: "update", groupId, noteId: "n", title: "A", body: "", version: 3 })
-    await outbox.submit({ kind: "update", groupId, noteId: "n", title: "B", body: "", version: 3 })
+    await outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "A", body: "" },
+      version: 3,
+    })
+    await outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "B", body: "" },
+      version: 3,
+    })
     state.online = true
     state.server = () => ({ note: note("n", 4, "B") })
     await outbox.flush()
@@ -214,9 +257,19 @@ describe("outbox merging edits of one note", () => {
   it("keeps the key of an edit that was never sent", async () => {
     const { outbox, offline } = harness()
     offline()
-    await outbox.submit({ kind: "update", groupId, noteId: "n", title: "A", body: "", version: 3 })
-    await outbox.submit({ kind: "update", groupId, noteId: "n", title: "B", body: "", version: 3 })
-    expect(outbox.entries.value.map((e) => [e.key, e.title])).toEqual([["key-1", "B"]])
+    await outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "A", body: "" },
+      version: 3,
+    })
+    await outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "B", body: "" },
+      version: 3,
+    })
+    expect(outbox.entries().map((e) => [e.key, e.payload.title])).toEqual([["key-1", "B"]])
   })
 
   it("uses a new key for an edit made after a send whose outcome is unknown", async () => {
@@ -224,8 +277,18 @@ describe("outbox merging edits of one note", () => {
     state.server = () => {
       throw new ConnectionLostError("closed after the send")
     }
-    await outbox.submit({ kind: "update", groupId, noteId: "n", title: "A", body: "", version: 3 })
-    await outbox.submit({ kind: "update", groupId, noteId: "n", title: "B", body: "", version: 3 })
+    await outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "A", body: "" },
+      version: 3,
+    })
+    await outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "B", body: "" },
+      version: 3,
+    })
     expect(sent.map((s) => s.key)).toEqual(["key-1", "key-2"])
   })
 
@@ -234,14 +297,16 @@ describe("outbox merging edits of one note", () => {
     state.server = () => {
       throw new ConnectionLostError("closed after the send")
     }
-    await outbox.submit({ kind: "create", groupId, noteId: "n", title: "T", body: "" })
+    await outbox.submit({
+      kind: "create",
+      entityId: "n",
+      payload: { groupId, title: "T", body: "" },
+    })
     state.server = () => ({})
     const outcome = await outbox.submit({
       kind: "delete",
-      groupId,
-      noteId: "n",
-      title: "T",
-      body: "",
+      entityId: "n",
+      payload: { groupId, title: "T", body: "" },
       version: 0,
     })
     expect(outcome.kind).toBe("sent")
@@ -255,14 +320,12 @@ describe("outbox when the server answers", () => {
     state.server = () => ({ note: note("n", 2, "Saved") })
     const outcome = await outbox.submit({
       kind: "update",
-      groupId,
-      noteId: "n",
-      title: "Saved",
-      body: "",
+      entityId: "n",
+      payload: { groupId, title: "Saved", body: "" },
       version: 1,
     })
-    expect(outcome).toEqual({ kind: "sent", note: note("n", 2, "Saved") })
-    expect(outbox.entries.value).toEqual([])
+    expect(outcome).toEqual({ kind: "sent", server: note("n", 2, "Saved") })
+    expect(outbox.entries()).toEqual([])
   })
 
   it("hands a refusal to the person who just made the change and queues nothing", async () => {
@@ -272,14 +335,26 @@ describe("outbox when the server answers", () => {
     }
     const outcome = await outbox.submit({
       kind: "update",
-      groupId,
-      noteId: "n",
-      title: "Mine",
-      body: "",
+      entityId: "n",
+      payload: { groupId, title: "Mine", body: "" },
       version: 1,
     })
     expect(outcome.kind).toBe("failed")
-    expect(outbox.entries.value).toEqual([])
+    expect(outbox.entries()).toEqual([])
+  })
+
+  it("keeps a write queued while the server says the same key is still running", async () => {
+    const { outbox, state } = harness()
+    state.server = () => {
+      throw refused("IN_PROGRESS")
+    }
+    const outcome = await outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "Mine", body: "" },
+      version: 1,
+    })
+    expect([outcome.kind, outbox.entries()[0]?.status]).toEqual(["queued", "pending"])
   })
 })
 
@@ -289,10 +364,8 @@ describe("outbox conflicts found after a reconnect", () => {
     h.offline()
     await h.outbox.submit({
       kind: "update",
-      groupId,
-      noteId: "n",
-      title: "Mine",
-      body: "my body",
+      entityId: "n",
+      payload: { groupId, title: "Mine", body: "my body" },
       version: 1,
     })
     h.state.server = () => {
@@ -306,11 +379,11 @@ describe("outbox conflicts found after a reconnect", () => {
 
   it("keeps an edit the server refused as a visible conflict with both versions", async () => {
     const { outbox } = await staleUpdate()
-    const [entry] = outbox.entries.value
+    const [entry] = outbox.entries()
     expect(entry.status).toBe("conflict")
     expect(entry.conflict?.reason).toBe("version")
     expect(entry.conflict?.server?.title).toBe("Theirs")
-    expect(entry.title).toBe("Mine")
+    expect(entry.payload.title).toBe("Mine")
   })
 
   it("does not send a conflicted write again on its own", async () => {
@@ -324,17 +397,17 @@ describe("outbox conflicts found after a reconnect", () => {
     const { outbox, sent, state } = await staleUpdate()
     state.server = () => ({ note: note("n", 3, "Mine") })
     sent.length = 0
-    await outbox.keepMine(outbox.entries.value[0].seq!)
+    await outbox.keepMine(outbox.entries()[0])
     expect(sent.map((s) => [s.name, s.payload.title, s.payload.version])).toEqual([
       ["note.update", "Mine", 2],
     ])
-    expect(outbox.entries.value).toEqual([])
+    expect(outbox.entries()).toEqual([])
   })
 
   it("shows the server's note and drops mine when I use the server's", async () => {
     const { outbox, store } = await staleUpdate()
-    await outbox.useTheirs(outbox.entries.value[0].seq!)
-    expect(outbox.entries.value).toEqual([])
+    await outbox.useTheirs(outbox.entries()[0])
+    expect(outbox.entries()).toEqual([])
     expect((await store.readNotes(groupId)).map((n) => n.title)).toEqual(["Theirs"])
   })
 
@@ -343,10 +416,8 @@ describe("outbox conflicts found after a reconnect", () => {
     h.offline()
     await h.outbox.submit({
       kind: "update",
-      groupId,
-      noteId: "n",
-      title: "Mine",
-      body: "",
+      entityId: "n",
+      payload: { groupId, title: "Mine", body: "" },
       version: 1,
     })
     h.state.server = () => {
@@ -355,8 +426,8 @@ describe("outbox conflicts found after a reconnect", () => {
     h.state.current = null
     h.state.online = true
     await h.outbox.flush()
-    expect(h.outbox.entries.value[0].conflict?.reason).toBe("gone")
-    expect(h.outbox.entries.value[0].conflict?.server).toBe(null)
+    expect(h.outbox.entries()[0].conflict?.reason).toBe("gone")
+    expect(h.outbox.entries()[0].conflict?.server).toBe(null)
   })
 
   it("treats a delete of a note already gone as done", async () => {
@@ -364,10 +435,8 @@ describe("outbox conflicts found after a reconnect", () => {
     h.offline()
     await h.outbox.submit({
       kind: "delete",
-      groupId,
-      noteId: "n",
-      title: "T",
-      body: "",
+      entityId: "n",
+      payload: { groupId, title: "T", body: "" },
       version: 1,
     })
     h.state.server = () => {
@@ -375,19 +444,23 @@ describe("outbox conflicts found after a reconnect", () => {
     }
     h.state.online = true
     await h.outbox.flush()
-    expect(h.outbox.entries.value).toEqual([])
+    expect(h.outbox.entries()).toEqual([])
   })
 
   it("keeps a write the server refuses for another reason, with the server's message", async () => {
     const h = harness()
     h.offline()
-    await h.outbox.submit({ kind: "create", groupId, noteId: "n", title: "T", body: "" })
+    await h.outbox.submit({
+      kind: "create",
+      entityId: "n",
+      payload: { groupId, title: "T", body: "" },
+    })
     h.state.server = () => {
       throw refused("ROLE_INSUFFICIENT")
     }
     h.state.online = true
     await h.outbox.flush()
-    const [entry] = h.outbox.entries.value
+    const [entry] = h.outbox.entries()
     expect(entry.status).toBe("conflict")
     expect(entry.conflict).toMatchObject({ reason: "rejected", message: "refused" })
   })
@@ -402,9 +475,8 @@ describe("outbox shared by two tabs", () => {
     const sendStarted = new Promise<void>((resolve) => (started = resolve))
     let keys = 0
     const tab = (online: boolean, prefix: string) =>
-      createOutbox({
+      createNotesOutbox({
         store,
-        userId: 1,
         // No lock shared between the two: the worst case for the queue's own checks.
         lock: createPromiseLock(),
         isOnline: () => online,
@@ -419,22 +491,25 @@ describe("outbox shared by two tabs", () => {
       })
     const tabA = tab(false, "key-a")
     const tabB = tab(true, "key-b")
-    await tabA.submit({ kind: "update", groupId, noteId: "n", title: "Old", body: "", version: 1 })
+    await tabA.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "Old", body: "" },
+      version: 1,
+    })
     const flushing = tabB.flush()
     await sendStarted
     // Tab A, offline, edits the same note while tab B's send is in flight.
     await tabA.submit({
       kind: "update",
-      groupId,
-      noteId: "n",
-      title: "Edit in A",
-      body: "",
+      entityId: "n",
+      payload: { groupId, title: "Edit in A", body: "" },
       version: 1,
     })
     finishSend()
     await flushing
     const [kept] = await store.readOutbox()
-    expect(kept?.title).toBe("Edit in A")
+    expect(kept?.payload.title).toBe("Edit in A")
   })
 
   it("keeps an edit made in one tab when another tab's send of the same note is refused", async () => {
@@ -445,9 +520,8 @@ describe("outbox shared by two tabs", () => {
     const sendStarted = new Promise<void>((resolve) => (started = resolve))
     let keys = 0
     const tab = (online: boolean, prefix: string) =>
-      createOutbox({
+      createNotesOutbox({
         store,
-        userId: 1,
         lock: createPromiseLock(),
         isOnline: () => online,
         newKey: () => `${prefix}-${++keys}`,
@@ -461,20 +535,122 @@ describe("outbox shared by two tabs", () => {
       })
     const tabA = tab(false, "key-a")
     const tabB = tab(true, "key-b")
-    await tabA.submit({ kind: "update", groupId, noteId: "n", title: "Old", body: "", version: 1 })
+    await tabA.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "Old", body: "" },
+      version: 1,
+    })
     const flushing = tabB.flush()
     await sendStarted
     await tabA.submit({
       kind: "update",
-      groupId,
-      noteId: "n",
-      title: "Edit in A",
-      body: "",
+      entityId: "n",
+      payload: { groupId, title: "Edit in A", body: "" },
       version: 1,
     })
     refuse()
     await flushing
     const [kept] = await store.readOutbox()
-    expect([kept?.title, kept?.status]).toEqual(["Edit in A", "pending"])
+    expect([kept?.payload.title, kept?.status]).toEqual(["Edit in A", "pending"])
+  })
+})
+
+describe("notes outbox wiring", () => {
+  it("sends nothing while the page is not signed in as the queue's user", async () => {
+    const { outbox, sent, state } = harness()
+    state.online = false
+    const outcome = await outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "Mine", body: "" },
+      version: 1,
+    })
+    expect([outcome.kind, sent.length, outbox.entries().length]).toEqual(["queued", 0, 1])
+  })
+
+  it("sends a note's group, id, text and base version in the command the API expects", async () => {
+    const { outbox, sent } = harness()
+    await outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "T", body: "B" },
+      version: 4,
+    })
+    expect(sent[0]).toMatchObject({
+      name: "note.update",
+      payload: { groupId, id: "n", title: "T", body: "B", version: 4 },
+    })
+  })
+
+  it("asks the server for the note in the group the queued write names", async () => {
+    const h = harness()
+    h.offline()
+    await h.outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId: "g-other", title: "Mine", body: "" },
+      version: 1,
+    })
+    h.state.server = () => {
+      throw refused("VERSION_CONFLICT")
+    }
+    h.state.current = note("n", 2, "Theirs")
+    h.state.online = true
+    await h.outbox.flush()
+    expect(h.fetched).toEqual([["g-other", "n"]])
+  })
+
+  it("shows a replayed create whose id is taken as a conflict, not a duplicate", async () => {
+    const h = harness()
+    h.offline()
+    await h.outbox.submit({
+      kind: "create",
+      entityId: "n",
+      payload: { groupId, title: "T", body: "" },
+    })
+    h.state.server = () => {
+      throw refused("ID_ALREADY_EXISTS")
+    }
+    h.state.current = note("n", 1, "Other")
+    h.state.online = true
+    await h.outbox.flush()
+    expect(h.outbox.entries()[0].conflict).toMatchObject({
+      reason: "version",
+      message: "Someone changed this note while you were offline.",
+    })
+  })
+
+  it("removes a note from the local copy once the server took its delete", async () => {
+    const h = harness()
+    await h.store.putNote(note("n"))
+    h.state.server = () => ({})
+    await h.outbox.submit({
+      kind: "delete",
+      entityId: "n",
+      payload: { groupId, title: "n", body: "" },
+      version: 1,
+    })
+    expect(await h.store.readNotes(groupId)).toEqual([])
+  })
+
+  it("removes a note deleted on the server from the local copy when I use the server's", async () => {
+    const h = harness()
+    await h.store.putNote(note("n"))
+    h.offline()
+    await h.outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "Mine", body: "" },
+      version: 1,
+    })
+    h.state.server = () => {
+      throw refused("NOTE_NOT_FOUND")
+    }
+    h.state.current = null
+    h.state.online = true
+    await h.outbox.flush()
+    await h.outbox.useTheirs(h.outbox.entries()[0])
+    expect(await h.store.readNotes(groupId)).toEqual([])
   })
 })

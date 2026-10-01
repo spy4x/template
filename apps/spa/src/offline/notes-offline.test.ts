@@ -5,7 +5,9 @@ import type { GroupItem, GroupsDependencies } from "../state/groups.ts"
 import { GroupKind, GroupRole } from "@domain/groups"
 import type { OfflineLayer } from "./index.ts"
 import { createMemoryStore } from "./memory-store.ts"
-import { createOutbox, createPromiseLock } from "./outbox.ts"
+import { createPromiseLock } from "@spy4x/realtime/outbox"
+import { createNotesOutbox } from "./notes-outbox.ts"
+import { signal } from "@preact/signals"
 import { offlineNotes } from "./notes-offline.ts"
 import { offlineGroups } from "./groups-offline.ts"
 
@@ -28,9 +30,8 @@ function note(id: string, version = 1, title = id): NoteItem {
 
 function layerWith(online: { socket: boolean }): OfflineLayer {
   const store = createMemoryStore()
-  const outbox = createOutbox({
+  const outbox = createNotesOutbox({
     store,
-    userId: 1,
     lock: createPromiseLock(),
     isOnline: () => online.socket,
     newKey: () => crypto.randomUUID(),
@@ -38,7 +39,9 @@ function layerWith(online: { socket: boolean }): OfflineLayer {
     send: (_name, payload) => Promise.resolve({ note: note(String(payload.id), 1, "sent") }),
     fetchNote: () => Promise.resolve(null),
   })
-  return { userId: 1, store, outbox }
+  const entries = signal<OfflineLayer["entries"]["value"]>([])
+  outbox.subscribe((all) => entries.value = all)
+  return { userId: 1, store, outbox, entries }
 }
 
 /** Server-side dependencies whose network the test switches off and on. */
@@ -142,7 +145,7 @@ describe("offline notes writes", () => {
       body: "",
     })
     expect(created.title).toBe("T")
-    expect(layer.outbox.entries.value.length).toBe(1)
+    expect(layer.entries.value.length).toBe(1)
   })
 })
 

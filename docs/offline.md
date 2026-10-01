@@ -12,7 +12,7 @@ the SPA works without them ([how to remove the layer](#removing-the-layer)).
 | Piece                                       | What it does                                                                                                              |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `offline/local-store.ts`                    | The Dexie (IndexedDB) database, one per signed-in user: the last notes and groups the server sent, and the outbox.        |
-| `offline/outbox.ts`                         | The queue of writes made while offline, the send loop, and the conflict rules. No Dexie or network in it: both injected.  |
+| `offline/notes-outbox.ts`                   | Puts the notes (commands, error codes, wording, local store) behind the outbox of `@spy4x/realtime/outbox`, and applies queued writes to a list. |
 | `offline/notes-offline.ts`, `groups-offline.ts` | Wrap the notes and groups stores' dependencies: reads keep and serve the local copy, note writes go through the outbox. |
 | `offline/OfflineStatus.tsx`                 | Shows "N changes are waiting to sync" and each conflict, with "Keep mine" and "Use the server's".                         |
 | `offline/session-cache.ts`                  | Remembers who was signed in, so an offline start does not show the sign-in page.                                          |
@@ -37,6 +37,13 @@ Because the local copy is replaced by every full read, it cannot drift from the 
 that runs after a reconnect is the same read that heals the store.
 
 ### Writes: the outbox
+
+The queue and its rules are not in this repository: they are the outbox of
+`@spy4x/realtime/outbox` (one entry per entity, a new key after an unknown outcome, keys that must
+still match before an entry is cleared, one writer at a time, conflicts left to a person).
+`offline/notes-outbox.ts` supplies what is about notes, and `offline/notes-outbox.test.ts` checks
+those rules through it. The Dexie store keeps the queue (`offline/local-store.ts`; database version
+2 moves rows of version 1 into the outbox's shape).
 
 A note create, update or delete is saved in the outbox, in IndexedDB, then sent at once if the
 socket is open. If it is not, the entry waits, and the person sees the change in the list with a
