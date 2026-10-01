@@ -45,12 +45,34 @@ test.describe("profile over the socket", () => {
       await expect(first.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible()
 
       const second = await context.newPage()
+      // What tab 2 sends and receives. Its first `profile.get` may go out while the socket is still
+      // connecting and be sent again a second later, so the spec waits for an answer to one.
+      const profileGets = new Set<string>()
+      let profileGetAnswered = false
+      const hintsReceived: { groupId: string; aggregate: string }[] = []
+      second.on("websocket", (socket) => {
+        socket.on("framesent", (frame) => {
+          const message = JSON.parse(String(frame.payload))
+          if (message.kind === "client.query" && message.name === "profile.get") {
+            profileGets.add(message.id)
+          }
+        })
+        socket.on("framereceived", (frame) => {
+          const message = JSON.parse(String(frame.payload))
+          if (message.kind === "server.result" && profileGets.has(message.requestId)) {
+            profileGetAnswered = true
+          }
+          if (message.kind === "change.hint") hintsReceived.push(message)
+        })
+      })
       await second.goto("/")
       await second.getByRole("navigation", { name: "Main navigation" })
         .getByRole("link", { name: "Profile" }).click()
       await expect(second.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible()
       await expect(second.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
       await expect(first.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+
+      await expect.poll(() => profileGetAnswered).toBe(true)
 
       await first.locator("[data-e2e=profile-first-name]").fill("Ada")
       await first.locator("[data-e2e=profile-last-name]").fill("Lovelace")
@@ -60,6 +82,12 @@ test.describe("profile over the socket", () => {
       // The second tab was neither reloaded nor touched: the server's hint made it read again.
       await expect(second.locator("[data-e2e=profile-first-name]")).toHaveValue("Ada")
       await expect(second.locator("[data-e2e=profile-last-name]")).toHaveValue("Lovelace")
+
+      // The server sent tab 2 the hint for this person's own changes, and the tab acted on it.
+      expect(
+        hintsReceived.some((hint) => /^user:\d+$/.test(hint.groupId) && hint.aggregate === "user"),
+      )
+        .toBe(true)
 
       // The save went over the socket, as a command with an idempotency key, not over REST.
       const command = framesSent.map((payload) => JSON.parse(payload)).find(
