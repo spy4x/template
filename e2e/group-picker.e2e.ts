@@ -95,7 +95,8 @@ test.describe("notes at /notes with a group picker", () => {
       await expect(titles).toHaveText(["Only in team"])
       await expect(page).toHaveURL("/notes")
 
-      // The choice is the server's: it survives a reload.
+      // The choice survives a reload. The page shows the device's copy first, so this passes even
+      // when the server forgets the choice; the next spec catches that.
       await open(page, page.url())
       await expect(heading(page, "Team B")).toBeVisible()
       await expect(titles).toHaveText(["Only in team"])
