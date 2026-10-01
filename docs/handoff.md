@@ -237,7 +237,6 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 - Only the group and note calls go over the socket. The profile, password, two-factor and
   push calls are still REST, and the profile page no longer receives live updates (a profile change
   in another tab shows after a reload).
-- The MPA finds a group by paging through the whole list, since the API cannot read one group (#123).
 - Group membership cannot be changed through the product: tests seed a second member with `POST /api/test/add-member`.
 - No local projection in the SPA, no offline outbox, no conflict UI. The page keeps its cursors in
   `localStorage` and rereads the whole group list to catch up.
@@ -249,7 +248,7 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 1. `apps/spa/src/state/realtime.ts` opens `/api/ws`. The upgrade runs the same session gate as
    REST and the `Origin` check, then `apps/api/services/realtime.ts` remembers which session each
    socket belongs to.
-2. `group.create` and `group.list` are dispatched on the same command and query buses REST uses,
+2. `group.create`, `group.list` and `group.get` are dispatched on the same command and query buses REST uses,
    from `apps/api/features/groups/socket.ts`. Each frame reads the session again from the database,
    so a signed-out or expired session is refused. Authorization stays in the buses.
 3. A command needs an idempotency key. `@spy4x/server/idempotency` (ts-libs) stores it for 7 days

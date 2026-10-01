@@ -18,17 +18,11 @@ export async function listGroups(
 }
 
 /**
- * The person's membership of one group, or `null` when they are not a member. The API has no read
- * of a single group, so this pages through the list.
+ * The person's membership of one group, or `null` when they are not a member (the API answers that
+ * as a missing group) or the read failed. One API call, whatever the number of groups.
  */
 export async function findGroup(api: Api, groupId: string): Promise<GroupRow | null> {
-  let cursor: string | undefined
-  do {
-    const page = await listGroups(api, cursor)
-    if (!page) return null
-    const group = page.groups.find((candidate) => candidate.id === groupId)
-    if (group) return group
-    cursor = page.nextCursor ?? undefined
-  } while (cursor)
-  return null
+  const answer = await api.call("GET", `/api/groups/${encodeURIComponent(groupId)}`)
+  if (!isOk(answer) || !isRecord(answer.body) || !isRecord(answer.body.group)) return null
+  return answer.body.group as unknown as GroupRow
 }

@@ -17,6 +17,7 @@ export const realtime = new Realtime({
     ...createGroupSocketRequests({
       create: (command) => commandBus.execute(command),
       list: (query) => queryBus.execute(query),
+      get: (query) => queryBus.execute(query),
       cursor: groupListCursor,
     }),
     ...createNoteSocketRequests({

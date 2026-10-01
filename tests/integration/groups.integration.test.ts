@@ -1,7 +1,7 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
 import postgres from "postgres"
-import { GroupError, GroupKind, GroupRole } from "@domain/groups"
+import { GroupError, GroupKind, GroupListPageKey, GroupRole } from "@domain/groups"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { requireDbConnection } from "./db-connection.ts"
 
@@ -58,6 +58,7 @@ Deno.test({
       await applyMigration(sql, "2026_10_02_0001_notes.sql")
       await applyMigration(sql, "2026_10_03_0001_idempotency_claim_token.sql")
       await applyMigration(sql, "2026_10_03_0002_outbox_jobs.sql")
+      await applyMigration(sql, "2026_10_04_0001_groups_ms_precision.sql")
 
       await t.step("backfill is rerunnable and covers only active users", async () => {
         await applyMigration(sql, "2026_08_18_0002_personal_group_backfill.sql")
@@ -176,6 +177,73 @@ Deno.test({
         const ids = [...first.groups, ...second.groups].map((group) => group.id)
         expect(new Set(ids).size).toBe(ids.length)
         expect((await repository.listForUser(activeUserTwo, { limit: 100 })).groups.length).toBe(1)
+      })
+
+      await t.step(
+        "the list pages through groups changed in one millisecond, each once",
+        async () => {
+          const repository = new PostgresGroupRepository(sql)
+          const owner = await insertUser(sql)
+          const ids: string[] = []
+          for (const name of ["a", "b", "c"]) {
+            const id = crypto.randomUUID()
+            await repository.createShared({ id, name }, owner)
+            ids.push(id)
+          }
+          // Three times ten microseconds apart, inside one millisecond. They are built in SQL because
+          // postgres.js would send a timestamp parameter through a Date, which drops microseconds.
+          for (const [index, id] of ids.entries()) {
+            await sql`
+            UPDATE groups
+            SET updated_at = TIMESTAMPTZ '2026-10-02 12:00:00.12345+00'
+              - make_interval(secs => ${index * 10} / 1000000.0)
+            WHERE id = ${id}
+          `
+          }
+
+          const seen: string[] = []
+          let after: GroupListPageKey | undefined
+          for (let page = 0; page < 5; page++) {
+            const result = await repository.listForUser(
+              owner,
+              after ? { limit: 1, after } : { limit: 1 },
+            )
+            // The owner's personal group may be listed too; only the three groups under test count.
+            seen.push(...result.groups.map((group) => group.id).filter((id) => ids.includes(id)))
+            if (!result.nextPageKey) break
+            after = result.nextPageKey
+          }
+
+          expect(seen.toSorted()).toEqual(ids.toSorted())
+        },
+      )
+
+      await t.step(
+        "one group is read for a member only, as a missing group otherwise",
+        async () => {
+          const repository = new PostgresGroupRepository(sql)
+          const owner = await insertUser(sql)
+          const stranger = await insertUser(sql)
+          const groupId = crypto.randomUUID()
+          await repository.createShared({ id: groupId, name: "Private" }, owner)
+
+          const read = await repository.getSummaryForMember(groupId, owner)
+          expect(read).toMatchObject({ id: groupId, name: "Private", role: GroupRole.OWNER })
+          expect(await repository.getSummaryForMember(groupId, stranger)).toBe(null)
+          expect(await repository.getSummaryForMember(crypto.randomUUID(), owner)).toBe(null)
+        },
+      )
+
+      await t.step("a soft-deleted group is not read, even by its former owner", async () => {
+        const repository = new PostgresGroupRepository(sql)
+        const owner = await insertUser(sql)
+        const groupId = crypto.randomUUID()
+        await repository.createShared({ id: groupId, name: "Gone" }, owner)
+        expect(await repository.getSummaryForMember(groupId, owner)).not.toBe(null)
+
+        await sql`UPDATE groups SET deleted_at = NOW() WHERE id = ${groupId}`
+
+        expect(await repository.getSummaryForMember(groupId, owner)).toBe(null)
       })
 
       await t.step("a committed create takes the group's first sequence", async () => {

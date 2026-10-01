@@ -1,6 +1,6 @@
 import type { CommandHandler, QueryHandler } from "@spy4x/platform/cqrs"
 import type { GroupRepository } from "@domain/groups"
-import { GroupCreateCommand, GroupListQuery } from "@domain/groups"
+import { GroupCreateCommand, GroupError, GroupGetQuery, GroupListQuery } from "@domain/groups"
 
 /**
  * Business logic only. Session strength is enforced by a CQRS middleware that
@@ -23,4 +23,15 @@ export function createGroupListHandler(
   repository: GroupRepository,
 ): QueryHandler<GroupListQuery> {
   return async (query) => await repository.listForUser(query.data.actor.userId, query.data.page)
+}
+
+/** A group the person is not a member of answers exactly as a missing one: no existence leak. */
+export function createGroupGetHandler(
+  repository: GroupRepository,
+): QueryHandler<GroupGetQuery> {
+  return async ({ data }) => {
+    const group = await repository.getSummaryForMember(data.groupId, data.actor.userId)
+    if (!group) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+    return { group }
+  }
 }

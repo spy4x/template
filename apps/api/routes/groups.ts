@@ -3,11 +3,14 @@ import type { MiddlewareHandler } from "hono"
 import {
   GroupCreateCommand,
   GroupCreateResult,
+  GroupGetQuery,
+  GroupGetResult,
   GroupKind,
   GroupListPageKey,
   GroupListQuery,
   GroupListResult,
   parseCreateSharedGroupRequest,
+  parseGroupId,
 } from "@domain/groups"
 import { createSameOriginMutationGuard } from "@spy4x/server/http/same-origin"
 import { actorFromAuth } from "../cqrs/actor.ts"
@@ -19,6 +22,7 @@ import { listGroupsPage } from "../features/groups/list.ts"
 export interface GroupsRouteDependencies {
   create(command: GroupCreateCommand): Promise<GroupCreateResult>
   list(query: GroupListQuery): Promise<GroupListResult>
+  get(query: GroupGetQuery): Promise<GroupGetResult>
   cursor: {
     encode(userId: number, pageKey: GroupListPageKey): Promise<string>
     decode(cursor: string, expectedUserId: number): Promise<GroupListPageKey>
@@ -51,6 +55,14 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
         cursor: c.req.query("cursor"),
       })
       return c.json(page)
+    })
+    .get("/:groupId", async (c) => {
+      const groupId = parseGroupId(c.req.param("groupId"))
+      return c.json(
+        await dependencies.get(
+          new GroupGetQuery({ actor: actorFromAuth(c.get("auth")!), groupId }),
+        ),
+      )
     })
     .post("/", requireSameOrigin, async (c) => {
       if (!c.req.header("content-type")?.toLowerCase().includes("application/json")) {

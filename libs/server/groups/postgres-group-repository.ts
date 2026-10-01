@@ -100,6 +100,29 @@ export class PostgresGroupRepository implements GroupRepository {
     }
   }
 
+  async getSummaryForMember(groupId: string, userId: number): Promise<GroupSummary | null> {
+    const rows = await this.sql<GroupSummaryRow[]>`
+      SELECT
+        groups.id,
+        groups.kind,
+        groups.name,
+        group_members.role,
+        groups.authorization_revision::text AS authorization_revision,
+        (groups.next_change_sequence - 1)::text AS change_sequence,
+        groups.updated_at
+      FROM groups
+      INNER JOIN group_members
+        ON group_members.group_id = groups.id
+       AND group_members.user_id = ${userId}
+      INNER JOIN users
+        ON users.id = group_members.user_id
+       AND users.deleted_at IS NULL
+      WHERE groups.id = ${groupId}
+        AND groups.deleted_at IS NULL
+    `
+    return rows[0] ?? null
+  }
+
   async getForMember(groupId: string, userId: number): Promise<GroupAccess | null> {
     const row = (
       await this.sql<GroupAccessRow[]>`
