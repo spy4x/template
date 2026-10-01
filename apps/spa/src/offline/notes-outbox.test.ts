@@ -606,4 +606,37 @@ describe("notes outbox wiring", () => {
       message: "Someone changed this note while you were offline.",
     })
   })
+
+  it("removes a note from the local copy once the server took its delete", async () => {
+    const h = harness()
+    await h.store.putNote(note("n"))
+    h.state.server = () => ({})
+    await h.outbox.submit({
+      kind: "delete",
+      entityId: "n",
+      payload: { groupId, title: "n", body: "" },
+      version: 1,
+    })
+    expect(await h.store.readNotes(groupId)).toEqual([])
+  })
+
+  it("removes a note deleted on the server from the local copy when I use the server's", async () => {
+    const h = harness()
+    await h.store.putNote(note("n"))
+    h.offline()
+    await h.outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "Mine", body: "" },
+      version: 1,
+    })
+    h.state.server = () => {
+      throw refused("NOTE_NOT_FOUND")
+    }
+    h.state.current = null
+    h.state.online = true
+    await h.outbox.flush()
+    await h.outbox.useTheirs(h.outbox.entries()[0])
+    expect(await h.store.readNotes(groupId)).toEqual([])
+  })
 })
