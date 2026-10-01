@@ -29,8 +29,9 @@ async function warmUp(browser: Browser, api: APIRequestContext, baseURL: string,
     await signIn(page, email, WARM_PASSWORD)
     const status = page.locator("[data-e2e=shell-ws-status]")
     await gotoApp(page, "/groups", status)
-    // The notes of the selected group, which is the personal group sign-up creates.
-    await gotoApp(page, "/notes", page.locator("[data-e2e=note-new-title]"))
+    // The notes of the selected group, which is the personal group sign-up creates, and its editor.
+    await gotoApp(page, "/notes", page.locator("[data-e2e=note-new]"))
+    await gotoApp(page, "/notes/new", page.locator("[data-e2e=note-title]"))
     await page.waitForLoadState("networkidle")
   } catch (error) {
     // The warm-up's own error is the one to report; a cleanup that fails as well is added to it.
