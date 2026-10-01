@@ -53,11 +53,11 @@ function displayName(user: FrameUser): string {
  * The signed-in frame: `Shell` from `@spy4x/preact-system` with this app's brand, navigation, user
  * menu and connection status. Signed-out screens use {@link PublicFrame} instead.
  *
- * With `onSignOut`, "Sign out" is an item of the user menu, which needs JavaScript to open: a form
- * that posts to its route, which the app takes over. Without it, a page rendered on the server,
- * "Sign out" is a form in the header. `connection` is shown only when the app has a live connection
- * to report. `groupPicker` puts the group picker at the bottom of the side menu and the mobile
- * drawer; without it the menu has none (nobody to pick for).
+ * With `onSignOut`, "Sign out" is an item of the user menu (a `<details>` that opens without
+ * JavaScript): a form that posts to its route, which the app takes over. Without it, a page
+ * rendered on the server, "Sign out" is a form in the header. `connection` is shown only when the
+ * app has a live connection to report. `groupPicker` puts the group picker at the bottom of the
+ * side menu and the mobile drawer; without it the menu has none (nobody to pick for).
  */
 export function AppFrame(
   { user, connection, currentPath, navigate, onSignOut, groupPicker, children }: {
