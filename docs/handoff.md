@@ -204,13 +204,23 @@ These cost real time to find. Do not rediscover them.
    same body for every valid address and queues the `auth.password-reset-mail` job
    with the address in `password_reset_requests`, never in the job row. The
    worker issues the code (a challenge of `@spy4x/server/auth`: only its SHA-256
-   is stored, one per address, 30 minutes, 5 wrong guesses) and mails the link
+   is stored, one per address, 30 minutes, with no practical cap on wrong guesses: a small cap would let anyone lock an address's reset, and the per-IP limit stops floods) and mails the link
    in the same step, so the raw code exists only in the mail. `POST
    /api/auth/password/reset` with `{ email, code, newPassword }` spends the code,
    marks the address proven, sets the password and signs out every session of
    the user; it signs nobody in. Limits: the IP limit of the other anonymous auth
    routes, and 3 requests an hour per address (`ratelimit-reset` in Valkey,
    keyed by a hash of the address, refusing when Valkey is down).
+
+   **Known gap: a squatted address.** Addresses are not verified at sign-up, so
+   anyone can sign up first with someone else's address. A reset gives the
+   owner the account back (new password, address proven, every session signed
+   out), unless the squatter turned on an authenticator app: that stays, and
+   the owner stops at the one-time-code step. Sign-up also answers 401 for a
+   taken address, which tells that an account uses it; avoiding that needs
+   verified addresses too. Both close with
+   [#140](https://github.com/spy4x/template/issues/140) (verify the address
+   with a one-time code).
 
    **Mail.** `libs/server/mail` picks the transport: with `ENV=dev` the console
    sender of `@spy4x/email` plus a copy in the `dev_mail` table, which the e2e
