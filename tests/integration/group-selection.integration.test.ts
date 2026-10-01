@@ -1,7 +1,6 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
 import postgres from "postgres"
-import { GroupKind } from "@domain/groups"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { requireDbConnection } from "./db-connection.ts"
 
@@ -44,19 +43,23 @@ async function insertUser(sql: postgres.Sql): Promise<number> {
   return rows[0].id
 }
 
-/** A user with their personal group, and a shared group they own. */
+/** A user with their first group, and a second group they own, made later. */
 async function personWithTwoGroups(sql: postgres.Sql) {
   const repository = new PostgresGroupRepository(sql)
   const userId = await insertUser(sql)
-  const personal = await repository.ensurePersonal({ id: crypto.randomUUID(), name: "Me" }, userId)
-  const shared = await repository.createShared({ id: crypto.randomUUID(), name: "Team" }, userId)
-  return { repository, userId, personal: personal.id, shared: shared.group.id }
+  const personal = crypto.randomUUID()
+  await repository.ensureFirst({ id: personal, name: "Me" }, userId)
+  // The two groups are made within one millisecond, so say which is older: the fallback is the
+  // oldest group, and two equal creation times would leave the choice to the ids.
+  await sql`UPDATE groups SET created_at = created_at - interval '1 hour' WHERE id = ${personal}`
+  const shared = await repository.create({ id: crypto.randomUUID(), name: "Team" }, userId)
+  return { repository, userId, personal, shared: shared.group.id }
 }
 
 Deno.test("the selected group is stored per user and checked against membership", async (t) => {
   await withSchema(async (sql) => {
     await t.step(
-      "a person who never chose gets their personal group, and nothing is stored",
+      "a person who never chose gets their oldest group, and nothing is stored",
       async () => {
         const { repository, userId, personal } = await personWithTwoGroups(sql)
 
@@ -119,7 +122,7 @@ Deno.test("the selected group is stored per user and checked against membership"
       async () => {
         const { repository, userId, personal } = await personWithTwoGroups(sql)
         const other = await insertUser(sql)
-        const sharedByOther = await repository.createShared(
+        const sharedByOther = await repository.create(
           { id: crypto.randomUUID(), name: "Theirs" },
           other,
         )
@@ -134,8 +137,10 @@ Deno.test("the selected group is stored per user and checked against membership"
       `
 
         expect((await repository.getSelected(userId)).groupId).toBe(personal)
-        const kind = await sql`SELECT kind FROM groups WHERE id = ${sharedByOther.group.id}`
-        expect(kind[0].kind).toBe(GroupKind.SHARED)
+        const stays = await sql`
+          SELECT 1 FROM groups WHERE id = ${sharedByOther.group.id} AND deleted_at IS NULL
+        `
+        expect(stays.length).toBe(1)
       },
     )
   })

@@ -2,7 +2,7 @@
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import { CommandBus } from "@spy4x/platform/cqrs"
-import { GroupCreateCommand, GroupKind } from "@domain/groups"
+import { GroupCreateCommand } from "@domain/groups"
 import { createGroupCreateHandler } from "../../apps/api/features/groups/handlers.ts"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { UserMFAStatus } from "@domain/identity"
@@ -72,7 +72,6 @@ Deno.test("idempotency keys in Postgres", async (t) => {
             new GroupCreateCommand({
               actor,
               id: "0b1f3c58-7f55-4a5d-8f6e-6a3a5a9d1a01",
-              kind: GroupKind.SHARED,
               name: "Replayed team",
               requestId,
               idempotencyKey: "create-team-1",

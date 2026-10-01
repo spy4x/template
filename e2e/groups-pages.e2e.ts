@@ -75,7 +75,7 @@ test.describe("group list and settings pages", () => {
       const longName = "A group with a very long name that must wrap and never push the page wider"
       const created = await page.request.post(`${apiBase}/api/groups`, {
         headers,
-        data: { id: crypto.randomUUID(), kind: 2, name: longName },
+        data: { id: crypto.randomUUID(), name: longName },
       })
       expect(created.status(), await created.text()).toBe(201)
 
@@ -93,6 +93,94 @@ test.describe("group list and settings pages", () => {
       await page.getByRole("link", { name: `Settings of ${longName}` }).click()
       await expect(page.getByRole("heading", { level: 2, name: "General" })).toBeVisible()
       expect(await overflow()).toBeLessThanOrEqual(0)
+    } finally {
+      await cleanup({ soft: true })
+    }
+  })
+
+  test("renames a group, deletes it with its confirmation and restores it from the Groups page", async ({ page, request }) => {
+    const email = "e2e_groups_lifecycle@example.com"
+    const password = "Passw0rd!"
+    const cleanup = async ({ soft = false } = {}) => {
+      const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
+        data: { login: email },
+      })
+      ;(soft ? expect.soft : expect)(response.status(), await response.text()).toBe(200)
+    }
+
+    await cleanup()
+    try {
+      const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
+        headers,
+        data: { email, password },
+      })
+      expect(signUp.ok()).toBe(true)
+      await page.goto("/sign-in")
+      await page.locator("[data-e2e=auth-form-login]").fill(email)
+      await page.locator("[data-e2e=auth-form-password]").fill(password)
+      await page.locator("[data-e2e=auth-form-submit]").click()
+      await page.waitForURL("/")
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+
+      await page.goto("/groups")
+      await page.locator("[data-e2e=group-name]").fill("Trip")
+      await page.getByRole("button", { name: "New group" }).click()
+      await page.getByRole("link", { name: "Settings of Trip" }).click()
+
+      await page.getByLabel("New name").fill("Trip 2027")
+      await page.getByRole("button", { name: "Rename" }).click()
+      await expect(page.locator("[data-e2e=group-general-name]")).toHaveText("Trip 2027")
+
+      await page.getByText("Delete this group...").click()
+      await expect(page.locator("[data-e2e=group-delete-confirmation]"))
+        .toContainText("You can restore it from the Groups page for 30 days")
+      await page.getByRole("button", { name: "Delete group" }).click()
+      await expect(page).toHaveURL("/groups")
+      await expect(page.locator("[data-e2e=group-item-name]")).toHaveText(["Personal"])
+      await expect(page.locator("[data-e2e=deleted-group-name]")).toHaveText(["Trip 2027"])
+
+      await page.getByRole("button", { name: "Restore Trip 2027" }).click()
+      await expect(page.locator("[data-e2e=group-item-name]").filter({ hasText: "Trip 2027" }))
+        .toHaveCount(1)
+      await expect(page.locator("[data-e2e=deleted-group-list]")).toHaveCount(0)
+    } finally {
+      await cleanup({ soft: true })
+    }
+  })
+
+  test("the last group cannot be deleted: the button is disabled and says why", async ({ page, request }) => {
+    const email = "e2e_groups_last@example.com"
+    const password = "Passw0rd!"
+    const cleanup = async ({ soft = false } = {}) => {
+      const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
+        data: { login: email },
+      })
+      ;(soft ? expect.soft : expect)(response.status(), await response.text()).toBe(200)
+    }
+
+    await cleanup()
+    try {
+      const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
+        headers,
+        data: { email, password },
+      })
+      expect(signUp.ok()).toBe(true)
+      await page.goto("/sign-in")
+      await page.locator("[data-e2e=auth-form-login]").fill(email)
+      await page.locator("[data-e2e=auth-form-password]").fill(password)
+      await page.locator("[data-e2e=auth-form-submit]").click()
+      await page.waitForURL("/")
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+
+      await page.goto("/groups")
+      await page.getByRole("link", { name: "Settings of Personal" }).click()
+      await expect(page.locator("[data-e2e=group-delete]")).toBeDisabled()
+      await expect(page.locator("[data-e2e=group-delete-why]")).toBeVisible()
+
+      const groups = await page.request.get(`${apiBase}/api/groups`)
+      const [only] = (await groups.json()).groups
+      const refused = await page.request.delete(`${apiBase}/api/groups/${only.id}`, { headers })
+      expect(refused.status()).toBe(409)
     } finally {
       await cleanup({ soft: true })
     }

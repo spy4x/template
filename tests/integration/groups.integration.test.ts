@@ -1,7 +1,7 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
 import postgres from "postgres"
-import { GroupError, GroupKind, GroupListPageKey, GroupRole } from "@domain/groups"
+import { GroupError, GroupListPageKey, GroupRole } from "@domain/groups"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { requireDbConnection } from "./db-connection.ts"
 
@@ -71,7 +71,7 @@ Deno.test({
             ON group_members.group_id = groups.id
            AND group_members.user_id = groups.owner_user_id
            AND group_members.role = ${GroupRole.OWNER}
-          WHERE groups.kind = ${GroupKind.PERSONAL}
+          WHERE groups.kind = 1
         `
         expect(counts[0].count).toBe(2)
 
@@ -79,11 +79,61 @@ Deno.test({
           SELECT COUNT(*)::int AS count
           FROM groups
           INNER JOIN users ON users.id = groups.owner_user_id
-          WHERE groups.kind = ${GroupKind.PERSONAL}
+          WHERE groups.kind = 1
             AND users.deleted_at IS NOT NULL
         `
         expect(invalid[0].count).toBe(0)
       })
+
+      await t.step(
+        "dropping the personal kind keeps every group, membership and owner, and removes the column",
+        async () => {
+          // A shared group with a second member and a note, beside the two backfilled personal ones.
+          const shared = crypto.randomUUID()
+          await sql`
+            INSERT INTO groups (id, kind, name, owner_user_id, created_by_user_id)
+            VALUES (${shared}, 2, 'Kept team', ${activeUserOne}, ${activeUserOne})
+          `
+          await sql`
+            INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+            VALUES (${shared}, ${activeUserOne}, 4, ${activeUserOne}),
+                   (${shared}, ${activeUserTwo}, 1, ${activeUserOne})
+          `
+          await sql`
+            INSERT INTO notes (id, group_id, title, change_sequence, created_by_user_id, updated_by_user_id)
+            VALUES (${crypto.randomUUID()}, ${shared}, 'Kept note', 1, ${activeUserOne}, ${activeUserOne})
+          `
+          const before = await sql`
+            SELECT groups.id, groups.name, groups.owner_user_id, group_members.user_id, group_members.role
+            FROM groups INNER JOIN group_members ON group_members.group_id = groups.id
+            ORDER BY groups.id, group_members.user_id
+          `
+
+          await applyMigration(sql, "2026_10_07_0001_group_kind_removed.sql")
+
+          const after = await sql`
+            SELECT groups.id, groups.name, groups.owner_user_id, group_members.user_id, group_members.role
+            FROM groups INNER JOIN group_members ON group_members.group_id = groups.id
+            ORDER BY groups.id, group_members.user_id
+          `
+          expect((await sql<CountRow[]>`SELECT COUNT(*)::int AS count FROM notes`)[0].count).toBe(1)
+          expect(after.length).toBe(before.length)
+          expect(after.length).toBeGreaterThanOrEqual(4)
+          expect(after.map((row) => ({ ...row }))).toEqual(before.map((row) => ({ ...row })))
+          const columns = await sql`
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = ${schema} AND table_name = 'groups' AND column_name = 'kind'
+          `
+          expect(columns.length).toBe(0)
+          // Every active user still has exactly the personal group the backfill gave them.
+          const owned = await sql<CountRow[]>`
+            SELECT COUNT(*)::int AS count FROM groups WHERE name = 'Personal' AND deleted_at IS NULL
+          `
+          expect(owned[0].count).toBe(2)
+          // The later steps count each user's groups: leave only the backfilled ones.
+          await sql`DELETE FROM groups WHERE id = ${shared}`
+        },
+      )
 
       await t.step(
         "schema snapshot matches tables, functions, and trigger definitions",
@@ -95,18 +145,13 @@ Deno.test({
         },
       )
 
-      await t.step("existing authenticated user self-heals a personal group", async () => {
+      await t.step("an existing user with no group gets one, once", async () => {
         const userId = await insertUser(sql)
         const repository = new PostgresGroupRepository(sql)
-        const personal = await repository.ensurePersonal(
-          { id: crypto.randomUUID(), name: "Personal" },
-          userId,
-        )
-        const retry = await repository.ensurePersonal(
-          { id: crypto.randomUUID(), name: "Personal" },
-          userId,
-        )
-        expect(personal.id).toBe(retry.id)
+        await repository.ensureFirst({ id: crypto.randomUUID(), name: "Personal" }, userId)
+        await repository.ensureFirst({ id: crypto.randomUUID(), name: "Personal" }, userId)
+        // The second call finds the first group and makes no other.
+        expect((await repository.listForUser(userId, { limit: 10 })).groups.length).toBe(1)
       })
 
       await t.step("concurrent exact shared create emits audit and outbox once", async () => {
@@ -115,7 +160,7 @@ Deno.test({
         const gate = deferred<void>()
         const requests = Array.from({ length: 20 }, async () => {
           await gate.promise
-          return await repository.createShared(
+          return await repository.create(
             { id: groupId, name: "Concurrent team", requestId: "request-exact" },
             activeUserOne,
           )
@@ -136,7 +181,7 @@ Deno.test({
           const requests = Array.from({ length: 20 }, async (_, index) => {
             await gate.promise
             try {
-              return await repository.createShared(
+              return await repository.create(
                 { id: groupId, name: index % 2 ? "Intent A" : "Intent B" },
                 activeUserOne,
               )
@@ -159,8 +204,8 @@ Deno.test({
           for (let index = 0; index < 55; index += 1) {
             const groupId = crypto.randomUUID()
             await transaction`
-              INSERT INTO groups (id, kind, name, owner_user_id, created_by_user_id)
-              VALUES (${groupId}, 2, ${`Page ${index}`}, ${activeUserOne}, ${activeUserOne})
+              INSERT INTO groups (id, name, owner_user_id, created_by_user_id)
+              VALUES (${groupId}, ${`Page ${index}`}, ${activeUserOne}, ${activeUserOne})
             `
             await transaction`
               INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
@@ -189,7 +234,7 @@ Deno.test({
           const ids: string[] = []
           for (const name of ["a", "b", "c"]) {
             const id = crypto.randomUUID()
-            await repository.createShared({ id, name }, owner)
+            await repository.create({ id, name }, owner)
             ids.push(id)
           }
           // Three times ten microseconds apart, inside one millisecond. They are built in SQL because
@@ -227,7 +272,7 @@ Deno.test({
           const owner = await insertUser(sql)
           const stranger = await insertUser(sql)
           const groupId = crypto.randomUUID()
-          await repository.createShared({ id: groupId, name: "Private" }, owner)
+          await repository.create({ id: groupId, name: "Private" }, owner)
 
           const read = await repository.getSummaryForMember(groupId, owner)
           expect(read).toMatchObject({ id: groupId, name: "Private", role: GroupRole.OWNER })
@@ -240,7 +285,7 @@ Deno.test({
         const repository = new PostgresGroupRepository(sql)
         const owner = await insertUser(sql)
         const groupId = crypto.randomUUID()
-        await repository.createShared({ id: groupId, name: "Gone" }, owner)
+        await repository.create({ id: groupId, name: "Gone" }, owner)
         expect(await repository.getSummaryForMember(groupId, owner)).not.toBe(null)
 
         await sql`UPDATE groups SET deleted_at = NOW() WHERE id = ${groupId}`
@@ -251,7 +296,7 @@ Deno.test({
       await t.step("a committed create takes the group's first sequence", async () => {
         const repository = new PostgresGroupRepository(sql)
         const groupId = crypto.randomUUID()
-        const created = await repository.createShared(
+        const created = await repository.create(
           { id: groupId, name: "Sequenced" },
           activeUserOne,
         )
@@ -265,8 +310,8 @@ Deno.test({
       await t.step("a replayed create does not take another sequence", async () => {
         const repository = new PostgresGroupRepository(sql)
         const groupId = crypto.randomUUID()
-        await repository.createShared({ id: groupId, name: "Replayed" }, activeUserOne)
-        const replay = await repository.createShared(
+        await repository.create({ id: groupId, name: "Replayed" }, activeUserOne)
+        const replay = await repository.create(
           { id: groupId, name: "Replayed" },
           activeUserOne,
         )
@@ -279,7 +324,7 @@ Deno.test({
         const userId = await insertUser(sql)
         const groupId = crypto.randomUUID()
         await expect(sql.begin(async (transaction: postgres.TransactionSql) => {
-          await new PostgresGroupRepository(transaction).createPersonal(
+          await new PostgresGroupRepository(transaction).createFirst(
             { id: groupId, name: "Personal" },
             userId,
           )
@@ -288,34 +333,37 @@ Deno.test({
         expect(await groupSequences(sql, groupId)).toEqual({ next: null, outbox: [] })
       })
 
-      await t.step("a personal group is stamped when it is created", async () => {
+      await t.step("a first group is stamped when it is created", async () => {
         const userId = await insertUser(sql)
-        const personal = await new PostgresGroupRepository(sql).ensurePersonal(
-          { id: crypto.randomUUID(), name: "Personal" },
-          userId,
-        )
-        expect(personal.nextChangeSequence).toBe("2")
-        expect(await groupSequences(sql, personal.id)).toEqual({ next: "2", outbox: ["1"] })
+        const id = crypto.randomUUID()
+        await new PostgresGroupRepository(sql).ensureFirst({ id, name: "Personal" }, userId)
+        expect(await groupSequences(sql, id)).toEqual({ next: "2", outbox: ["1"] })
       })
 
-      await t.step("member ids name only active users of an active group", async () => {
-        const repository = new PostgresGroupRepository(sql)
-        const groupId = crypto.randomUUID()
-        await repository.createShared({ id: groupId, name: "Members" }, activeUserOne)
-        const gone = await insertUser(sql, new Date())
-        await sql`
+      await t.step(
+        "member ids name only active users, and a deleted group still has them",
+        async () => {
+          const repository = new PostgresGroupRepository(sql)
+          const groupId = crypto.randomUUID()
+          await repository.create({ id: groupId, name: "Members" }, activeUserOne)
+          const gone = await insertUser(sql, new Date())
+          await sql`
           INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
           VALUES (${groupId}, ${activeUserTwo}, 1, ${activeUserOne}),
                  (${groupId}, ${gone}, 1, ${activeUserOne})
         `
-        expect(await repository.listMemberUserIds(groupId)).toEqual([activeUserOne, activeUserTwo])
-        expect(await repository.listMemberUserIds(crypto.randomUUID())).toEqual([])
-      })
+          expect(await repository.listMemberUserIds(groupId)).toEqual([
+            activeUserOne,
+            activeUserTwo,
+          ])
+          expect(await repository.listMemberUserIds(crypto.randomUUID())).toEqual([])
+        },
+      )
 
       await t.step("shared creation rejects soft-deleted actors", async () => {
         const actor = await insertUser(sql, new Date())
         const groupId = crypto.randomUUID()
-        await expect(new PostgresGroupRepository(sql).createShared(
+        await expect(new PostgresGroupRepository(sql).create(
           { id: groupId, name: "Denied" },
           actor,
         )).rejects.toThrow(GroupError)
@@ -408,12 +456,19 @@ const SNAPSHOT_TABLES = [
   "dev_mail",
 ]
 
+/**
+ * What the snapshot test compares. A column is numbered by its position among the table's live
+ * columns, not by `ordinal_position`: a dropped column leaves a gap there, which a fresh
+ * `schema.sql` does not have.
+ */
 async function groupMetadata(sql: postgres.Sql, schema: string): Promise<string[]> {
   const rows = await sql<MetadataRow[]>`
     SELECT value
     FROM (
       SELECT
-        'column|' || table_name || '|' || ordinal_position || '|' || column_name || '|' ||
+        'column|' || table_name || '|' ||
+        ROW_NUMBER() OVER (PARTITION BY table_name ORDER BY ordinal_position) || '|' ||
+        column_name || '|' ||
         data_type || '|' || COALESCE(character_maximum_length::text, '') || '|' ||
         COALESCE(datetime_precision::text, '') || '|' || is_nullable || '|' ||
         COALESCE(column_default, '') AS value

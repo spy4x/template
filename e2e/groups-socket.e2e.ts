@@ -66,7 +66,7 @@ test.describe("groups over the socket", () => {
       expect(closed.status(), await closed.text()).toBe(200)
       const behindItsBack = await page.request.post(`${apiBase}/api/groups`, {
         headers,
-        data: { id: crypto.randomUUID(), kind: 2, name: "Made while offline" },
+        data: { id: crypto.randomUUID(), name: "Made while offline" },
       })
       expect(behindItsBack.status()).toBe(201)
       await expect(names.filter({ hasText: "Made while offline" })).toHaveCount(0)

@@ -5,7 +5,6 @@ import { gotoApp, signIn } from "./fixtures/app.ts"
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 const password = "Passw0rd!"
-const SHARED_GROUP = 2
 
 async function cleanup(request: APIRequestContext, email: string): Promise<void> {
   const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
@@ -40,7 +39,7 @@ async function sharedGroup(page: Page, name: string): Promise<string> {
   const id = crypto.randomUUID()
   const created = await page.request.post(`${apiBase}/api/groups`, {
     headers,
-    data: { id, kind: SHARED_GROUP, name },
+    data: { id, name },
   })
   expect(created.status(), await created.text()).toBe(201)
   return id
@@ -48,9 +47,9 @@ async function sharedGroup(page: Page, name: string): Promise<string> {
 
 async function personalGroup(page: Page): Promise<{ id: string; name: string }> {
   const list = await page.request.get(`${apiBase}/api/groups`)
-  const groups: { id: string; kind: number; name: string }[] = (await list.json()).groups
-  const personal = groups.find((group) => group.kind === 1)
-  expect(personal, "a new user has a personal group").toBeDefined()
+  const groups: { id: string; name: string }[] = (await list.json()).groups
+  const personal = groups.find((group) => group.name === "Personal")
+  expect(personal, "a new user has a group named Personal").toBeDefined()
   return personal!
 }
 

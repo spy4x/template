@@ -238,8 +238,8 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
       `
         const { id: groupId, userId } = group[0]
         await sql`
-        INSERT INTO groups (id, kind, name, owner_user_id, created_by_user_id)
-        VALUES (${groupId}, 2, 'jobs fixture', ${userId}, ${userId})
+        INSERT INTO groups (id, name, owner_user_id, created_by_user_id)
+        VALUES (${groupId}, 'jobs fixture', ${userId}, ${userId})
       `
         const insertChange = (version: number, processed: string | null) =>
           sql`
@@ -289,8 +289,8 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
         SELECT u.id AS user_id, gen_random_uuid() AS group_id FROM u
       `
       await sql`
-        INSERT INTO groups (id, kind, name, owner_user_id, created_by_user_id)
-        VALUES (${groupId}, 2, 'check fixture', ${userId}, ${userId})
+        INSERT INTO groups (id, name, owner_user_id, created_by_user_id)
+        VALUES (${groupId}, 'check fixture', ${userId}, ${userId})
       `
       const insert = (group: string | null, actor: number | null, version: number) =>
         sql`

@@ -31,6 +31,8 @@ import { requireDbConnection } from "./db-connection.ts"
  */
 
 const AUTH_MIGRATION = "2026_09_24_0001_auth_package_tables.sql"
+/** Drops the group kind, so a group is inserted without it. */
+const KIND_MIGRATION = "2026_10_07_0001_group_kind_removed.sql"
 const MASTER_MIGRATIONS = [
   "2026_01_26_0001_init.sql",
   "2026_01_26_0002_auth_profiles_audit.sql",
@@ -194,7 +196,7 @@ Deno.test("the auth migration carries the package schema verbatim", async () => 
 })
 
 Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) => {
-  await withSchema([...MASTER_MIGRATIONS, AUTH_MIGRATION], async (sql) => {
+  await withSchema([...MASTER_MIGRATIONS, AUTH_MIGRATION, KIND_MIGRATION], async (sql) => {
     const signIn = buildSignIn(sql)
 
     await t.step("sign-up creates auth user, key, profile, group and session", async () => {
@@ -398,7 +400,7 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
 })
 
 Deno.test("username accounts and the password reset link", async (t) => {
-  await withSchema([...MASTER_MIGRATIONS, AUTH_MIGRATION], async (sql) => {
+  await withSchema([...MASTER_MIGRATIONS, AUTH_MIGRATION, KIND_MIGRATION], async (sql) => {
     const signIn = buildSignIn(sql)
     const db = new AppDbBase({ sql })
     const ann = { email: "ann@example.com", password: "Passw0rd!" }
@@ -504,7 +506,7 @@ Deno.test("username accounts and the password reset link", async (t) => {
 })
 
 Deno.test("authenticator-app enrolment, second factor and replay", async (t) => {
-  await withSchema([...MASTER_MIGRATIONS, AUTH_MIGRATION], async (sql) => {
+  await withSchema([...MASTER_MIGRATIONS, AUTH_MIGRATION, KIND_MIGRATION], async (sql) => {
     const signIn = buildSignIn(sql)
     const signUpBody = { email: "totp-user@example.com", password: "Passw0rd!" }
     const credentials = { login: signUpBody.email, password: signUpBody.password }
@@ -686,6 +688,8 @@ Deno.test("the auth migration applies on top of the previous schema", async () =
     `
 
     await applyMigration(sql, AUTH_MIGRATION)
+    // Every later migration runs before the next sign-up, as a deploy applies them in order.
+    await applyMigration(sql, KIND_MIGRATION)
 
     const [authUser] = await sql<{ id: number; createdAt: Date }[]>`
       SELECT id, created_at FROM auth_users
