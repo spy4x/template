@@ -1,37 +1,34 @@
-import type { PushNotificationMessage, PushSubscribeRequest } from "@spy4x/platform/model"
-import { pushNotificationMessageSchema } from "@spy4x/platform/model"
+import type {
+  PushNotificationMessage,
+  PushSubscribeRequest,
+  PushSubscriptionJson,
+} from "@spy4x/platform/model"
+import {
+  createWebPushSender,
+  type PushOptions,
+  type PushSendResult,
+  type PushSubscriptionStore,
+  type VapidKeys,
+  vapidPublicKey,
+  type WebPushSenderOptions,
+} from "@spy4x/integrations/push"
 import type { UserPushTokenPublic } from "@domain/identity"
-import { validate } from "@spy4x/validation"
 import type { PushTokenRecord, PushTokenStore } from "./push-token-store.ts"
 
-/** How urgently the push service should deliver (RFC 8030). */
-export type PushUrgency = "very-low" | "low" | "normal" | "high"
+/** The library's sender options this service passes through; it supplies keys and store. */
+export type PushSenderOptions = Omit<WebPushSenderOptions, "vapidKeys" | "store">
 
-/** Delivery options of one push. */
-export interface PushOptions {
-  urgency?: PushUrgency
-  /** Seconds the push service keeps the message while the device is offline. */
-  ttl?: number
-  /** Replaces a pending message with the same topic. */
-  topic?: string
+function subscriptionOf(token: PushTokenRecord): PushSubscriptionJson {
+  return {
+    endpoint: token.endpoint,
+    expirationTime: null,
+    keys: { auth: token.auth, p256dh: token.p256dh },
+  }
 }
 
-/** One browser subscription the API can push to. `@negrel/webpush`'s `PushSubscriber` fits. */
-export interface PushTarget {
-  pushTextMessage(message: string, options: PushOptions): Promise<void>
-}
-
-/** Builds a push target from a stored subscription. `@negrel/webpush`'s `ApplicationServer` fits. */
-export interface PushSender {
-  subscribe(subscription: { endpoint: string; keys: { auth: string; p256dh: string } }): PushTarget
-}
-
-/** HTTP statuses with which a push service says the subscription is gone for good. */
-const GONE_STATUSES = new Set([404, 410])
-
-function isGone(error: unknown): boolean {
-  return !!error && typeof error === "object" && "response" in error &&
-    error.response instanceof Response && GONE_STATUSES.has(error.response.status)
+function logFailure(result: PushSendResult): PushSendResult {
+  if (!result.success) console.error("Error sending push notification", result.error)
+  return result
 }
 
 function toPublic(token: PushTokenRecord): UserPushTokenPublic {
@@ -41,11 +38,13 @@ function toPublic(token: PushTokenRecord): UserPushTokenPublic {
 
 /**
  * Web Push for signed-in users. Subscriptions live in Postgres (`store`), so they survive a
- * restart, and `send` reaches only the devices of the one user it is given.
+ * restart, and `send` reaches only the devices of the one user it is given. Encryption, VAPID
+ * signing, delivery and deleting gone subscriptions are `@spy4x/integrations/push`'s job.
  */
 export class WebPushService {
   constructor(
-    private readonly sender: PushSender,
+    private readonly vapidKeys: VapidKeys,
+    private readonly senderOptions: PushSenderOptions,
     private readonly store: PushTokenStore,
     private readonly encodedPublicKey: string,
   ) {}
@@ -66,12 +65,17 @@ export class WebPushService {
       auth: subscription.keys.auth,
       p256dh: subscription.keys.p256dh,
     })
-    // A welcome push the push service reports gone deletes the row (see `push`), yet subscribe
-    // still reports success: the browser handed us the subscription a moment ago.
+    // The welcome push goes to this one subscription only, not to the user's other devices. One
+    // the push service reports gone deletes the row, yet subscribe still reports success: the
+    // browser handed us the subscription a moment ago.
     await this.push(
-      token,
-      JSON.stringify({ title: "✅ Test Push Notification", body: "You are now subscribed" }),
+      userId,
+      { title: "✅ Test Push Notification", body: "You are now subscribed", url: null },
       {},
+      {
+        listByUser: () => Promise.resolve([subscriptionOf(token)]),
+        deleteByEndpoint: (user, endpoint) => this.store.deleteByEndpoint(user, endpoint),
+      },
     )
     return toPublic(token)
   }
@@ -86,36 +90,45 @@ export class WebPushService {
 
   /**
    * Pushes `message` to every device of `userId`, and to nobody else. A subscription the push
-   * service reports gone (404 or 410) is deleted; any other failure is logged and the remaining
-   * devices are still tried.
+   * service reports gone (404 or 410) is deleted; any other failure is logged, and the remaining
+   * devices are still tried. Never throws; an invalid payload is a failed result.
    */
-  public async send(
+  public send(
     userId: number,
     message: PushNotificationMessage,
     options: PushOptions = {},
-  ): Promise<void> {
-    const validationResult = validate(pushNotificationMessageSchema, message)
-    if (validationResult.error) {
-      throw new Error(`Invalid push payload: ${validationResult.error.description}`)
-    }
-    const text = JSON.stringify(validationResult.data)
-    for (const token of await this.store.listByUser(userId)) {
-      await this.push(token, text, options)
-    }
+  ): Promise<PushSendResult> {
+    return this.push(userId, message, options, {
+      listByUser: async (user) => (await this.store.listByUser(Number(user))).map(subscriptionOf),
+      deleteByEndpoint: (user, endpoint) => this.store.deleteByEndpoint(user, endpoint),
+    })
   }
 
-  private async push(token: PushTokenRecord, text: string, options: PushOptions): Promise<void> {
-    try {
-      await this.sender
-        .subscribe({ endpoint: token.endpoint, keys: { auth: token.auth, p256dh: token.p256dh } })
-        .pushTextMessage(text, options)
-    } catch (error) {
-      if (isGone(error)) {
-        console.log("Subscription is no longer valid, deleting", { deviceId: token.deviceId })
-        await this.store.remove({ userId: token.userId, deviceId: token.deviceId })
-      } else {
-        console.error("Error sending push notification", error, { deviceId: token.deviceId })
-      }
-    }
+  private async push(
+    userId: number,
+    message: PushNotificationMessage,
+    options: PushOptions,
+    store: PushSubscriptionStore,
+  ): Promise<PushSendResult> {
+    const sender = await createWebPushSender({
+      ...this.senderOptions,
+      vapidKeys: this.vapidKeys,
+      store,
+    })
+    return logFailure(await sender.send(userId, message, options))
   }
+}
+
+/**
+ * Builds the service from the VAPID key file's text. The file is what `@negrel/webpush`'s
+ * `exportVapidKeys` wrote: `{ "publicKey": <JWK>, "privateKey": <JWK> }`, the library's
+ * `VapidKeys`. Throws on keys that do not import, so a broken file stops start-up.
+ */
+export async function createWebPushService(
+  vapidKeysJson: string,
+  senderOptions: PushSenderOptions,
+  store: PushTokenStore,
+): Promise<WebPushService> {
+  const vapidKeys: VapidKeys = JSON.parse(vapidKeysJson)
+  return new WebPushService(vapidKeys, senderOptions, store, await vapidPublicKey(vapidKeys))
 }

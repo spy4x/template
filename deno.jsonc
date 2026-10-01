@@ -121,12 +121,12 @@
     "@spy4x/platform": "jsr:@spy4x/platform@1.20.0",
     "@spy4x/server": "jsr:@spy4x/server@1.20.0",
     "@spy4x/realtime": "jsr:@spy4x/realtime@1.20.0",
+    "@spy4x/integrations": "jsr:@spy4x/integrations@1.20.0",
 
     // apps/api
     "hono": "jsr:@hono/hono@4.13.8",
     "@hectorm/otpauth": "jsr:@hectorm/otpauth@9.5.2",
     "qrcode": "jsr:@libs/qrcode@3.1.0",
-    "webpush": "jsr:@negrel/webpush@0.5.0",
 
     // apps/tgbot
 

@@ -1,4 +1,5 @@
 import type { Sql } from "@spy4x/server/db"
+import type { PushSubscriptionStore } from "@spy4x/integrations/push"
 
 /** One stored Web Push subscription: a single browser on a single device of one user. */
 export interface PushTokenRecord {
@@ -12,8 +13,11 @@ export interface PushTokenRecord {
   updatedAt: Date
 }
 
-/** What `WebPushService` needs from storage. */
-export interface PushTokenStore {
+/**
+ * What `WebPushService` needs from storage. `deleteByEndpoint` is the half of the library's
+ * `PushSubscriptionStore` the sender calls for a subscription the push service reports gone.
+ */
+export interface PushTokenStore extends Pick<PushSubscriptionStore, "deleteByEndpoint"> {
   /** Live subscriptions of one user, newest first. */
   listByUser(userId: number): Promise<PushTokenRecord[]>
   /** Creates the user's subscription for this device, or replaces the one already there. */
@@ -57,6 +61,12 @@ export function createPushTokenStore(sql: Sql): PushTokenStore {
         UPDATE user_push_tokens
         SET deleted_at = NOW(), updated_at = NOW()
         WHERE deleted_at IS NULL AND user_id = ${userId} AND device_id = ${deviceId}`
+    },
+    async deleteByEndpoint(userId, endpoint) {
+      await sql`
+        UPDATE user_push_tokens
+        SET deleted_at = NOW(), updated_at = NOW()
+        WHERE deleted_at IS NULL AND user_id = ${userId} AND endpoint = ${endpoint}`
     },
   }
 }
