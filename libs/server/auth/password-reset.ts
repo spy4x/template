@@ -26,10 +26,13 @@ export const PASSWORD_RESET_PURPOSE = "app.password-reset"
 export const PASSWORD_RESET_TTL_MINUTES = 30
 
 /**
- * Wrong codes one address's live link survives. A link carries 256 random bits, so guessing is
- * hopeless; the cap only stops a flood of guesses from reaching the database.
+ * Wrong codes one address's live link survives: the largest count the auth stores accept (their
+ * `attempts` column is a Postgres `integer`), so in practice no limit. A small cap would let anyone
+ * who knows an address lock its reset: a new link keeps the old one's count while the old one is
+ * unexpired, so each request would push the lock out again. A cap buys nothing against 256 random
+ * bits, and the per-IP limit of the reset route already stops a flood of guesses.
  */
-export const PASSWORD_RESET_MAX_GUESSES = 5
+export const PASSWORD_RESET_MAX_GUESSES = 2_147_483_647
 
 /** The page a reset link opens, in both apps. */
 export const PASSWORD_RESET_PATH = "/reset-password"

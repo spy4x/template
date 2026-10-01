@@ -5,7 +5,6 @@ import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import {
   consumePasswordReset,
   issuePasswordReset,
-  PASSWORD_RESET_MAX_GUESSES,
   PASSWORD_RESET_TTL_MINUTES,
   passwordResetLink,
 } from "./password-reset.ts"
@@ -109,16 +108,6 @@ describe("consumePasswordReset", () => {
     expect(await consumePasswordReset(store, "bob@example.com", issued.code, NOW)).toBe(false)
     expect(await consumePasswordReset(store, issued.email, "", NOW)).toBe(false)
     expect(await consumePasswordReset(store, issued.email, undefined, NOW)).toBe(false)
-  })
-
-  it(`stops comparing after ${PASSWORD_RESET_MAX_GUESSES} wrong codes, even the right one`, async () => {
-    const store = await storeWithAccounts()
-    const issued = (await issuePasswordReset(store, "ann@example.com", NOW))!
-    for (let guess = 0; guess < PASSWORD_RESET_MAX_GUESSES; guess++) {
-      await consumePasswordReset(store, issued.email, `wrong-${guess}`, NOW)
-    }
-
-    expect(await consumePasswordReset(store, issued.email, issued.code, NOW)).toBe(false)
   })
 })
 

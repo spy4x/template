@@ -14,7 +14,12 @@ import { UserMFAStatus } from "@domain/identity"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
-import { issuePasswordReset } from "../../libs/server/auth/password-reset.ts"
+import {
+  consumePasswordReset,
+  issuePasswordReset,
+  PASSWORD_RESET_PURPOSE,
+} from "../../libs/server/auth/password-reset.ts"
+import { sha256Hex } from "@spy4x/platform/tokens"
 import { requireDbConnection } from "./db-connection.ts"
 
 /**
@@ -460,6 +465,40 @@ Deno.test("username accounts and the password reset link", async (t) => {
       const client = buildApp(signIn)
       const late = { login: ann.email, password: "Late-Passw0rd" }
       expect((await client.request("POST", "/sign-in", late)).status).toBe(401)
+    })
+
+    await t.step("a fresh link works after wrong guesses at the previous one", async () => {
+      // A stranger who knows the address guesses at the live link, more often than any small cap.
+      await issuePasswordReset(db.authStore, ann.email, new Date())
+      for (let guess = 0; guess < 10; guess++) {
+        expect(await consumePasswordReset(db.authStore, ann.email, `wrong-${guess}`)).toBe(false)
+      }
+
+      // The owner asks again before the first link expires; the new link must still work.
+      const fresh = (await issuePasswordReset(db.authStore, ann.email, new Date()))!
+      expect(await signIn.resetPassword(ann.email, fresh.code, "Fresh-Passw0rd")).toBe(true)
+    })
+
+    await t.step("a link for a key without an address is refused and changes nothing", async () => {
+      // A username account whose username looks like an address: no link is ever sent for it, so
+      // a challenge under its name must not reset it either.
+      await sql`
+        UPDATE auth_keys SET subject = 'olduser@example.com', email = NULL
+        WHERE subject = 'legacyuser'
+      `
+      const code = "code-for-a-key-without-an-address"
+      await db.authStore.issueChallenge({
+        purpose: PASSWORD_RESET_PURPOSE,
+        subject: "olduser@example.com",
+        secretHash: await sha256Hex(code),
+        expiresAt: new Date(Date.now() + 60_000),
+        now: new Date(),
+      })
+
+      expect(await signIn.resetPassword("olduser@example.com", code, "Taken-Passw0rd")).toBe(false)
+      const client = buildApp(signIn)
+      const old = { login: "olduser@example.com", password: "Passw0rd!" }
+      expect((await client.request("POST", "/sign-in", old)).status).toBe(200)
     })
   })
 })
