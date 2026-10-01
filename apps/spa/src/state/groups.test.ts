@@ -336,7 +336,7 @@ describe("groups store", () => {
     const { store } = harness({
       remove: () => {
         sent++
-        return gate.promise
+        return sent === 1 ? gate.promise : Promise.resolve({ group: deleted("a") })
       },
     })
 
