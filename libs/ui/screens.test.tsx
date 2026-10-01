@@ -26,6 +26,7 @@ import {
   noteDeleteRequestSchema,
   noteUpdateRequestSchema,
 } from "@domain/notes"
+import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
 import { NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
 import { ForgotPasswordScreen, ResetPasswordScreen } from "./password-reset-screen.tsx"
 
@@ -353,6 +354,17 @@ describe("the group picker without JavaScript", () => {
     expect(parseSelectGroupRequest(body)).toEqual(body)
   })
 
+  it("draws the form through ScreenForm, so it has EnhancedForm's status line and not a plain form's", () => {
+    const html = renderToString(frame())
+    const forms = [...html.matchAll(/<form\b[^>]*action="\/groups\/select"[^>]*>[\s\S]*?<\/form>/g)]
+
+    expect(forms).toHaveLength(2)
+    for (const [form] of forms) {
+      expect(form).toContain('class="space-y-0 ')
+      expect(form).toContain('<p role="status" aria-live="polite"')
+    }
+  })
+
   it("lists every group with the person's role, marks the selected one, and gives each copy its own ids", () => {
     const html = renderToString(frame())
 
@@ -572,68 +584,29 @@ const notesDefaults: NotesScreenProps = {
   group: { id: groupId, name: "Team", canWrite: true },
   notes: [noteRow],
   loading: false,
-  draftId: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111009",
-  draft: { title: "", body: "" },
-  createErrors: noError,
-  creating: false,
-  editing: null,
-  editErrors: noError,
-  saving: false,
-  deleting: null,
   listError: null,
   nextPageHref: null,
 }
 
 describe("NotesScreen without JavaScript", () => {
-  it("names the group on screen in the address of the create form", () => {
+  it("has no form: a link opens the create page and each note's own page", () => {
     const surface = noScriptSurface(<NotesScreen {...notesDefaults} />)
 
-    expect(formAt(surface, `/notes?group=${groupId}`).method).toBe("post")
-  })
-
-  it("posts a new note and each delete with the API's field names, and links each note to its edit page", () => {
-    const surface = noScriptSurface(<NotesScreen {...notesDefaults} />)
-
-    expect(surface.forms.every((form) => form.method === "post")).toBe(true)
-    expect(formAt(surface, NOTE_PATHS.create(groupId)).fields).toEqual(
-      schemaKeys(noteCreateRequestSchema),
-    )
-    expect(formAt(surface, NOTE_PATHS.delete(noteRow.id)).fields).toEqual(
-      schemaKeys(noteDeleteRequestSchema),
-    )
-    expect(surface.forms).toHaveLength(2)
+    expect(surface.forms).toEqual([])
+    expect(surface.links).toContain(NOTE_PATHS.new)
     expect(surface.links).toContain(NOTE_PATHS.note(noteRow.id))
     expect(surface.scriptOnlyButtons).toEqual([])
   })
 
-  it("posts the edit with the API's field names and the version it started from", () => {
-    // The edit started from version 2 while the list already shows 3: the form must post the
-    // version the person edited, not the one the delete form next to it carries.
+  it("shows a viewer the notes and no way to add one", () => {
     const screen = (
-      <NotesScreen
-        {...notesDefaults}
-        editing={{ id: noteRow.id, title: "Groceries", body: "", version: 2, conflict: false }}
-      />
+      <NotesScreen {...notesDefaults} group={{ id: groupId, name: "Team", canWrite: false }} />
     )
-    const html = renderToString(screen)
     const surface = noScriptSurface(screen)
+    const html = renderToString(screen)
 
-    expect(formAt(surface, NOTE_PATHS.note(noteRow.id)).fields).toEqual(
-      schemaKeys(noteUpdateRequestSchema),
-    )
-    expect(html).toContain('name="version" value="2"')
-    expect(surface.links).toContain(NOTE_PATHS.list)
-  })
-
-  it("shows a viewer the notes without a single form", () => {
-    const surface = noScriptSurface(
-      <NotesScreen {...notesDefaults} group={{ id: groupId, name: "Team", canWrite: false }} />,
-    )
-    const html = renderToString(
-      <NotesScreen {...notesDefaults} group={{ id: groupId, name: "Team", canWrite: false }} />,
-    )
-
-    expect(surface.forms).toEqual([])
+    expect(surface.links).not.toContain(NOTE_PATHS.new)
+    expect(surface.links).toContain(NOTE_PATHS.note(noteRow.id))
     expect(html).toContain("Groceries")
     expect(html).toContain("Only an editor can change them.")
   })
@@ -645,29 +618,6 @@ describe("NotesScreen without JavaScript", () => {
 
     expect(surface.links).toContain(`${NOTE_PATHS.list}?cursor=abc`)
   })
-})
-
-describe("NotesScreen", () => {
-  it("ties the title error to its field and tells a stale edit where the latest version is", () => {
-    const html = renderToString(
-      <NotesScreen
-        {...notesDefaults}
-        editing={{ id: noteRow.id, title: "Mine", body: "", version: 3, conflict: true }}
-        editErrors={{ title: "Enter a title", form: "The note was changed by someone else" }}
-      />,
-    )
-
-    expect(html).toMatch(/aria-describedby="note-edit-title-error"/)
-    expect(html).toContain("Enter a title")
-    expect(html).toContain("The note was changed by someone else")
-    expect(html).toContain("Load the latest version")
-  })
-
-  it("names each delete button after its note", () => {
-    const html = renderToString(<NotesScreen {...notesDefaults} />)
-
-    expect(html).toContain('aria-label="Delete Groceries"')
-  })
 
   it("says the group was not found once loading is over", () => {
     expect(renderToString(<NotesScreen {...notesDefaults} group={null} loading />)).toContain(
@@ -676,5 +626,162 @@ describe("NotesScreen", () => {
     expect(renderToString(<NotesScreen {...notesDefaults} group={null} />)).toContain(
       "This group was not found.",
     )
+  })
+})
+
+const editorDefaults: NoteEditorScreenProps = {
+  group: { id: groupId, name: "Team", canWrite: true },
+  loading: false,
+  notFound: false,
+  note: null,
+  value: { title: "", body: "" },
+  draftId: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111009",
+  errors: noError,
+  saving: false,
+  deleting: false,
+}
+const existing = { id: noteRow.id, version: 2, conflict: false }
+
+describe("NoteEditorScreen without JavaScript", () => {
+  it("posts a new note to the selected group's create route with the API's field names", () => {
+    const surface = noScriptSurface(<NoteEditorScreen {...editorDefaults} />)
+
+    expect(surface.forms).toEqual([
+      {
+        action: NOTE_PATHS.create(groupId),
+        method: "post",
+        fields: schemaKeys(noteCreateRequestSchema),
+      },
+    ])
+    expect(surface.links).toContain(NOTE_PATHS.list)
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("posts the edit with the API's field names and the version it started from", () => {
+    const screen = <NoteEditorScreen {...editorDefaults} note={existing} value={noteRow} />
+    const html = renderToString(screen)
+    const surface = noScriptSurface(screen)
+
+    expect(formAt(surface, NOTE_PATHS.note(noteRow.id)).fields).toEqual(
+      schemaKeys(noteUpdateRequestSchema),
+    )
+    expect(html).toContain('name="version" value="2"')
+    expect(html).toContain('value="Groceries"')
+  })
+
+  it("links Delete to a page that asks first, instead of deleting on one click", () => {
+    const surface = noScriptSurface(
+      <NoteEditorScreen {...editorDefaults} note={existing} value={noteRow} />,
+    )
+
+    expect(surface.links).toContain(NOTE_PATHS.delete(noteRow.id))
+    expect(surface.forms).toHaveLength(1)
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it('asks "delete this note?" in a form that posts the version the person saw', () => {
+    const screen = (
+      <NoteEditorScreen {...editorDefaults} note={existing} value={noteRow} confirmingDelete />
+    )
+    const html = renderToString(screen)
+    const surface = noScriptSurface(screen)
+
+    expect(surface.forms).toEqual([
+      {
+        action: NOTE_PATHS.delete(noteRow.id),
+        method: "post",
+        fields: schemaKeys(noteDeleteRequestSchema),
+      },
+    ])
+    expect(html).toContain('name="version" value="2"')
+    expect(html).toContain("Delete this note?")
+    expect(surface.links).toContain(NOTE_PATHS.note(noteRow.id))
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("shows a viewer the note as text, with no form and no way to change it", () => {
+    const screen = (
+      <NoteEditorScreen
+        {...editorDefaults}
+        group={{ id: groupId, name: "Team", canWrite: false }}
+        note={existing}
+        value={noteRow}
+      />
+    )
+    const surface = noScriptSurface(screen)
+    const html = renderToString(screen)
+
+    expect(surface.forms).toEqual([])
+    expect(surface.links).toEqual([NOTE_PATHS.list])
+    expect(html).toContain("Groceries")
+    expect(html).toContain("milk")
+    expect(html).toContain("Only an editor can change it.")
+    expect(html).not.toContain("Delete")
+  })
+
+  it("tells a viewer on the create page that only an editor can add notes", () => {
+    const screen = (
+      <NoteEditorScreen
+        {...editorDefaults}
+        group={{ id: groupId, name: "Team", canWrite: false }}
+      />
+    )
+
+    expect(noScriptSurface(screen).forms).toEqual([])
+    expect(renderToString(screen)).toContain("Only an editor can add notes")
+  })
+
+  it("says the note was not found, with a way back to the list and no form", () => {
+    const screen = <NoteEditorScreen {...editorDefaults} notFound />
+    const surface = noScriptSurface(screen)
+
+    expect(renderToString(screen)).toContain("Note not found")
+    expect(renderToString(screen)).toContain("There is no such note in Team")
+    expect(surface.forms).toEqual([])
+    expect(surface.links).toEqual([NOTE_PATHS.list])
+  })
+})
+
+describe("NoteEditorScreen", () => {
+  it("ties the title error to its field and tells a stale edit where the latest version is", () => {
+    const html = renderToString(
+      <NoteEditorScreen
+        {...editorDefaults}
+        note={{ ...existing, conflict: true }}
+        value={{ title: "Mine", body: "" }}
+        errors={{ title: "Enter a title", form: "The note was changed by someone else" }}
+      />,
+    )
+
+    expect(html).toMatch(/aria-describedby="note-title-error"/)
+    expect(html).toContain("Enter a title")
+    expect(html).toContain("The note was changed by someone else")
+    expect(html).toContain("Load the latest version")
+    // The unsaved-text guard lets this link through: it acts on the page and leaves nothing.
+    expect(html).toMatch(/<a\b[^>]*data-unsaved-ok="true"[^>]*>Load the latest version/)
+  })
+
+  it("shows the error of a refused read instead of claiming the note does not exist", () => {
+    const html = renderToString(
+      <NoteEditorScreen {...editorDefaults} notFound errors={{ title: null, form: "Offline" }} />,
+    )
+
+    expect(html).toContain("Offline")
+    expect(html).not.toContain("There is no such note")
+  })
+
+  it("says the group was not found once loading is over", () => {
+    expect(renderToString(<NoteEditorScreen {...editorDefaults} group={null} loading />))
+      .toContain("Loading the group...")
+    expect(renderToString(<NoteEditorScreen {...editorDefaults} group={null} />)).toContain(
+      "This group was not found.",
+    )
+  })
+
+  it("says the note is loading while it is read", () => {
+    const html = renderToString(<NoteEditorScreen {...editorDefaults} loading />)
+
+    expect(html).toContain("Loading the note...")
+    expect(html).not.toContain("<form")
   })
 })

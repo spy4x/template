@@ -99,13 +99,29 @@ the domain code (and the current version) in `details`.
 The worker needs no change. A note's outbox row names the group as its aggregate and the group's
 sequence as its version, so it is announced exactly like a group change.
 
-### 6. Screen: `libs/ui/`
+### 6. Screens: `libs/ui/`
 
-| File                 | What it holds                                                                                                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `progressive.tsx`    | `NOTE_PATHS`: the routes the forms post to and the pages link to. They carry no group id: `/notes`, `/notes/:id` and `/notes/:id/delete` act on the person's selected group (see "How a group call travels", item 8, in `docs/handoff.md`).                                                                                                  |
-| `notes-screen.tsx`   | `NotesScreen`: props in, callbacks out. The create and edit forms post the API's field names; delete is a form with the version; "Edit" is a link. A viewer gets the list and no form. |
-| `screens.test.tsx`   | Renders the screen on the server and checks that every action is a working form or link whose fields match the request schema.                                                         |
+An aggregate has two pages, a **list page** and an **editor page**, and each is one screen. Copy
+both. The list page only reads and links; everything that writes happens on the editor page, which
+has its own address, a back link to the list and room for a long text.
+
+| File                      | What it holds                                                                                                                                                                                                                                                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `progressive.tsx`         | `NOTE_PATHS`: the routes the forms post to and the pages link to. They carry no group id: `/notes`, `/notes/new`, `/notes/:id` and `/notes/:id/delete` act on the person's selected group (see "How a group call travels", item 8, in `docs/handoff.md`).                                                       |
+| `notes-screen.tsx`        | The list page, `NotesScreen`: props in, links out, no form. "New note" and each note's title are links. A viewer gets the list and no "New note".                                                                                                                                                              |
+| `note-editor-screen.tsx`  | The editor page, `NoteEditorScreen`, for `/notes/new` (no note yet) and `/notes/:id`. The form posts the API's field names; "Save" and "Cancel" are the form's own. A viewer gets the note as text. A note that cannot be read is "Note not found". The version conflict link and message are part of the screen. |
+| `screens.test.tsx`        | Renders each screen on the server and checks that every action is a working form or link whose fields match the request schema.                                                                                                                                                                                |
+| `interactions.test.tsx`   | Drives each screen in a browser DOM: typing, submitting through the callback or natively, and the delete dialog.                                                                                                                                                                                                |
+
+Deleting asks first. With the app's `onDelete`, "Delete" opens preact-components' `ConfirmDialog`.
+Without it (the page without JavaScript), "Delete" is a link to `GET /notes/:id/delete`, a page that
+asks "delete this note?" in a form posting the version; a refusal shows the note's page again, as
+it is now, with the error.
+
+**A note in another of the person's groups.** A note belongs to one group, and the pages work on the
+person's selected group. A link must never change the selection (another site could switch a
+person's group with one), so `/notes/:id` for a note outside the selected group is the "Note not
+found" page, which tells the person to switch group. The group picker is the one way to switch.
 
 ### 7. SPA wiring: `apps/spa/src/`
 
@@ -114,6 +130,8 @@ sequence as its version, so it is announced exactly like a group change.
 | `state/notes.ts`          | The store: reads a group's notes over REST, writes over the socket with `realtimeCommand` (which adds the idempotency key), and turns a version conflict into the conflict UI. |
 | `state/notes.test.ts`     | The store against fake calls.                                                                                                                                                  |
 | `views/NotesView.tsx`     | Passes the store and the group's role to `NotesScreen`.                                                                                                                        |
+| `views/NoteEditorView.tsx` | Passes the store and the group's role to `NoteEditorScreen` for `/notes/new` and `/notes/:id`, with the offline conflict state above it.                                      |
+| `views/UnsavedGuard.tsx`  | Asks before the person leaves the editor page with text that is not saved: on closing the tab, and on a click on any link in the app. The MPA has no such guard.             |
 | `app.tsx`                 | The routes, and the pull: a hint for the open group reads its notes again.                                                                                                     |
 
 The store does not move the group's cursor on its own writes: another member's change may have
@@ -127,7 +145,8 @@ one extra read instead.
 | `apps/api/features/notes/transports.test.ts`                | Both transports on real buses and handlers: a viewer's writes are refused; a stale version conflicts. |
 | `apps/api/features/notes/socket.test.ts`, `routes/notes.test.ts` | Parsing and dispatch of each transport.                                                          |
 | `tests/integration/notes.integration.test.ts`               | Postgres: one sequence step and one outbox row per write, conflicts, viewers, paging.                 |
-| `e2e/notes.e2e.ts`                                          | Two members: one creates, edits and deletes; the other's open tab follows without a reload.           |
+| `e2e/notes.e2e.ts`                                          | Two members: one creates, edits and deletes on the note pages; the other's open tab follows without a reload; a viewer sees a note without edit controls. |
+| `e2e/mpa/notes.mpa.ts`                                      | The same pages with JavaScript off: create, edit, delete after the confirm page, and a viewer.        |
 
 The product cannot add a member yet, so tests seed one: the integration test inserts the row, and
 the e2e spec calls `POST /api/test/add-member` (`apps/api/routes/dev.ts`, mounted only in
@@ -135,8 +154,9 @@ development). Teach `POST /api/test/cleanup-user` to delete the new table's rows
 
 ## What is left to the next aggregate
 
-- A create posted to `/notes` goes to the group selected when the post arrives. If another device
-  switched groups after the page was drawn, the note lands in the new group.
+- A create posts to `/notes?group=<id>`, naming the group the page showed. The MPA refuses it when
+  that is no longer the selected group (another device switched), so a note never lands in a group
+  other than the one on screen. The SPA creates in the group it shows over the socket.
 - The role check and the write are two steps, not one transaction. Membership cannot change
   through the product yet; when it can, the check moves into the write's transaction.
 - The SPA reads the whole list again on every hint. A pull of only the notes changed after the

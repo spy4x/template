@@ -99,10 +99,16 @@ test.describe("notes in a shared group", () => {
       await openNotes(ownerPage, "Notes team")
       const ownerTitles = ownerPage.locator("[data-e2e=note-item-title]")
 
-      // Create.
-      await ownerPage.locator("[data-e2e=note-new-title]").fill("Groceries")
-      await ownerPage.locator("[data-e2e=note-new-body]").fill("milk")
-      await ownerPage.locator("[data-e2e=note-create]").click()
+      // Create, on a page of its own: the person lands on the new note's page.
+      await ownerPage.locator("[data-e2e=note-new]").click()
+      await expect(ownerPage).toHaveURL("/notes/new")
+      await ownerPage.locator("[data-e2e=note-title]").fill("Groceries")
+      await ownerPage.locator("[data-e2e=note-body]").fill("milk")
+      await ownerPage.locator("[data-e2e=note-save]").click()
+      await expect(ownerPage).toHaveURL(/\/notes\/[0-9a-f-]{36}$/)
+      await expect(ownerPage.locator("[data-e2e=note-title]")).toHaveValue("Groceries")
+      const notePath = new URL(ownerPage.url()).pathname
+      await ownerPage.locator("[data-e2e=note-back]").click()
       await expect(ownerTitles).toHaveText(["Groceries"])
       await expect(memberTitles).toHaveText(["Groceries"], { timeout: 5_000 })
       await expect(memberPage.locator("[data-e2e=note-item-body]")).toHaveText(["milk"])
@@ -114,14 +120,25 @@ test.describe("notes in a shared group", () => {
       expect(command?.idempotencyKey).toBeTruthy()
 
       // Edit.
-      await ownerPage.getByRole("link", { name: "Edit Groceries" }).click()
-      await ownerPage.locator("[data-e2e=note-edit-title]").fill("Groceries for Friday")
+      await ownerPage.getByRole("link", { name: "Groceries" }).click()
+      await expect(ownerPage).toHaveURL(notePath)
+      await ownerPage.locator("[data-e2e=note-title]").fill("Groceries for Friday")
       await ownerPage.locator("[data-e2e=note-save]").click()
+      await expect(ownerPage).toHaveURL("/notes")
       await expect(ownerTitles).toHaveText(["Groceries for Friday"])
       await expect(memberTitles).toHaveText(["Groceries for Friday"], { timeout: 5_000 })
 
-      // Delete.
-      await ownerPage.getByRole("button", { name: "Delete Groceries for Friday" }).click()
+      // Delete asks first: keeping the note leaves it, confirming deletes it.
+      await ownerPage.getByRole("link", { name: "Groceries for Friday" }).click()
+      await ownerPage.locator("[data-e2e=note-delete]").click()
+      const dialog = ownerPage.locator("[data-e2e=note-delete-dialog]")
+      await expect(dialog).toBeVisible()
+      await dialog.getByRole("button", { name: "Keep it" }).first().click()
+      await expect(dialog).toHaveCount(0)
+      await expect(ownerPage).toHaveURL(notePath)
+      await ownerPage.locator("[data-e2e=note-delete]").click()
+      await dialog.getByRole("button", { name: "Delete", exact: true }).click()
+      await expect(ownerPage).toHaveURL("/notes")
       await expect(ownerTitles).toHaveCount(0)
       await expect(memberTitles).toHaveCount(0, { timeout: 5_000 })
       await expect(memberPage.getByText("No notes yet.")).toBeVisible()
@@ -180,6 +197,171 @@ test.describe("notes in a shared group", () => {
       await ownerContext.close()
       await memberContext.close()
       for (const email of [owner, member]) await cleanup(request, email)
+    }
+  })
+
+  test("a viewer opens a note as text, with no way to save, delete or add", async ({ browser, request }) => {
+    const owner = "e2e_notes_view_owner@example.com"
+    const member = "e2e_notes_view_viewer@example.com"
+    const baseURL = test.info().project.use.baseURL
+    for (const username of [owner, member]) await cleanup(request, username)
+    const ownerContext = await browser.newContext({ baseURL })
+    const memberContext = await browser.newContext({ baseURL })
+    try {
+      for (const username of [owner, member]) await signUp(request, username)
+      const ownerPage = await ownerContext.newPage()
+      await signIn(ownerPage, owner)
+      const groupId = await sharedGroup(ownerPage, request, "Viewer team", member)
+      const created = await ownerPage.request.post(`${apiBase}/api/groups/${groupId}/notes`, {
+        headers,
+        data: { id: crypto.randomUUID(), title: "Owner's note", body: "Read me" },
+      })
+      expect(created.status(), await created.text()).toBe(201)
+
+      const memberPage = await memberContext.newPage()
+      await signIn(memberPage, member)
+      await openNotes(memberPage, "Viewer team")
+      await expect(memberPage.locator("[data-e2e=note-new]")).toHaveCount(0)
+      await memberPage.getByRole("link", { name: "Owner's note" }).click()
+      await expect(memberPage.locator("[data-e2e=note-read-title]")).toHaveText("Owner's note")
+      await expect(memberPage.locator("[data-e2e=note-read-body]")).toHaveText("Read me")
+      await expect(memberPage.locator("[data-e2e=note-read-only]")).toBeVisible()
+      for (const hook of ["note-title", "note-save", "note-delete"]) {
+        await expect(memberPage.locator(`[data-e2e=${hook}]`), hook).toHaveCount(0)
+      }
+
+      await memberPage.goto("/notes/new")
+      await expect(memberPage.getByText("Only an editor can add notes to this group."))
+        .toBeVisible()
+      await expect(memberPage.locator("[data-e2e=note-save]")).toHaveCount(0)
+    } finally {
+      await ownerContext.close()
+      await memberContext.close()
+      for (const username of [owner, member]) await cleanup(request, username)
+    }
+  })
+
+  test("a note of another group is not found, and opening it does not change the selected group", async ({ browser, request }) => {
+    const owner = "e2e_notes_other_group@example.com"
+    await cleanup(request, owner)
+    const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    try {
+      await signUp(request, owner)
+      const page = await context.newPage()
+      await signIn(page, owner)
+      const selectedBefore = await (await page.request.get(`${apiBase}/api/groups/selected`)).json()
+      const otherGroup = crypto.randomUUID()
+      const created = await page.request.post(`${apiBase}/api/groups`, {
+        headers,
+        data: { id: otherGroup, kind: 2, name: "Other team" },
+      })
+      expect(created.status(), await created.text()).toBe(201)
+      const noteId = crypto.randomUUID()
+      const note = await page.request.post(`${apiBase}/api/groups/${otherGroup}/notes`, {
+        headers,
+        data: { id: noteId, title: "Elsewhere", body: "" },
+      })
+      expect(note.status(), await note.text()).toBe(201)
+      expect(selectedBefore.groupId).not.toBe(otherGroup)
+
+      await page.goto(`/notes/${noteId}`)
+      await expect(page.getByRole("heading", { level: 1, name: "Note not found" })).toBeVisible()
+      await expect(page.locator("[data-e2e=note-not-found]")).toBeVisible()
+      await expect(page.locator("[data-e2e=note-title]")).toHaveCount(0)
+      const selectedAfter = await (await page.request.get(`${apiBase}/api/groups/selected`)).json()
+      expect(selectedAfter.groupId).toBe(selectedBefore.groupId)
+
+      await page.locator("[data-e2e=note-back]").click()
+      await expect(page).toHaveURL("/notes")
+    } finally {
+      await context.close()
+      await cleanup(request, owner)
+    }
+  })
+
+  test("leaving the note page with unsaved text asks first, and staying keeps the text", async ({ browser, request }) => {
+    const owner = "e2e_notes_unsaved@example.com"
+    await cleanup(request, owner)
+    const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    try {
+      await signUp(request, owner)
+      const page = await context.newPage()
+      await signIn(page, owner)
+      await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", {
+        name: "Notes",
+      }).click()
+      await page.locator("[data-e2e=note-new]").click()
+      await expect(page).toHaveURL("/notes/new")
+
+      // Nothing typed: leaving is free.
+      await page.locator("[data-e2e=note-back]").click()
+      await expect(page).toHaveURL("/notes")
+      await page.locator("[data-e2e=note-new]").click()
+
+      await page.locator("[data-e2e=note-title]").fill("Half a thought")
+      const dialog = page.locator("[data-e2e=unsaved-dialog]")
+      await page.locator("[data-e2e=note-back]").click()
+      await expect(dialog).toBeVisible()
+      await dialog.getByRole("button", { name: "Stay" }).first().click()
+      await expect(dialog).toHaveCount(0)
+      await expect(page).toHaveURL("/notes/new")
+      await expect(page.locator("[data-e2e=note-title]")).toHaveValue("Half a thought")
+
+      // A link in the side menu is held back the same way.
+      await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", {
+        name: "Groups",
+      }).click()
+      await expect(dialog).toBeVisible()
+      await dialog.getByRole("button", { name: "Leave" }).click()
+      await expect(page).toHaveURL("/groups")
+
+      // Discarded: the next create page starts empty.
+      await page.goto("/notes/new")
+      await expect(page.locator("[data-e2e=note-title]")).toHaveValue("")
+    } finally {
+      await context.close()
+      await cleanup(request, owner)
+    }
+  })
+
+  test('after a refused save, "Load the latest version" loads the server\'s text instead of asking to leave', async ({ browser, request }) => {
+    const owner = "e2e_notes_conflict@example.com"
+    await cleanup(request, owner)
+    const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    try {
+      await signUp(request, owner)
+      const page = await context.newPage()
+      await signIn(page, owner)
+      const { groupId } = await (await page.request.get(`${apiBase}/api/groups/selected`)).json()
+      const noteId = crypto.randomUUID()
+      const created = await page.request.post(`${apiBase}/api/groups/${groupId}/notes`, {
+        headers,
+        data: { id: noteId, title: "Original", body: "" },
+      })
+      expect(created.status(), await created.text()).toBe(201)
+
+      await page.goto(`/notes/${noteId}`)
+      const title = page.locator("[data-e2e=note-title]")
+      await expect(title).toHaveValue("Original")
+      await title.fill("Mine")
+
+      // Someone else saves first, so this save is refused for a stale version.
+      const theirs = await page.request.patch(`${apiBase}/api/groups/${groupId}/notes/${noteId}`, {
+        headers,
+        data: { title: "Theirs", body: "", version: 1 },
+      })
+      expect(theirs.status(), await theirs.text()).toBe(200)
+      await page.locator("[data-e2e=note-save]").click()
+      await expect(page.locator("[data-e2e=note-conflict]")).toBeVisible()
+      await expect(title).toHaveValue("Mine")
+
+      await page.getByRole("link", { name: "Load the latest version" }).click()
+      await expect(title).toHaveValue("Theirs")
+      await expect(page.locator("[data-e2e=unsaved-dialog]")).toHaveCount(0)
+      await expect(page.locator("[data-e2e=note-conflict]")).toHaveCount(0)
+    } finally {
+      await context.close()
+      await cleanup(request, owner)
     }
   })
 })

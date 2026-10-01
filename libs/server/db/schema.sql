@@ -304,6 +304,8 @@ CREATE INDEX idx_notes_created_by ON notes (created_by_user_id);
 CREATE INDEX idx_notes_updated_by ON notes (updated_by_user_id);
 
 -- Per-user settings. See migration 2026_10_05_0001_user_settings.sql.
+-- `version` grows by one with every change of the selection. It is not the sequence of a hint: the
+-- selection's hint is sent by `GroupSelectedEvent`, from the handler.
 CREATE TABLE user_settings (
     user_id INT4 PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     selected_group_id UUID REFERENCES groups(id) ON DELETE SET NULL,

@@ -35,21 +35,23 @@ export const FORM_ACTIONS = {
 /**
  * The routes the notes of the selected group post to and live at. A form's field names match the
  * API schema of the same action (`@domain/notes`); the group is the person's selected one, which
- * the server holds (`GET /api/groups/selected`), so no path names it. The notes screen posts to
+ * the server holds (`GET /api/groups/selected`), so no path names it. The notes screens post to
  * these.
  */
 export const NOTE_PATHS = {
-  /** The list and the create form; `POST` creates `{ id, title, body }`. */
+  /** The list; `POST` creates `{ id, title, body }`. */
   list: "/notes",
+  /** The create page: the editor with no note yet. */
+  new: "/notes/new",
   /**
    * The create form's action: the list, with the group the page shows. The server refuses the post
    * when that is no longer the selected group, so a note cannot land in a group other than the
    * one on screen.
    */
   create: (groupId: string) => `/notes?${new URLSearchParams({ group: groupId })}`,
-  /** One note's edit form; `POST` updates `{ title, body, version }`. */
+  /** One note's page, with its edit form; `POST` updates `{ title, body, version }`. */
   note: (noteId: string) => `/notes/${noteId}`,
-  /** `POST` deletes `{ version }`. */
+  /** `GET` asks "delete this note?" on a page of its own; `POST` deletes `{ version }`. */
   delete: (noteId: string) => `/notes/${noteId}/delete`,
 } as const
 

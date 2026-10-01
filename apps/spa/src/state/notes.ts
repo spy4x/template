@@ -1,4 +1,4 @@
-import { signal } from "@preact/signals"
+import { computed, signal } from "@preact/signals"
 import { RealtimeRequestError } from "@spy4x/realtime"
 import { apiFetch } from "./api.ts"
 import { realtimeCommand, realtimeQuery } from "./realtime.ts"
@@ -57,6 +57,8 @@ interface Edit extends Draft {
   id: string
   version: number
   conflict: boolean
+  /** The note as the edit started from it, to tell what the person changed. */
+  base: Draft
 }
 
 const NO_ERRORS: FormErrors = { title: null, form: null }
@@ -68,8 +70,7 @@ const MAX_PAGES = 20
 export const NOTE_MESSAGES = {
   titleRequired: "Enter a title",
   conflict: "Someone changed this note since you opened it.",
-  deleteConflict:
-    "Someone changed that note, so it was not deleted. The list shows it as it is now.",
+  deleteConflict: "Someone changed that note, so it was not deleted.",
   gone: "This note was deleted.",
   load: "Could not load the notes",
   create: "Could not add the note",
@@ -111,6 +112,16 @@ export function createNotesStore(dependencies: NotesDependencies) {
   const editErrors = signal<FormErrors>(NO_ERRORS)
   const saving = signal(false)
   const deleting = signal<string | null>(null)
+  /** The open note is not in the open group: it is gone, or it is in another group. */
+  const missing = signal(false)
+  /** The person typed text that no save or create has taken yet. */
+  const unsaved = computed(() => {
+    const edit = editing.value
+    if (edit) {
+      return edit.conflict || edit.title !== edit.base.title || edit.body !== edit.base.body
+    }
+    return draft.value.title !== "" || draft.value.body !== ""
+  })
   let inFlight: Promise<void> | null = null
   let queued: Promise<void> | null = null
 
@@ -181,10 +192,12 @@ export function createNotesStore(dependencies: NotesDependencies) {
     if (noteId === null) {
       editing.value = null
       editErrors.value = NO_ERRORS
+      missing.value = false
       return
     }
     if (editing.value?.id === noteId) return
     editErrors.value = NO_ERRORS
+    missing.value = false
     const known = notes.value.find((note) => note.id === noteId)
     if (known) {
       editing.value = toEdit(known)
@@ -204,19 +217,19 @@ export function createNotesStore(dependencies: NotesDependencies) {
       notes.value = notes.value.map((existing) => existing.id === note.id ? note : existing)
     } catch (cause) {
       editing.value = null
-      listError.value = noteCode(cause) === "NOTE_NOT_FOUND"
-        ? NOTE_MESSAGES.gone
-        : describe(cause, NOTE_MESSAGES.load)
+      if (noteCode(cause) === "NOTE_NOT_FOUND") missing.value = true
+      else listError.value = describe(cause, NOTE_MESSAGES.load)
     }
   }
 
-  async function create(): Promise<void> {
+  /** Creates the note from the draft. Resolves the note once created, `null` when it was not. */
+  async function create(): Promise<NoteItem | null> {
     const forGroup = groupId.value
-    if (!forGroup || creating.value) return
+    if (!forGroup || creating.value) return null
     const title = draft.value.title.trim()
     if (!title) {
       createErrors.value = { title: NOTE_MESSAGES.titleRequired, form: null }
-      return
+      return null
     }
     creating.value = true
     createErrors.value = NO_ERRORS
@@ -230,8 +243,10 @@ export function createNotesStore(dependencies: NotesDependencies) {
       notes.value = [note, ...notes.value.filter((existing) => existing.id !== note.id)]
       draft.value = EMPTY_DRAFT
       draftId.value = dependencies.newId()
+      return note
     } catch (cause) {
       createErrors.value = { title: null, form: describe(cause, NOTE_MESSAGES.create) }
+      return null
     } finally {
       creating.value = false
     }
@@ -279,20 +294,36 @@ export function createNotesStore(dependencies: NotesDependencies) {
     }
   }
 
-  async function remove(note: NoteItem): Promise<void> {
+  /** Drops what was typed into the create form, and starts a new note's id. */
+  function discardDraft(): void {
+    draft.value = EMPTY_DRAFT
+    draftId.value = dependencies.newId()
+    createErrors.value = NO_ERRORS
+  }
+
+  /** Deletes the note at the version the person saw. Resolves `true` once deleted, `false` when it was refused or failed. */
+  async function remove(note: Pick<NoteItem, "id" | "version">): Promise<boolean> {
     const forGroup = groupId.value
-    if (!forGroup || deleting.value) return
+    if (!forGroup || deleting.value) return false
     deleting.value = note.id
     listError.value = null
     try {
       await dependencies.delete({ groupId: forGroup, id: note.id, version: note.version })
       notes.value = notes.value.filter((existing) => existing.id !== note.id)
+      editing.value = null
+      return true
     } catch (cause) {
       const code = noteCode(cause)
       listError.value = code === "VERSION_CONFLICT"
         ? NOTE_MESSAGES.deleteConflict
         : describe(cause, NOTE_MESSAGES.delete)
+      // The page of this note offers the latest version; the list is read again.
+      const edit = editing.value
+      if (code === "VERSION_CONFLICT" && edit?.id === note.id) {
+        editing.value = { ...edit, conflict: true }
+      }
       if (code === "VERSION_CONFLICT" || code === "NOTE_NOT_FOUND") await refresh().catch(() => {})
+      return false
     } finally {
       deleting.value = null
     }
@@ -311,6 +342,7 @@ export function createNotesStore(dependencies: NotesDependencies) {
     editErrors.value = NO_ERRORS
     saving.value = false
     deleting.value = null
+    missing.value = false
     inFlight = null
     queued = null
   }
@@ -328,10 +360,13 @@ export function createNotesStore(dependencies: NotesDependencies) {
     editErrors,
     saving,
     deleting,
+    missing,
+    unsaved,
     open,
     refresh,
     reloadLatest,
     create,
+    discardDraft,
     save,
     remove,
     reset,
@@ -339,7 +374,14 @@ export function createNotesStore(dependencies: NotesDependencies) {
 }
 
 function toEdit(note: NoteItem): Edit {
-  return { id: note.id, title: note.title, body: note.body, version: note.version, conflict: false }
+  return {
+    id: note.id,
+    title: note.title,
+    body: note.body,
+    version: note.version,
+    conflict: false,
+    base: { title: note.title, body: note.body },
+  }
 }
 
 /** The notes as the server serves them: reads over REST, writes over the socket. */

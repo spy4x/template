@@ -140,7 +140,8 @@ layer is missing from this list. Following them on this repository ends with `de
    `createNotesStore(onlineNotes)`, `createGroupsStore(onlineGroups)`. The optional `readLocal`
    dependency and its `showLocal` call can go with them.
 5. In `apps/spa/src/state/realtime.ts`, delete `isRealtimeOpen`.
-6. In `apps/spa/src/views/NotesView.tsx`, delete the `OfflineStatus` import and element.
+6. In `apps/spa/src/views/NotesView.tsx` and `apps/spa/src/views/NoteEditorView.tsx`, delete the
+   `OfflineStatus` import and element.
 7. Remove `dexie` from `deno.jsonc` and run `deno install` to update `deno.lock`.
 8. Delete the spec `e2e/offline.e2e.ts`, and this guard test with its clause at the end of the
    `test` task in `deno.jsonc`: `tests/offline-removal.test.ts`. The unit tests lived in the
