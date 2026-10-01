@@ -127,12 +127,16 @@ Deno.test({
         ])
       })
 
-      await t.step("a subscription the push service reports gone is deleted", async () => {
+      await t.step("a gone subscription is deleted for its user only", async () => {
+        // The same browser signed in as user B holds the same endpoint; it is not A's to delete.
+        await sql`
+          INSERT INTO user_push_tokens (user_id, device_id, endpoint, auth, p256dh)
+          VALUES (${userB}, ${"phone"}, ${"https://push.example/new"}, ${KEYS.auth}, ${KEYS.p256dh})`
         const { service } = await serviceOver(sql, { "https://push.example/new": 410 })
         await service.send(userA, { title: "Hi", body: "There", url: null })
         const devices = await service.deviceList(userA)
         expect(devices.map((device) => device.deviceId)).toEqual(["laptop"])
-        expect((await service.deviceList(userB)).length).toBe(1)
+        expect((await service.deviceList(userB)).length).toBe(2)
       })
 
       await t.step("unsubscribing one user leaves another user's same device id live", async () => {
