@@ -5,11 +5,11 @@ const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 
 test.describe("group list and settings pages", () => {
   test("creates a group, opens its settings and reads its name and the person's role there", async ({ page, request }) => {
-    const username = "e2e_groups_pages_user"
+    const email = "e2e_groups_pages_user@example.com"
     const password = "Passw0rd!"
     const cleanup = async ({ soft = false } = {}) => {
       const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
-        data: { username },
+        data: { login: email },
       })
       ;(soft ? expect.soft : expect)(response.status(), await response.text()).toBe(200)
     }
@@ -18,11 +18,11 @@ test.describe("group list and settings pages", () => {
     try {
       const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
         headers,
-        data: { username, password },
+        data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
       await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await page.locator("[data-e2e=auth-form-submit]").click()
       await page.waitForURL("/")
@@ -55,11 +55,11 @@ test.describe("group list and settings pages", () => {
   })
 
   test("neither page scrolls sideways at 375 px", async ({ page, request }) => {
-    const username = "e2e_groups_pages_narrow"
+    const email = "e2e_groups_pages_narrow@example.com"
     const password = "Passw0rd!"
     const cleanup = async ({ soft = false } = {}) => {
       const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
-        data: { username },
+        data: { login: email },
       })
       ;(soft ? expect.soft : expect)(response.status(), await response.text()).toBe(200)
     }
@@ -68,12 +68,12 @@ test.describe("group list and settings pages", () => {
     try {
       const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
         headers,
-        data: { username, password },
+        data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
       await page.setViewportSize({ width: 375, height: 812 })
       await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await page.locator("[data-e2e=auth-form-submit]").click()
       await page.waitForURL("/")
