@@ -567,6 +567,35 @@ describe("auth routes rate-limit", () => {
     })
   }
 
+  it("keeps a correct one-time code's answer and reports it when its slot cannot be given back", async () => {
+    const errors: unknown[] = []
+    /** Works for the check, then fails, as Valkey going down while the code is checked. */
+    const storeThatDiesAfterCheck = (): RateLimitStore => {
+      const store = memoryStore()
+      let checked = false
+      const down = () => Promise.reject(new Error("valkey is down"))
+      return {
+        read: (key, now) => store.read(key, now),
+        // The refund deletes the window it empties, or rewrites a shorter one.
+        delete: (key) => checked ? down() : store.delete(key),
+        write: (...args) => checked ? down() : (checked = true, store.write(...args)),
+      }
+    }
+    const { app, calls } = buildApp(undefined, {
+      rateLimits: createAuthRateLimits({
+        ...tightLimits,
+        store: storeThatDiesAfterCheck,
+        onStoreError: (error) => errors.push(error),
+      }),
+    })
+
+    const response = await send(app, otpRoutes[0], sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(calls).toEqual([otpRoutes[0].operation])
+    expect(errors.map((error) => (error as Error).message)).toEqual(["valkey is down"])
+  })
+
   it("lets GET /auth/me through and reports the error while the normal limit's store is down", async () => {
     const errors: unknown[] = []
     const { app } = buildApp(undefined, {

@@ -2,8 +2,7 @@ import type { MiddlewareHandler } from "hono"
 import {
   type Clock,
   createStoreLimiter,
-  type RateLimitDecision,
-  type RateLimiter,
+  failOpenLimiter,
   type RateLimitStore,
 } from "@spy4x/platform/rate-limit"
 import {
@@ -44,49 +43,32 @@ export interface AuthRateLimitSettings {
    * `createRedisRateLimitStore` over Valkey; tests pass an in-process store.
    */
   store: (name: string) => RateLimitStore
-  /** Told each time the normal limit lets a request through because its store failed. */
+  /**
+   * Told each time a store failure is let pass: the normal limit allowing a request, or a correct
+   * one-time code whose slot could not be given back.
+   */
   onStoreError: (error: unknown) => void
   /** Injected by tests. */
   clock?: Clock
 }
 
 /**
- * A limiter that allows the request when `limiter` throws, and reports the error. Only the normal
- * limit uses it: it guards no secret, and refusing it would turn a Valkey outage into a broken
- * `/me` for every signed-in user.
- *
- * A local copy of `failOpenLimiter` from spy4x/ts-libs#335, same name and signature, until a
- * released `@spy4x/platform` carries it. This copy has no `refund`, so a limiter built with
- * `skipSuccessful` refuses it at startup; the normal limit does not use `skipSuccessful`.
- */
-function failOpenLimiter(
-  limiter: RateLimiter,
-  { limit, onError }: { limit: number; onError: (error: unknown, key: string) => void },
-): RateLimiter {
-  return {
-    async check(key: string): Promise<RateLimitDecision> {
-      try {
-        return await limiter.check(key)
-      } catch (error) {
-        onError(error, key)
-        return { allowed: true, remaining: limit, retryAfterMs: 0, resetAfterMs: 0, limit }
-      }
-    },
-    reset: (key: string) => limiter.reset(key),
-  }
-}
-
-/**
  * Build the auth rate limits over the stores `settings.store` builds. In production that is Valkey
  * through the atomic `createRedisRateLimitStore`, so every budget survives an API restart or
  * deploy, and any number of API instances share one exact budget per client. Compose runs Valkey
- * without persistence (`--save ""`), so restarting Valkey itself still empties every budget.
+ * without persistence (`--save ""`), so restarting Valkey itself still empties every budget. Compose
+ * also runs Valkey with `--maxmemory-policy allkeys-lru`, so under memory pressure a budget may be
+ * evicted like any cached key; a budget under attack is touched on every attempt and is the last to
+ * go, and the Postgres failure counter still bounds one-time-code guesses.
  *
  * When Valkey fails, the strict and one-time-code limits refuse the request (the error reaches
  * Hono's error handler, which answers 500): they stand between a guesser and a password or a
  * six-digit code, and letting guesses through unseen is the attack they exist to stop. The normal
  * limit lets the request through and reports the error through `settings.onStoreError`, so sign-out
- * and `/me` keep working while Valkey is down, as the rest of the signed-in API does.
+ * and `/me` keep working while Valkey is down, as the rest of the signed-in API does. The normal
+ * limit uses `failOpenLimiter` for that; the other two must never be wrapped in it. A correct
+ * one-time code whose slot cannot be given back keeps its response (the session cookie included),
+ * and the slot stays spent; that error is reported through `settings.onStoreError` too.
  *
  * Shared budgets, on purpose: sign-in and sign-up from one IP spend one strict budget, since both
  * guess or probe passwords. `/totp/check` and `/totp/connect/finish` spend one user's one-time-code
@@ -148,6 +130,7 @@ export function createAuthRateLimits(settings: AuthRateLimitSettings): AuthRateL
       keyPrefix: "auth-otp:",
       // A correct code gives its slot back: only wrong codes run the budget out.
       skipSuccessful: true,
+      onRefundError: (error) => settings.onStoreError(error),
     }),
     normal: createRateLimitMiddleware(normal, {
       remoteAddr,

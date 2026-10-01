@@ -58,7 +58,7 @@ const emit = (event: Parameters<typeof eventBus.emit>[0]) => eventBus.emit(event
 const rateLimits = createAuthRateLimits({
   ...config.rateLimiter,
   store: (keyPrefix) => createRedisRateLimitStore(kv, { keyPrefix }),
-  onStoreError: (error) => log("error: auth rate limit store failed, request allowed", error),
+  onStoreError: (error) => log("error: auth rate limit store failed and was let pass", error),
 })
 app.route(
   "/auth",
