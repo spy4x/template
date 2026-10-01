@@ -696,6 +696,7 @@ describe("NoteEditorScreen without JavaScript", () => {
     expect(html).toContain('name="version" value="2"')
     expect(html).toContain("Delete this note?")
     expect(surface.links).toContain(NOTE_PATHS.note(noteRow.id))
+    expect(surface.scriptOnlyButtons).toEqual([])
   })
 
   it("shows a viewer the note as text, with no form and no way to change it", () => {
