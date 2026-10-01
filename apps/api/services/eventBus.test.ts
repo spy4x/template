@@ -5,8 +5,7 @@ import { contextStorage } from "hono/context-storage"
 import { requestId } from "hono/request-id"
 import type { Event } from "@spy4x/platform/cqrs"
 import type { APIContext } from "../_types.ts"
-import { counterValue } from "./metrics.ts"
-import { EVENT_LISTENER_FAILURES, eventBus, subscribe } from "./eventBus.ts"
+import { eventBus, eventListenerFailures, subscribe } from "./eventBus.ts"
 
 class ListenerProbeEvent implements Event<{ n: number }> {
   constructor(public data: { n: number }) {}
@@ -30,7 +29,7 @@ async function captureLogs(work: () => void | Promise<void>): Promise<unknown[][
 describe("the event bus's listener failure report", () => {
   it("logs one structured line and counts it when a listener throws", async () => {
     const labels = { event: "ListenerProbeEvent", listener: "throwingListener" }
-    const before = counterValue(EVENT_LISTENER_FAILURES, labels)
+    const before = eventListenerFailures.value(labels)
     const throwingListener = () => {
       throw new Error("disk on fire")
     }
@@ -47,7 +46,7 @@ describe("the event bus's listener failure report", () => {
       listener: "throwingListener",
       error: "Error: disk on fire",
     })
-    expect(counterValue(EVENT_LISTENER_FAILURES, labels)).toBe(before + 1)
+    expect(eventListenerFailures.value(labels)).toBe(before + 1)
   })
 
   it("reports a listener that rejects, and still runs the listeners after it", async () => {
@@ -75,7 +74,7 @@ describe("the event bus's listener failure report", () => {
     off()
 
     expect(lines).toHaveLength(0)
-    expect(counterValue(EVENT_LISTENER_FAILURES, labels)).toBe(0)
+    expect(eventListenerFailures.value(labels)).toBe(0)
   })
 
   it("puts the request id of the request that raised the event on the log line", async () => {

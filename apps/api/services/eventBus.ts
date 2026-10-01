@@ -1,10 +1,13 @@
 import { EventBus } from "@spy4x/platform/cqrs"
 import type { Event, EventConstructor } from "@spy4x/platform/cqrs"
 import { log } from "./log.ts"
-import { incrementCounter } from "./metrics.ts"
+import { createCounter } from "@spy4x/platform/universal/metrics"
 
 /** Counts every listener that threw, by event and listener name. #159 alerts on it. */
-export const EVENT_LISTENER_FAILURES = "event_listener_failures_total"
+export const eventListenerFailures = createCounter(
+  "event_listener_failures_total",
+  "Event listeners that threw, by event and listener name",
+)
 
 /** Carries the failing listener's name, which the bus does not pass to its error handler. */
 class ListenerFailure extends Error {
@@ -16,7 +19,7 @@ class ListenerFailure extends Error {
 function reportListenerFailure(eventClass: EventConstructor<Event<unknown>>, error: unknown): void {
   const failure = error instanceof ListenerFailure ? error : new ListenerFailure("unknown", error)
   const cause = failure.original
-  incrementCounter(EVENT_LISTENER_FAILURES, { event: eventClass.name, listener: failure.listener })
+  eventListenerFailures.increment({ event: eventClass.name, listener: failure.listener })
   // "log" prefixes the request id when the event was raised inside a request.
   log(JSON.stringify({
     level: "error",
