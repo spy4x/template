@@ -1,14 +1,15 @@
 import type { JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
-import { Button, buttonClasses } from "@spy4x/preact-ui/button"
+import { Button } from "@spy4x/preact-ui/button"
 import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Input, Textarea } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
+import { Link } from "@spy4x/preact-ui/link"
 import { NOTE_BODY_MAX_LENGTH, NOTE_TITLE_MAX_LENGTH } from "@domain/notes"
-import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm, ScreenLink } from "./progressive.tsx"
+import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
 /** One note as the screen shows it. */
 export interface NoteRow {
@@ -96,9 +97,9 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
         <CardBody>
           <Stack>
             <EmptyState title={loading ? "Loading the group..." : "This group was not found."} />
-            <ScreenLink href={SCREEN_PATHS.groups} navigate={navigate} class="pc-link">
+            <Link href={SCREEN_PATHS.groups} navigate={navigate} class="pc-link">
               Back to groups
-            </ScreenLink>
+            </Link>
           </Stack>
         </CardBody>
       </Card>
@@ -110,9 +111,9 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
       <Card>
         <CardHeader>
           <h1 class="text-lg font-semibold">Notes in {group.name}</h1>
-          <ScreenLink href={SCREEN_PATHS.groups} navigate={navigate} class="pc-link text-sm">
+          <Link href={SCREEN_PATHS.groups} navigate={navigate} class="pc-link text-sm">
             All groups
-          </ScreenLink>
+          </Link>
         </CardHeader>
         <CardBody>
           {!group.canWrite
@@ -142,9 +143,9 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
                 </ul>
               )}
             {props.nextPageHref && (
-              <ScreenLink href={props.nextPageHref} navigate={navigate} class="pc-link text-sm">
+              <Link href={props.nextPageHref} navigate={navigate} class="pc-link text-sm">
                 Older notes
-              </ScreenLink>
+              </Link>
             )}
           </Stack>
         </CardBody>
@@ -159,7 +160,7 @@ function CreateForm(
   { group, draftId, draft, onDraftChange, createErrors, creating, onCreate }: WithGroup,
 ): JSX.Element {
   return (
-    <ScreenForm action={NOTE_PATHS.list(group.id)} pending={creating} onSubmit={onCreate}>
+    <ScreenForm action={NOTE_PATHS.create(group.id)} pending={creating} onSubmit={onCreate}>
       <input type="hidden" name="id" value={draftId} />
       <NoteFields
         idPrefix="note-new"
@@ -179,7 +180,6 @@ function CreateForm(
 
 function EditForm(
   {
-    group,
     editing,
     onEditChange,
     editErrors,
@@ -189,7 +189,7 @@ function EditForm(
     navigate,
   }: WithGroup & { editing: NoteEdit },
 ): JSX.Element {
-  const notePath = NOTE_PATHS.note(group.id, editing.id)
+  const notePath = NOTE_PATHS.note(editing.id)
   return (
     <ScreenForm action={notePath} pending={saving} onSubmit={onSave}>
       <input type="hidden" name="version" value={String(editing.version)} />
@@ -202,13 +202,13 @@ function EditForm(
       />
       {editing.conflict && (
         <p class="mt-2 text-sm" data-e2e="note-conflict">
-          <ScreenLink
+          <Link
             href={notePath}
             navigate={onReloadLatest ? () => onReloadLatest() : navigate}
             class="pc-link"
           >
             Load the latest version
-          </ScreenLink>{" "}
+          </Link>{" "}
           to see what changed. Your text here is kept until you do.
         </p>
       )}
@@ -216,13 +216,14 @@ function EditForm(
         <Button type="submit" data-e2e="note-save" busy={saving} busyLabel="Saving...">
           Save note
         </Button>
-        <ScreenLink
-          href={NOTE_PATHS.list(group.id)}
+        <Button
+          href={NOTE_PATHS.list}
           navigate={navigate}
-          class={buttonClasses("outline", "md")}
+          variant="outline"
+          size="md"
         >
           Cancel
-        </ScreenLink>
+        </Button>
       </div>
     </ScreenForm>
   )
@@ -290,15 +291,15 @@ function NoteItem(
       </p>}
       {group.canWrite && (
         <div class="flex flex-wrap items-center gap-3">
-          <ScreenLink
-            href={NOTE_PATHS.note(group.id, note.id)}
+          <Link
+            href={NOTE_PATHS.note(note.id)}
             navigate={navigate}
             class="pc-link text-sm"
           >
             Edit<span class="sr-only">{` ${note.title}`}</span>
-          </ScreenLink>
+          </Link>
           <ScreenForm
-            action={NOTE_PATHS.delete(group.id, note.id)}
+            action={NOTE_PATHS.delete(note.id)}
             pending={deleting === note.id}
             onSubmit={onDelete && (() => onDelete(note))}
           >

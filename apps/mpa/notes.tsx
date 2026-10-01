@@ -7,9 +7,9 @@ import {
   type NoteRow,
   NotesScreen,
 } from "@ui/notes-screen.tsx"
-import { NOTE_PATHS } from "@ui/progressive.tsx"
+import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { type Api, type ApiAnswer, errorCode, errorMessage, isOk, isRecord } from "./api.ts"
-import { findGroup } from "./groups.ts"
+import { readGroup, readSelected } from "./groups.ts"
 import { Frame, readSession, signInPath } from "./session.tsx"
 import type { State } from "./utils.ts"
 
@@ -61,27 +61,60 @@ async function listNotes(api: Api, groupId: string, cursor: string | null) {
 }
 
 /**
- * A notes page: the group's notes, a page at a time (`?cursor=`), with the create form or, with
- * `editing`, the edit form. A person who is not a member sees "This group was not found".
+ * An old `/groups/:groupId/notes[/:noteId]` link. When that group is already the selected one, the
+ * link goes to the notes at their new address. Otherwise it goes to the groups page: selecting is a
+ * change, and the API refuses a change a page load makes (it takes only a post the browser made
+ * from the app's own page, so another site cannot switch a person's group with a link). The groups
+ * page has an "Open notes" button for every group, which is that post.
+ */
+export async function redirectFromOldNotesPath(
+  ctx: FreshContext<State>,
+  groupId: string,
+  noteId?: string,
+): Promise<Response> {
+  const selected = await readSelected(ctx.state.api)
+  if (selected !== groupId) return ctx.redirect(SCREEN_PATHS.groups, 303)
+  return ctx.redirect(noteId ? NOTE_PATHS.note(noteId) : NOTE_PATHS.list, 303)
+}
+
+/**
+ * The id of the person's selected group, or the answer to give when there is none: the notes page
+ * with "This group was not found". A person with no group is the only way to get there.
+ */
+export async function selectedGroupOrPage(
+  ctx: FreshContext<State>,
+): Promise<{ groupId: string } | { page: Response }> {
+  const groupId = await readSelected(ctx.state.api)
+  return groupId ? { groupId } : { page: await renderNotes(ctx) }
+}
+
+/**
+ * The notes page: the selected group's notes, a page at a time (`?cursor=`), with the create form
+ * or, with `editing`, the edit form. The group is the one the server holds for the person, so the
+ * address names none. A person with no group sees "This group was not found".
  */
 export async function renderNotes(
   ctx: FreshContext<State>,
-  groupId: string,
   page: NotesPageState = {},
 ): Promise<Response> {
   const { api } = ctx.state
   const session = await readSession(api)
   if (!session.user) return ctx.redirect(signInPath(session), 303)
-  const membership = await findGroup(api, groupId)
+  const picker = session.picker
+  // The picker holds one page of groups; a person with more may have selected one beyond it.
+  const membership = picker?.selectedId
+    ? picker.groups.find((group) => group.id === picker.selectedId) ??
+      await readGroup(api, picker.selectedId)
+    : null
   const cursor = ctx.url.searchParams.get("cursor")
   const list = membership
-    ? await listNotes(api, groupId, cursor)
+    ? await listNotes(api, membership.id, cursor)
     : { notes: [], nextCursor: null, error: null }
   return ctx.render(
     <Frame session={session} path={ctx.url.pathname}>
       <NotesScreen
         group={membership
-          ? { id: groupId, name: membership.name, canWrite: canMutateNotes(membership.role) }
+          ? { id: membership.id, name: membership.name, canWrite: canMutateNotes(membership.role) }
           : null}
         notes={list.notes}
         loading={false}
@@ -95,7 +128,7 @@ export async function renderNotes(
         deleting={null}
         listError={page.listError ?? list.error}
         nextPageHref={list.nextCursor
-          ? `${NOTE_PATHS.list(groupId)}?${new URLSearchParams({ cursor: list.nextCursor })}`
+          ? `${NOTE_PATHS.list}?${new URLSearchParams({ cursor: list.nextCursor })}`
           : null}
       />
     </Frame>,

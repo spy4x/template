@@ -52,7 +52,12 @@ async function groupWithNote(page: Page, name: string, title: string) {
 
 /** Opens a group's notes, then makes sure the service worker holds the app before going offline. */
 async function openNotesAndCacheShell(page: Page, groupId: string): Promise<void> {
-  await page.goto(`/groups/${groupId}/notes`)
+  const selected = await page.request.put(`${apiBase}/api/groups/selected`, {
+    headers,
+    data: { groupId },
+  })
+  expect(selected.ok(), await selected.text()).toBe(true)
+  await page.goto("/notes")
   await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready
@@ -130,7 +135,50 @@ test.describe("offline notes", () => {
     }
   })
 
+  test("a person with no network switches between groups already on the device, and the server learns the choice when the network is back", async ({ browser, request }) => {
+    const user = "e2e_offline_picker"
+    await cleanup(request, user)
+    const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    try {
+      await signUp(request, user)
+      const page = await context.newPage()
+      await signIn(page, user)
+      const first = await groupWithNote(page, "Offline first", "In the first")
+      const second = await groupWithNote(page, "Offline second", "In the second")
+      // Open both online so their notes are in the local store.
+      await openNotesAndCacheShell(page, second.groupId)
+      await openNotesAndCacheShell(page, first.groupId)
+      const titles = page.locator("[data-e2e=note-item-title]")
+      await expect(titles).toHaveText(["In the first"])
+
+      await reloadOffline(context, page)
+      await expect(titles).toHaveText(["In the first"])
+      const picker = page.locator("#sidebar-group-picker")
+      await picker.focus()
+      await page.keyboard.press("ArrowDown")
+      await page.keyboard.type("Offline second")
+      await page.keyboard.press("Enter")
+      await expect(page.getByRole("heading", { level: 1, name: "Notes in Offline second" }))
+        .toBeVisible()
+      await expect(titles).toHaveText(["In the second"])
+
+      await context.setOffline(false)
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online", {
+        timeout: 20_000,
+      })
+      await expect.poll(async () => {
+        const response = await page.request.get(`${apiBase}/api/groups/selected`)
+        return (await response.json()).groupId
+      }).toBe(second.groupId)
+    } finally {
+      await context.close()
+      await cleanup(request, user)
+    }
+  })
+
   test("two devices editing the same note offline end with one visible conflict and no lost edit", async ({ browser, request }) => {
+    // Two browsers, two offline reloads and a 20 s wait for sync: 28 s on main, which is too close to 30 s.
+    test.setTimeout(60_000)
     const user = "e2e_offline_pair"
     await cleanup(request, user)
     const baseURL = test.info().project.use.baseURL
@@ -182,6 +230,8 @@ test.describe("offline notes", () => {
   })
 
   test("choosing the server's version drops the offline edit and shows the server's note", async ({ browser, request }) => {
+    // Two browsers, two offline reloads and a 20 s wait for sync: 28 s on main, which is too close to 30 s.
+    test.setTimeout(60_000)
     const user = "e2e_offline_theirs"
     await cleanup(request, user)
     const baseURL = test.info().project.use.baseURL

@@ -1,7 +1,8 @@
 import type { JSX } from "preact"
 import { type AuthCredentials, AuthForm, type AuthMode } from "@spy4x/preact-system/auth-form"
 import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
-import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenLink } from "./progressive.tsx"
+import { Link } from "@spy4x/preact-ui/link"
+import { FORM_ACTIONS, type Navigate, SCREEN_PATHS } from "./progressive.tsx"
 
 /** The three screens `AuthScreen` draws: the two credential modes, and the second factor. */
 export type AuthScreenKind = AuthMode | "one-time-code"
@@ -21,6 +22,9 @@ const ACTIONS: Record<AuthScreenKind, string> = {
 
 /** The API schemas call the fields `username` and `otp`, so the forms post those names. */
 const FIELD_NAMES = { login: "username", code: "otp" }
+
+/** The mode switch is a link to the other page, so it works before any script runs. */
+const MODE_HREFS = { "sign-in": SCREEN_PATHS.signIn, "sign-up": SCREEN_PATHS.signUp }
 
 const COPY: Record<AuthScreenKind, { title: string; description: string; failure: string }> = {
   "sign-in": {
@@ -76,9 +80,9 @@ function Notice(
       </CardHeader>
       <CardBody>
         <p class="mb-4">{text}</p>
-        <ScreenLink href={SCREEN_PATHS.profile} navigate={navigate} class="pc-link">
+        <Link href={SCREEN_PATHS.profile} navigate={navigate} class="pc-link">
           {link}
-        </ScreenLink>
+        </Link>
       </CardBody>
     </Card>
   )
@@ -142,15 +146,16 @@ export function AuthScreen(
           labels={{ login: "Username", codeHint: "Six digits from your authenticator app." }}
           names={FIELD_NAMES}
           onModeChange={onModeChange}
+          modeHrefs={MODE_HREFS}
           onSignIn={onSignIn}
           onSignUp={onSignUp}
           onOneTimeCode={onOneTimeCode}
           footer={screen === "one-time-code" && (
             <p class="text-sm">
               Need help?{" "}
-              <ScreenLink href={SCREEN_PATHS.signIn} navigate={navigate} class="pc-link">
+              <Link href={SCREEN_PATHS.signIn} navigate={navigate} class="pc-link">
                 Back to sign in
-              </ScreenLink>
+              </Link>
             </p>
           )}
         />

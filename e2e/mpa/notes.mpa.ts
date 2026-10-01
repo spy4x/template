@@ -38,11 +38,12 @@ test("a person without JavaScript signs up, signs out, signs in, picks a group a
 
     await page.getByRole("navigation", { name: "Main navigation" })
       .getByRole("link", { name: "Groups" }).click()
-    await expect(page.getByRole("link", { name: "Personal" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Open notes in Personal" })).toBeVisible()
     await page.locator("[data-e2e=group-name]").fill("Trip")
     await page.locator("[data-e2e=group-create]").click()
     await expect(page).toHaveURL("/groups")
-    await page.getByRole("link", { name: "Trip" }).click()
+    await page.getByRole("button", { name: "Open notes in Trip" }).click()
+    await expect(page).toHaveURL("/notes")
     await expect(page.getByRole("heading", { level: 1, name: "Notes in Trip" })).toBeVisible()
     await expect(page.getByText("No notes yet.")).toBeVisible()
 
@@ -61,6 +62,14 @@ test("a person without JavaScript signs up, signs out, signs in, picks a group a
 
     await page.getByRole("button", { name: "Delete Packing list" }).click()
     await expect(page.getByText("No notes yet.")).toBeVisible()
+
+    // The side menu's picker is a form: pick the personal group and press Switch.
+    await page.locator("#sidebar-group-picker").selectOption({ label: "Personal · Owner" })
+    await page.locator("form[action='/groups/select']:visible [data-e2e=group-picker-submit]")
+      .click()
+    await expect(page).toHaveURL("/notes")
+    await expect(page.getByRole("heading", { level: 1, name: "Notes in Personal" }))
+      .toBeVisible()
   } finally {
     await cleanup(request, username)
   }

@@ -39,8 +39,7 @@ says what is missing. Do not copy the gap into a new screen.
   `<a href="…">`, with field `name`s matching the API schema of the same action. Form actions are
   listed in `FORM_ACTIONS` (`libs/ui/progressive.tsx`). With its callback, the app takes the submit
   over; without it, the browser posts. Push registration needs the browser's push manager, so it is
-  the one action without a native form. **Open:** `AuthForm`'s mode switch is a button
-  ([preact-components#456](https://github.com/spy4x/preact-components/issues/456)).
+  the one action without a native form. The mode switch of `AuthForm` is a link (`modeHrefs`).
 - **Built on preact-components' `EnhancedForm`.** Every form here is `ScreenForm`
   (`libs/ui/progressive.tsx`): `EnhancedForm` with its status taken from the screen's `pending`
   prop, so a pending form is disabled and refuses a second submit.

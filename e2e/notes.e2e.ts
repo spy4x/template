@@ -53,7 +53,7 @@ async function openNotes(page: Page, groupName: string): Promise<void> {
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", {
     name: "Groups",
   }).click()
-  await page.getByRole("link", { name: groupName }).click()
+  await page.getByRole("button", { name: `Open notes in ${groupName}` }).click()
   await expect(page.getByRole("heading", { level: 1, name: `Notes in ${groupName}` }))
     .toBeVisible()
 }

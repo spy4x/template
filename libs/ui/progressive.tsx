@@ -24,20 +24,29 @@ export const FORM_ACTIONS = {
   pushRemove: "/profile/push/remove",
   /** Creates a shared group: `{ id, kind, name }`. */
   groupCreate: "/groups",
+  /** Selects the group the notes show: `{ groupId }`. */
+  groupSelect: "/groups/select",
 } as const
 
 /**
- * The routes a group's notes post to and live at, built from the ids in the path. A form's field
- * names match the API schema of the same action (`@domain/notes`); the path carries the group and
- * the note. The notes screen posts to these.
+ * The routes the notes of the selected group post to and live at. A form's field names match the
+ * API schema of the same action (`@domain/notes`); the group is the person's selected one, which
+ * the server holds (`GET /api/groups/selected`), so no path names it. The notes screen posts to
+ * these.
  */
 export const NOTE_PATHS = {
   /** The list and the create form; `POST` creates `{ id, title, body }`. */
-  list: (groupId: string) => `/groups/${groupId}/notes`,
+  list: "/notes",
+  /**
+   * The create form's action: the list, with the group the page shows. The server refuses the post
+   * when that is no longer the selected group, so a note cannot land in a group other than the
+   * one on screen.
+   */
+  create: (groupId: string) => `/notes?${new URLSearchParams({ group: groupId })}`,
   /** One note's edit form; `POST` updates `{ title, body, version }`. */
-  note: (groupId: string, noteId: string) => `/groups/${groupId}/notes/${noteId}`,
+  note: (noteId: string) => `/notes/${noteId}`,
   /** `POST` deletes `{ version }`. */
-  delete: (groupId: string, noteId: string) => `/groups/${groupId}/notes/${noteId}/delete`,
+  delete: (noteId: string) => `/notes/${noteId}/delete`,
 } as const
 
 /** The pages these screens link to. */
@@ -48,35 +57,6 @@ export const SCREEN_PATHS = {
   profile: "/",
   groups: "/groups",
 } as const
-
-/**
- * Whether a click is one the page may take over: the primary button with no modifier. Ctrl or Meta
- * opens a new tab, Shift a new window and Alt a download, so those stay the browser's.
- */
-function isPlainClick(event: MouseEvent): boolean {
-  return event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
-    !event.altKey
-}
-
-/**
- * A real `<a href>`. With `navigate`, a plain click goes through it instead of loading the page;
- * without it, or on a modified click, the browser follows the link as usual.
- */
-export function ScreenLink(
-  { href, navigate, class: className, children }: {
-    href: string
-    navigate?: Navigate
-    class?: string
-    children: ComponentChildren
-  },
-): JSX.Element {
-  const onClick = (event: MouseEvent) => {
-    if (!navigate || event.defaultPrevented || !isPlainClick(event)) return
-    event.preventDefault()
-    navigate(href)
-  }
-  return <a href={href} class={className} onClick={onClick}>{children}</a>
-}
 
 /** `EnhancedForm` announces nothing itself: each screen shows its own busy button and error. */
 const QUIET: EnhancedFormLabels = { sending: "", done: "", failed: "" }

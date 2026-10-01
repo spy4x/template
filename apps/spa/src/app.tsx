@@ -3,11 +3,12 @@ import { useEffect, useState } from "preact/hooks"
 import { SWUpdater } from "@spy4x/preact-system/sw-updater"
 import { LoadingSpinner } from "@spy4x/preact-ui/loading-spinner"
 import { Toastr } from "@spy4x/preact-ui/toastr"
-import { Route, Switch } from "wouter-preact"
+import { Route, Switch, useLocation } from "wouter-preact"
 import { canSignOut, sessionState } from "./state/session.ts"
 import { bootstrapSession, settleOwedSignOut } from "./state/auth.ts"
 import { groupsStore } from "./state/groups.ts"
 import { notesStore } from "./state/notes.ts"
+import { selectionStore } from "./state/selection.ts"
 import { connectRealtime, disconnectRealtime } from "./state/realtime.ts"
 import { profileStore } from "./state/profile.ts"
 import { userChangeGroupId } from "@domain/identity"
@@ -19,6 +20,30 @@ import { GroupsView } from "./views/GroupsView.tsx"
 import { NotesView } from "./views/NotesView.tsx"
 import { ProfileView } from "./views/ProfileView.tsx"
 import { AppShell, PublicFrame } from "./views/AppShell.tsx"
+import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
+
+/**
+ * An old `/groups/:groupId/notes…` link. It selects nothing: a link must not change the selection,
+ * or another site could switch a person's group by linking here. When that group is already the
+ * selected one it opens the notes at their new address; otherwise it opens the groups page, which
+ * has an "Open notes" button for each group. It waits for the selection to be known.
+ */
+function OpenIfSelected({ groupId, noteId }: { groupId: string; noteId?: string }) {
+  const [, navigate] = useLocation()
+  const selected = selectionStore.groupId.value
+  useEffect(() => {
+    if (selected === null) return
+    navigate(
+      selected !== groupId
+        ? SCREEN_PATHS.groups
+        : noteId
+        ? NOTE_PATHS.note(noteId)
+        : NOTE_PATHS.list,
+      { replace: true },
+    )
+  }, [selected, groupId, noteId])
+  return <LoadingSpinner size="lg" label="Opening the notes..." class="min-h-[50vh]" />
+}
 
 function Routes() {
   return (
@@ -28,11 +53,13 @@ function Routes() {
       <Route path="/totp">{() => <AuthView key="one-time-code" screen="one-time-code" />}</Route>
       <Route path="/groups" component={GroupsView} />
       <Route path="/groups/:groupId/notes">
-        {(params) => <NotesView groupId={params.groupId} />}
+        {(params) => <OpenIfSelected groupId={params.groupId} />}
       </Route>
       <Route path="/groups/:groupId/notes/:noteId">
-        {(params) => <NotesView groupId={params.groupId} noteId={params.noteId} />}
+        {(params) => <OpenIfSelected groupId={params.groupId} noteId={params.noteId} />}
       </Route>
+      <Route path="/notes">{() => <NotesView />}</Route>
+      <Route path="/notes/:noteId">{(params) => <NotesView noteId={params.noteId} />}</Route>
       <Route path="/" component={ProfileView} />
     </Switch>
   )
@@ -89,23 +116,29 @@ export function App() {
       groupsStore.reset()
       notesStore.reset()
       profileStore.reset()
+      selectionStore.reset()
       return
     }
     // The REST read is the pull: it runs at start-up, after every reconnect and for every push
     // that is news, so a missed frame costs one read and never leaves the list wrong. A note
     // change moves its group's sequence, so the open group's notes are read again too.
     const pull = async (gap?: { groupId: string }) => {
-      // The hint for this person's own profile or push devices, sent after a change in another tab.
-      if (gap?.groupId === userChangeGroupId(userId)) return await profileStore.refresh()
+      // The hint for this person's own changes (profile, push devices, selected group), sent after
+      // a change in another tab.
+      if (gap?.groupId === userChangeGroupId(userId)) {
+        return await Promise.all([profileStore.refresh(), selectionStore.refresh()]).then(() => {})
+      }
       // Writes made offline go out before anything is read, so the read shows their result.
       await flushOutbox()
       const openGroup = notesStore.groupId.value
       await Promise.all([
+        selectionStore.refresh(),
         groupsStore.refresh(),
         openGroup && (!gap || gap.groupId === openGroup) ? notesStore.refresh() : undefined,
       ])
     }
     startOffline(userId)
+    selectionStore.start(userId)
     void pull().catch(() => {})
     connectRealtime(userId, pull)
     return () => disconnectRealtime()
