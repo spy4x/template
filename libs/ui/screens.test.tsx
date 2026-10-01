@@ -17,9 +17,10 @@ import { pushUnsubscribeRequestSchema } from "@spy4x/platform/model"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
 import { GroupKind, GroupRole, parseSelectGroupRequest } from "@domain/groups"
-import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
+import { GroupSettingsScreen, type GroupSettingsScreenProps } from "./group-settings-screen.tsx"
+import { GroupsScreen, type GroupsScreenProps, ROLE_TEXT } from "./groups-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
-import { FORM_ACTIONS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
+import { FORM_ACTIONS, GROUP_PATHS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 import {
   noteCreateRequestSchema,
   noteDeleteRequestSchema,
@@ -380,6 +381,7 @@ describe("the group picker without JavaScript", () => {
 
 const groupsDefaults: GroupsScreenProps = {
   groups: [],
+  selectedId: null,
   name: "",
   onNameChange: () => {},
   creating: false,
@@ -466,7 +468,95 @@ describe("GroupsScreen", () => {
     ])
     expect(html).toContain('name="groupId" value="g-2"')
     expect(html).toContain('aria-label="Open notes in Team"')
-    expect(surface.links).toEqual([])
+  })
+
+  it("links each group to its own settings page, named after the group", () => {
+    const screen = (
+      <GroupsScreen
+        {...groupsDefaults}
+        groups={[
+          { id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER },
+          { id: "g-2", name: "Team", kind: GroupKind.SHARED, role: GroupRole.VIEWER },
+        ]}
+      />
+    )
+
+    expect(noScriptSurface(screen).links).toEqual([
+      GROUP_PATHS.settings("g-1"),
+      GROUP_PATHS.settings("g-2"),
+    ])
+    expect(renderToString(screen)).toContain('aria-label="Settings of Team"')
+  })
+
+  it("marks only the selected group", () => {
+    const groups = [
+      { id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER },
+      { id: "g-2", name: "Team", kind: GroupKind.SHARED, role: GroupRole.VIEWER },
+    ]
+    const marked = (selectedId: string | null) =>
+      renderToString(<GroupsScreen {...groupsDefaults} groups={groups} selectedId={selectedId} />)
+        .match(/>Selected</g)?.length ?? 0
+
+    expect(marked("g-2")).toBe(1)
+    expect(marked(null)).toBe(0)
+    expect(renderToString(
+      <GroupsScreen {...groupsDefaults} groups={groups} selectedId="g-2" />,
+    )).toMatch(/Team<\/span>\s*(<!--.*?-->)?\s*<span[^>]*>Selected/)
+  })
+})
+
+const settingsDefaults: GroupSettingsScreenProps = {
+  group: { id: "g-1", name: "Team", kind: GroupKind.SHARED, role: GroupRole.OWNER },
+  selected: false,
+  loading: false,
+}
+
+describe("GroupSettingsScreen", () => {
+  for (const role of [GroupRole.VIEWER, GroupRole.EDITOR, GroupRole.ADMIN, GroupRole.OWNER]) {
+    it(`shows the General section read-only to a person whose role is ${GroupRole[role]}`, () => {
+      const screen = (
+        <GroupSettingsScreen
+          {...settingsDefaults}
+          group={{ ...settingsDefaults.group!, role }}
+        />
+      )
+      const html = renderToString(screen)
+      const surface = noScriptSurface(screen)
+
+      expect(html).toContain("General")
+      expect(html).toContain("Team")
+      expect(html).toContain(`data-e2e="group-general-role">${ROLE_TEXT[role]}<`)
+      // The only form is "Open notes"; there is nothing to edit, and no button that does nothing.
+      expect(surface.forms).toEqual([
+        { action: FORM_ACTIONS.groupSelect, method: "post", fields: ["groupId"] },
+      ])
+      expect(surface.scriptOnlyButtons).toEqual([])
+      expect(html).not.toContain('<input type="text"')
+      expect(html).not.toContain("<textarea")
+    })
+  }
+
+  it("marks the group as selected only when it is the selected one", () => {
+    expect(renderToString(<GroupSettingsScreen {...settingsDefaults} />)).not.toContain(
+      ">Selected<",
+    )
+    expect(renderToString(<GroupSettingsScreen {...settingsDefaults} selected />)).toContain(
+      ">Selected<",
+    )
+  })
+
+  it("links back to the groups page", () => {
+    expect(noScriptSurface(<GroupSettingsScreen {...settingsDefaults} />).links)
+      .toEqual(["/groups"])
+  })
+
+  it("says the group does not exist once it has been read, and loading before", () => {
+    const missing = <GroupSettingsScreen {...settingsDefaults} group={null} />
+
+    expect(renderToString(missing)).toContain("This group does not exist.")
+    expect(renderToString(<GroupSettingsScreen {...settingsDefaults} group={null} loading />))
+      .toContain("Loading the group...")
+    expect(noScriptSurface(missing).links).toEqual(["/groups"])
   })
 })
 

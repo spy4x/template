@@ -59,6 +59,8 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
   const loading = signal(false)
   const creating = signal(false)
   const error = signal<string | null>(null)
+  /** The last list read failed; cleared by the next read that succeeds. */
+  const loadError = signal<string | null>(null)
   let inFlight: Promise<void> | null = null
   let queued: Promise<void> | null = null
 
@@ -84,7 +86,15 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
   function start(via: ReadChannel): Promise<void> {
     loading.value = true
     if (groups.value.length === 0) void showLocal()
-    inFlight = readAll(via).finally(() => {
+    inFlight = readAll(via).then(
+      () => {
+        loadError.value = null
+      },
+      (cause) => {
+        loadError.value = describe(cause, "Could not load the groups")
+        throw cause
+      },
+    ).finally(() => {
       inFlight = null
       loading.value = false
     })
@@ -140,13 +150,25 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
     groups.value = []
     name.value = ""
     error.value = null
+    loadError.value = null
     loading.value = false
     creating.value = false
     inFlight = null
     queued = null
   }
 
-  return { groups, name, loading, creating, error, refresh, refreshFromUser, create, reset }
+  return {
+    groups,
+    name,
+    loading,
+    creating,
+    error,
+    loadError,
+    refresh,
+    refreshFromUser,
+    create,
+    reset,
+  }
 }
 
 /** The groups as the server serves them: reads over REST, writes over the socket. */

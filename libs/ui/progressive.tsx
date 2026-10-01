@@ -63,6 +63,12 @@ export const SCREEN_PATHS = {
   groups: "/groups",
 } as const
 
+/** Where a group's own pages live. */
+export const GROUP_PATHS = {
+  /** The group's settings page. */
+  settings: (groupId: string) => `/groups/${encodeURIComponent(groupId)}`,
+} as const
+
 /** `EnhancedForm` announces nothing itself: each screen shows its own busy button and error. */
 const QUIET: EnhancedFormLabels = { sending: "", done: "", failed: "" }
 

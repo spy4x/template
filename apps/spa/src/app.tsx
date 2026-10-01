@@ -18,6 +18,7 @@ import { toasts } from "./state/toasts.ts"
 import { AuthView } from "./views/AuthView.tsx"
 import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView.tsx"
 import { GroupsView } from "./views/GroupsView.tsx"
+import { GroupSettingsView } from "./views/GroupSettingsView.tsx"
 import { NotesView } from "./views/NotesView.tsx"
 import { ProfileView } from "./views/ProfileView.tsx"
 import { AppShell, PublicFrame } from "./views/AppShell.tsx"
@@ -55,6 +56,9 @@ function Routes() {
       <Route path="/forgot-password" component={ForgotPasswordView} />
       <Route path="/reset-password" component={ResetPasswordView} />
       <Route path="/groups" component={GroupsView} />
+      <Route path="/groups/:groupId">
+        {(params) => <GroupSettingsView groupId={params.groupId} />}
+      </Route>
       <Route path="/groups/:groupId/notes">
         {(params) => <OpenIfSelected groupId={params.groupId} />}
       </Route>

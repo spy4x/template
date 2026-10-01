@@ -43,6 +43,7 @@ async function renderGroups(
     <Frame session={session} path={ctx.url.pathname}>
       <GroupsScreen
         groups={page?.groups ?? []}
+        selectedId={session.picker?.selectedId ?? null}
         draftId={draftId}
         name={name}
         creating={false}

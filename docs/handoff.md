@@ -357,6 +357,13 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    group (the API refuses a select that is not a post from the app's own page). The create form
    names the group on screen (`/notes?group=<id>`); the MPA refuses the post when that is no longer
    the selected group.
+   `/groups` lists the groups as cards (kind, the person's role, a "Selected" badge, a settings link
+   and an "Open notes" form). `/groups/:groupId` is the settings page: `GroupSettingsScreen` in
+   `libs/ui`, one `<section>` per concern. Only General exists, read-only for every role, because
+   the API can neither rename a group nor list its members. Each later issue (rename, delete and
+   keep-at-least-one #129; members, roles and leaving #130; invitations #131; ownership #132; moving
+   notes #133; the extra fields #134) adds its
+   own section to that screen, shown only to the roles that may use it.
 
 ## Next steps, in dependency order
 
