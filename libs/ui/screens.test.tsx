@@ -303,11 +303,13 @@ describe("frames without JavaScript", () => {
   })
 
   it("links the brand and the navigation of the signed-in frame, and posts sign-out from the user menu when the app takes sign-out over", () => {
-    const surface = noScriptSurface(
+    const frame = (
       <AppFrame user={{ firstName: "Ada", lastName: "" }} connection="open" onSignOut={() => {}}>
         page
-      </AppFrame>,
+      </AppFrame>
     )
+    const html = renderToString(frame)
+    const surface = noScriptSurface(frame)
     const [skipLink, ...pages] = surface.links
     expect(skipLink).toMatch(/^#./)
     // The navigation is drawn twice (sidebar and drawer), the brand once.
@@ -315,9 +317,15 @@ describe("frames without JavaScript", () => {
     expect(pages.filter((href) => href === "/notes")).toHaveLength(2)
     expect(pages.filter((href) => href === "/groups")).toHaveLength(2)
     expect(pages).toHaveLength(7)
-    // "Sign out" is a form in the user menu; only the button that opens the menu needs a script.
+    // "Sign out" is a form in the user menu. The menu is a `<details>` until the page hydrates, so
+    // the browser opens it from its `<summary>` and no button needs a script.
     expect(surface.forms).toEqual([{ action: FORM_ACTIONS.signOut, method: "post", fields: [] }])
-    expect(surface.scriptOnlyButtons).toEqual(["shell-user-menu-button"])
+    expect(surface.scriptOnlyButtons).toEqual([])
+    const menu = html.match(
+      /<details\b[^>]*>(?:(?!<\/details>)[\s\S])*?data-e2e="shell-user-menu-button"[\s\S]*?<\/details>/,
+    )
+    expect(menu?.[0]).toMatch(/<summary\b[^>]*data-e2e="shell-user-menu-button"/)
+    expect(menu?.[0]).toContain(`<form method="post" action="${FORM_ACTIONS.signOut}"`)
   })
 
   it("posts sign-out from the signed-in frame when no app takes it over, and shows no connection it does not have", () => {
@@ -360,7 +368,7 @@ describe("the group picker without JavaScript", () => {
 
     expect(forms).toHaveLength(2)
     for (const [form] of forms) {
-      expect(form).toContain('class="space-y-0 ')
+      expect(form).toContain(" space-y-0! ")
       expect(form).toContain('<p role="status" aria-live="polite"')
     }
   })
