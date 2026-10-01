@@ -320,3 +320,82 @@ describe("group.list payload", () => {
     })
   }
 })
+
+describe("group changes over the socket", () => {
+  /** The three commands, each recording what the socket dispatched to it. */
+  function changes() {
+    const seen: { name: string; data: object }[] = []
+    const record = (name: string) => (command: { data: object }) => {
+      seen.push({ name, data: command.data })
+      return Promise.resolve({
+        group: {
+          id,
+          name: "Team",
+          role: GroupRole.OWNER,
+          authorizationRevision: "1",
+          changeSequence: "1",
+          updatedAt: new Date(0),
+          deletedAt: new Date(0),
+        },
+      })
+    }
+    const requests = createGroupSocketRequests({
+      create: () => Promise.reject(new Error("not used")),
+      list: () => Promise.reject(new Error("not used")),
+      get: () => Promise.reject(new Error("not used")),
+      select: () => Promise.reject(new Error("not used")),
+      selected: () => Promise.reject(new Error("not used")),
+      cursor: {
+        encode: () => Promise.reject(new Error("not used")),
+        decode: () => Promise.reject(),
+      },
+      rename: record("rename"),
+      delete: record("delete"),
+      restore: record("restore"),
+      deleted: () => Promise.resolve({ groups: [] }),
+    })
+    return { requests, seen }
+  }
+
+  const call = { actor, requestId: "req-1", signal, idempotencyKey: "key-1" }
+
+  it("declares rename, delete and restore as commands and the deleted list as a query", () => {
+    const { requests } = changes()
+
+    expect(requests["group.rename"].kind).toBe("command")
+    expect(requests["group.delete"].kind).toBe("command")
+    expect(requests["group.restore"].kind).toBe("command")
+    expect(requests["group.deleted"].kind).toBe("query")
+  })
+
+  it("dispatches each command with the actor, group, request id and idempotency key", async () => {
+    const { requests, seen } = changes()
+
+    await requests["group.rename"].handle({ ...call, payload: { groupId: id, name: " Trip " } })
+    await requests["group.delete"].handle({ ...call, payload: { groupId: id } })
+    await requests["group.restore"].handle({ ...call, payload: { groupId: id } })
+
+    const common = { actor, groupId: id, requestId: "req-1", idempotencyKey: "key-1" }
+    expect(seen).toEqual([
+      { name: "rename", data: { ...common, name: "Trip" } },
+      { name: "delete", data: common },
+      { name: "restore", data: common },
+    ])
+  })
+
+  it("refuses a payload with fields it does not know, before any command runs", async () => {
+    const { requests, seen } = changes()
+
+    for (
+      const [name, payload] of [
+        ["group.rename", { groupId: id, name: "Trip", userId: 999 }],
+        ["group.rename", { groupId: id }],
+        ["group.delete", { groupId: id, force: true }],
+        ["group.restore", {}],
+      ] as const
+    ) {
+      await expect(requests[name].handle({ ...call, payload })).rejects.toBeInstanceOf(GroupError)
+    }
+    expect(seen).toEqual([])
+  })
+})
