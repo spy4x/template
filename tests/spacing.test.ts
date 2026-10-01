@@ -17,26 +17,43 @@ const SOURCE_DIRS = ["apps", "libs"]
 
 /**
  * Build output and caches, which hold compiled classes rather than source, and test files, which
- * spell out classes to assert on.
+ * spell out classes to assert on. `walk` tests these against the absolute path, so the directory
+ * pattern is anchored below `root`: a checkout under a parent named `build/` must still be walked.
  */
-const SKIP = [/[\\/](node_modules|dist|build|\.vite|_fresh)[\\/]/, /\.test\.tsx?$/]
+function skipPatterns(root: string): RegExp[] {
+  const below = root.replace(/[\\^$.*+?()[\]{}|/]/g, `\\$&`)
+  return [
+    new RegExp(`^${below}(.*[\\\\/])?(node_modules|dist|build|\\.vite|_fresh)[\\\\/]`),
+    /\.test\.tsx?$/,
+  ]
+}
 
-/** Every source file under {@link SOURCE_DIRS}, relative to the repository root. */
-async function sourceFiles(): Promise<string[]> {
+/** Every source file under {@link SOURCE_DIRS} in `root`, relative to `root`. */
+async function sourceFiles(root: string): Promise<string[]> {
   const files: string[] = []
   for (const dir of SOURCE_DIRS) {
-    const entries = walk(`${ROOT}${dir}`, {
+    const entries = walk(`${root}${dir}`, {
       includeDirs: false,
       exts: [".ts", ".tsx", ".css", ".html"],
-      skip: SKIP,
+      skip: skipPatterns(root),
     })
-    for await (const entry of entries) files.push(relative(ROOT, entry.path))
+    for await (const entry of entries) files.push(relative(root, entry.path))
   }
   return files.sort()
 }
 
+Deno.test("skips build output below the root, not the root's own parents", () => {
+  const root = `/home/me/worktrees/template/build/fix-x/`
+  const skipped = (path: string) => skipPatterns(root).some((p) => p.test(path))
+  expect(skipped(`${root}apps/spa/src/app.tsx`)).toBe(false)
+  expect(skipped(`${root}apps/spa/dist/assets/index.js`)).toBe(true)
+  expect(skipped(`${root}apps/mpa/_fresh/server.js`)).toBe(true)
+  expect(skipped(`${root}node_modules/x/index.ts`)).toBe(true)
+  expect(skipped(`${root}libs/ui/screens.test.tsx`)).toBe(true)
+})
+
 Deno.test("every spacing class in apps/ and libs/ is on the scale", async () => {
-  const files = await sourceFiles()
+  const files = await sourceFiles(ROOT)
   // An empty walk would pass silently, so require a file the SPA cannot lose.
   expect(files).toContain("apps/spa/src/app.tsx")
   const found: string[] = []
