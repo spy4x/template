@@ -52,10 +52,12 @@ import { realtimeOnUserSignedOutHandler } from "@api/cqrs/event-handlers/realtim
 // - The four audit listeners ought to be durable, since a lost row is a lost audit record. They
 //   stay best-effort until an outbox row can carry the event: today a row has no payload, and the
 //   audit row needs the address and user agent, which cannot be read back later.
-// - The socket-closing and hint listeners is best-effort by nature: sockets live in this process and the
+// - The socket-closing listener is best-effort by nature: sockets live in this process and the
 //   worker, which runs outbox jobs, cannot close them. Its durable backstop is already in place:
 //   every socket is revalidated on a timer (`realtime.startRevalidation`) and before each
 //   request, so a failure here delays the close by one interval at most.
+// - The two hint listeners are best-effort for the same reason. A hint a tab misses is caught up
+//   by the read the page makes whenever its socket opens again.
 subscribe(UserSignedUpEvent, authAuditOnUserSignedUpHandler)
 subscribe(UserSignedInEvent, authAuditOnUserSignedInHandler)
 subscribe(UserSignedOutEvent, authAuditOnUserSignedOutHandler)
