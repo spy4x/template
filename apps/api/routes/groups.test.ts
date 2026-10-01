@@ -9,6 +9,8 @@ import {
   GroupListQuery,
   GroupRepository,
   GroupRole,
+  GroupSelectCommand,
+  GroupSelectedQuery,
 } from "@domain/groups"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { AccessError, UserMFAStatus } from "@domain/identity"
@@ -42,11 +44,23 @@ function dependencies(): GroupsRouteDependencies & {
   createCommand: GroupCreateCommand | null
   listQuery: GroupListQuery | null
   getQuery: GroupGetQuery | null
+  selectCommand: GroupSelectCommand | null
+  selectedQuery: GroupSelectedQuery | null
 } {
   return {
     createCommand: null,
     listQuery: null,
     getQuery: null,
+    selectCommand: null,
+    selectedQuery: null,
+    select(command) {
+      this.selectCommand = command
+      return Promise.resolve({ groupId: command.data.groupId, version: 5 })
+    },
+    selected(query) {
+      this.selectedQuery = query
+      return Promise.resolve({ groupId: id, version: 5 })
+    },
     create(command) {
       this.createCommand = command
       return Promise.resolve({
@@ -166,6 +180,59 @@ describe("groups route", () => {
       after: { updatedAt: now, id },
     })
     expect(await response.json()).toEqual({ groups: [], nextCursor: "next-token" })
+  })
+
+  it("reads the selected group of the authenticated session, not a group called selected", async () => {
+    const deps = dependencies()
+    const app = buildApp(deps, buildAuthData({ user: { id: 19 } }))
+    const response = await app.request("http://local/groups/selected")
+
+    expect(response.status).toBe(200)
+    expect(deps.selectedQuery?.data.actor.userId).toBe(19)
+    expect(deps.getQuery).toBe(null)
+    expect(await response.json()).toEqual({ groupId: id, version: 5 })
+  })
+
+  it("selects a group for the authenticated session with PUT", async () => {
+    const deps = dependencies()
+    const app = buildApp(deps, buildAuthData({ user: { id: 19 } }))
+    const response = await app.request("http://local/groups/selected", {
+      method: "PUT",
+      headers: { ...mutationHeaders, "idempotency-key": "key-9" },
+      body: JSON.stringify({ groupId: id }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(deps.selectCommand?.data).toEqual({
+      actor: expect.objectContaining({ userId: 19 }),
+      groupId: id,
+      requestId: "req-groups-1",
+      idempotencyKey: "key-9",
+    })
+    expect(await response.json()).toEqual({ groupId: id, version: 5 })
+  })
+
+  it("refuses to select from another origin or with a body that is not exactly a group id", async () => {
+    const deps = dependencies()
+    const app = buildApp(deps)
+    const crossSite = await app.request("http://local/groups/selected", {
+      method: "PUT",
+      headers: {
+        ...mutationHeaders,
+        origin: "http://evil.example",
+        "sec-fetch-site": "cross-site",
+      },
+      body: JSON.stringify({ groupId: id }),
+    })
+    const wrongBody = await app.request("http://local/groups/selected", {
+      method: "PUT",
+      headers: mutationHeaders,
+      body: JSON.stringify({ groupId: id, extra: 1 }),
+    })
+
+    expect(crossSite.status).toBe(403)
+    expect(wrongBody.status).toBe(400)
+    expect(deps.selectCommand).toBe(null)
   })
 
   it("reads one group for the authenticated session", async () => {

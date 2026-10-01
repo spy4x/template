@@ -1,7 +1,13 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { GroupCreateCommand, GroupError, GroupKind, GroupRole } from "@domain/groups"
-import type { GroupGetQuery, GroupListQuery, GroupRepository } from "@domain/groups"
+import type {
+  GroupGetQuery,
+  GroupListQuery,
+  GroupRepository,
+  GroupSelectCommand,
+  GroupSelectedQuery,
+} from "@domain/groups"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { UserMFAStatus } from "@domain/identity"
 import { createGroupSocketRequests } from "./socket.ts"
@@ -23,10 +29,14 @@ function harness() {
     command: GroupCreateCommand | null
     query: GroupListQuery | null
     get: GroupGetQuery | null
+    select: GroupSelectCommand | null
+    selected: GroupSelectedQuery | null
   } = {
     command: null,
     query: null,
     get: null,
+    select: null,
+    selected: null,
   }
   const requests = createGroupSocketRequests({
     create(command) {
@@ -57,6 +67,14 @@ function harness() {
           updatedAt: new Date(0),
         },
       })
+    },
+    select(command) {
+      seen.select = command
+      return Promise.resolve({ groupId: command.data.groupId, version: 2 })
+    },
+    selected(query) {
+      seen.selected = query
+      return Promise.resolve({ groupId: id, version: 2 })
     },
     list(query) {
       seen.query = query
@@ -165,6 +183,8 @@ describe("group socket requests", () => {
       create: () => Promise.reject(new Error("not used")),
       list: () => Promise.reject(new Error("not used")),
       get: handler,
+      select: () => Promise.reject(new Error("not used")),
+      selected: () => Promise.reject(new Error("not used")),
       cursor: { encode: () => Promise.resolve(""), decode: () => Promise.reject(new Error("x")) },
     })
     const ask = async (groupId: string) => {
@@ -203,6 +223,67 @@ describe("group socket requests", () => {
     expect(seen.query?.data.page.limit).toBe(10)
     expect(seen.query?.data.page.after?.id).toBe("abc")
     expect(page).toEqual({ groups: [], nextCursor: "cursor-for-7" })
+  })
+})
+
+describe("group selection over the socket", () => {
+  it("declares select as a command and selected as a query", () => {
+    const { requests } = harness()
+
+    expect(requests["group.select"].kind).toBe("command")
+    expect(requests["group.selected"].kind).toBe("query")
+  })
+
+  it("selects the named group for the actor and carries the idempotency key", async () => {
+    const { requests, seen } = harness()
+
+    const result = await requests["group.select"].handle({
+      actor,
+      requestId: "req-3",
+      signal,
+      payload: { groupId: id },
+      idempotencyKey: "key-1",
+    })
+
+    expect(seen.select?.data).toEqual({
+      actor,
+      groupId: id,
+      requestId: "req-3",
+      idempotencyKey: "key-1",
+    })
+    expect(result).toEqual({ groupId: id, version: 2 })
+  })
+
+  for (
+    const [name, payload] of [
+      ["no payload", undefined],
+      ["a group id that is not a UUID", { groupId: "nope" }],
+      ["an unknown field", { groupId: id, userId: 1 }],
+      ["a missing group id", {}],
+    ] as const
+  ) {
+    it(`refuses to select with ${name}, before any command runs`, async () => {
+      const { requests, seen } = harness()
+
+      await expect(
+        requests["group.select"].handle({ actor, requestId: "r", signal, payload }),
+      ).rejects.toThrow(GroupError)
+      expect(seen.select).toBe(null)
+    })
+  }
+
+  it("reads the selection of the actor", async () => {
+    const { requests, seen } = harness()
+
+    const result = await requests["group.selected"].handle({
+      actor,
+      requestId: "req-4",
+      signal,
+      payload: undefined,
+    })
+
+    expect(seen.selected?.data).toEqual({ actor })
+    expect(result).toEqual({ groupId: id, version: 2 })
   })
 })
 

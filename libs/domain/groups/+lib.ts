@@ -159,7 +159,58 @@ export class GroupGetQuery implements Query<GroupGetPayload, GroupGetResult> {
   constructor(public data: GroupGetPayload) {}
 }
 
+/**
+ * Which group the person works in now: the one `/notes` shows. One per user, kept on the server so
+ * every device agrees. `groupId` is `null` only for a person who belongs to no group.
+ */
+export interface SelectedGroup {
+  groupId: string | null
+  /**
+   * Grows by one every time the selection changes; `0` while the person never chose and the
+   * answer is the fallback.
+   */
+  version: number
+}
+
+export interface GroupSelectPayload {
+  actor: Actor
+  groupId: string
+  requestId?: string
+  /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
+  idempotencyKey?: string
+}
+
+/**
+ * Selects one of the actor's groups. A group the actor is not a member of answers
+ * `GROUP_NOT_FOUND`, as a missing group does.
+ */
+export class GroupSelectCommand implements Command<GroupSelectPayload, SelectedGroup> {
+  __resultType?: SelectedGroup
+  constructor(public data: GroupSelectPayload) {}
+}
+
+export interface GroupSelectedPayload {
+  actor: Actor
+}
+
+/**
+ * The actor's selected group. When the stored one is gone (the group was deleted, or the person
+ * left it) or never chosen, the answer is another of their groups, their personal one first, and
+ * it is stored: the server decides, so every device gets the same answer.
+ */
+export class GroupSelectedQuery implements Query<GroupSelectedPayload, SelectedGroup> {
+  __resultType?: SelectedGroup
+  constructor(public data: GroupSelectedPayload) {}
+}
+
 export interface GroupRepository {
+  /** See {@link GroupSelectedQuery}. */
+  getSelected(userId: number): Promise<SelectedGroup>
+  /**
+   * Stores the user's selection and announces it to their devices, in one transaction. `null` when
+   * the user is not a member of the group (or it is missing): nothing is stored.
+   */
+  select(userId: number, groupId: string): Promise<SelectedGroup | null>
   listForUser(userId: number, page: GroupListPage): Promise<GroupListResult>
   /** The group as the list shows it, or `null` when it is missing or the user is not a member. */
   getSummaryForMember(groupId: string, userId: number): Promise<GroupSummary | null>
@@ -179,6 +230,7 @@ export type PersonalGroupOperation =
   | "transfer-owner"
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const SELECT_KEYS = ["groupId"]
 const CREATE_SHARED_KEYS = ["id", "kind", "name"]
 
 export function parseCreateSharedGroupRequest(value: unknown): CreateSharedGroupRequest {
@@ -200,6 +252,14 @@ export function parseCreateSharedGroupRequest(value: unknown): CreateSharedGroup
     throw new GroupError("INVALID_REQUEST", "Group name must contain 1 to 100 characters")
   }
   return { id: value.id, kind: GroupKind.SHARED, name }
+}
+
+/** The body of a request to select a group: exactly `{ groupId }`, a lowercase UUID v4. */
+export function parseSelectGroupRequest(value: unknown): { groupId: string } {
+  if (!isRecord(value) || Object.keys(value).sort().join(",") !== SELECT_KEYS.join(",")) {
+    throw new GroupError("INVALID_REQUEST", "Expected exactly groupId")
+  }
+  return { groupId: parseGroupId(value.groupId) }
 }
 
 /** A group id from a request: a lowercase UUID v4, or `INVALID_REQUEST`. */

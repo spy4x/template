@@ -302,3 +302,16 @@ CREATE INDEX idx_notes_group_updated_id_active
 CREATE INDEX idx_notes_group_change_sequence ON notes (group_id, change_sequence);
 CREATE INDEX idx_notes_created_by ON notes (created_by_user_id);
 CREATE INDEX idx_notes_updated_by ON notes (updated_by_user_id);
+
+-- Per-user settings. See migration 2026_10_05_0001_user_settings.sql.
+CREATE TABLE user_settings (
+    user_id INT4 PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    selected_group_id UUID REFERENCES groups(id) ON DELETE SET NULL,
+    version INT4 DEFAULT 1 NOT NULL,
+    updated_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT user_settings_version_check CHECK (version >= 1)
+);
+
+CREATE INDEX idx_user_settings_selected_group
+    ON user_settings (selected_group_id)
+    WHERE selected_group_id IS NOT NULL;

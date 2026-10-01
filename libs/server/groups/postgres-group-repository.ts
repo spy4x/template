@@ -12,6 +12,7 @@ import {
   GroupRepository,
   GroupRole,
   GroupSummary,
+  SelectedGroup,
 } from "@domain/groups"
 import { recordGroupChange } from "./group-change-log.ts"
 
@@ -53,6 +54,11 @@ interface MemberRow extends postgres.Row {
 interface PersonalMembershipCountRow extends postgres.Row {
   memberCount: number
   ownerCount: number
+}
+
+interface SelectionRow extends postgres.Row {
+  selectedGroupId: string | null
+  version: number
 }
 
 const GROUP_CREATED_EVENT = "group.created"
@@ -163,6 +169,87 @@ export class PostgresGroupRepository implements GroupRepository {
       ORDER BY group_members.user_id
     `
     return rows.map((row) => row.userId)
+  }
+
+  /**
+   * The group the person works in: the one they chose, while they are still a member of it, else
+   * their personal group, then their oldest shared one. A read only: the fallback is not stored, so
+   * a read can never overwrite a choice committed at the same moment, and it announces nothing.
+   * It is the same answer every time until membership changes, so every device agrees on it.
+   */
+  async getSelected(userId: number): Promise<SelectedGroup> {
+    const stored = (
+      await this.sql<SelectionRow[]>`
+        SELECT selected_group_id, version FROM user_settings WHERE user_id = ${userId}
+      `
+    )[0]
+    if (stored?.selectedGroupId && await this.isMember(stored.selectedGroupId, userId)) {
+      return { groupId: stored.selectedGroupId, version: stored.version }
+    }
+    const fallback = (
+      await this.sql<{ id: string }[]>`
+        SELECT groups.id
+        FROM groups
+        INNER JOIN group_members
+          ON group_members.group_id = groups.id
+         AND group_members.user_id = ${userId}
+        INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+        WHERE groups.deleted_at IS NULL
+        ORDER BY groups.kind, groups.created_at, groups.id
+        LIMIT 1
+      `
+    )[0]
+    return { groupId: fallback?.id ?? null, version: stored?.version ?? 0 }
+  }
+
+  async select(userId: number, groupId: string): Promise<SelectedGroup | null> {
+    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const repository = new PostgresGroupRepository(transaction)
+      if (!await repository.isMember(groupId, userId)) return null
+      return await repository.storeSelection(userId, groupId)
+    })
+  }
+
+  private async isMember(groupId: string, userId: number): Promise<boolean> {
+    const rows = await this.sql`
+      SELECT 1
+      FROM groups
+      INNER JOIN group_members
+        ON group_members.group_id = groups.id
+       AND group_members.user_id = ${userId}
+      INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+      WHERE groups.id = ${groupId}
+        AND groups.deleted_at IS NULL
+    `
+    return rows.length > 0
+  }
+
+  /**
+   * Stores the selection and, when it changed, moves the version and announces it. Selecting the
+   * group already selected changes nothing and sends nothing. Runs in the caller's transaction.
+   */
+  private async storeSelection(userId: number, groupId: string): Promise<SelectedGroup> {
+    const changed = (
+      await this.sql<SelectionRow[]>`
+        INSERT INTO user_settings (user_id, selected_group_id)
+        VALUES (${userId}, ${groupId})
+        ON CONFLICT (user_id) DO UPDATE
+        SET selected_group_id = EXCLUDED.selected_group_id,
+            version = user_settings.version + 1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE user_settings.selected_group_id IS DISTINCT FROM EXCLUDED.selected_group_id
+        RETURNING selected_group_id, version
+      `
+    )[0]
+    if (changed) {
+      return { groupId, version: changed.version }
+    }
+    const current = (
+      await this.sql<SelectionRow[]>`
+        SELECT selected_group_id, version FROM user_settings WHERE user_id = ${userId}
+      `
+    )[0]
+    return { groupId, version: current.version }
   }
 
   async createShared(
