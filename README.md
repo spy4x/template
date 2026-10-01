@@ -204,4 +204,4 @@ Licensed under [MIT](LICENSE). Copyright (c) 2026 Anton Shubin.
 
 ---
 
-Made by Anton Shubin · [antonshubin.com/tools](https://antonshubin.com/tools)
+Made by Anton Shubin · [antonshubin.com/tools/template](https://antonshubin.com/tools/template)
