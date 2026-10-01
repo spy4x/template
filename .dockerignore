@@ -20,6 +20,8 @@
 **/_fresh
 
 # 4. Never let a secret into an image. On the server these folders hold the env file and the Web
-#    Push key; Compose hands them to the containers at run time (env_file, a bind mount).
+#    Push key, and a developer may keep a .env beside an app; Compose hands the containers what they
+#    need at run time (environment, a bind mount).
 infra/envs
 infra/configs
+**/.env*

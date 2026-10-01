@@ -71,7 +71,7 @@
     "lint:fix": "deno lint --fix",
     "lint:check": "deno lint",
     "ts:check": "deno run --allow-read --allow-run=deno infra/scripts/type-check.ts",
-    // tests/spacing.test.ts, tests/ui-boundary.test.ts, tests/dockerfile-base.test.ts, tests/compose-migrate.test.ts and tests/offline-removal.test.ts read files, so each runs on its own with its own read grant.
+    // tests/spacing.test.ts, tests/ui-boundary.test.ts, tests/dockerfile-base.test.ts, tests/dockerignore.test.ts, tests/compose-migrate.test.ts and tests/offline-removal.test.ts read files, so each runs on its own with its own read grant.
     // apps/mpa runs on its own because Fresh reads its build id from DENO_DEPLOYMENT_ID, GITHUB_SHA or CI_COMMIT_SHA when it loads.
     // infra/scripts is excluded from the other tools; the "test" block below lets its tests run.
     // libs/ui's interaction tests load happy-dom, whose WebSocket package reads the two WS_* variables.
