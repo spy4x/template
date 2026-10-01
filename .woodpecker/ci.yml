@@ -71,8 +71,9 @@ steps:
     depends_on: [check]
 
   e2e-mpa:
-    # The MPA's browser test: with JavaScript turned off, one person signs up, signs in and manages
-    # notes. e2e/mpa/run.sh migrates, starts the API and the MPA behind one origin and runs it.
+    # The MPA's browser tests: with JavaScript turned off, one person signs up, signs in and manages
+    # notes, and another resets a forgotten password. e2e/mpa/run.sh migrates, starts the API, the
+    # worker and the MPA behind one origin and runs them.
     image: mcr.microsoft.com/playwright:v1.57.0-noble
     environment:
       DB_HOST: postgres

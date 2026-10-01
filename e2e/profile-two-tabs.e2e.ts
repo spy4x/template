@@ -5,12 +5,12 @@ const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 
 test.describe("profile over the socket", () => {
   test("a name saved in one tab appears in a second tab without a reload", async ({ context, request }) => {
-    const username = "e2e_profile_two_tabs_user"
+    const email = "e2e_profile_two_tabs_user@example.com"
     const password = "Passw0rd!"
 
     const cleanup = async ({ soft = false } = {}) => {
       const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
-        data: { username },
+        data: { login: email },
       })
       ;(soft ? expect.soft : expect)(response.status(), await response.text()).toBe(200)
     }
@@ -19,7 +19,7 @@ test.describe("profile over the socket", () => {
     try {
       const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
         headers,
-        data: { username, password },
+        data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
 
@@ -36,7 +36,7 @@ test.describe("profile over the socket", () => {
         }
       })
       await first.goto("/sign-in")
-      await first.locator("[data-e2e=auth-form-login]").fill(username)
+      await first.locator("[data-e2e=auth-form-login]").fill(email)
       await first.locator("[data-e2e=auth-form-password]").fill(password)
       await first.locator("[data-e2e=auth-form-submit]").click()
       await first.waitForURL("/")

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Runs the MPA's browser test (`e2e/mpa`) against a stack made here: migrates the database, starts
-# the API, builds and starts the MPA, puts both behind one origin (`e2e/mpa/proxy.ts`) and runs
-# Playwright. CI runs this script (.woodpecker/ci.yml); run it the same way on a machine.
+# Runs the MPA's browser tests (`e2e/mpa`) against a stack made here: migrates the database, starts
+# the API and the worker, builds and starts the MPA, puts both behind one origin
+# (`e2e/mpa/proxy.ts`) and runs Playwright. CI runs this script (.woodpecker/ci.yml); run it the
+# same way on a machine.
 #
 # Needs from the environment: a Postgres and a Valkey that are already running, as `DB_HOST`,
 # `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`, `KV_HOSTNAME`, `KV_PORT` and `KV_PASSWORD`, and a
@@ -80,6 +81,16 @@ deno serve --allow-all --port "$API_PORT" --host 127.0.0.1 apps/api/index.ts \
   >"$SCRATCH/api.log" 2>&1 &
 PIDS+=($!)
 wait_for api "${PIDS[-1]}" "http://127.0.0.1:$API_PORT/api/health"
+
+# The worker sends the password reset mails the reset spec reads back through /api/test/last-mail.
+deno run --allow-all apps/worker/+main.ts >"$SCRATCH/worker.log" 2>&1 &
+PIDS+=($!)
+for _ in $(seq 1 120); do
+  grep -q "Worker started" "$SCRATCH/worker.log" && break
+  kill -0 "${PIDS[-1]}" 2>/dev/null || { echo "worker stopped"; tail -n 40 "$SCRATCH/worker.log"; exit 1; }
+  sleep 0.5
+done
+grep -q "Worker started" "$SCRATCH/worker.log" || { echo "worker did not start within 60 s"; exit 1; }
 
 deno task mpa:build
 # Flags go before the file: after it, `deno serve` passes them to the script and ignores them.

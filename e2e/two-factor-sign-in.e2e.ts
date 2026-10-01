@@ -30,7 +30,7 @@ const currentStep = () => Math.floor(Date.now() / 1000 / STEP_SECONDS)
 
 test.describe("two-factor sign-in", () => {
   test("signs in with a one-time code after the password step", async ({ page, request }) => {
-    const username = "e2e_two_factor_user"
+    const email = "e2e_two_factor_user@example.com"
     const password = "Passw0rd!"
     const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 
@@ -38,7 +38,7 @@ test.describe("two-factor sign-in", () => {
     // `soft` in `finally`: a failed cleanup is reported next to the spec's own error, not over it.
     const cleanup = async ({ soft = false } = {}) => {
       const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
-        data: { username },
+        data: { login: email },
       })
       ;(soft ? expect.soft : expect)(response.status(), await response.text()).toBe(200)
     }
@@ -47,7 +47,7 @@ test.describe("two-factor sign-in", () => {
     try {
       const signUp = await page.request.post(`${apiBase}/api/auth/password/sign-up`, {
         headers,
-        data: { username, password },
+        data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
 
@@ -73,7 +73,7 @@ test.describe("two-factor sign-in", () => {
 
       // Password step: the app reloads onto the code screen, which must still ask for the code.
       await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(username)
+      await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await page.locator("[data-e2e=auth-form-submit]").click()
       await page.waitForURL("**/totp")

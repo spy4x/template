@@ -6,22 +6,24 @@ const password = "Passw0rd!"
 
 const VIEWER = 1
 
-async function cleanup(request: APIRequestContext, username: string): Promise<void> {
-  const response = await request.post(`${apiBase}/api/test/cleanup-user`, { data: { username } })
+async function cleanup(request: APIRequestContext, email: string): Promise<void> {
+  const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
+    data: { login: email },
+  })
   expect.soft(response.status(), await response.text()).toBe(200)
 }
 
-async function signUp(request: APIRequestContext, username: string): Promise<void> {
+async function signUp(request: APIRequestContext, email: string): Promise<void> {
   const response = await request.post(`${apiBase}/api/auth/password/sign-up`, {
     headers,
-    data: { username, password },
+    data: { email, password },
   })
   expect(response.ok(), await response.text()).toBe(true)
 }
 
-async function signIn(page: Page, username: string): Promise<void> {
+async function signIn(page: Page, email: string): Promise<void> {
   await page.goto("/sign-in")
-  await page.locator("[data-e2e=auth-form-login]").fill(username)
+  await page.locator("[data-e2e=auth-form-login]").fill(email)
   await page.locator("[data-e2e=auth-form-password]").fill(password)
   await page.locator("[data-e2e=auth-form-submit]").click()
   await page.waitForURL("/")
@@ -42,7 +44,7 @@ async function sharedGroup(
   })
   expect(created.status(), await created.text()).toBe(201)
   const added = await request.post(`${apiBase}/api/test/add-member`, {
-    data: { username: member, groupId, role: VIEWER },
+    data: { login: member, groupId, role: VIEWER },
   })
   expect(added.status(), await added.text()).toBe(200)
   return groupId
@@ -60,14 +62,14 @@ async function openNotes(page: Page, groupName: string): Promise<void> {
 
 test.describe("notes in a shared group", () => {
   test("a note created, edited and deleted by the owner shows in a viewer's open tab without a reload", async ({ browser, request }) => {
-    const owner = "e2e_notes_live_owner"
-    const member = "e2e_notes_live_viewer"
+    const owner = "e2e_notes_live_owner@example.com"
+    const member = "e2e_notes_live_viewer@example.com"
     const baseURL = test.info().project.use.baseURL
-    for (const username of [owner, member]) await cleanup(request, username)
+    for (const email of [owner, member]) await cleanup(request, email)
     const ownerContext = await browser.newContext({ baseURL })
     const memberContext = await browser.newContext({ baseURL })
     try {
-      for (const username of [owner, member]) await signUp(request, username)
+      for (const email of [owner, member]) await signUp(request, email)
       const ownerPage = await ownerContext.newPage()
       const framesSent: string[] = []
       ownerPage.on("websocket", (socket) => {
@@ -128,19 +130,19 @@ test.describe("notes in a shared group", () => {
     } finally {
       await ownerContext.close()
       await memberContext.close()
-      for (const username of [owner, member]) await cleanup(request, username)
+      for (const email of [owner, member]) await cleanup(request, email)
     }
   })
 
   test("a viewer cannot create, edit or delete a note over REST", async ({ browser, request }) => {
-    const owner = "e2e_notes_rest_owner"
-    const member = "e2e_notes_rest_viewer"
+    const owner = "e2e_notes_rest_owner@example.com"
+    const member = "e2e_notes_rest_viewer@example.com"
     const baseURL = test.info().project.use.baseURL
-    for (const username of [owner, member]) await cleanup(request, username)
+    for (const email of [owner, member]) await cleanup(request, email)
     const ownerContext = await browser.newContext({ baseURL })
     const memberContext = await browser.newContext({ baseURL })
     try {
-      for (const username of [owner, member]) await signUp(request, username)
+      for (const email of [owner, member]) await signUp(request, email)
       const ownerPage = await ownerContext.newPage()
       await signIn(ownerPage, owner)
       const groupId = await sharedGroup(ownerPage, request, "Read only", member)
@@ -177,7 +179,7 @@ test.describe("notes in a shared group", () => {
     } finally {
       await ownerContext.close()
       await memberContext.close()
-      for (const username of [owner, member]) await cleanup(request, username)
+      for (const email of [owner, member]) await cleanup(request, email)
     }
   })
 })
