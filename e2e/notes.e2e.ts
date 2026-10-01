@@ -1,6 +1,6 @@
 import { type APIRequestContext, type Page } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
-import { signIn } from "./fixtures/app.ts"
+import { gotoApp, signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -208,7 +208,7 @@ test.describe("notes in a shared group", () => {
     try {
       for (const username of [owner, member]) await signUp(request, username)
       const ownerPage = await ownerContext.newPage()
-      await signIn(ownerPage, owner)
+      await signInOnline(ownerPage, owner)
       const groupId = await sharedGroup(ownerPage, request, "Viewer team", member)
       const created = await ownerPage.request.post(`${apiBase}/api/groups/${groupId}/notes`, {
         headers,
@@ -217,7 +217,7 @@ test.describe("notes in a shared group", () => {
       expect(created.status(), await created.text()).toBe(201)
 
       const memberPage = await memberContext.newPage()
-      await signIn(memberPage, member)
+      await signInOnline(memberPage, member)
       await openNotes(memberPage, "Viewer team")
       await expect(memberPage.locator("[data-e2e=note-new]")).toHaveCount(0)
       await memberPage.getByRole("link", { name: "Owner's note" }).click()
@@ -228,7 +228,7 @@ test.describe("notes in a shared group", () => {
         await expect(memberPage.locator(`[data-e2e=${hook}]`), hook).toHaveCount(0)
       }
 
-      await memberPage.goto("/notes/new")
+      await gotoApp(memberPage, "/notes/new", memberPage.locator("[data-e2e=shell-ws-status]"))
       await expect(memberPage.getByText("Only an editor can add notes to this group."))
         .toBeVisible()
       await expect(memberPage.locator("[data-e2e=note-save]")).toHaveCount(0)
@@ -246,7 +246,7 @@ test.describe("notes in a shared group", () => {
     try {
       await signUp(request, owner)
       const page = await context.newPage()
-      await signIn(page, owner)
+      await signInOnline(page, owner)
       const selectedBefore = await (await page.request.get(`${apiBase}/api/groups/selected`)).json()
       const otherGroup = crypto.randomUUID()
       const created = await page.request.post(`${apiBase}/api/groups`, {
@@ -262,7 +262,7 @@ test.describe("notes in a shared group", () => {
       expect(note.status(), await note.text()).toBe(201)
       expect(selectedBefore.groupId).not.toBe(otherGroup)
 
-      await page.goto(`/notes/${noteId}`)
+      await gotoApp(page, `/notes/${noteId}`, page.locator("[data-e2e=shell-ws-status]"))
       await expect(page.getByRole("heading", { level: 1, name: "Note not found" })).toBeVisible()
       await expect(page.locator("[data-e2e=note-not-found]")).toBeVisible()
       await expect(page.locator("[data-e2e=note-title]")).toHaveCount(0)
@@ -284,7 +284,7 @@ test.describe("notes in a shared group", () => {
     try {
       await signUp(request, owner)
       const page = await context.newPage()
-      await signIn(page, owner)
+      await signInOnline(page, owner)
       await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", {
         name: "Notes",
       }).click()
@@ -314,7 +314,7 @@ test.describe("notes in a shared group", () => {
       await expect(page).toHaveURL("/groups")
 
       // Discarded: the next create page starts empty.
-      await page.goto("/notes/new")
+      await gotoApp(page, "/notes/new", page.locator("[data-e2e=shell-ws-status]"))
       await expect(page.locator("[data-e2e=note-title]")).toHaveValue("")
     } finally {
       await context.close()
@@ -329,7 +329,7 @@ test.describe("notes in a shared group", () => {
     try {
       await signUp(request, owner)
       const page = await context.newPage()
-      await signIn(page, owner)
+      await signInOnline(page, owner)
       const { groupId } = await (await page.request.get(`${apiBase}/api/groups/selected`)).json()
       const noteId = crypto.randomUUID()
       const created = await page.request.post(`${apiBase}/api/groups/${groupId}/notes`, {
@@ -338,7 +338,7 @@ test.describe("notes in a shared group", () => {
       })
       expect(created.status(), await created.text()).toBe(201)
 
-      await page.goto(`/notes/${noteId}`)
+      await gotoApp(page, `/notes/${noteId}`, page.locator("[data-e2e=shell-ws-status]"))
       const title = page.locator("[data-e2e=note-title]")
       await expect(title).toHaveValue("Original")
       await title.fill("Mine")
