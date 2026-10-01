@@ -16,6 +16,7 @@ import { flushOutbox, startOffline, stopOffline } from "./offline/index.ts"
 import { forgetUser, recallUser, rememberUser } from "./offline/session-cache.ts"
 import { toasts } from "./state/toasts.ts"
 import { AuthView } from "./views/AuthView.tsx"
+import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView.tsx"
 import { GroupsView } from "./views/GroupsView.tsx"
 import { NotesView } from "./views/NotesView.tsx"
 import { ProfileView } from "./views/ProfileView.tsx"
@@ -51,6 +52,8 @@ function Routes() {
       <Route path="/sign-up">{() => <AuthView key="sign-up" screen="sign-up" />}</Route>
       <Route path="/sign-in">{() => <AuthView key="sign-in" screen="sign-in" />}</Route>
       <Route path="/totp">{() => <AuthView key="one-time-code" screen="one-time-code" />}</Route>
+      <Route path="/forgot-password" component={ForgotPasswordView} />
+      <Route path="/reset-password" component={ResetPasswordView} />
       <Route path="/groups" component={GroupsView} />
       <Route path="/groups/:groupId/notes">
         {(params) => <OpenIfSelected groupId={params.groupId} />}
