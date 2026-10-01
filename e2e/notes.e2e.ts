@@ -251,7 +251,7 @@ test.describe("notes in a shared group", () => {
       const otherGroup = crypto.randomUUID()
       const created = await page.request.post(`${apiBase}/api/groups`, {
         headers,
-        data: { id: otherGroup, kind: 2, name: "Other team" },
+        data: { id: otherGroup, name: "Other team" },
       })
       expect(created.status(), await created.text()).toBe(201)
       const noteId = crypto.randomUUID()
