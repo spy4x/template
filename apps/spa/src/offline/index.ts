@@ -1,10 +1,10 @@
-import { signal } from "@preact/signals"
+import { type Signal, signal } from "@preact/signals"
 import { RealtimeRequestError } from "@spy4x/realtime"
+import { createPromiseLock, createWebLock, type OutboxLock } from "@spy4x/realtime/outbox"
 import { isRealtimeOpen, realtimeCommand, realtimeQuery } from "../state/realtime.ts"
 import type { NoteItem } from "../state/notes.ts"
-import { type LocalStore, openDexieStore } from "./local-store.ts"
-import type { OutboxPorts } from "./outbox.ts"
-import { createOutbox, createPromiseLock, type Outbox } from "./outbox.ts"
+import { type LocalStore, type NoteEntry, openDexieStore } from "./local-store.ts"
+import { createNotesOutbox, type NotesOutbox } from "./notes-outbox.ts"
 
 /**
  * The offline layer's entry point: what the rest of the SPA imports. `docs/offline.md` lists every
@@ -15,18 +15,18 @@ import { createOutbox, createPromiseLock, type Outbox } from "./outbox.ts"
 export interface OfflineLayer {
   userId: number
   store: LocalStore
-  outbox: Outbox
+  outbox: NotesOutbox
+  /** The queued writes, for the screen: refreshed after every change to the queue. */
+  entries: Signal<readonly NoteEntry[]>
 }
 
 let layer: OfflineLayer | null = null
 
 /** One lock per user across all tabs of the browser; one tab's chain where locks are missing. */
-function withBrowserLock(userId: number): OutboxPorts["lock"] {
-  const oneTab = createPromiseLock()
-  return <T>(work: () => Promise<T>) =>
-    typeof navigator !== "undefined" && navigator.locks
-      ? navigator.locks.request(`offline-outbox:${userId}`, work)
-      : oneTab(work)
+function withBrowserLock(userId: number): OutboxLock {
+  return typeof navigator !== "undefined" && navigator.locks
+    ? createWebLock(navigator.locks, `offline-outbox:${userId}`)
+    : createPromiseLock()
 }
 
 /** The running layer as a signal, so a screen that shows the queue redraws when it starts. */
@@ -42,13 +42,10 @@ export function startOffline(userId: number): OfflineLayer {
   if (layer?.userId === userId) return layer
   stopOffline()
   const store = openDexieStore(userId)
-  const outbox = createOutbox({
+  const outbox = createNotesOutbox({
     store,
-    userId,
     lock: withBrowserLock(userId),
     isOnline: () => isRealtimeOpen(userId),
-    newKey: () => crypto.randomUUID(),
-    now: () => new Date().toISOString(),
     send: (name, payload, key) =>
       realtimeCommand(name, payload, { attempts: 1, newKey: () => key }),
     async fetchNote(groupId, id) {
@@ -66,7 +63,9 @@ export function startOffline(userId: number): OfflineLayer {
       }
     },
   })
-  layer = { userId, store, outbox }
+  const entries = signal<readonly NoteEntry[]>([])
+  outbox.subscribe((all) => entries.value = all)
+  layer = { userId, store, outbox, entries }
   activeLayer.value = layer
   void outbox.reload()
   return layer
@@ -83,7 +82,7 @@ export async function stopOffline({ forget = false } = {}): Promise<void> {
   activeLayer.value = null
   if (!closing) return
   if (forget) await closing.store.clearCache().catch(() => {})
-  closing.outbox.entries.value = []
+  closing.entries.value = []
   closing.store.close()
 }
 

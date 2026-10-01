@@ -2,17 +2,19 @@ import { useState } from "preact/hooks"
 import { Button } from "@spy4x/preact-ui/button"
 import { Card, CardBody } from "@spy4x/preact-ui/card"
 import { activeLayer } from "./index.ts"
-import type { OutboxEntry } from "./local-store.ts"
+import type { NoteEntry } from "./local-store.ts"
 
 /** What the server holds now, in a conflict: its text, or that the note is gone. */
-function serverSide(entry: OutboxEntry): string {
+function serverSide(entry: NoteEntry): string {
   const server = entry.conflict?.server
   return server ? `${server.title}\n${server.body}`.trim() : "The note no longer exists."
 }
 
 /** What this person wrote, in a conflict. */
-function mySide(entry: OutboxEntry): string {
-  return entry.kind === "delete" ? "You deleted this note." : `${entry.title}\n${entry.body}`.trim()
+function mySide(entry: NoteEntry): string {
+  return entry.kind === "delete"
+    ? "You deleted this note."
+    : `${entry.payload.title}\n${entry.payload.body}`.trim()
 }
 
 /**
@@ -27,7 +29,7 @@ export function OfflineStatus(
   const [copied, setCopied] = useState(0)
   const layer = activeLayer.value
   if (!layer) return null
-  const entries = layer.outbox.entries.value.filter((entry) => entry.groupId === groupId)
+  const entries = layer.entries.value.filter((entry) => entry.payload.groupId === groupId)
   const waiting = entries.filter((entry) => entry.status === "pending").length
   const conflicts = entries.filter((entry) => entry.status === "conflict")
   if (waiting === 0 && conflicts.length === 0) return null
@@ -63,7 +65,7 @@ export function OfflineStatus(
                   type="button"
                   data-e2e="conflict-keep-mine"
                   onClick={async () => {
-                    await layer.outbox.keepMine(entry.seq!)
+                    await layer.outbox.keepMine(entry)
                     onResolved()
                   }}
                 >
@@ -94,7 +96,7 @@ export function OfflineStatus(
                 variant="outline"
                 data-e2e="conflict-use-theirs"
                 onClick={async () => {
-                  await layer.outbox.useTheirs(entry.seq!)
+                  await layer.outbox.useTheirs(entry)
                   onResolved()
                 }}
               >

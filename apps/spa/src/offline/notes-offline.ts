@@ -1,6 +1,7 @@
 import { RealtimeRequestError } from "@spy4x/realtime"
 import type { NoteItem, NotePage, NotesDependencies } from "../state/notes.ts"
 import type { OfflineLayer } from "./index.ts"
+import { overlayNotes } from "./notes-outbox.ts"
 
 /** The notes store's own cap on pages, so a runaway cursor stops the same way in both. */
 const MAX_PAGES = 20
@@ -27,8 +28,13 @@ export function offlineNotes(
 ): NotesDependencies {
   /** The note as this person sees it, with the queued writes applied. */
   async function visible(layer: OfflineLayer, groupId: string, id: string) {
-    const notes = await layer.outbox.overlay(groupId, await layer.store.readNotes(groupId))
+    const notes = await overlay(layer, groupId, await layer.store.readNotes(groupId))
     return notes.find((note) => note.id === id)
+  }
+
+  /** The notes with the queued writes applied. */
+  async function overlay(layer: OfflineLayer, groupId: string, base: readonly NoteItem[]) {
+    return overlayNotes(await layer.store.readOutbox(), layer.userId, groupId, base)
   }
 
   return {
@@ -51,7 +57,7 @@ export function offlineNotes(
         if (!isUnreachable(error)) throw error
         base = await layer.store.readNotes(groupId)
       }
-      return { notes: await layer.outbox.overlay(groupId, base), nextCursor: null }
+      return { notes: await overlay(layer, groupId, base), nextCursor: null }
     },
     async get(groupId, id) {
       const layer = current()
@@ -59,7 +65,7 @@ export function offlineNotes(
       try {
         const { note } = await online.get(groupId, id)
         await layer.store.putNote(note)
-        const [mine] = (await layer.outbox.overlay(groupId, [note])).filter((n) => n.id === id)
+        const [mine] = (await overlay(layer, groupId, [note])).filter((n) => n.id === id)
         return { note: mine ?? note }
       } catch (error) {
         // The server's "not found" is final, except for a note created here and not yet sent.
@@ -75,10 +81,8 @@ export function offlineNotes(
       if (!layer) return await online.create(input)
       const outcome = await layer.outbox.submit({
         kind: "create",
-        groupId: input.groupId,
-        noteId: input.id,
-        title: input.title,
-        body: input.body,
+        entityId: input.id,
+        payload: { groupId: input.groupId, title: input.title, body: input.body },
       })
       return await answer(layer, outcome, input.groupId, input.id)
     },
@@ -87,10 +91,8 @@ export function offlineNotes(
       if (!layer) return await online.update(input)
       const outcome = await layer.outbox.submit({
         kind: "update",
-        groupId: input.groupId,
-        noteId: input.id,
-        title: input.title,
-        body: input.body,
+        entityId: input.id,
+        payload: { groupId: input.groupId, title: input.title, body: input.body },
         version: input.version,
       })
       return await answer(layer, outcome, input.groupId, input.id)
@@ -101,10 +103,8 @@ export function offlineNotes(
       const known = await visible(layer, input.groupId, input.id)
       const outcome = await layer.outbox.submit({
         kind: "delete",
-        groupId: input.groupId,
-        noteId: input.id,
-        title: known?.title ?? "",
-        body: known?.body ?? "",
+        entityId: input.id,
+        payload: { groupId: input.groupId, title: known?.title ?? "", body: known?.body ?? "" },
         version: input.version,
       })
       if (outcome.kind === "failed") throw outcome.error
@@ -113,7 +113,7 @@ export function offlineNotes(
     async readLocal(groupId) {
       const layer = current()
       if (!layer) return []
-      return await layer.outbox.overlay(groupId, await layer.store.readNotes(groupId))
+      return await overlay(layer, groupId, await layer.store.readNotes(groupId))
     },
   }
 
