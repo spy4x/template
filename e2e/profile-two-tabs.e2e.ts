@@ -103,6 +103,9 @@ test.describe("profile over the socket", () => {
       socketBlocked = true
       for (const route of openSockets) route.close()
       await expect(second.locator("[data-e2e=shell-ws-status]")).not.toHaveText("Online")
+      // The first save's notice closes on its own five seconds after it opened. While it is still
+      // open, the second save's notice makes the "Saved" text below match twice.
+      await expect(first.locator("[data-e2e=profile-saved]")).toHaveCount(0, { timeout: 10_000 })
       await first.locator("[data-e2e=profile-first-name]").fill("Grace")
       await first.locator("[data-e2e=profile-save]").click()
       await first.locator("[data-e2e=profile-saved]").getByText("Saved", { exact: true }).waitFor()
