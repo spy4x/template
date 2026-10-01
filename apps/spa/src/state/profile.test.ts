@@ -122,7 +122,7 @@ describe("profile store", () => {
     const { store } = harness(answers)
     store.onSocketStatus("connecting")
     store.onSocketStatus("open")
-    await Promise.resolve()
+    await new Promise((r) => setTimeout(r, 0))
     expect(sessionState.value.user).toBe(null)
 
     store.onSocketStatus("closed")

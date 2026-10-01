@@ -5,7 +5,10 @@ import { PushDevicesUpdatedEvent } from "../../cqrs/events.ts"
 import type { PushListQuery } from "../../cqrs/queries.ts"
 import type { WebPushService } from "../../services/web-push-service.ts"
 
-/** What the push handlers need from the app. `index.ts` passes the real ones; tests pass fakes. */
+/**
+ * What the push handlers need from the app. The files in `cqrs/command-handlers/` and
+ * `cqrs/query-handlers/` pass the real ones; tests pass fakes.
+ */
 export interface PushHandlerDependencies {
   webPush(): Promise<Pick<WebPushService, "subscribe" | "unsubscribe" | "deviceList">>
   emit(event: PushDevicesUpdatedEvent): void

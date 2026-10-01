@@ -65,6 +65,18 @@ test.describe("profile over the socket", () => {
           if (message.kind === "change.hint") hintsReceived.push(message)
         })
       })
+      // Tab 2's socket can be dropped and held down, which a page-wide offline switch could not do
+      // without also cutting tab 1.
+      let socketBlocked = false
+      const openSockets: { close(): void }[] = []
+      await second.routeWebSocket(/\/api\/ws$/, (route) => {
+        if (socketBlocked) {
+          route.close()
+          return
+        }
+        route.connectToServer()
+        openSockets.push(route)
+      })
       await second.goto("/")
       await second.getByRole("navigation", { name: "Main navigation" })
         .getByRole("link", { name: "Profile" }).click()
@@ -89,7 +101,21 @@ test.describe("profile over the socket", () => {
       )
         .toBe(true)
 
-      // The save went over the socket, as a command with an idempotency key, not over REST.
+      // A change made while tab 2's socket is down gives it no hint; it reads the profile again
+      // once the socket opens.
+      socketBlocked = true
+      for (const route of openSockets) route.close()
+      await expect(second.locator("[data-e2e=shell-ws-status]")).not.toHaveText("Online")
+      await first.locator("[data-e2e=profile-first-name]").fill("Grace")
+      await first.locator("[data-e2e=profile-save]").click()
+      await first.locator("[data-e2e=profile-saved]").getByText("Saved", { exact: true }).waitFor()
+      await expect(second.locator("[data-e2e=profile-first-name]")).toHaveValue("Ada")
+      socketBlocked = false
+      await expect(second.locator("[data-e2e=profile-first-name]")).toHaveValue("Grace", {
+        timeout: 30_000,
+      })
+
+      // The first save went over the socket, as a command with an idempotency key, not over REST.
       const command = framesSent.map((payload) => JSON.parse(payload)).find(
         (frame) => frame.kind === "client.command" && frame.name === "profile.update",
       )
