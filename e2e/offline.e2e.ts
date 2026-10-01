@@ -1,10 +1,5 @@
-import {
-  type APIRequestContext,
-  type BrowserContext,
-  expect,
-  type Page,
-  test,
-} from "@playwright/test"
+import { type APIRequestContext, type BrowserContext, type Page } from "@playwright/test"
+import { expect, test } from "./fixtures/stack.ts"
 import { gotoApp, signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
