@@ -137,6 +137,12 @@ port Compose publishes:
 DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=<user> DB_PASS=<password> DB_NAME=<name> deno task db:migrate
 ```
 
+To start again from an empty development database, run `ENV=dev deno task db:reset` with the same
+values (plus the seed's `AUTH_PEPPER` and `SEED_PASSWORD`). It drops the database, migrates it and
+seeds it, after you confirm; `--yes` skips the question. It refuses unless `ENV=dev`, `DB_HOST` is
+`localhost`, `127.0.0.1` or `db`, and `DB_NAME` differs from the one in `infra/envs/.env.prod`. A
+missing or unreadable `.env.prod` also refuses; on a machine without one, add `--no-prod-check`.
+
 To add a demo user `demo` who owns a shared group, run `deno task db:seed` with the same values plus
 `AUTH_PEPPER` (the API's) and `SEED_PASSWORD` (the demo user's password, 8 to 50 characters).
 
@@ -169,6 +175,7 @@ Current tasks come from [`deno.jsonc`](deno.jsonc).
 | `deno task test:integration` | Integration tests against a Postgres you provide       |
 | `deno task e2e`              | Playwright end-to-end tests                            |
 | `deno task db:migrate`       | Apply the SQL migrations in `libs/server/db`           |
+| `deno task db:reset`         | Drop, migrate and seed a dev database (`ENV=dev` only) |
 | `deno task spa:build`        | Build the SPA                                          |
 | `deno task deploy`           | Copy the production files to the server and start them |
 
