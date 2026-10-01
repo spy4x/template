@@ -2,7 +2,7 @@ import type { Context } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { GroupError, GroupErrorCode } from "@domain/groups"
 import { AccessError } from "@domain/identity"
-import { IdempotencyError } from "@server/idempotency/idempotency.ts"
+import { IdempotencyError } from "@spy4x/server/idempotency"
 import { APIContext } from "../../_types.ts"
 
 export type GroupFeatureErrorCode =
@@ -58,6 +58,7 @@ const IDEMPOTENCY_CODES: Record<IdempotencyError["code"], GroupFeatureErrorCode>
   INVALID_KEY: "IDEMPOTENCY_KEY_INVALID",
   KEY_REUSED: "IDEMPOTENCY_KEY_REUSED",
   IN_PROGRESS: "IDEMPOTENCY_IN_PROGRESS",
+  INVALID_COMMAND: "INVALID_REQUEST",
 }
 
 export function groupErrorResponse(c: Context<APIContext>, error: unknown): Response {

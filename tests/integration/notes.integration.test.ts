@@ -17,8 +17,7 @@ import {
 } from "@domain/notes"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
-import { createIdempotencyMiddleware } from "@server/idempotency/idempotency.ts"
-import { PostgresIdempotencyStore } from "@server/idempotency/postgres-idempotency-store.ts"
+import { createIdempotencyMiddleware, PostgresIdempotencyStore } from "@spy4x/server/idempotency"
 import { createSessionGate } from "../../apps/api/cqrs/session-gate.ts"
 import {
   createNoteCreateHandler,

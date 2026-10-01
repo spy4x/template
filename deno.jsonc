@@ -8,7 +8,6 @@
     "./libs/domain/identity",
     "./libs/domain/notes",
     "./libs/server/groups",
-    "./libs/server/idempotency",
     "./libs/server/notes",
     "./libs/ui"
   ],
@@ -108,7 +107,6 @@
     "@domain/identity": "./libs/domain/identity/+lib.ts",
     "@domain/notes": "./libs/domain/notes/+lib.ts",
     "@server/groups/": "./libs/server/groups/",
-    "@server/idempotency/": "./libs/server/idempotency/",
     "@server/notes/": "./libs/server/notes/",
     "@client/vite/": "./libs/client/vite/",
     // #endregion Aliases

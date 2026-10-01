@@ -5,7 +5,7 @@ import { RealtimeRequestError } from "@spy4x/realtime"
 import { GroupError } from "@domain/groups"
 import { NoteError, NoteVersionConflictError } from "@domain/notes"
 import { AccessError, UserMFAStatus } from "@domain/identity"
-import { IdempotencyError } from "@server/idempotency/idempotency.ts"
+import { IdempotencyError } from "@spy4x/server/idempotency"
 import { buildAuthData } from "../_testing/fake-auth.ts"
 import {
   POLICY_CLOSE_CODE,

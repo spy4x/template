@@ -3,7 +3,7 @@ import postgres from "postgres"
 import { createSqlFromEnv } from "@spy4x/server/db"
 import { OutboxProcessor, PostgresOutboxRepository } from "@spy4x/server/outbox"
 import { GroupChangeNotifier } from "@server/groups/group-change-notify.ts"
-import { PostgresIdempotencyStore } from "@server/idempotency/postgres-idempotency-store.ts"
+import { PostgresIdempotencyStore } from "@spy4x/server/idempotency"
 import { shutdownSignal, ShutdownSignalError } from "@spy4x/platform/server/shutdown-signal"
 
 const sql = createSqlFromEnv(Deno.env.toObject(), {

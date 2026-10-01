@@ -12,7 +12,7 @@ import {
 import { GROUP_AGGREGATE, GroupError } from "@domain/groups"
 import { AccessError, type Actor } from "@domain/identity"
 import { NoteError, NoteVersionConflictError } from "@domain/notes"
-import { IdempotencyError } from "@server/idempotency/idempotency.ts"
+import { IdempotencyError } from "@spy4x/server/idempotency"
 import { actorFromAuth } from "../cqrs/actor.ts"
 import type { AppAuthState } from "./sign-in.ts"
 
@@ -84,7 +84,9 @@ export function toRequestError(error: unknown): RealtimeRequestError | null {
     return new RealtimeRequestError("unauthorized", error.message, { code: error.code })
   }
   if (error instanceof IdempotencyError) {
-    const code = error.code === "INVALID_KEY" ? "bad_request" : "conflict"
+    const code = error.code === "INVALID_KEY" || error.code === "INVALID_COMMAND"
+      ? "bad_request"
+      : "conflict"
     return new RealtimeRequestError(code, error.message, { code: error.code })
   }
   return null

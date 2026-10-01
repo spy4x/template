@@ -252,7 +252,7 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 2. `group.create` and `group.list` are dispatched on the same command and query buses REST uses,
    from `apps/api/features/groups/socket.ts`. Each frame reads the session again from the database,
    so a signed-out or expired session is refused. Authorization stays in the buses.
-3. A command needs an idempotency key. `libs/server/idempotency` stores it for 7 days per user and
+3. A command needs an idempotency key. `@spy4x/server/idempotency` (ts-libs) stores it for 7 days per user and
    runs the command once; a repeat returns the first result, and a repeat while the first still
    runs waits, then answers `conflict`. The worker sweeps expired keys hourly.
 4. Every committed group change bumps `groups.next_change_sequence` and writes an outbox row in

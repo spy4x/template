@@ -56,6 +56,7 @@ Deno.test({
       await applyMigration(sql, "2026_09_30_0002_totp_failure_counter.sql")
       await applyMigration(sql, "2026_10_01_0001_idempotency_keys.sql")
       await applyMigration(sql, "2026_10_02_0001_notes.sql")
+      await applyMigration(sql, "2026_10_03_0001_idempotency_claim_token.sql")
 
       await t.step("backfill is rerunnable and covers only active users", async () => {
         await applyMigration(sql, "2026_08_18_0002_personal_group_backfill.sql")
