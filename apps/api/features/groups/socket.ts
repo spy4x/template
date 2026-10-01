@@ -1,11 +1,19 @@
-import { GroupCreateCommand, GroupKind, parseCreateSharedGroupRequest } from "@domain/groups"
-import type { GroupCreateResult } from "@domain/groups"
+import {
+  GroupCreateCommand,
+  GroupError,
+  GroupGetQuery,
+  GroupKind,
+  parseCreateSharedGroupRequest,
+  parseGroupId,
+} from "@domain/groups"
+import type { GroupCreateResult, GroupGetResult } from "@domain/groups"
 import type { SocketRequests } from "../../services/realtime.ts"
 import { type GroupListDependencies, listGroupsPage, parseListPayload } from "./list.ts"
 
 /** What the group socket requests need from the app. */
 export interface GroupSocketDependencies extends GroupListDependencies {
   create(command: GroupCreateCommand): Promise<GroupCreateResult>
+  get(query: GroupGetQuery): Promise<GroupGetResult>
 }
 
 /**
@@ -29,6 +37,17 @@ export function createGroupSocketRequests(dependencies: GroupSocketDependencies)
             idempotencyKey,
           }),
         )
+      },
+    },
+    "group.get": {
+      kind: "query",
+      handle: async ({ actor, payload }) => {
+        const keys = payload && typeof payload === "object" ? Object.keys(payload) : []
+        if (keys.length !== 1 || keys[0] !== "groupId") {
+          throw new GroupError("INVALID_REQUEST", "Expected exactly groupId")
+        }
+        const groupId = parseGroupId((payload as { groupId: unknown }).groupId)
+        return await dependencies.get(new GroupGetQuery({ actor, groupId }))
       },
     },
     "group.list": {

@@ -146,8 +146,23 @@ export class GroupListQuery implements Query<GroupListPayload, GroupListResult> 
   constructor(public data: GroupListPayload) {}
 }
 
+export interface GroupGetPayload {
+  actor: Actor
+  groupId: string
+}
+
+export type GroupGetResult = { group: GroupSummary }
+
+/** One group of the actor, as the list shows it. Throws `GROUP_NOT_FOUND` for a non-member. */
+export class GroupGetQuery implements Query<GroupGetPayload, GroupGetResult> {
+  __resultType?: GroupGetResult
+  constructor(public data: GroupGetPayload) {}
+}
+
 export interface GroupRepository {
   listForUser(userId: number, page: GroupListPage): Promise<GroupListResult>
+  /** The group as the list shows it, or `null` when it is missing or the user is not a member. */
+  getSummaryForMember(groupId: string, userId: number): Promise<GroupSummary | null>
   /** The ids of the active users who are members of an active group; who a change is pushed to. */
   listMemberUserIds(groupId: string): Promise<number[]>
   getForMember(groupId: string, userId: number): Promise<GroupAccess | null>
@@ -185,6 +200,14 @@ export function parseCreateSharedGroupRequest(value: unknown): CreateSharedGroup
     throw new GroupError("INVALID_REQUEST", "Group name must contain 1 to 100 characters")
   }
   return { id: value.id, kind: GroupKind.SHARED, name }
+}
+
+/** A group id from a request: a lowercase UUID v4, or `INVALID_REQUEST`. */
+export function parseGroupId(value: unknown): string {
+  if (typeof value !== "string" || !UUID_V4_PATTERN.test(value)) {
+    throw new GroupError("INVALID_REQUEST", "Group id must be a lowercase UUID v4")
+  }
+  return value
 }
 
 export function canRead(role: GroupRole): boolean {

@@ -1,10 +1,12 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { GroupCreateCommand, GroupError, GroupKind, GroupRole } from "@domain/groups"
-import type { GroupListQuery } from "@domain/groups"
+import type { GroupGetQuery, GroupListQuery, GroupRepository } from "@domain/groups"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { UserMFAStatus } from "@domain/identity"
 import { createGroupSocketRequests } from "./socket.ts"
+import { createGroupGetHandler } from "./handlers.ts"
+import { toRequestError } from "../../services/realtime.ts"
 import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, parseListPayload } from "./list.ts"
 
 const id = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
@@ -17,9 +19,14 @@ const actor = {
 const signal = new AbortController().signal
 
 function harness() {
-  const seen: { command: GroupCreateCommand | null; query: GroupListQuery | null } = {
+  const seen: {
+    command: GroupCreateCommand | null
+    query: GroupListQuery | null
+    get: GroupGetQuery | null
+  } = {
     command: null,
     query: null,
+    get: null,
   }
   const requests = createGroupSocketRequests({
     create(command) {
@@ -31,6 +38,20 @@ function harness() {
           kind: GroupKind.SHARED,
           name: command.data.name,
           role: GroupRole.OWNER,
+          authorizationRevision: "1",
+          changeSequence: "1",
+          updatedAt: new Date(0),
+        },
+      })
+    },
+    get(query) {
+      seen.get = query
+      return Promise.resolve({
+        group: {
+          id: query.data.groupId,
+          kind: GroupKind.SHARED,
+          name: "Team",
+          role: GroupRole.VIEWER,
           authorizationRevision: "1",
           changeSequence: "1",
           updatedAt: new Date(0),
@@ -89,6 +110,83 @@ describe("group socket requests", () => {
       payload: { id, kind: GroupKind.SHARED, name: "Team", userId: 999 },
     })).rejects.toBeInstanceOf(GroupError)
     expect(seen.command).toBe(null)
+  })
+
+  it("reads one group by id for the actor", async () => {
+    const { requests, seen } = harness()
+
+    const result = await requests["group.get"].handle({
+      actor,
+      requestId: "req-3",
+      signal,
+      payload: { groupId: id },
+    })
+
+    expect(requests["group.get"].kind).toBe("query")
+    expect(seen.get?.data).toEqual({ actor, groupId: id })
+    expect(result).toMatchObject({ group: { id } })
+  })
+
+  for (
+    const [name, payload] of [
+      ["a missing payload", undefined],
+      ["a malformed id", { groupId: "nope" }],
+      ["an extra field", { groupId: id, userId: 9 }],
+    ] as const
+  ) {
+    it(`refuses group.get with ${name}`, async () => {
+      const { requests, seen } = harness()
+
+      await expect(requests["group.get"].handle({ actor, requestId: "r", signal, payload }))
+        .rejects.toBeInstanceOf(GroupError)
+      expect(seen.get).toBe(null)
+    })
+  }
+
+  it("answers a stranger's group id and an unknown id with the same error kind", async () => {
+    const ownGroup = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111aaa"
+    const handler = createGroupGetHandler({
+      getSummaryForMember: (groupId: string, userId: number) =>
+        Promise.resolve(
+          groupId === ownGroup && userId === 19
+            ? {
+              id: ownGroup,
+              kind: GroupKind.SHARED,
+              name: "Team",
+              role: GroupRole.OWNER,
+              authorizationRevision: "1",
+              changeSequence: "1",
+              updatedAt: new Date(0),
+            }
+            : null,
+        ),
+    } as GroupRepository)
+    const requests = createGroupSocketRequests({
+      create: () => Promise.reject(new Error("not used")),
+      list: () => Promise.reject(new Error("not used")),
+      get: handler,
+      cursor: { encode: () => Promise.resolve(""), decode: () => Promise.reject(new Error("x")) },
+    })
+    const ask = async (groupId: string) => {
+      try {
+        await requests["group.get"].handle({
+          actor: { ...actor, userId: 20 },
+          requestId: "r",
+          signal,
+          payload: { groupId },
+        })
+      } catch (error) {
+        const mapped = toRequestError(error)
+        return [mapped?.code, mapped?.message]
+      }
+      return ["answered"]
+    }
+
+    const stranger = await ask(ownGroup)
+    const unknown = await ask("7b6d8d6c-1af5-4f04-8ae4-b1ee5d111bbb")
+
+    expect(stranger[0]).toBe("not_found")
+    expect(stranger).toEqual(unknown)
   })
 
   it("lists the actor's groups and returns the next cursor", async () => {

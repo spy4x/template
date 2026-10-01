@@ -6,10 +6,11 @@ import { log } from "@api/services/log.ts"
 import { createIdempotencyMiddleware, PostgresIdempotencyStore } from "@spy4x/server/idempotency"
 import { UserProfileUpdateCommand } from "@api/cqrs/commands.ts"
 import { UserProfileGetQuery } from "@api/cqrs/queries.ts"
-import { GroupCreateCommand, GroupListQuery } from "@domain/groups"
+import { GroupCreateCommand, GroupGetQuery, GroupListQuery } from "@domain/groups"
 import { userProfileUpdateHandler } from "@api/cqrs/command-handlers/user-profile-update.ts"
 import { userProfileGetHandler } from "@api/cqrs/query-handlers/user-profile-get.ts"
 import { groupCreateHandler } from "@api/cqrs/command-handlers/group-create.ts"
+import { groupGetHandler } from "@api/cqrs/query-handlers/group-get.ts"
 import { groupListHandler } from "@api/cqrs/query-handlers/group-list.ts"
 import {
   NoteCreateCommand,
@@ -54,6 +55,7 @@ commandBus.register(NoteUpdateCommand, noteUpdateHandler)
 commandBus.register(NoteDeleteCommand, noteDeleteHandler)
 queryBus.register(UserProfileGetQuery, userProfileGetHandler)
 queryBus.register(GroupListQuery, groupListHandler)
+queryBus.register(GroupGetQuery, groupGetHandler)
 queryBus.register(NoteListQuery, noteListHandler)
 queryBus.register(NoteGetQuery, noteGetHandler)
 

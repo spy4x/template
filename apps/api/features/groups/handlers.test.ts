@@ -8,13 +8,19 @@ import {
   Group,
   GroupAccess,
   GroupCreateCommand,
+  GroupError,
+  GroupGetQuery,
   GroupKind,
   GroupListQuery,
   GroupRepository,
   GroupRole,
   GroupSummary,
 } from "@domain/groups"
-import { createGroupCreateHandler, createGroupListHandler } from "./handlers.ts"
+import {
+  createGroupCreateHandler,
+  createGroupGetHandler,
+  createGroupListHandler,
+} from "./handlers.ts"
 
 const now = new Date("2026-08-18T10:00:00.000Z")
 const summary: GroupSummary = {
@@ -34,6 +40,10 @@ class FakeGroupRepository implements GroupRepository {
   listForUser(userId: number) {
     this.listUserId = userId
     return Promise.resolve({ groups: [summary], nextPageKey: null })
+  }
+
+  getSummaryForMember(groupId: string, userId: number) {
+    return Promise.resolve(groupId === summary.id && userId === 84 ? summary : null)
   }
 
   listMemberUserIds(_groupId: string): Promise<number[]> {
@@ -91,5 +101,25 @@ describe("group CQRS handlers", () => {
 
     expect(repository.listUserId).toBe(84)
     expect(result.groups).toEqual([summary])
+  })
+
+  it("reads one group of a member", async () => {
+    const handler = createGroupGetHandler(new FakeGroupRepository())
+    const result = await handler(new GroupGetQuery({ actor: actor(84), groupId: summary.id }))
+
+    expect(result).toEqual({ group: summary })
+  })
+
+  it("answers a non-member exactly as a missing group", async () => {
+    const handler = createGroupGetHandler(new FakeGroupRepository())
+    const missing = await handler(
+      new GroupGetQuery({ actor: actor(84), groupId: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d119999" }),
+    ).catch((error) => error)
+    const stranger = await handler(new GroupGetQuery({ actor: actor(85), groupId: summary.id }))
+      .catch((error) => error)
+
+    expect(stranger).toBeInstanceOf(GroupError)
+    expect(stranger.code).toBe("GROUP_NOT_FOUND")
+    expect([stranger.code, stranger.message]).toEqual([missing.code, missing.message])
   })
 })

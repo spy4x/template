@@ -4,8 +4,10 @@ import { Hono } from "hono"
 import {
   GroupCreateCommand,
   GroupError,
+  GroupGetQuery,
   GroupKind,
   GroupListQuery,
+  GroupRepository,
   GroupRole,
 } from "@domain/groups"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
@@ -15,6 +17,7 @@ import { createSessionGate } from "../cqrs/session-gate.ts"
 import type { APIContext } from "../_types.ts"
 import { oversizedJson } from "../_testing/json-bodies.ts"
 import { IdempotencyError } from "@spy4x/server/idempotency"
+import { createGroupGetHandler } from "../features/groups/handlers.ts"
 import { createGroupsRoute, GroupsRouteDependencies } from "./groups.ts"
 import { buildAuthData } from "../_testing/fake-auth.ts"
 
@@ -38,10 +41,12 @@ function buildApp(
 function dependencies(): GroupsRouteDependencies & {
   createCommand: GroupCreateCommand | null
   listQuery: GroupListQuery | null
+  getQuery: GroupGetQuery | null
 } {
   return {
     createCommand: null,
     listQuery: null,
+    getQuery: null,
     create(command) {
       this.createCommand = command
       return Promise.resolve({
@@ -50,6 +55,20 @@ function dependencies(): GroupsRouteDependencies & {
           id: command.data.id,
           kind: GroupKind.SHARED,
           name: command.data.name,
+          role: GroupRole.OWNER,
+          authorizationRevision: "1",
+          changeSequence: "1",
+          updatedAt: now,
+        },
+      })
+    },
+    get(query) {
+      this.getQuery = query
+      return Promise.resolve({
+        group: {
+          id: query.data.groupId,
+          kind: GroupKind.SHARED,
+          name: "Team",
           role: GroupRole.OWNER,
           authorizationRevision: "1",
           changeSequence: "1",
@@ -147,6 +166,57 @@ describe("groups route", () => {
       after: { updatedAt: now, id },
     })
     expect(await response.json()).toEqual({ groups: [], nextCursor: "next-token" })
+  })
+
+  it("reads one group for the authenticated session", async () => {
+    const deps = dependencies()
+    const app = buildApp(deps, buildAuthData({ user: { id: 19 } }))
+    const response = await app.request(`http://local/groups/${id}`)
+
+    expect(response.status).toBe(200)
+    expect(deps.getQuery?.data).toEqual({
+      actor: expect.objectContaining({ userId: 19 }),
+      groupId: id,
+    })
+    expect((await response.json()).group.id).toBe(id)
+  })
+
+  it("answers a stranger's group id and an unknown id with the same 404", async () => {
+    const ownGroup = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111aaa"
+    const deps = dependencies()
+    // The real handler over a repository that knows one group, whose only member is user 19.
+    deps.get = createGroupGetHandler({
+      getSummaryForMember: (groupId: string, userId: number) =>
+        Promise.resolve(
+          groupId === ownGroup && userId === 19
+            ? {
+              id: ownGroup,
+              kind: GroupKind.SHARED,
+              name: "Team",
+              role: GroupRole.OWNER,
+              authorizationRevision: "1",
+              changeSequence: "1",
+              updatedAt: now,
+            }
+            : null,
+        ),
+    } as GroupRepository)
+    const stranger = await buildApp(deps, buildAuthData({ user: { id: 20 } }))
+      .request(`http://local/groups/${ownGroup}`)
+    const unknown = await buildApp(deps, buildAuthData({ user: { id: 20 } }))
+      .request("http://local/groups/7b6d8d6c-1af5-4f04-8ae4-b1ee5d111bbb")
+
+    expect(stranger.status).toBe(404)
+    expect(unknown.status).toBe(404)
+    expect(await stranger.json()).toEqual(await unknown.json())
+  })
+
+  it("refuses a group id that is not a UUID without asking the bus", async () => {
+    const deps = dependencies()
+    const response = await buildApp(deps).request("http://local/groups/not-a-uuid")
+
+    expect(response.status).toBe(400)
+    expect(deps.getQuery).toBe(null)
   })
 
   it("rejects an over-limit group page", async () => {

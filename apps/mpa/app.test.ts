@@ -5,6 +5,7 @@ import { handler as signIn } from "./routes/sign-in.ts"
 import { handler as signOut } from "./routes/sign-out.ts"
 import { handler as home } from "./routes/index.tsx"
 import { handler as password } from "./routes/profile/password.ts"
+import { handler as notes } from "./routes/groups/[groupId]/notes/index.tsx"
 import { handler as note } from "./routes/groups/[groupId]/notes/[noteId]/index.tsx"
 import { pageMiddleware } from "./middleware.ts"
 import type { State } from "./utils.ts"
@@ -37,6 +38,7 @@ function appWith(fetch: typeof globalThis.fetch) {
     .post("/profile/password", password.POST!)
     .post("/sign-in", signIn.POST!)
     .post("/sign-out", signOut.POST!)
+    .get("/groups/:groupId/notes", notes.GET!)
     .post("/groups/:groupId/notes/:noteId", note.POST!)
     .handler()
 }
@@ -207,11 +209,8 @@ describe("the note edit page", () => {
   it("keeps the typed text after a save against a stale version and links to the latest one", async () => {
     const { calls, fetch } = fakeApi((path) => {
       if (path === "/api/auth/me") return Response.json({ firstName: "Ada", lastName: "", mfa: 1 })
-      if (path === "/api/groups") {
-        return Response.json({
-          groups: [{ id: groupId, name: "Trip", kind: 2, role: 4 }],
-          nextCursor: null,
-        })
+      if (path === `/api/groups/${groupId}`) {
+        return Response.json({ group: { id: groupId, name: "Trip", kind: 2, role: 4 } })
       }
       if (path === `/api/groups/${groupId}/notes`) {
         return Response.json({ notes: [], nextCursor: null })
@@ -238,5 +237,47 @@ describe("the note edit page", () => {
     expect(html).toContain("The note was changed by someone else")
     expect(html).toContain('value="Mine"')
     expect(html).toContain(`href="/groups/${groupId}/notes/${noteId}"`)
+  })
+})
+
+describe("the notes page", () => {
+  const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
+  const notesFetch = (groupStatus: number) =>
+    fakeApi((path) => {
+      if (path === "/api/auth/me") return Response.json({ firstName: "Ada", lastName: "", mfa: 1 })
+      if (path === `/api/groups/${groupId}`) {
+        return groupStatus === 200
+          ? Response.json({ group: { id: groupId, name: "Trip", kind: 2, role: 4 } })
+          : Response.json({ error: { code: "GROUP_NOT_FOUND" } }, { status: groupStatus })
+      }
+      return Response.json({ notes: [], nextCursor: null })
+    })
+
+  it("reads its group with one call and never lists the person's groups", async () => {
+    const { calls, fetch } = notesFetch(200)
+
+    const response = await appWith(fetch)(
+      new Request(`${config.webAppOrigin}/groups/${groupId}/notes`),
+      info,
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain("Trip")
+    const groupCalls = calls.filter((call) =>
+      /^\/api\/groups(\/|\?|$)/.test(call.path) &&
+      !call.path.includes("/notes")
+    )
+    expect(groupCalls.map((call) => call.path)).toEqual([`/api/groups/${groupId}`])
+  })
+
+  it("shows a group that is missing or not the person's as not found", async () => {
+    const { fetch } = notesFetch(404)
+
+    const response = await appWith(fetch)(
+      new Request(`${config.webAppOrigin}/groups/${groupId}/notes`),
+      info,
+    )
+
+    expect(await response.text()).toContain("This group was not found")
   })
 })
