@@ -109,4 +109,5 @@ services:
       POSTGRES_DB: template_test
   valkey:
     image: valkey/valkey:8.1
-    command: [valkey-server, --requirepass, ci-throwaway]
+    commands:
+      - valkey-server --requirepass ci-throwaway
