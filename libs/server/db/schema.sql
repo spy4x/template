@@ -219,8 +219,8 @@ CREATE TABLE outbox_events (
     aggregate_type VARCHAR(64) NOT NULL,
     aggregate_id UUID NOT NULL,
     aggregate_version BIGINT NOT NULL,
-    group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    actor_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
+    actor_user_id INT4 REFERENCES users(id) ON DELETE RESTRICT,
     attempt_count INT4 DEFAULT 0 NOT NULL,
     available_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     claimed_at TIMESTAMPTZ,
@@ -232,7 +232,8 @@ CREATE TABLE outbox_events (
         length(btrim(aggregate_type)) BETWEEN 1 AND 64
     ),
     CONSTRAINT outbox_events_aggregate_version_check CHECK (aggregate_version >= 1),
-    CONSTRAINT outbox_events_attempt_count_check CHECK (attempt_count >= 0)
+    CONSTRAINT outbox_events_attempt_count_check CHECK (attempt_count >= 0),
+    CONSTRAINT outbox_events_group_actor_check CHECK ((group_id IS NULL) = (actor_user_id IS NULL))
 );
 
 CREATE UNIQUE INDEX idx_outbox_events_aggregate_version_kind

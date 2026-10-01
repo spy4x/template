@@ -107,6 +107,7 @@
     "@domain/identity": "./libs/domain/identity/+lib.ts",
     "@domain/notes": "./libs/domain/notes/+lib.ts",
     "@server/groups/": "./libs/server/groups/",
+    "@server/jobs/": "./libs/server/jobs/",
     "@server/notes/": "./libs/server/notes/",
     "@client/vite/": "./libs/client/vite/",
     // #endregion Aliases
