@@ -13,7 +13,7 @@ import type { SignIn } from "@api/services/sign-in.ts"
 import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
 import { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
-import type { TotpFailures } from "../services/totp-failures.ts"
+import type { Lockout } from "@spy4x/server/lockout"
 import type { AuthRateLimits } from "../middlewares/auth-rate-limits.ts"
 import { readApiJson } from "@api/services/json-body.ts"
 
@@ -24,7 +24,7 @@ export interface AuthRouteDependencies {
   mutationGuards: MutationGuards
   rateLimits: AuthRateLimits
   /** Persistent count of wrong one-time codes per user, with a growing lock. */
-  totpFailures: TotpFailures
+  totpFailures: Lockout
 }
 
 /**
@@ -34,7 +34,7 @@ export interface AuthRouteDependencies {
  */
 async function checkUnderFailureCount(
   c: Context<APIContext>,
-  totpFailures: TotpFailures,
+  totpFailures: Lockout,
   userId: number,
   check: () => Promise<boolean>,
   wrongAnswer: () => Response,

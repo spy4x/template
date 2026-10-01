@@ -16,14 +16,14 @@ import {
 } from "../_testing/mutation-requests.ts"
 import { MALFORMED_JSON, oversizedJson } from "../_testing/json-bodies.ts"
 import { type AuthRateLimits, createAuthRateLimits } from "../middlewares/auth-rate-limits.ts"
-import type { TotpFailures } from "../services/totp-failures.ts"
+import type { Lockout } from "@spy4x/server/lockout"
 import { createAuthRoute } from "./auth.ts"
 
 /**
  * A failure counter that records its calls in `calls`, and answers `lockedForMs` to `begin`
  * (0 = not locked).
  */
-function fakeTotpFailures(calls: string[], lockedForMs = 0): TotpFailures {
+function fakeTotpFailures(calls: string[], lockedForMs = 0): Lockout {
   return {
     begin: () => (calls.push("begin"), Promise.resolve(lockedForMs)),
     refund: () => (calls.push("refund"), Promise.resolve()),
