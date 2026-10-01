@@ -17,11 +17,13 @@ interface ComposeService {
   labels?: string[]
 }
 
-async function services(): Promise<Record<string, ComposeService>> {
-  const compose = parse(await Deno.readTextFile(COMPOSE)) as {
+const COMPOSE_PROD = fromFileUrl(new URL("../infra/compose/compose.prod.yml", import.meta.url))
+
+async function services(file = COMPOSE): Promise<Record<string, ComposeService>> {
+  const compose = parse(await Deno.readTextFile(file)) as {
     services?: Record<string, ComposeService>
   }
-  if (!compose.services) throw new Error(`${COMPOSE} has no services`)
+  if (!compose.services) throw new Error(`${file} has no services`)
   return compose.services
 }
 
@@ -45,5 +47,17 @@ Deno.test("the MPA takes the SPA's traffic but leaves /api and /ws to the API", 
   // Traefik's default priority is the rule's length; the SPA's router has none set.
   expect(Number(label(mpa, "traefik.http.routers.mpa-${PROJECT}.priority"))).toBeGreaterThan(
     (rule ?? "").length,
+  )
+})
+
+Deno.test("in production the MPA is served over HTTPS on the port its image listens on", async () => {
+  const { mpa } = await services(COMPOSE_PROD)
+  const router = "traefik.http.routers.mpa-${PROJECT}"
+  expect(label(mpa, `${router}.entrypoints`)).toBe("websecure")
+  expect(label(mpa, `${router}.tls`)).toBe("true")
+  expect(label(mpa, `${router}.tls.certresolver`)).toContain("TRAEFIK_CERT_RESOLVER")
+  const shared = (await services()).mpa
+  expect(label(shared, "traefik.http.services.mpa-${PROJECT}.loadbalancer.server.port")).toBe(
+    "8080",
   )
 })

@@ -89,7 +89,7 @@ steps:
                 break
               } catch {
                 if (i >= 120) {
-                  console.error(`${hostname} did not accept connections within 60 s`)
+                  console.error(`$${hostname} did not accept connections within 60 s`)
                   Deno.exit(1)
                 }
                 await new Promise((resolve) => setTimeout(resolve, 500))

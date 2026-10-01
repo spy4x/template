@@ -14,6 +14,14 @@ API_PORT=${API_PORT:-8000}
 MPA_PORT=${MPA_PORT:-8001}
 export FRONT_PORT API_PORT MPA_PORT
 
+# The API reads vapid.json from its working directory. Reuse existing keys; never replace them, and
+# never leave a file in infra/configs/ that was not there. Checked before the trap below, which
+# deletes the root vapid.json: only one this script made.
+if [ -e vapid.json ]; then
+  echo "vapid.json exists in the repository root; move it away first"
+  exit 1
+fi
+
 SCRATCH=$(mktemp -d)
 PIDS=()
 cleanup() {
@@ -31,7 +39,7 @@ trap cleanup EXIT INT TERM
 
 wait_for() { # <name> <pid> <url>
   for _ in $(seq 1 120); do
-    curl -fsS -o /dev/null "$3" 2>/dev/null && return 0
+    curl -fsS --max-time 2 -o /dev/null "$3" 2>/dev/null && return 0
     kill -0 "$2" 2>/dev/null || { echo "$1 stopped"; tail -n 40 "$SCRATCH/$1.log"; return 1; }
     sleep 0.5
   done
@@ -62,9 +70,11 @@ export MPA_BASE_URL="http://$DOMAIN"
 
 deno task db:migrate
 
-# The API reads vapid.json from its working directory.
-deno task vapid-key:create >/dev/null
-cp infra/configs/vapid.json vapid.json
+if [ -f infra/configs/vapid.json ]; then
+  cp infra/configs/vapid.json vapid.json
+else
+  deno task vapid-key:create >/dev/null && mv infra/configs/vapid.json vapid.json
+fi
 
 deno serve --allow-all --port "$API_PORT" --host 127.0.0.1 apps/api/index.ts \
   >"$SCRATCH/api.log" 2>&1 &
