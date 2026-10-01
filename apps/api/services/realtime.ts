@@ -195,8 +195,7 @@ export class Realtime {
   async revalidate(userId?: number): Promise<number> {
     let closed = 0
     const checked = new Map<number, Promise<AppAuthState | null>>()
-    for (const live of [...this.#live.values()]) {
-      if (userId !== undefined && live.userId !== userId) continue
+    for (const live of this.#socketsOf(userId)) {
       let entitled = checked.get(live.sessionId)
       if (!entitled) {
         entitled = this.#options.entitledSession(live.sessionId)
@@ -227,8 +226,7 @@ export class Realtime {
    */
   closeUser(userId: number, reason: string, code = POLICY_CLOSE_CODE): number {
     let closed = 0
-    for (const live of this.#live.values()) {
-      if (live.userId !== userId) continue
+    for (const live of this.#socketsOf(userId)) {
       live.socket.close(code, reason)
       closed++
     }
@@ -239,6 +237,21 @@ export class Realtime {
   async notifyGroupChange(groupId: string, sequence: number): Promise<NotifyStatus> {
     const outcome = await this.#notifier.notify({ groupId, aggregate: GROUP_AGGREGATE, sequence })
     return outcome.status
+  }
+
+  /**
+   * A snapshot of one user's live sockets, found through the registry's per-user index instead of
+   * a scan of every socket, or of everyone's when `userId` is omitted. A snapshot, because closing
+   * a socket removes it from `#live` while the caller still iterates.
+   */
+  #socketsOf(userId?: number): LiveSocket[] {
+    if (userId === undefined) return [...this.#live.values()]
+    const sockets: LiveSocket[] = []
+    for (const id of this.registry.socketIdsFor(String(userId))) {
+      const live = this.#live.get(id)
+      if (live) sockets.push(live)
+    }
+    return sockets
   }
 
   /** Closes every socket and stops the registry's timers. */
