@@ -2,17 +2,20 @@ import type { ComponentChildren, JSX } from "preact"
 import { Shell, type ShellNavItem } from "@spy4x/preact-system/shell"
 import { Button } from "@spy4x/preact-ui/button"
 import { Page } from "@spy4x/preact-ui/layout"
+import { Link } from "@spy4x/preact-ui/link"
+import { GroupPicker, type GroupPickerData } from "./group-picker.tsx"
 import {
   FORM_ACTIONS,
   type Navigate,
+  NOTE_PATHS,
   SCREEN_PATHS,
   ScreenForm,
-  ScreenLink,
 } from "./progressive.tsx"
 
 /** Every page a signed-in user can open. Add a route here when it gets its own page. */
 const NAV_ITEMS: readonly ShellNavItem[] = [
   { name: "Profile", href: SCREEN_PATHS.profile },
+  { name: "Notes", href: NOTE_PATHS.list },
   { name: "Groups", href: SCREEN_PATHS.groups },
 ]
 
@@ -34,10 +37,10 @@ export interface FrameUser {
 
 function Brand({ navigate }: { navigate?: Navigate }): JSX.Element {
   return (
-    <ScreenLink href={SCREEN_PATHS.profile} navigate={navigate} class="flex items-center gap-3">
+    <Link href={SCREEN_PATHS.profile} navigate={navigate} class="flex items-center gap-3">
       <span class="h-8 w-8 rounded-xl bg-primary-muted" aria-hidden="true"></span>
       <span class="text-lg font-semibold">Template</span>
-    </ScreenLink>
+    </Link>
   )
 }
 
@@ -53,15 +56,17 @@ function displayName(user: FrameUser): string {
  * With `onSignOut`, "Sign out" is an item of the user menu, which needs JavaScript to open: a form
  * that posts to its route, which the app takes over. Without it, a page rendered on the server,
  * "Sign out" is a form in the header. `connection` is shown only when the app has a live connection
- * to report.
+ * to report. `groupPicker` puts the group picker at the bottom of the side menu and the mobile
+ * drawer; without it the menu has none (nobody to pick for).
  */
 export function AppFrame(
-  { user, connection, currentPath, navigate, onSignOut, children }: {
+  { user, connection, currentPath, navigate, onSignOut, groupPicker, children }: {
     user: FrameUser
     connection?: ConnectionStatus
     currentPath?: string
     navigate?: Navigate
     onSignOut?: () => void
+    groupPicker?: GroupPickerData
     children: ComponentChildren
   },
 ): JSX.Element {
@@ -72,6 +77,8 @@ export function AppFrame(
       currentPath={currentPath}
       navigate={navigate}
       user={{ name: displayName(user) }}
+      sidebarBottom={groupPicker &&
+        ((place) => <GroupPicker {...groupPicker} navigate={navigate} place={place} />)}
       userMenuItems={onSignOut
         ? [{ label: "Sign out", action: FORM_ACTIONS.signOut, onClick: onSignOut }]
         : []}

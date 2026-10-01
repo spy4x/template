@@ -295,7 +295,7 @@ describe("NotesScreen in the browser", () => {
     await type("[data-e2e=note-new-title]", "Trip")
 
     expect(draft.calls).toEqual([[{ title: "Trip", body: "" }]])
-    expect(await submit(NOTE_PATHS.list(groupId))).toBe(true)
+    expect(await submit(NOTE_PATHS.create(groupId))).toBe(true)
     expect(create.calls).toHaveLength(1)
   })
 
@@ -303,15 +303,15 @@ describe("NotesScreen in the browser", () => {
     const remove = spy<[typeof note]>()
     await mount(<NotesScreen {...notesDefaults} onDelete={remove.fn} />)
 
-    expect(await submit(NOTE_PATHS.delete(groupId, note.id))).toBe(true)
+    expect(await submit(NOTE_PATHS.delete(note.id))).toBe(true)
     expect(remove.calls).toEqual([[note]])
   })
 
   it("posts the create and the delete natively when the app takes nothing over", async () => {
     await mount(<NotesScreen {...notesDefaults} />)
 
-    expect(await submit(NOTE_PATHS.list(groupId))).toBe(false)
-    expect(await submit(NOTE_PATHS.delete(groupId, note.id))).toBe(false)
+    expect(await submit(NOTE_PATHS.create(groupId))).toBe(false)
+    expect(await submit(NOTE_PATHS.delete(note.id))).toBe(false)
   })
 
   it("moves focus to the title when it gets an error", async () => {
@@ -365,12 +365,71 @@ describe("GroupsScreen in the browser", () => {
     expect(await submit(FORM_ACTIONS.groupCreate)).toBe(false)
   })
 
-  it("follows a group's link through navigate instead of loading the page", async () => {
-    const navigate = spy<[string]>()
-    await mount(<GroupsScreen {...groupsDefaults} navigate={navigate.fn} />)
+  it("opens a group's notes through the app's callback, and posts natively without one", async () => {
+    const open = spy<[string]>()
+    const groups = [{ id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER }]
+    await mount(<GroupsScreen {...groupsDefaults} groups={groups} onOpen={open.fn} />)
 
-    expect(await click(`a[href="${NOTE_PATHS.list("g-1")}"]`)).toBe(true)
-    expect(navigate.calls).toEqual([[NOTE_PATHS.list("g-1")]])
+    expect(await submit(FORM_ACTIONS.groupSelect)).toBe(true)
+    expect(open.calls).toEqual([["g-1"]])
+
+    await rerender(<GroupsScreen {...groupsDefaults} groups={groups} />)
+    expect(await submit(FORM_ACTIONS.groupSelect)).toBe(false)
+  })
+})
+
+describe("the group picker in the browser", () => {
+  const groups = [
+    { id: "g-1", name: "Home", role: GroupRole.OWNER },
+    { id: "g-2", name: "Team", role: GroupRole.VIEWER },
+  ]
+  const frame = (
+    picker: Parameters<typeof AppFrame>[0]["groupPicker"],
+    navigate?: (href: string) => void,
+  ) => (
+    <AppFrame user={{ firstName: "Ada", lastName: "" }} groupPicker={picker} navigate={navigate}>
+      page
+    </AppFrame>
+  )
+
+  it("selects the group the person picks from the list, through the app's callback", async () => {
+    const select = spy<[string]>()
+    await mount(frame({ groups, selectedId: "g-1", onSelect: select.fn }))
+    const input = find<HTMLInputElement>("#sidebar-group-picker")
+    expect(input.value).toBe("Home")
+
+    await act(() => {
+      input.dispatchEvent(
+        new window.KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          bubbles: true,
+          cancelable: true,
+        }) as unknown as Event,
+      )
+    })
+    const options = [...root!.querySelectorAll("#sidebar-group-picker-listbox [role=option]")]
+    expect(options.map((option) => option.textContent)).toEqual(["HomeOwner", "TeamViewer"])
+    await act(() => {
+      options[1].dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true, cancelable: true }) as unknown as Event,
+      )
+    })
+
+    expect(select.calls).toEqual([["g-2"]])
+  })
+
+  it("follows the cog to the groups page through navigate", async () => {
+    const navigate = spy<[string]>()
+    await mount(frame({ groups, selectedId: "g-1", onSelect: () => {} }, navigate.fn))
+
+    expect(await click("[data-e2e=group-manage]")).toBe(true)
+    expect(navigate.calls).toEqual([["/groups"]])
+  })
+
+  it("posts the form natively when the app does not take the choice over", async () => {
+    await mount(frame({ groups, selectedId: "g-1" }))
+
+    expect(await submit(FORM_ACTIONS.groupSelect)).toBe(false)
   })
 })
 

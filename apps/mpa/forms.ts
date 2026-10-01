@@ -75,6 +75,7 @@ export const API_BODIES = {
     kind: numberField(form, "kind"),
     name: field(form, "name"),
   }),
+  groupSelect: (form: FormData) => ({ groupId: field(form, "groupId") }),
   noteCreate: (form: FormData) => ({
     id: field(form, "id"),
     title: field(form, "title"),

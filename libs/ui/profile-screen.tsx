@@ -1,22 +1,17 @@
 import type { JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
 import { encodeBase64 } from "@std/encoding"
-import { Button, buttonClasses } from "@spy4x/preact-ui/button"
+import { Button } from "@spy4x/preact-ui/button"
 import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
 import { Grid, Stack } from "@spy4x/preact-ui/layout"
+import { Link } from "@spy4x/preact-ui/link"
 import type { UserMFAStatus, UserPushTokenPublic } from "@domain/identity"
 import type { ConnectionStatus } from "./frame.tsx"
-import {
-  FORM_ACTIONS,
-  type Navigate,
-  SCREEN_PATHS,
-  ScreenForm,
-  ScreenLink,
-} from "./progressive.tsx"
+import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { TwoFactorStep, twoFactorStep } from "./two-factor.ts"
 
 /** The messages shown when an action failed without a message of its own. */
@@ -169,9 +164,9 @@ export function ProfileScreen(
         <CardBody>
           <Stack>
             <p>Verify OTP to access profile.</p>
-            <ScreenLink href={SCREEN_PATHS.oneTimeCode} navigate={navigate} class="pc-link">
+            <Link href={SCREEN_PATHS.oneTimeCode} navigate={navigate} class="pc-link">
               Go to OTP
-            </ScreenLink>
+            </Link>
           </Stack>
         </CardBody>
       </Card>
@@ -188,20 +183,24 @@ export function ProfileScreen(
           <Stack>
             <p>Access your profile after sign in.</p>
             <div class="flex flex-col gap-3 sm:flex-row">
-              <ScreenLink
+              <Button
                 href={SCREEN_PATHS.signIn}
                 navigate={navigate}
-                class={buttonClasses("primary", "md", "text-center")}
+                variant="primary"
+                size="md"
+                class="text-center"
               >
                 Sign in
-              </ScreenLink>
-              <ScreenLink
+              </Button>
+              <Button
                 href={SCREEN_PATHS.signUp}
                 navigate={navigate}
-                class={buttonClasses("outline", "md", "text-center")}
+                variant="outline"
+                size="md"
+                class="text-center"
               >
                 Sign up
-              </ScreenLink>
+              </Button>
             </div>
           </Stack>
         </CardBody>

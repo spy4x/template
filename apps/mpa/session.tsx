@@ -1,8 +1,10 @@
 import type { ComponentChildren, JSX } from "preact"
 import type { UserMFAStatus } from "@domain/identity"
 import { AppFrame, PublicFrame } from "@ui/frame.tsx"
+import type { GroupPickerData } from "@ui/group-picker.tsx"
 import { SCREEN_PATHS } from "@ui/progressive.tsx"
 import { type Api, isRecord } from "./api.ts"
+import { readPicker } from "./groups.ts"
 
 /** The signed-in user as the pages show them. */
 export interface SessionUser {
@@ -16,6 +18,8 @@ export interface Session {
   user: SessionUser | null
   /** Signed in with the password, the one-time code still owed. */
   mfaPending: boolean
+  /** The groups and the selected one, for the side menu; `null` without a user or when unread. */
+  picker: GroupPickerData | null
 }
 
 /**
@@ -25,10 +29,14 @@ export interface Session {
 export async function readSession(api: Api): Promise<Session> {
   const answer = await api.call("GET", "/api/auth/me")
   if (answer.status === 200 && isRecord(answer.body)) {
-    return { user: answer.body as unknown as SessionUser, mfaPending: false }
+    return {
+      user: answer.body as unknown as SessionUser,
+      mfaPending: false,
+      picker: await readPicker(api),
+    }
   }
-  if (answer.status === 202) return { user: null, mfaPending: true }
-  if (answer.status === 401) return { user: null, mfaPending: false }
+  if (answer.status === 202) return { user: null, mfaPending: true, picker: null }
+  if (answer.status === 401) return { user: null, mfaPending: false, picker: null }
   throw new Error(`GET /api/auth/me answered ${answer.status}`)
 }
 
@@ -45,6 +53,14 @@ export function Frame(
   { session, path, children }: { session: Session; path: string; children: ComponentChildren },
 ): JSX.Element {
   return session.user
-    ? <AppFrame user={session.user} currentPath={path}>{children}</AppFrame>
+    ? (
+      <AppFrame
+        user={session.user}
+        currentPath={path}
+        groupPicker={session.picker ?? undefined}
+      >
+        {children}
+      </AppFrame>
+    )
     : <PublicFrame canSignOut={session.mfaPending}>{children}</PublicFrame>
 }

@@ -7,7 +7,7 @@ import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { GroupKind, GroupRole } from "@domain/groups"
-import { FORM_ACTIONS, type Navigate, NOTE_PATHS, ScreenForm, ScreenLink } from "./progressive.tsx"
+import { FORM_ACTIONS, ScreenForm } from "./progressive.tsx"
 
 /** One group as the screen shows it. */
 export interface GroupRow {
@@ -36,7 +36,11 @@ export interface GroupsScreenProps {
   onCreate?: () => void
   /** Reads the list again; without it there is no Refresh button, and a page load refreshes. */
   onRefresh?: () => void
-  navigate?: Navigate
+  /**
+   * Opens a group's notes: selects the group, then shows `/notes`. A form that posts `{ groupId }`
+   * to `FORM_ACTIONS.groupSelect`; with this callback the app takes the submit over.
+   */
+  onOpen?: (groupId: string) => void
 }
 
 const KIND_TEXT: Record<GroupKind, string> = {
@@ -44,7 +48,8 @@ const KIND_TEXT: Record<GroupKind, string> = {
   [GroupKind.SHARED]: "Shared",
 }
 
-const ROLE_TEXT: Record<GroupRole, string> = {
+/** What a role is called on screen. */
+export const ROLE_TEXT: Record<GroupRole, string> = {
   [GroupRole.VIEWER]: "Viewer",
   [GroupRole.EDITOR]: "Editor",
   [GroupRole.ADMIN]: "Admin",
@@ -52,12 +57,12 @@ const ROLE_TEXT: Record<GroupRole, string> = {
 }
 
 /**
- * The groups page: the groups the person belongs to, each a link to its notes, and a form to create
- * a shared one. The form posts the API's field names to its route; with `onCreate`, the app takes
+ * The groups page: the groups the person belongs to, each with a form that opens its notes, and a
+ * form to create a shared one. The form posts the API's field names to its route; with `onCreate`, the app takes
  * the submit over.
  */
 export function GroupsScreen(
-  { groups, draftId, name, onNameChange, creating, loading, error, onCreate, onRefresh, navigate }:
+  { groups, draftId, name, onNameChange, creating, loading, error, onCreate, onRefresh, onOpen }:
     GroupsScreenProps,
 ): JSX.Element {
   return (
@@ -112,16 +117,25 @@ export function GroupsScreen(
                       class="flex flex-col gap-1 rounded-primary border border-subtle px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
                       data-e2e={`group-${group.id}`}
                     >
-                      <ScreenLink
-                        href={NOTE_PATHS.list(group.id)}
-                        navigate={navigate}
-                        class="pc-link font-medium"
-                      >
-                        <span data-e2e="group-item-name">{group.name}</span>
-                      </ScreenLink>
+                      <span class="font-medium" data-e2e="group-item-name">{group.name}</span>
                       <span class="text-xs text-muted">
                         {KIND_TEXT[group.kind]} · {ROLE_TEXT[group.role]}
                       </span>
+                      <ScreenForm
+                        action={FORM_ACTIONS.groupSelect}
+                        onSubmit={onOpen && (() => onOpen(group.id))}
+                      >
+                        <input type="hidden" name="groupId" value={group.id} />
+                        <Button
+                          type="submit"
+                          variant="outline"
+                          size="sm"
+                          aria-label={`Open notes in ${group.name}`}
+                          data-e2e="group-open"
+                        >
+                          Open notes
+                        </Button>
+                      </ScreenForm>
                     </li>
                   ))}
                 </ul>

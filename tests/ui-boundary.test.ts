@@ -57,6 +57,6 @@ Deno.test("the boundary refuses this repository's app aliases and a relative imp
   }
   expect(report(`import { x } from "../../apps/spa/src/state/auth.ts"\nexport const y = x`))
     .toHaveLength(1)
-  expect(report(`import { ScreenLink } from "./progressive.tsx"\nexport const l = ScreenLink`))
+  expect(report(`import { FORM_ACTIONS } from "./progressive.tsx"\nexport const l = FORM_ACTIONS`))
     .toEqual([])
 })

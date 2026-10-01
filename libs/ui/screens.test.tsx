@@ -13,7 +13,7 @@ import {
 import { pushUnsubscribeRequestSchema } from "@spy4x/platform/model"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
-import { GroupKind, GroupRole } from "@domain/groups"
+import { GroupKind, GroupRole, parseSelectGroupRequest } from "@domain/groups"
 import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
 import { FORM_ACTIONS, NOTE_PATHS } from "./progressive.tsx"
@@ -98,6 +98,12 @@ describe("AuthScreen without JavaScript", () => {
       },
     ])
     expect(surface.scriptOnlyButtons).toEqual(["auth-form-password-toggle"])
+  })
+
+  it("switches between sign in and sign up with a plain link", () => {
+    expect(noScriptSurface(<AuthScreen {...authDefaults} />).links).toEqual(["/sign-up"])
+    expect(noScriptSurface(<AuthScreen {...authDefaults} screen="sign-up" />).links)
+      .toEqual(["/sign-in"])
   })
 
   it("posts the sign-up credentials to the sign-up route", () => {
@@ -230,8 +236,9 @@ describe("frames without JavaScript", () => {
     expect(skipLink).toMatch(/^#./)
     // The navigation is drawn twice (sidebar and drawer), the brand once.
     expect(pages.filter((href) => href === "/")).toHaveLength(3)
+    expect(pages.filter((href) => href === "/notes")).toHaveLength(2)
     expect(pages.filter((href) => href === "/groups")).toHaveLength(2)
-    expect(pages).toHaveLength(5)
+    expect(pages).toHaveLength(7)
     // "Sign out" is a form in the user menu; only the button that opens the menu needs a script.
     expect(surface.forms).toEqual([{ action: FORM_ACTIONS.signOut, method: "post", fields: [] }])
     expect(surface.scriptOnlyButtons).toEqual(["shell-user-menu-button"])
@@ -242,6 +249,58 @@ describe("frames without JavaScript", () => {
     const surface = noScriptSurface(frame)
     expect(surface.forms).toEqual([{ action: FORM_ACTIONS.signOut, method: "post", fields: [] }])
     expect(renderToString(frame)).not.toContain("shell-ws-status")
+  })
+})
+
+const pickerGroups = [
+  { id: "g-1", name: "Home", role: GroupRole.OWNER },
+  { id: "g-2", name: "Team", role: GroupRole.VIEWER },
+]
+
+describe("the group picker without JavaScript", () => {
+  const frame = (picker = { groups: pickerGroups, selectedId: "g-2" as string | null }) => (
+    <AppFrame user={{ firstName: "Ada", lastName: "" }} groupPicker={picker}>page</AppFrame>
+  )
+
+  it("posts the chosen group to the select route from the side menu and from the drawer", () => {
+    const surface = noScriptSurface(frame())
+    const pickerForms = surface.forms.filter((form) => form.action === FORM_ACTIONS.groupSelect)
+
+    // Shell draws its sidebar slot twice: once in the side menu, once in the mobile drawer.
+    expect(pickerForms).toEqual([
+      { action: FORM_ACTIONS.groupSelect, method: "post", fields: ["groupId"] },
+      { action: FORM_ACTIONS.groupSelect, method: "post", fields: ["groupId"] },
+    ])
+    // The field names are what the API's request parser takes, and nothing else.
+    const body = Object.fromEntries(
+      pickerForms[0].fields.map((name) => [name, "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"]),
+    )
+    expect(parseSelectGroupRequest(body)).toEqual(body)
+  })
+
+  it("lists every group with the person's role, marks the selected one, and gives each copy its own ids", () => {
+    const html = renderToString(frame())
+
+    expect(html.match(/<option value="g-1">Home · Owner<\/option>/g)).toHaveLength(2)
+    expect(html.match(/<option selected value="g-2">Team · Viewer<\/option>/g)).toHaveLength(2)
+    const ids = [...html.matchAll(/<select\b[^>]*\sid="([^"]*)"/g)].map(([, id]) => id)
+    expect(new Set(ids).size).toBe(2)
+  })
+
+  it("links a cog named Manage groups to the groups page", () => {
+    const html = renderToString(frame())
+    const cogs = [...html.matchAll(/<a\b[^>]*data-e2e="group-manage"[^>]*>/g)].map(([tag]) => tag)
+
+    expect(cogs).toHaveLength(2)
+    for (const cog of cogs) {
+      expect(attribute(cog, "href")).toBe("/groups")
+      expect(attribute(cog, "aria-label")).toBe("Manage groups")
+    }
+  })
+
+  it("draws no picker when the app has no groups to offer", () => {
+    expect(renderToString(<AppFrame user={{ firstName: "Ada", lastName: "" }}>page</AppFrame>))
+      .not.toContain("group-picker")
   })
 })
 
@@ -313,15 +372,27 @@ describe("GroupsScreen", () => {
     expect(noScriptSurface(<GroupsScreen {...withoutRefresh} />).scriptOnlyButtons).toEqual([])
   })
 
-  it("links each group to its notes", () => {
-    const surface = noScriptSurface(
+  it("gives each group a form that selects it and opens its notes, named after the group", () => {
+    const screen = (
       <GroupsScreen
         {...groupsDefaults}
-        groups={[{ id: "g-2", name: "Team", kind: GroupKind.SHARED, role: GroupRole.VIEWER }]}
-      />,
+        groups={[
+          { id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER },
+          { id: "g-2", name: "Team", kind: GroupKind.SHARED, role: GroupRole.VIEWER },
+        ]}
+      />
     )
+    const html = renderToString(screen)
+    const surface = noScriptSurface(screen)
 
-    expect(surface.links).toEqual([NOTE_PATHS.list("g-2")])
+    const selects = surface.forms.filter((form) => form.action === FORM_ACTIONS.groupSelect)
+    expect(selects).toEqual([
+      { action: FORM_ACTIONS.groupSelect, method: "post", fields: ["groupId"] },
+      { action: FORM_ACTIONS.groupSelect, method: "post", fields: ["groupId"] },
+    ])
+    expect(html).toContain('name="groupId" value="g-2"')
+    expect(html).toContain('aria-label="Open notes in Team"')
+    expect(surface.links).toEqual([])
   })
 })
 
@@ -350,18 +421,24 @@ const notesDefaults: NotesScreenProps = {
 }
 
 describe("NotesScreen without JavaScript", () => {
+  it("names the group on screen in the address of the create form", () => {
+    const surface = noScriptSurface(<NotesScreen {...notesDefaults} />)
+
+    expect(formAt(surface, `/notes?group=${groupId}`).method).toBe("post")
+  })
+
   it("posts a new note and each delete with the API's field names, and links each note to its edit page", () => {
     const surface = noScriptSurface(<NotesScreen {...notesDefaults} />)
 
     expect(surface.forms.every((form) => form.method === "post")).toBe(true)
-    expect(formAt(surface, NOTE_PATHS.list(groupId)).fields).toEqual(
+    expect(formAt(surface, NOTE_PATHS.create(groupId)).fields).toEqual(
       schemaKeys(noteCreateRequestSchema),
     )
-    expect(formAt(surface, NOTE_PATHS.delete(groupId, noteRow.id)).fields).toEqual(
+    expect(formAt(surface, NOTE_PATHS.delete(noteRow.id)).fields).toEqual(
       schemaKeys(noteDeleteRequestSchema),
     )
     expect(surface.forms).toHaveLength(2)
-    expect(surface.links).toContain(NOTE_PATHS.note(groupId, noteRow.id))
+    expect(surface.links).toContain(NOTE_PATHS.note(noteRow.id))
     expect(surface.scriptOnlyButtons).toEqual([])
   })
 
@@ -377,11 +454,11 @@ describe("NotesScreen without JavaScript", () => {
     const html = renderToString(screen)
     const surface = noScriptSurface(screen)
 
-    expect(formAt(surface, NOTE_PATHS.note(groupId, noteRow.id)).fields).toEqual(
+    expect(formAt(surface, NOTE_PATHS.note(noteRow.id)).fields).toEqual(
       schemaKeys(noteUpdateRequestSchema),
     )
     expect(html).toContain('name="version" value="2"')
-    expect(surface.links).toContain(NOTE_PATHS.list(groupId))
+    expect(surface.links).toContain(NOTE_PATHS.list)
   })
 
   it("shows a viewer the notes without a single form", () => {
@@ -399,10 +476,10 @@ describe("NotesScreen without JavaScript", () => {
 
   it("links a page without JavaScript to the older notes", () => {
     const surface = noScriptSurface(
-      <NotesScreen {...notesDefaults} nextPageHref={`${NOTE_PATHS.list(groupId)}?cursor=abc`} />,
+      <NotesScreen {...notesDefaults} nextPageHref={`${NOTE_PATHS.list}?cursor=abc`} />,
     )
 
-    expect(surface.links).toContain(`${NOTE_PATHS.list(groupId)}?cursor=abc`)
+    expect(surface.links).toContain(`${NOTE_PATHS.list}?cursor=abc`)
   })
 })
 
