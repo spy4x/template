@@ -41,7 +41,7 @@ apps/spa      Preact + Vite PWA. Wires the libs/ui auth, profile and groups scre
               group commands and queries go over the socket.
 apps/mpa      Fresh. REST-only, server-rendered client: auth, profile, groups and notes,
               every action a form post that works without JavaScript. Calls the API
-              over HTTP (API_URL); not in compose yet (#122).
+              over HTTP (API_URL); in compose under the `mpa` profile.
 apps/worker   Drains outbox_events and announces group changes (pg_notify); sweeps
               expired idempotency keys. Runs in compose as `worker`, from the API's image.
 
