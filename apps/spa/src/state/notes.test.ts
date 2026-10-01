@@ -117,6 +117,18 @@ describe("notes store", () => {
     expect(store.draftId.value).not.toBe(firstId)
   })
 
+  it("gives back the note it created, and nothing when the title is missing", async () => {
+    const { store } = harness()
+    await store.open(groupId, null)
+    store.draft.value = { title: "Plan", body: "" }
+    const id = store.draftId.value
+
+    expect((await store.create())?.id).toBe(id)
+
+    store.draft.value = { title: " ", body: "" }
+    expect(await store.create()).toBe(null)
+  })
+
   it("puts a missing title error on the title and sends nothing", async () => {
     const { store, calls } = harness()
     await store.open(groupId, null)
@@ -173,6 +185,7 @@ describe("notes store", () => {
       body: "",
       version: 2,
       conflict: false,
+      base: { title: "Theirs", body: "" },
     })
     expect(store.editErrors.value).toEqual({ title: null, form: null })
   })
@@ -192,6 +205,85 @@ describe("notes store", () => {
     expect(store.listError.value).toBe(NOTE_MESSAGES.deleteConflict)
     expect(reads.length).toBe(2)
     expect(store.notes.value.map((note) => note.title)).toEqual(["Changed"])
+  })
+
+  it("deletes the open note and says so, so the page can leave it", async () => {
+    const { store, calls } = harness({ pages: [{ notes: [item("a", 3)], nextCursor: null }] })
+    await store.open(groupId, "a")
+
+    expect(await store.remove(store.notes.value[0])).toBe(true)
+
+    expect(calls).toEqual([{ name: "delete", input: { groupId, id: "a", version: 3 } }])
+    expect(store.editing.value).toBe(null)
+    expect(store.notes.value).toEqual([])
+  })
+
+  it("flags a conflict on the open note when its delete was refused for a stale version", async () => {
+    const { store } = harness({
+      pages: [{ notes: [item("a", 1)], nextCursor: null }, {
+        notes: [item("a", 2)],
+        nextCursor: null,
+      }],
+      delete: () => Promise.reject(conflict(2)),
+    })
+    await store.open(groupId, "a")
+
+    expect(await store.remove(store.notes.value[0])).toBe(false)
+
+    expect(store.editing.value).toMatchObject({ id: "a", conflict: true })
+  })
+
+  it("marks a note that is not in the open group as missing, with no list error", async () => {
+    const { store } = harness({
+      pages: [{ notes: [item("a")], nextCursor: null }],
+      get: () =>
+        Promise.reject(
+          new RealtimeRequestError("not_found", "Note not found", { code: "NOTE_NOT_FOUND" }),
+        ),
+    })
+
+    await store.open(groupId, "elsewhere")
+
+    expect(store.missing.value).toBe(true)
+    expect(store.editing.value).toBe(null)
+    expect(store.listError.value).toBe(null)
+
+    await store.open(groupId, "a")
+    expect(store.missing.value).toBe(false)
+  })
+
+  it("counts typed text as unsaved until it is saved, created or discarded", async () => {
+    const { store } = harness({ pages: [{ notes: [item("a", 4)], nextCursor: null }] })
+    await store.open(groupId, null)
+    expect(store.unsaved.value).toBe(false)
+    store.draft.value = { title: "Half", body: "" }
+    expect(store.unsaved.value).toBe(true)
+    store.discardDraft()
+    expect(store.unsaved.value).toBe(false)
+
+    await store.open(groupId, "a")
+    expect(store.unsaved.value).toBe(false)
+    store.editing.value = { ...store.editing.value!, title: "Changed" }
+    expect(store.unsaved.value).toBe(true)
+    store.editing.value = { ...store.editing.value!, title: "a" }
+    expect(store.unsaved.value).toBe(false)
+    store.editing.value = { ...store.editing.value!, title: "Changed" }
+    await store.save()
+    expect(store.unsaved.value).toBe(false)
+  })
+
+  it("does not count another member's change to the open note as the person's own edit", async () => {
+    const { store } = harness({
+      pages: [{ notes: [item("a", 1)], nextCursor: null }, {
+        notes: [item("a", 2, "Theirs")],
+        nextCursor: null,
+      }],
+    })
+    await store.open(groupId, "a")
+
+    await store.refresh()
+
+    expect(store.unsaved.value).toBe(false)
   })
 
   it("forgets the previous group's notes and draft when another group opens", async () => {

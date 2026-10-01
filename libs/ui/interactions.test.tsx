@@ -17,7 +17,7 @@ import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
 import { GroupSettingsScreen } from "./group-settings-screen.tsx"
 import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
-import { NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
+import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
 import { FORM_ACTIONS, NOTE_PATHS } from "./progressive.tsx"
 import {
@@ -381,58 +381,83 @@ const note = {
   version: 3,
 }
 const noError = { title: null, form: null }
-const notesDefaults: NotesScreenProps = {
+const editorDefaults: NoteEditorScreenProps = {
   group: { id: groupId, name: "Team", canWrite: true },
-  notes: [note],
   loading: false,
+  notFound: false,
+  note: null,
+  value: { title: "", body: "" },
   draftId: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111009",
-  draft: { title: "", body: "" },
-  createErrors: noError,
-  creating: false,
-  editing: null,
-  editErrors: noError,
+  errors: noError,
   saving: false,
-  deleting: null,
-  listError: null,
-  nextPageHref: null,
+  deleting: false,
+}
+const existing = { id: note.id, version: 3, conflict: false }
+
+/** Clicks the first button of the open delete dialog with this label. */
+async function clickDialogButton(label: string): Promise<void> {
+  const button = [...document.querySelectorAll("[data-e2e=note-delete-dialog] button")]
+    .find((candidate) => candidate.textContent?.trim() === label)
+  if (!button) throw new Error(`the dialog has no ${label} button`)
+  await act(() => {
+    button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }) as unknown as Event)
+  })
 }
 
-describe("NotesScreen in the browser", () => {
+describe("NoteEditorScreen in the browser", () => {
   it("reports the typed title and creates the note through the app's callbacks", async () => {
-    const draft = spy<[{ title: string; body: string }]>()
-    const create = spy<[]>()
-    await mount(<NotesScreen {...notesDefaults} onDraftChange={draft.fn} onCreate={create.fn} />)
+    const change = spy<[{ title: string; body: string }]>()
+    const save = spy<[]>()
+    await mount(<NoteEditorScreen {...editorDefaults} onChange={change.fn} onSave={save.fn} />)
 
-    await type("[data-e2e=note-new-title]", "Trip")
+    await type("[data-e2e=note-title]", "Trip")
 
-    expect(draft.calls).toEqual([[{ title: "Trip", body: "" }]])
+    expect(change.calls).toEqual([[{ title: "Trip", body: "" }]])
     expect(await submit(NOTE_PATHS.create(groupId))).toBe(true)
-    expect(create.calls).toHaveLength(1)
+    expect(save.calls).toHaveLength(1)
   })
 
-  it("deletes the note it belongs to through the app's callback", async () => {
-    const remove = spy<[typeof note]>()
-    await mount(<NotesScreen {...notesDefaults} onDelete={remove.fn} />)
-
-    expect(await submit(NOTE_PATHS.delete(note.id))).toBe(true)
-    expect(remove.calls).toEqual([[note]])
-  })
-
-  it("posts the create and the delete natively when the app takes nothing over", async () => {
-    await mount(<NotesScreen {...notesDefaults} />)
+  it("posts natively when the app takes nothing over", async () => {
+    await mount(<NoteEditorScreen {...editorDefaults} />)
 
     expect(await submit(NOTE_PATHS.create(groupId))).toBe(false)
-    expect(await submit(NOTE_PATHS.delete(note.id))).toBe(false)
+  })
+
+  it("asks before deleting, and deletes only when the person confirms", async () => {
+    const remove = spy<[]>()
+    await mount(
+      <NoteEditorScreen {...editorDefaults} note={existing} value={note} onDelete={remove.fn} />,
+    )
+
+    await click("[data-e2e=note-delete]")
+    expect(remove.calls).toEqual([])
+    expect(find("[data-e2e=note-delete-dialog]").textContent).toContain("Delete this note?")
+
+    await clickDialogButton("Delete")
+    expect(remove.calls).toHaveLength(1)
+  })
+
+  it("deletes nothing when the person keeps the note", async () => {
+    const remove = spy<[]>()
+    await mount(
+      <NoteEditorScreen {...editorDefaults} note={existing} value={note} onDelete={remove.fn} />,
+    )
+    await click("[data-e2e=note-delete]")
+
+    await clickDialogButton("Keep it")
+
+    expect(remove.calls).toEqual([])
+    expect(document.querySelector("[data-e2e=note-delete-dialog]")).toBe(null)
   })
 
   it("moves focus to the title when it gets an error", async () => {
-    await mount(<NotesScreen {...notesDefaults} />)
+    await mount(<NoteEditorScreen {...editorDefaults} />)
 
     await rerender(
-      <NotesScreen {...notesDefaults} createErrors={{ title: "Enter a title", form: null }} />,
+      <NoteEditorScreen {...editorDefaults} errors={{ title: "Enter a title", form: null }} />,
     )
 
-    expect(focused()).toBe("note-new-title")
+    expect(focused()).toBe("note-title")
   })
 })
 

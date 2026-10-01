@@ -19,6 +19,7 @@ import { AuthView } from "./views/AuthView.tsx"
 import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView.tsx"
 import { GroupsView } from "./views/GroupsView.tsx"
 import { GroupSettingsView } from "./views/GroupSettingsView.tsx"
+import { NoteEditorView } from "./views/NoteEditorView.tsx"
 import { NotesView } from "./views/NotesView.tsx"
 import { ProfileView } from "./views/ProfileView.tsx"
 import { AppShell, PublicFrame } from "./views/AppShell.tsx"
@@ -65,8 +66,11 @@ function Routes() {
       <Route path="/groups/:groupId/notes/:noteId">
         {(params) => <OpenIfSelected groupId={params.groupId} noteId={params.noteId} />}
       </Route>
-      <Route path="/notes">{() => <NotesView />}</Route>
-      <Route path="/notes/:noteId">{(params) => <NotesView noteId={params.noteId} />}</Route>
+      <Route path="/notes" component={NotesView} />
+      <Route path="/notes/new">{() => <NoteEditorView key="new" />}</Route>
+      <Route path="/notes/:noteId">
+        {(params) => <NoteEditorView key={params.noteId} noteId={params.noteId} />}
+      </Route>
       <Route path="/" component={ProfileView} />
     </Switch>
   )

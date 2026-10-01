@@ -1,27 +1,23 @@
 import type { FreshContext } from "fresh"
 import { canMutateNotes } from "@domain/groups"
+import { NoteEditorScreen, type NoteTarget } from "@ui/note-editor-screen.tsx"
 import {
   type NoteDraft,
-  type NoteEdit,
   type NoteFormErrors,
   type NoteRow,
+  type NotesGroup,
   NotesScreen,
 } from "@ui/notes-screen.tsx"
 import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { type Api, type ApiAnswer, errorCode, errorMessage, isOk, isRecord } from "./api.ts"
 import { readGroup, readSelected } from "./groups.ts"
-import { Frame, readSession, signInPath } from "./session.tsx"
+import { Frame, readSession, type Session, signInPath } from "./session.tsx"
 import type { State } from "./utils.ts"
 
 const NO_ERRORS: NoteFormErrors = { title: null, form: null }
 
-/** What a notes page shows besides the list: the open form and the errors of the last post. */
+/** What the list page shows besides the list: the error of the last post. */
 export interface NotesPageState {
-  draftId?: string
-  draft?: NoteDraft
-  createErrors?: NoteFormErrors
-  editing?: NoteEdit | null
-  editErrors?: NoteFormErrors
   listError?: string | null
   status?: number
 }
@@ -88,15 +84,10 @@ export async function selectedGroupOrPage(
   return groupId ? { groupId } : { page: await renderNotes(ctx) }
 }
 
-/**
- * The notes page: the selected group's notes, a page at a time (`?cursor=`), with the create form
- * or, with `editing`, the edit form. The group is the one the server holds for the person, so the
- * address names none. A person with no group sees "This group was not found".
- */
-export async function renderNotes(
+/** Who the person is and which group the notes pages show, or the sign-in redirect to give. */
+async function readPage(
   ctx: FreshContext<State>,
-  page: NotesPageState = {},
-): Promise<Response> {
+): Promise<Response | { session: Session; group: NotesGroup | null }> {
   const { api } = ctx.state
   const session = await readSession(api)
   if (!session.user) return ctx.redirect(signInPath(session), 303)
@@ -106,34 +97,119 @@ export async function renderNotes(
     ? picker.groups.find((group) => group.id === picker.selectedId) ??
       await readGroup(api, picker.selectedId)
     : null
+  const group: NotesGroup | null = membership
+    ? { id: membership.id, name: membership.name, canWrite: canMutateNotes(membership.role) }
+    : null
+  return { session, group }
+}
+
+/**
+ * The notes page: the selected group's notes, a page at a time (`?cursor=`). The group is the one
+ * the server holds for the person, so the address names none. A person with no group sees "This
+ * group was not found".
+ */
+export async function renderNotes(
+  ctx: FreshContext<State>,
+  page: NotesPageState = {},
+): Promise<Response> {
+  const read = await readPage(ctx)
+  if (read instanceof Response) return read
+  const { session, group } = read
   const cursor = ctx.url.searchParams.get("cursor")
-  const list = membership
-    ? await listNotes(api, membership.id, cursor)
+  const list = group
+    ? await listNotes(ctx.state.api, group.id, cursor)
     : { notes: [], nextCursor: null, error: null }
   return ctx.render(
     <Frame session={session} path={ctx.url.pathname}>
       <NotesScreen
-        group={membership
-          ? { id: membership.id, name: membership.name, canWrite: canMutateNotes(membership.role) }
-          : null}
+        group={group}
         notes={list.notes}
         loading={false}
-        draftId={page.draftId ?? crypto.randomUUID()}
-        draft={page.draft ?? { title: "", body: "" }}
-        createErrors={page.createErrors ?? NO_ERRORS}
-        creating={false}
-        editing={page.editing ?? null}
-        editErrors={page.editErrors ?? NO_ERRORS}
-        saving={false}
-        deleting={null}
         listError={page.listError ?? list.error}
         nextPageHref={list.nextCursor
           ? `${NOTE_PATHS.list}?${new URLSearchParams({ cursor: list.nextCursor })}`
           : null}
       />
     </Frame>,
-    { status: page.status ?? (membership ? 200 : 404) },
+    { status: page.status ?? (group ? 200 : 404) },
   )
+}
+
+/** What the note page shows besides the note: the typed text, the errors of the last post. */
+export interface NoteEditorPageState {
+  /** The note being edited; `null` for the create page. */
+  note?: NoteTarget | null
+  value?: NoteDraft
+  draftId?: string
+  errors?: NoteFormErrors
+  /** The note could not be read, so the page says it was not found. */
+  notFound?: boolean
+  /** Show "delete this note?" in place of the form. */
+  confirmingDelete?: boolean
+  status?: number
+}
+
+/**
+ * The note page: the create form, or the edit form of `note`, or "not found", or the question
+ * "delete this note?". For a viewer it is the note as text. The group is the selected one.
+ */
+export async function renderNoteEditor(
+  ctx: FreshContext<State>,
+  page: NoteEditorPageState = {},
+): Promise<Response> {
+  const read = await readPage(ctx)
+  if (read instanceof Response) return read
+  const { session, group } = read
+  const notFound = page.notFound ?? false
+  return ctx.render(
+    <Frame session={session} path={ctx.url.pathname}>
+      <NoteEditorScreen
+        group={group}
+        loading={false}
+        notFound={notFound}
+        note={page.note ?? null}
+        value={page.value ?? { title: "", body: "" }}
+        draftId={page.draftId ?? crypto.randomUUID()}
+        errors={page.errors ?? NO_ERRORS}
+        saving={false}
+        deleting={false}
+        confirmingDelete={page.confirmingDelete}
+      />
+    </Frame>,
+    { status: page.status ?? (group && !notFound ? 200 : 404) },
+  )
+}
+
+/**
+ * Reads a note of the selected group and renders its page: the edit form, or with `confirming` the
+ * delete question. `errors` is a refusal of the post that led here, shown on the page. A note that
+ * cannot be read (gone, or in another group) is the not-found page; a person never gets to a note
+ * of another group by a link, because a link must not change the selection.
+ */
+export async function renderNoteOfSelectedGroup(
+  ctx: FreshContext<State>,
+  groupId: string,
+  noteId: string,
+  options: { confirming?: boolean; errors?: NoteFormErrors; status?: number } = {},
+): Promise<Response> {
+  const answer = await ctx.state.api.call("GET", notesApiPath(groupId, noteId))
+  const note = noteOf(answer)
+  if (!note) {
+    return renderNoteEditor(ctx, {
+      notFound: true,
+      errors: answer.status === 404
+        ? options.errors
+        : { title: null, form: errorMessage(answer, "The note could not be read") },
+      status: answer.status === 404 || answer.status === 403 ? 404 : answer.status,
+    })
+  }
+  return renderNoteEditor(ctx, {
+    note: { id: note.id, version: note.version, conflict: false },
+    value: { title: note.title, body: note.body },
+    errors: options.errors,
+    confirmingDelete: options.confirming,
+    status: options.status,
+  })
 }
 
 /** The form error of a refused note write, and whether it was a stale version. */
