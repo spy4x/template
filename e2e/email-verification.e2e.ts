@@ -81,8 +81,8 @@ test("a new account proves its address with the mailed code, then moves to a new
     // The new address signs in; the old one no longer does.
     await page.locator("[data-e2e=shell-user-menu-button]").click()
     await page.getByRole("menuitem", { name: "Sign out" }).click()
-    // Signed out, the e-mail page has nothing to show and hands over to sign-in.
-    await expect(page).toHaveURL("/sign-in")
+    // Signed out, the e-mail page hands over to sign-in, which would return to it.
+    await expect(page).toHaveURL("/sign-in?next=%2Femail")
     await gotoApp(page, "/sign-in", page.locator("[data-e2e=auth-form-login]"))
     await page.locator("[data-e2e=auth-form-login]").fill(email)
     await page.locator("[data-e2e=auth-form-password]").fill(password)
