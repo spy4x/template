@@ -23,8 +23,8 @@ import type { State } from "./utils.ts"
 
 /**
  * One group's settings page, for the `GET` and for a refused rename, delete, member change,
- * leave, invitation, revoke or transfer, which shows the refusal where the person acted and keeps what they
- * typed. A new invitation's link is drawn this once, in the answer to its create.
+ * leave, invitation, revoke or transfer, which shows the refusal where the person acted and keeps
+ * what they typed. A new invitation's link is drawn this once, in the answer to its create.
  */
 export async function renderGroupSettings(
   ctx: FreshContext<State>,
@@ -43,6 +43,7 @@ export async function renderGroupSettings(
     transferDraft = EMPTY_TRANSFER_DRAFT,
     transferError = null,
     status,
+    retryAfter,
   }: {
     name?: string
     renameError?: string | null
@@ -60,6 +61,8 @@ export async function renderGroupSettings(
     transferDraft?: TransferDraft
     transferError?: TransferError | null
     status?: number
+    /** The API's `Retry-After` of a refused request, passed on with its status. */
+    retryAfter?: string
   } = {},
 ): Promise<Response> {
   const session = await readSession(ctx.state.api)
@@ -124,6 +127,9 @@ export async function renderGroupSettings(
         )}
       />
     </Frame>,
-    { status: status ?? (group ? 200 : 404) },
+    {
+      status: status ?? (group ? 200 : 404),
+      headers: retryAfter ? { "retry-after": retryAfter } : undefined,
+    },
   )
 }

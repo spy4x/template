@@ -32,6 +32,7 @@ export const handler = define.handlers({
         message: errorMessage(answer, "The group could not be transferred"),
       },
       status: answer.status,
+      retryAfter: answer.retryAfter,
     })
   },
 })
