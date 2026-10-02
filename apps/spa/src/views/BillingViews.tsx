@@ -21,18 +21,20 @@ function useGroupBilling(groupId: string) {
     group,
     billing: current?.groupId === groupId ? current.billing : null,
     error: failure?.groupId === groupId ? failure.message : null,
+    errorId: failure?.groupId === groupId ? failure.id : undefined,
   }
 }
 
 /** The plan section of a group's settings page. */
 export function GroupBillingCard({ groupId }: { groupId: string }) {
   const [, navigate] = useLocation()
-  const { billing, error } = useGroupBilling(groupId)
+  const { billing, error, errorId } = useGroupBilling(groupId)
   return (
     <BillingCard
       groupId={groupId}
       billing={billing}
       error={error}
+      errorId={errorId}
       pending={billingStore.pending.value}
       navigate={navigate}
       onManage={() => void billingStore.portal(groupId)}
@@ -43,13 +45,14 @@ export function GroupBillingCard({ groupId }: { groupId: string }) {
 /** The plans a group can move to, at `/groups/:groupId/pricing`. */
 export function PricingView({ groupId }: { groupId: string }) {
   const [, navigate] = useLocation()
-  const { group, billing, error } = useGroupBilling(groupId)
+  const { group, billing, error, errorId } = useGroupBilling(groupId)
   return (
     <PricingScreen
       groupId={groupId}
       groupName={group?.name ?? null}
       billing={billing}
       error={error}
+      errorId={errorId}
       pending={billingStore.pending.value}
       navigate={navigate}
       onChoose={(planId) => void billingStore.checkout(groupId, planId)}

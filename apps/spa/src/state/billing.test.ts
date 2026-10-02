@@ -49,6 +49,8 @@ const billingJson = {
   currentPeriodEnd: "2026-11-01T00:00:00.000Z",
   cancelAtPeriodEnd: false,
   canManage: true,
+  subscribed: true,
+  hasCustomer: true,
 }
 
 describe("billing store", () => {
@@ -111,12 +113,44 @@ describe("billing store", () => {
 
     await store.checkout(groupId, "pro")
 
-    expect(store.error.value).toEqual({
+    expect(store.error.value).toMatchObject({
       groupId,
       message: "Only the owner can manage the group's billing",
     })
     expect(store.pending.value).toBe(false)
     expect(left).toEqual([])
+  })
+
+  it("marks every refusal as new, even when its message repeats", async () => {
+    const refusal = {
+      ok: false as const,
+      status: 409,
+      error: { status: 409, message: "The group already has a subscription" },
+    }
+    const { store } = harness(refusal, refusal)
+
+    await store.checkout(groupId, "pro")
+    const first = store.error.value
+    await store.checkout(groupId, "pro")
+
+    expect(store.error.value?.message).toBe(first?.message)
+    expect(store.error.value?.id).not.toBe(first?.id)
+  })
+
+  it("never leaves for a provider page that is not http or https", async () => {
+    const { store, left } = harness({
+      ok: true,
+      status: 200,
+      data: { url: "javascript:alert(1)" },
+    })
+
+    await store.portal(groupId)
+
+    expect(left).toEqual([])
+    expect(store.error.value?.message).toBe(
+      "The payment provider answered with an address this app does not open.",
+    )
+    expect(store.pending.value).toBe(false)
   })
 
   it("says the server is out of reach when the call never arrives", async () => {

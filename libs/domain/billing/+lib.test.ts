@@ -8,7 +8,9 @@ import {
   BillingStatus,
   effectivePlanId,
   FREE_PLAN_ID,
+  hasLiveSubscription,
   PRO_PLAN_ID,
+  providerPageUrl,
   type StoredSubscription,
   toGroupBilling,
 } from "./+lib.ts"
@@ -48,14 +50,44 @@ describe("billing domain", () => {
   })
 
   it("shows the free plan and no way to manage it while billing is off, whatever is stored", () => {
-    expect(toGroupBilling(subscription(BillingStatus.Active), GroupRole.OWNER, false)).toEqual({
-      enabled: false,
-      planId: FREE_PLAN_ID,
-      status: null,
-      currentPeriodEnd: null,
-      cancelAtPeriodEnd: false,
-      canManage: false,
-    })
+    expect(toGroupBilling(subscription(BillingStatus.Active), GroupRole.OWNER, false, true))
+      .toEqual({
+        enabled: false,
+        planId: FREE_PLAN_ID,
+        status: null,
+        currentPeriodEnd: null,
+        cancelAtPeriodEnd: false,
+        canManage: false,
+        subscribed: false,
+        hasCustomer: false,
+      })
+  })
+
+  it("counts every subscription that is not cancelled as live, whatever plan it shows", () => {
+    for (
+      const status of [
+        BillingStatus.Trialing,
+        BillingStatus.Active,
+        BillingStatus.PastDue,
+        BillingStatus.Incomplete,
+        BillingStatus.Paused,
+      ]
+    ) {
+      expect(hasLiveSubscription(subscription(status))).toBe(true)
+    }
+    expect(hasLiveSubscription(subscription(BillingStatus.Active, null))).toBe(true)
+    expect(hasLiveSubscription(subscription(BillingStatus.Canceled))).toBe(false)
+    expect(hasLiveSubscription(null)).toBe(false)
+  })
+
+  it("opens only http and https provider pages", () => {
+    expect(providerPageUrl("https://checkout.stripe.com/c/pay/cs_1")).toBe(
+      "https://checkout.stripe.com/c/pay/cs_1",
+    )
+    expect(providerPageUrl("http://localhost:8000/fake")).toBe("http://localhost:8000/fake")
+    for (const url of ["javascript:alert(1)", "data:text/html,x", "/relative", "", 42, null]) {
+      expect(providerPageUrl(url)).toBeNull()
+    }
   })
 
   it("lets only the owner manage billing, and tells a stranger the group does not exist", () => {

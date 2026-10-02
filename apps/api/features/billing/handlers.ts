@@ -8,9 +8,8 @@ import {
   BillingGetQuery,
   BillingPortalCommand,
   type BillingRepository,
-  effectivePlanId,
-  FREE_PLAN_ID,
   type GroupRoleLookup,
+  hasLiveSubscription,
   PAID_PLANS,
   toGroupBilling,
 } from "@domain/billing"
@@ -38,8 +37,10 @@ export function createBillingGetHandler(
   return async ({ data }) => {
     const role = await groups.roleOf(data.groupId, data.actor.userId)
     assertCanReadBilling(role)
-    const subscription = provider ? await billing.get(data.groupId) : null
-    return { billing: toGroupBilling(subscription, role, provider !== null) }
+    const [subscription, customerId] = provider
+      ? await Promise.all([billing.get(data.groupId), billing.customerOf(data.groupId)])
+      : [null, null]
+    return { billing: toGroupBilling(subscription, role, provider !== null, customerId !== null) }
   }
 }
 
@@ -52,10 +53,11 @@ export function createBillingCheckoutHandler(
       throw new BillingError("UNKNOWN_PLAN", "No such plan")
     }
     // A second checkout would start a second subscription and charge twice; the portal changes the
-    // plan of the one the group has.
+    // plan of the one the group has. Any subscription that is not cancelled counts, even a paused,
+    // incomplete or unknown-price one that shows as the free plan.
     const current = await dependencies.billing.get(data.groupId)
-    if (effectivePlanId(current) !== FREE_PLAN_ID) {
-      throw new BillingError("ALREADY_SUBSCRIBED", "The group already has a paid plan")
+    if (hasLiveSubscription(current)) {
+      throw new BillingError("ALREADY_SUBSCRIBED", "The group already has a subscription")
     }
     const customerId = await dependencies.billing.customerOf(data.groupId)
     const result = await provider.createCheckout({
@@ -64,7 +66,11 @@ export function createBillingCheckoutHandler(
       cancelUrl: appUrl(dependencies, `/groups/${data.groupId}/pricing`),
       reference: data.groupId,
       ...(customerId ? { customerId } : {}),
-      ...(data.idempotencyKey ? { idempotencyKey: data.idempotencyKey } : {}),
+      // The client's key is scoped to the group and the person, so one person's key can never
+      // replay a checkout the provider made for another group or person.
+      ...(data.idempotencyKey
+        ? { idempotencyKey: `${data.groupId}:${data.actor.userId}:${data.idempotencyKey}` }
+        : {}),
     })
     if (!result.ok) {
       dependencies.log("error: billing checkout failed", result.error)

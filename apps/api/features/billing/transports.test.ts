@@ -92,7 +92,13 @@ function stack(
     portal: (command) => commands.execute(command),
     expectedOrigin: "http://local",
   })
-  const call = (userId: number, method: string, path: string, body?: unknown) => {
+  const call = (
+    userId: number,
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders: Record<string, string> = {},
+  ) => {
     const app = new Hono<APIContext>()
     app.use("*", async (c, next) => {
       c.set("requestId", "req-billing")
@@ -107,6 +113,7 @@ function stack(
         cookie: "sessionIdToken=1:token",
         origin: "http://local",
         "sec-fetch-site": "same-origin",
+        ...extraHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
@@ -190,6 +197,57 @@ describe("billing over REST", () => {
     expect(recorder.checkouts).toEqual([])
   })
 
+  for (
+    const [name, subscription] of [
+      ["paused", { ...PRO, status: BillingStatus.Paused }],
+      ["incomplete", { ...PRO, status: BillingStatus.Incomplete }],
+      ["on a price no plan maps to", { ...PRO, planId: null }],
+    ] as const
+  ) {
+    it(`refuses a second checkout while the group's subscription is ${name}, though it shows as free`, async () => {
+      const { recorder, call } = stack({ subscription, customer: "cus_1" })
+
+      const response = await call(OWNER, "POST", "/checkout", { planId: "pro" })
+
+      expect([response.status, await code(response)]).toEqual([409, "ALREADY_SUBSCRIBED"])
+      expect(recorder.checkouts).toEqual([])
+    })
+  }
+
+  it("opens a new checkout once the group's subscription is cancelled", async () => {
+    const { recorder, call } = stack({
+      subscription: { ...PRO, status: BillingStatus.Canceled },
+      customer: "cus_1",
+    })
+
+    const response = await call(OWNER, "POST", "/checkout", { planId: "pro" })
+
+    expect(response.status).toBe(200)
+    expect(recorder.checkouts).toHaveLength(1)
+  })
+
+  it("scopes the client's idempotency key to the group and the owner", async () => {
+    const { recorder, call } = stack()
+
+    await call(OWNER, "POST", "/checkout", { planId: "pro" }, { "idempotency-key": "key-1" })
+
+    expect(recorder.checkouts[0].idempotencyKey).toBe(`${groupId}:${OWNER}:key-1`)
+  })
+
+  it("tells the owner whether the group has a live subscription and a customer", async () => {
+    const paused = stack({ subscription: { ...PRO, status: BillingStatus.Paused }, customer: "c" })
+    const lapsed = stack({
+      subscription: { ...PRO, status: BillingStatus.Canceled },
+      customer: "c",
+    })
+
+    const live = await (await paused.call(OWNER, "GET", "")).json()
+    const ended = await (await lapsed.call(OWNER, "GET", "")).json()
+
+    expect(live.billing).toMatchObject({ planId: "free", subscribed: true, hasCustomer: true })
+    expect(ended.billing).toMatchObject({ planId: "free", subscribed: false, hasCustomer: true })
+  })
+
   it("opens the owner's portal for the group's customer, back to the group's settings", async () => {
     const { recorder, call } = stack({ subscription: PRO, customer: "cus_1" })
 
@@ -233,6 +291,8 @@ describe("billing over REST", () => {
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
       canManage: false,
+      subscribed: false,
+      hasCustomer: false,
     })
     expect([checkout.status, await code(checkout)]).toEqual([404, "BILLING_DISABLED"])
   })

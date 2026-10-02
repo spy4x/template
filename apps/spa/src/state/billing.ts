@@ -1,6 +1,6 @@
 import { signal } from "@preact/signals"
 import type { ApiResult } from "@spy4x/platform/api"
-import type { GroupBilling } from "@domain/billing"
+import { type GroupBilling, providerPageUrl } from "@domain/billing"
 import { apiFetch } from "./api.ts"
 
 /** `apiFetch`, or a test's stand-in for it. */
@@ -10,6 +10,7 @@ export type BillingFetch = <T>(url: string, init?: RequestInit) => Promise<ApiRe
 type GroupBillingJson = Omit<GroupBilling, "currentPeriodEnd"> & { currentPeriodEnd: string | null }
 
 const OFFLINE = "The server is out of reach. Try again."
+const UNSAFE_PAGE = "The payment provider answered with an address this app does not open."
 
 function billingPath(groupId: string, action = ""): string {
   return `/api/groups/${encodeURIComponent(groupId)}/billing${action}`
@@ -28,8 +29,12 @@ export function createBillingStore(
 ) {
   /** The billing of the group last read, with its id, so another group's page shows none of it. */
   const current = signal<{ groupId: string; billing: GroupBilling } | null>(null)
-  /** Why the last read or the last checkout or portal failed, with the group it was for. */
-  const error = signal<{ groupId: string; message: string } | null>(null)
+  /**
+   * Why the last read or the last checkout or portal failed, with the group it was for. `id` is new
+   * on every failure, so a screen moves focus to the message even when the text repeats.
+   */
+  const error = signal<{ groupId: string; message: string; id: number } | null>(null)
+  let refusals = 0
   /** A checkout or portal call is in flight. */
   const pending = signal(false)
 
@@ -37,7 +42,7 @@ export function createBillingStore(
     try {
       const result = await fetch<{ billing: GroupBillingJson }>(billingPath(groupId))
       if (!result.ok) {
-        error.value = { groupId, message: result.error.message }
+        error.value = { groupId, message: result.error.message, id: ++refusals }
         return
       }
       const { currentPeriodEnd, ...rest } = result.data.billing
@@ -50,7 +55,7 @@ export function createBillingStore(
       }
       if (error.value?.groupId === groupId) error.value = null
     } catch (_unreachable) {
-      error.value = { groupId, message: OFFLINE }
+      error.value = { groupId, message: OFFLINE, id: ++refusals }
     }
   }
 
@@ -66,13 +71,18 @@ export function createBillingStore(
         body: body === undefined ? undefined : JSON.stringify(body),
       })
       if (!result.ok) {
-        error.value = { groupId, message: result.error.message }
+        error.value = { groupId, message: result.error.message, id: ++refusals }
+        return
+      }
+      const url = providerPageUrl(result.data.url)
+      if (!url) {
+        error.value = { groupId, message: UNSAFE_PAGE, id: ++refusals }
         return
       }
       leaving = true
-      leave(result.data.url)
+      leave(url)
     } catch (_unreachable) {
-      error.value = { groupId, message: OFFLINE }
+      error.value = { groupId, message: OFFLINE, id: ++refusals }
     } finally {
       if (!leaving) pending.value = false
     }

@@ -28,6 +28,8 @@ const FREE_OWNER: GroupBilling = {
   currentPeriodEnd: null,
   cancelAtPeriodEnd: false,
   canManage: true,
+  subscribed: false,
+  hasCustomer: false,
 }
 
 const PRO_OWNER: GroupBilling = {
@@ -35,6 +37,8 @@ const PRO_OWNER: GroupBilling = {
   planId: PRO_PLAN_ID,
   status: BillingStatus.Active,
   currentPeriodEnd: new Date("2026-11-01T00:00:00Z"),
+  subscribed: true,
+  hasCustomer: true,
 }
 
 interface RenderedForm {
@@ -70,6 +74,31 @@ describe("billing screens without JavaScript", () => {
 
   it("gives the owner of a paying group a form that posts to the portal", () => {
     expect(forms(<BillingCard groupId={groupId} billing={PRO_OWNER} />)).toEqual([
+      { action: BILLING_PATHS.portal(groupId), method: "post", fields: [] },
+    ])
+  })
+
+  it("gives the owner the portal, and no upgrade, while a subscription that shows as free is live", () => {
+    const incomplete = {
+      ...FREE_OWNER,
+      status: BillingStatus.Incomplete,
+      subscribed: true,
+      hasCustomer: true,
+    }
+    const html = renderToString(<BillingCard groupId={groupId} billing={incomplete} />)
+
+    expect(forms(<BillingCard groupId={groupId} billing={incomplete} />)).toEqual([
+      { action: BILLING_PATHS.portal(groupId), method: "post", fields: [] },
+    ])
+    expect(html).not.toContain(BILLING_PATHS.pricing(groupId))
+  })
+
+  it("gives the owner of a group whose subscription ended both the plans and the portal", () => {
+    const lapsed = { ...FREE_OWNER, status: BillingStatus.Canceled, hasCustomer: true }
+    const html = renderToString(<BillingCard groupId={groupId} billing={lapsed} />)
+
+    expect(html).toContain(`href="${BILLING_PATHS.pricing(groupId)}"`)
+    expect(forms(<BillingCard groupId={groupId} billing={lapsed} />)).toEqual([
       { action: BILLING_PATHS.portal(groupId), method: "post", fields: [] },
     ])
   })
@@ -113,6 +142,12 @@ describe("billing screens without JavaScript", () => {
     expect(forms(<PricingScreen groupId={groupId} groupName="Team" billing={member} />)).toEqual([])
     expect(forms(<PricingScreen groupId={groupId} groupName="Team" billing={PRO_OWNER} />))
       .toEqual([])
+  })
+
+  it("shows no plan to choose while a subscription that shows as free is live", () => {
+    const paused = { ...FREE_OWNER, status: BillingStatus.Paused, subscribed: true }
+
+    expect(forms(<PricingScreen groupId={groupId} groupName="Team" billing={paused} />)).toEqual([])
   })
 })
 
@@ -233,6 +268,26 @@ describe("billing screens in the browser", () => {
 
     expect(document.activeElement?.getAttribute("data-e2e")).toBe("pricing-error")
     expect(find(`[data-e2e="pricing-error"]`).textContent).toContain("unavailable")
+  })
+
+  it("moves focus to the message again when the same refusal comes back", async () => {
+    const props = { groupId, groupName: "Team", billing: FREE_OWNER, error: "Refused." }
+    await mount(<PricingScreen {...props} errorId={1} />)
+    find<HTMLButtonElement>(`[data-e2e="pricing-plans"] button`).focus()
+
+    await rerender(<PricingScreen {...props} errorId={2} />)
+
+    expect(document.activeElement?.getAttribute("data-e2e")).toBe("pricing-error")
+  })
+
+  it("moves focus to the portal's message again when the same refusal comes back", async () => {
+    const props = { groupId, billing: PRO_OWNER, error: "Refused." }
+    await mount(<BillingCard {...props} errorId={1} />)
+    find<HTMLButtonElement>(`[data-e2e="group-section-billing"] form button`).focus()
+
+    await rerender(<BillingCard {...props} errorId={2} />)
+
+    expect(document.activeElement?.getAttribute("data-e2e")).toBe("billing-error")
   })
 
   it("moves focus to a refused portal's message", async () => {

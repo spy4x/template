@@ -1,6 +1,7 @@
 import type { JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
 import { BillingInterval, PlanCard, PricingTable, UpgradePrompt } from "@spy4x/preact-ui/billing"
+import { Button } from "@spy4x/preact-ui/button"
 import { Card, CardBody } from "@spy4x/preact-ui/card"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
@@ -43,6 +44,8 @@ export interface BillingCardProps {
   billing: GroupBilling | null
   /** Why the billing could not be read or the portal could not be opened, or `null`. */
   error?: string | null
+  /** New on every refusal, so focus moves to the message even when its text repeats. */
+  errorId?: number
   /** The portal is being opened. */
   pending?: boolean
   navigate?: Navigate
@@ -58,13 +61,14 @@ export interface BillingCardProps {
  * to change it: a link to the plans while the group is free, the provider's portal once it pays.
  */
 export function BillingCard(
-  { groupId, billing, error = null, pending = false, navigate, onManage }: BillingCardProps,
+  { groupId, billing, error = null, errorId, pending = false, navigate, onManage }:
+    BillingCardProps,
 ): JSX.Element {
   const message = useRef<HTMLDivElement>(null)
   // A refused portal has no field to fix, so focus lands on the message, under the button pressed.
   useEffect(() => {
     if (error && billing) message.current?.focus()
-  }, [error])
+  }, [error, errorId])
   // PlanCard draws its own form with no submit callback, so the app's callback takes the submit over
   // from the fieldset around it. The listener is added here rather than as `onSubmitCapture`: Preact
   // only maps that prop when the element has an `onsubmit` property, which not every DOM gives a
@@ -81,8 +85,13 @@ export function BillingCard(
     return () => fieldset.removeEventListener("submit", take, true)
   }, [onManage, pending, billing])
 
-  const paid = billing !== null && billing.planId !== FREE_PLAN_ID
+  // The owner reaches the portal whenever the provider has something of the group's: a live
+  // subscription, whatever plan it shows, or a customer with past invoices.
+  const portalOpen = billing !== null && billing.canManage &&
+    (billing.subscribed || billing.hasCustomer)
   const plan = billing ? findPlan(billing.planId) : null
+  const planCard = portalOpen && billing.subscribed && billing.planId !== FREE_PLAN_ID &&
+    billing.status !== null && billing.status <= 5
   return (
     <section aria-labelledby="group-billing" data-e2e="group-section-billing">
       <Card>
@@ -95,7 +104,7 @@ export function BillingCard(
                 : <p class="text-sm">Loading the plan...</p>)
               : (
                 <div data-e2e="billing-plan" data-plan={billing.planId}>
-                  {paid && billing.canManage && billing.status !== null && billing.status <= 5
+                  {planCard
                     ? (
                       // The fieldset disables the manage button while the portal opens.
                       <fieldset ref={portal} disabled={pending} class="m-0 min-w-0 border-0 p-0">
@@ -124,23 +133,42 @@ export function BillingCard(
                           {" "}
                           plan.
                         </p>
-                        {!billing.enabled ? null : billing.canManage
+                        {!billing.enabled
+                          ? null
+                          : !billing.canManage
                           ? (
-                            <UpgradePrompt
-                              href={BILLING_PATHS.pricing(groupId)}
-                              navigate={navigate}
-                              headingLevel={3}
-                              labels={{
-                                title: "Upgrade the group",
-                                message: "A paid plan adds priority support for every member.",
-                                action: "See plans",
-                              }}
-                            />
-                          )
-                          : (
                             <p class="text-sm text-muted" data-e2e="billing-owner-only">
                               Only the group's owner can change its plan.
                             </p>
+                          )
+                          : (
+                            <>
+                              {!billing.subscribed && (
+                                <UpgradePrompt
+                                  href={BILLING_PATHS.pricing(groupId)}
+                                  navigate={navigate}
+                                  headingLevel={3}
+                                  labels={{
+                                    title: "Upgrade the group",
+                                    message: "A paid plan adds priority support for every member.",
+                                    action: "See plans",
+                                  }}
+                                />
+                              )}
+                              {portalOpen && (
+                                <fieldset
+                                  ref={portal}
+                                  disabled={pending}
+                                  class="m-0 min-w-0 border-0 p-0"
+                                >
+                                  <form method="post" action={BILLING_PATHS.portal(groupId)}>
+                                    <Button type="submit" variant="outline">
+                                      Manage billing
+                                    </Button>
+                                  </form>
+                                </fieldset>
+                              )}
+                            </>
                           )}
                       </Stack>
                     )}
@@ -164,6 +192,8 @@ export interface PricingScreenProps {
   billing: GroupBilling | null
   /** Why the plans cannot be shown or the checkout could not be opened, or `null`. */
   error?: string | null
+  /** New on every refusal, so focus moves to the message even when its text repeats. */
+  errorId?: number
   /** A checkout is being opened: every plan's button is disabled. */
   pending?: boolean
   navigate?: Navigate
@@ -180,13 +210,13 @@ export interface PricingScreenProps {
  * the plan.
  */
 export function PricingScreen(
-  { groupId, groupName, billing, error = null, pending = false, navigate, onChoose }:
+  { groupId, groupName, billing, error = null, errorId, pending = false, navigate, onChoose }:
     PricingScreenProps,
 ): JSX.Element {
   const message = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (error && billing) message.current?.focus()
-  }, [error])
+  }, [error, errorId])
 
   const back = (
     <Link href={GROUP_PATHS.settings(groupId)} navigate={navigate} class="pc-link text-sm">
@@ -217,11 +247,10 @@ export function PricingScreen(
             Only the group's owner can change its plan.
           </p>
         )
-        : billing.planId !== FREE_PLAN_ID
+        : billing.subscribed
         ? (
           <p class="text-sm" data-e2e="pricing-paid">
-            This group is on the {planName(billing.planId)}{" "}
-            plan. Change or cancel it from the group's settings.
+            This group already has a subscription. Change or cancel it from the group's settings.
           </p>
         )
         : (

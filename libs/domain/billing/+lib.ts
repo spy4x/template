@@ -97,6 +97,30 @@ export function effectivePlanId(subscription: StoredSubscription | null): string
   return findPlan(subscription.planId) ? subscription.planId : FREE_PLAN_ID
 }
 
+/**
+ * Whether the group has a subscription the provider may still charge: any stored one that is not
+ * cancelled, whatever plan or price it bills. A second checkout while one exists would start a
+ * second subscription.
+ */
+export function hasLiveSubscription(subscription: StoredSubscription | null): boolean {
+  return subscription !== null && subscription.status !== BillingStatus.Canceled
+}
+
+/**
+ * The provider page a checkout or portal answer names, when it is an `http:` or `https:` URL; any
+ * other scheme (`javascript:`, `data:`) or a value that is no URL gives `null`, so the app never
+ * sends a person there.
+ */
+export function providerPageUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  try {
+    const url = new URL(value)
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null
+  } catch {
+    return null
+  }
+}
+
 /** A group's billing, as the API returns it to any member. */
 export interface GroupBilling {
   /** `false` when this deployment takes no payments: every group is on the free plan. */
@@ -108,6 +132,10 @@ export interface GroupBilling {
   cancelAtPeriodEnd: boolean
   /** Whether the person asking may open checkout or the portal: billing is on and they own it. */
   canManage: boolean
+  /** The group has a subscription that is not cancelled, so it cannot check out again. */
+  subscribed: boolean
+  /** The group has a provider customer, so its portal (invoices, card, plan) can be opened. */
+  hasCustomer: boolean
 }
 
 /** Builds the {@link GroupBilling} view of one group for one member. */
@@ -115,6 +143,7 @@ export function toGroupBilling(
   subscription: StoredSubscription | null,
   role: GroupRole,
   enabled: boolean,
+  hasCustomer: boolean,
 ): GroupBilling {
   return {
     enabled,
@@ -123,6 +152,8 @@ export function toGroupBilling(
     currentPeriodEnd: enabled ? subscription?.currentPeriodEnd ?? null : null,
     cancelAtPeriodEnd: enabled ? subscription?.cancelAtPeriodEnd ?? false : false,
     canManage: enabled && canManageBilling(role),
+    subscribed: enabled && hasLiveSubscription(subscription),
+    hasCustomer: enabled && hasCustomer,
   }
 }
 

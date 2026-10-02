@@ -1,5 +1,5 @@
 import type { FreshContext } from "fresh"
-import { BillingStatus, type GroupBilling } from "@domain/billing"
+import { BillingStatus, type GroupBilling, providerPageUrl } from "@domain/billing"
 import { PricingScreen } from "@ui/billing-screen.tsx"
 import { type Api, isOk, isRecord } from "./api.ts"
 import { readGroup } from "./groups.ts"
@@ -15,9 +15,11 @@ export async function readBilling(api: Api, groupId: string): Promise<GroupBilli
   if (!isOk(answer) || !isRecord(answer.body) || !isRecord(answer.body.billing)) return null
   const billing = answer.body.billing
   const { enabled, planId, status, currentPeriodEnd, cancelAtPeriodEnd, canManage } = billing
+  const { subscribed, hasCustomer } = billing
   if (
     typeof enabled !== "boolean" || typeof planId !== "string" ||
     typeof cancelAtPeriodEnd !== "boolean" || typeof canManage !== "boolean" ||
+    typeof subscribed !== "boolean" || typeof hasCustomer !== "boolean" ||
     !(status === null || (typeof status === "number" && status in BillingStatus)) ||
     !(currentPeriodEnd === null || typeof currentPeriodEnd === "string")
   ) {
@@ -30,18 +32,14 @@ export async function readBilling(api: Api, groupId: string): Promise<GroupBilli
     currentPeriodEnd: currentPeriodEnd === null ? null : new Date(currentPeriodEnd),
     cancelAtPeriodEnd,
     canManage,
+    subscribed,
+    hasCustomer,
   }
 }
 
 /** The provider page an answer of checkout or portal names, or `null`. */
 export function redirectUrl(body: unknown): string | null {
-  if (!isRecord(body) || typeof body.url !== "string") return null
-  try {
-    const url = new URL(body.url)
-    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null
-  } catch {
-    return null
-  }
+  return isRecord(body) ? providerPageUrl(body.url) : null
 }
 
 /** The plans page, for the `GET` and for a refused checkout, which shows why under the plans. */
