@@ -53,6 +53,7 @@ const billingJson = {
   canManage: true,
   subscribed: true,
   hasCustomer: true,
+  seatPrice: { seats: 3, amount: 900, currency: "EUR" },
 }
 
 describe("billing store", () => {

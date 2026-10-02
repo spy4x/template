@@ -10,6 +10,7 @@ import {
   type BillingApplyOutcome,
   BillingNoticeKind,
   type BillingRepository,
+  findPlan,
   type StoredSubscription,
 } from "@domain/billing"
 import type { GroupRole } from "@domain/groups"
@@ -18,7 +19,9 @@ import {
   lockActorRole,
   recordGroupChange,
 } from "@server/groups/group-change-log.ts"
+import { PostgresInvitationRepository } from "@server/groups/postgres-invitation-repository.ts"
 import { scheduleBillingNotice, trialNoticeAt } from "./billing-notices.ts"
+import { queueSeatSync } from "./seat-sync.ts"
 
 interface SubscriptionRow extends postgres.Row, StoredSubscription {}
 
@@ -77,7 +80,8 @@ export class PostgresBillingRepository implements BillingRepository {
           current_period_end,
           cancel_at_period_end,
           past_due_since,
-          trial_end
+          trial_end,
+          quantity
         FROM subscriptions
         WHERE group_id = ${groupId}
       `
@@ -92,6 +96,7 @@ export class PostgresBillingRepository implements BillingRepository {
         cancelAtPeriodEnd: row.cancelAtPeriodEnd,
         pastDueSince: row.pastDueSince,
         trialEnd: row.trialEnd,
+        quantity: row.quantity,
       }
       : null
   }
@@ -118,6 +123,11 @@ export class PostgresBillingRepository implements BillingRepository {
       `
     )[0]
     return row?.providerCustomerId ?? null
+  }
+
+  /** Counted by the invitations' own count, so a seat and the `maxMembers` cap never disagree. */
+  async membersOf(groupId: string): Promise<number> {
+    return await new PostgresInvitationRepository(this.sql).countMembers(groupId)
   }
 
   /**
@@ -170,7 +180,8 @@ export class PostgresBillingRepository implements BillingRepository {
           provider_event_at,
           provider_event_rank,
           past_due_since,
-          trial_end
+          trial_end,
+          quantity
         ) VALUES (
           ${group.id},
           ${subscription.id},
@@ -181,7 +192,8 @@ export class PostgresBillingRepository implements BillingRepository {
           ${event.occurredAt},
           ${rank},
           ${pastDue ? event.occurredAt : null},
-          ${subscription.trialEnd}
+          ${subscription.trialEnd},
+          ${subscription.quantity}
         )
         ON CONFLICT (group_id) DO UPDATE SET
           provider_subscription_id = EXCLUDED.provider_subscription_id,
@@ -198,6 +210,7 @@ export class PostgresBillingRepository implements BillingRepository {
             ELSE EXCLUDED.past_due_since
           END,
           trial_end = EXCLUDED.trial_end,
+          quantity = EXCLUDED.quantity,
           updated_at = CURRENT_TIMESTAMP
         WHERE (subscriptions.provider_event_at, subscriptions.provider_event_rank)
             <= (EXCLUDED.provider_event_at, EXCLUDED.provider_event_rank)
@@ -220,6 +233,16 @@ export class PostgresBillingRepository implements BillingRepository {
         ON CONFLICT (group_id) DO UPDATE SET provider_customer_id = EXCLUDED.provider_customer_id
       `
       await scheduleNotices(transaction, group.id, event.occurredAt, before, subscription)
+      // A per-member subscription that bills another count than the group has, such as a checkout
+      // started before someone joined, is corrected by the worker.
+      if (
+        subscription.status !== SubscriptionStatus.Canceled &&
+        subscription.planId !== null && findPlan(subscription.planId)?.perSeat &&
+        subscription.quantity !==
+          await new PostgresInvitationRepository(transaction).countMembers(group.id)
+      ) {
+        await queueSeatSync(transaction, group.id)
+      }
       // Only a new plan or status is news to the group's pages; a renewal that moves the period's end
       // is not. The owner pays, so the change is theirs; a deleted group still records it, so a
       // restore shows the plan the provider reported meanwhile.

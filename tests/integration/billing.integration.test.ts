@@ -83,6 +83,7 @@ function event(
     currentPeriodEnd?: Date
     cancelAtPeriodEnd?: boolean
     trialEnd?: Date | null
+    quantity?: number | null
   },
 ): SubscriptionEvent {
   return {
@@ -98,6 +99,7 @@ function event(
       currentPeriodEnd: input.currentPeriodEnd ?? new Date("2026-11-01T10:00:00Z"),
       cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,
       trialEnd: input.trialEnd ?? null,
+      quantity: input.quantity === undefined ? 1 : input.quantity,
       reference: input.reference === undefined ? null : input.reference,
     },
   }

@@ -13,7 +13,9 @@ import {
   BillingConfigError,
   BillingMode,
   billingSettingsOf,
+  createFakeBilling,
   createPlanOf,
+  createSeatPriced,
   FAKE_PRO_PRICE_ID,
   FAKE_WEBHOOK_SECRET,
   readBillingSetup,
@@ -156,6 +158,7 @@ describe("billing configuration", () => {
           cancelAtPeriodEnd: false,
           pastDueSince: new Date(Date.now() - days * DAY),
           trialEnd: null,
+          quantity: 1,
         }),
     })
     const setup = (graceDays?: string) =>
@@ -170,6 +173,7 @@ describe("billing configuration", () => {
           ...pastDue(days),
           lockedRoleOf: () => Promise.resolve(null),
           customerOf: () => Promise.resolve("cus_1"),
+          membersOf: () => Promise.resolve(1),
         },
         groups: { roleOf: () => Promise.resolve(GroupRole.OWNER) },
         provider: configured.provider,
@@ -199,5 +203,66 @@ describe("billing configuration", () => {
 
   it("shares its webhook secret and Pro price with the e2e fixture that signs events", () => {
     expect([FAKE_WEBHOOK_SECRET, FAKE_PRO_PRICE_ID]).toEqual([DEV_WEBHOOK_SECRET, DEV_PRO_PRICE_ID])
+  })
+
+  it("answers a seat change in development with the asked quantity on the Pro plan", async () => {
+    const result = await createFakeBilling("price_dev").updateQuantity({
+      subscriptionId: "sub_dev",
+      quantity: 4,
+      idempotencyKey: "seats:1:4",
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { id: "sub_dev", quantity: 4, planId: "pro", priceId: "price_dev" },
+    })
+  })
+
+  describe("the price confirmation a new invitation needs", () => {
+    const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
+    const subscription = (planId: string, status: BillingStatus): StoredSubscription => ({
+      groupId,
+      providerSubscriptionId: "sub_1",
+      planId,
+      status,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      pastDueSince: null,
+      trialEnd: null,
+      quantity: 2,
+    })
+    const seatPriced = (
+      stored: StoredSubscription | null,
+      role: GroupRole | null,
+      enabled = true,
+    ) =>
+      createSeatPriced(
+        { get: () => Promise.resolve(stored) },
+        () => Promise.resolve(role),
+        enabled,
+      )(groupId, 1)
+
+    it("asks the owner and an admin of a group on a live per-member plan", async () => {
+      const pro = subscription("pro", BillingStatus.Active)
+      expect(await seatPriced(pro, GroupRole.OWNER)).toBe(true)
+      expect(await seatPriced(pro, GroupRole.ADMIN)).toBe(true)
+      expect(await seatPriced(subscription("pro", BillingStatus.PastDue), GroupRole.OWNER))
+        .toBe(true)
+    })
+
+    it("asks nobody when billing is off, the group pays nothing or the plan is canceled", async () => {
+      const pro = subscription("pro", BillingStatus.Active)
+      expect(await seatPriced(pro, GroupRole.OWNER, false)).toBe(false)
+      expect(await seatPriced(null, GroupRole.OWNER)).toBe(false)
+      expect(await seatPriced(subscription("pro", BillingStatus.Canceled), GroupRole.OWNER))
+        .toBe(false)
+    })
+
+    it("tells a viewer, an editor or a stranger nothing of the group's bill", async () => {
+      const pro = subscription("pro", BillingStatus.Active)
+      expect(await seatPriced(pro, GroupRole.EDITOR)).toBe(false)
+      expect(await seatPriced(pro, GroupRole.VIEWER)).toBe(false)
+      expect(await seatPriced(pro, null)).toBe(false)
+    })
   })
 })

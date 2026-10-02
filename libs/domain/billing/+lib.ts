@@ -63,6 +63,12 @@ export interface Plan {
   entitlements: Entitlements
   /** Days of free trial a group's first checkout of this plan starts with; `0` for none. */
   trialDays: number
+  /**
+   * The plan bills `amount` per member a month, the owner included, so the subscription's quantity
+   * follows the group's member count. A pending invitation takes no seat, the same count
+   * `maxMembers` caps.
+   */
+  perSeat: boolean
 }
 
 /** Every plan, free first. The paid ones are the ones a checkout may name. */
@@ -79,6 +85,7 @@ export const PLANS: readonly Plan[] = [
       limits: { maxMembers: 3, maxNotes: 10, storageBytes: 50 * 1024 * 1024 },
     },
     trialDays: 0,
+    perSeat: false,
   },
   {
     id: PRO_PLAN_ID,
@@ -87,6 +94,7 @@ export const PLANS: readonly Plan[] = [
     currency: "EUR",
     description: "For a group that relies on it.",
     features: [
+      "Billed per member, the owner included",
       "Unlimited notes",
       "Up to 50 members",
       "Promote members to editor or admin",
@@ -97,6 +105,7 @@ export const PLANS: readonly Plan[] = [
       limits: { maxMembers: 50, maxNotes: null, storageBytes: 10 * 1024 * 1024 * 1024 },
     },
     trialDays: 14,
+    perSeat: true,
   },
 ]
 
@@ -165,6 +174,8 @@ export interface StoredSubscription {
   pastDueSince: Date | null
   /** When the trial ends, or `null` when the subscription has none. */
   trialEnd: Date | null
+  /** The seats the provider last reported it bills, or `null` when it reported none. */
+  quantity: number | null
 }
 
 /**
@@ -291,6 +302,25 @@ export function hasLiveSubscription(subscription: StoredSubscription | null): bo
 }
 
 /**
+ * Whether the provider bills the group per member: its subscription is live and its plan is
+ * {@link Plan.perSeat}. A past-due subscription past its grace still counts, since the provider
+ * keeps charging it; the subscription's quantity then follows the member count.
+ */
+export function isSeatBilled(subscription: StoredSubscription | null): boolean {
+  if (!hasLiveSubscription(subscription) || subscription?.planId == null) return false
+  return findPlan(subscription.planId)?.perSeat === true
+}
+
+/** The per-member price a group pays, as the invitation form shows it before a new member joins. */
+export interface SeatPrice {
+  /** Members the group pays for now, the owner included. */
+  seats: number
+  /** The price of one seat a month, in the currency's smallest unit. */
+  amount: number
+  currency: string
+}
+
+/**
  * The provider page a checkout or portal answer names, when it is an `http:` or `https:` URL; any
  * other scheme (`javascript:`, `data:`) or a value that is no URL gives `null`, so the app never
  * sends a person there.
@@ -324,11 +354,13 @@ export interface GroupBilling {
   subscribed: boolean
   /** The group has a provider customer, so its portal (invoices, card, plan) can be opened. */
   hasCustomer: boolean
+  /** What the group pays per member, while it is billed per member (see {@link isSeatBilled}). */
+  seatPrice: SeatPrice | null
 }
 
 /**
  * Builds the {@link GroupBilling} view of one group for one member, with the plan it is on at `now`
- * (see {@link effectivePlanId}).
+ * (see {@link effectivePlanId}). `members` is the group's member count, the owner included.
  */
 export function toGroupBilling(
   subscription: StoredSubscription | null,
@@ -337,7 +369,9 @@ export function toGroupBilling(
   hasCustomer: boolean,
   now: Date,
   graceDays: number,
+  members: number,
 ): GroupBilling {
+  const seatPlan = enabled && isSeatBilled(subscription) ? findPlan(subscription!.planId!) : null
   return {
     enabled,
     planId: enabled ? effectivePlanId(subscription, now, graceDays) : FREE_PLAN_ID,
@@ -351,6 +385,9 @@ export function toGroupBilling(
     canManage: enabled && canManageBilling(role),
     subscribed: enabled && hasLiveSubscription(subscription),
     hasCustomer: enabled && hasCustomer,
+    seatPrice: seatPlan
+      ? { seats: members, amount: seatPlan.amount, currency: seatPlan.currency }
+      : null,
   }
 }
 
@@ -360,6 +397,15 @@ function jsonDate(value: unknown): Date | null | undefined {
   if (typeof value !== "string") return undefined
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? undefined : date
+}
+
+function readSeatPrice(value: unknown): SeatPrice | null | undefined {
+  if (value === null) return null
+  if (typeof value !== "object" || value === undefined) return undefined
+  const { seats, amount, currency } = value as Record<string, unknown>
+  const whole = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0
+  if (!whole(seats) || !whole(amount) || typeof currency !== "string") return undefined
+  return { seats, amount, currency }
 }
 
 function readNotice(value: unknown): BillingNotice | null | undefined {
@@ -383,12 +429,14 @@ export function readGroupBilling(value: unknown): GroupBilling | null {
   const currentPeriodEnd = jsonDate(billing.currentPeriodEnd)
   const trialEnd = jsonDate(billing.trialEnd)
   const notice = readNotice(billing.notice)
+  const seatPrice = readSeatPrice(billing.seatPrice)
   if (
     typeof enabled !== "boolean" || typeof planId !== "string" ||
     typeof cancelAtPeriodEnd !== "boolean" || typeof canManage !== "boolean" ||
     typeof subscribed !== "boolean" || typeof hasCustomer !== "boolean" ||
     !(status === null || (typeof status === "number" && status in BillingStatus)) ||
-    currentPeriodEnd === undefined || trialEnd === undefined || notice === undefined
+    currentPeriodEnd === undefined || trialEnd === undefined || notice === undefined ||
+    seatPrice === undefined
   ) {
     return null
   }
@@ -403,6 +451,7 @@ export function readGroupBilling(value: unknown): GroupBilling | null {
     canManage,
     subscribed,
     hasCustomer,
+    seatPrice,
   }
 }
 
@@ -602,6 +651,8 @@ export interface BillingRepository {
   lockedRoleOf(groupId: string, userId: number): Promise<GroupRole | null>
   /** The provider customer that pays for the group, or `null` before its first checkout. */
   customerOf(groupId: string): Promise<string | null>
+  /** The group's members, the owner included: the count `maxMembers` caps and seats bill. */
+  membersOf(groupId: string): Promise<number>
 }
 
 /** The actor's role in a group, or `null` when they are not an active member of an active group. */

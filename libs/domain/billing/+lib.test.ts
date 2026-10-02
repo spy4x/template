@@ -17,6 +17,7 @@ import {
   FREE_PLAN_ID,
   graceEndsAt,
   hasLiveSubscription,
+  isSeatBilled,
   PlanError,
   PLANS,
   PRO_PLAN_ID,
@@ -45,6 +46,7 @@ const subscription = (status: BillingStatus, planId: string | null = PRO_PLAN_ID
     cancelAtPeriodEnd: false,
     pastDueSince: status === BillingStatus.PastDue ? FAILED_AT : null,
     trialEnd: null,
+    quantity: 1,
   }) satisfies StoredSubscription
 
 /** When the trial and the period end in the tests of trials and cancellations. */
@@ -127,7 +129,7 @@ describe("billing domain", () => {
   it("shows a past-due group's plan as free once its grace period is over", () => {
     const later = new Date(FAILED_AT.getTime() + 8 * DAY)
     const billing = (now: Date) =>
-      toGroupBilling(subscription(BillingStatus.PastDue), GroupRole.OWNER, true, true, now, 7)
+      toGroupBilling(subscription(BillingStatus.PastDue), GroupRole.OWNER, true, true, now, 7, 3)
 
     expect(billing(NOW)).toMatchObject({ planId: PRO_PLAN_ID, status: BillingStatus.PastDue })
     expect(billing(later)).toMatchObject({ planId: FREE_PLAN_ID, status: BillingStatus.PastDue })
@@ -135,7 +137,7 @@ describe("billing domain", () => {
 
   it("shows the free plan and no way to manage it while billing is off, whatever is stored", () => {
     expect(
-      toGroupBilling(subscription(BillingStatus.Active), GroupRole.OWNER, false, true, NOW, 7),
+      toGroupBilling(subscription(BillingStatus.Active), GroupRole.OWNER, false, true, NOW, 7, 3),
     )
       .toEqual({
         enabled: false,
@@ -148,6 +150,7 @@ describe("billing domain", () => {
         canManage: false,
         subscribed: false,
         hasCustomer: false,
+        seatPrice: null,
       })
   })
 
@@ -204,7 +207,7 @@ describe("billing domain", () => {
 
   it("shows the notice to the owner only, with the trial's end", () => {
     const view = (role: GroupRole) =>
-      toGroupBilling(trial(), role, true, true, at(-DAY), DEFAULT_GRACE_DAYS)
+      toGroupBilling(trial(), role, true, true, at(-DAY), DEFAULT_GRACE_DAYS, 3)
 
     expect(view(GroupRole.OWNER)).toMatchObject({
       trialEnd: ENDS_AT,
@@ -219,14 +222,14 @@ describe("billing domain", () => {
   })
 
   it("reads the billing back from the API's JSON, dates included", () => {
-    const view = toGroupBilling(trial(), GroupRole.OWNER, true, true, at(-DAY), 7)
+    const view = toGroupBilling(trial(), GroupRole.OWNER, true, true, at(-DAY), 7, 3)
     const json = JSON.parse(JSON.stringify(view))
 
     expect(readGroupBilling(json)).toEqual(view)
   })
 
   it("reads no billing from JSON with a field missing or of the wrong kind", () => {
-    const view = toGroupBilling(trial(), GroupRole.OWNER, true, true, at(-DAY), 7)
+    const view = toGroupBilling(trial(), GroupRole.OWNER, true, true, at(-DAY), 7, 3)
     const json = JSON.parse(JSON.stringify(view))
     const broken = [
       { ...json, trialEnd: 5 },
@@ -236,11 +239,44 @@ describe("billing domain", () => {
       { ...json, notice: { ...json.notice, daysLeft: -1 } },
       { ...json, notice: undefined },
       { ...json, canManage: "yes" },
+      { ...json, seatPrice: { seats: 1.5, amount: 900, currency: "EUR" } },
+      { ...json, seatPrice: undefined },
       null,
     ]
     for (const value of broken) {
       expect({ value, read: readGroupBilling(value) }).toEqual({ value, read: null })
     }
+  })
+
+  it("bills the paid plan per member and the free plan not", () => {
+    expect(PLANS.map((plan) => [plan.id, plan.perSeat])).toEqual([
+      [FREE_PLAN_ID, false],
+      [PRO_PLAN_ID, true],
+    ])
+  })
+
+  it("bills per member only a live subscription to a per-member plan", () => {
+    expect(isSeatBilled(subscription(BillingStatus.Active))).toBe(true)
+    // The provider still charges a past-due subscription, so its seats still follow the members.
+    expect(isSeatBilled(subscription(BillingStatus.PastDue))).toBe(true)
+    expect(isSeatBilled(subscription(BillingStatus.Canceled))).toBe(false)
+    expect(isSeatBilled(subscription(BillingStatus.Active, FREE_PLAN_ID))).toBe(false)
+    expect(isSeatBilled(subscription(BillingStatus.Active, null))).toBe(false)
+    expect(isSeatBilled(null)).toBe(false)
+  })
+
+  it("shows every member the per-member price and the seats of a group billed per member", () => {
+    const view = (stored: StoredSubscription | null, enabled = true) =>
+      toGroupBilling(stored, GroupRole.VIEWER, enabled, true, NOW, 7, 4).seatPrice
+
+    expect(view(subscription(BillingStatus.Active))).toEqual({
+      seats: 4,
+      amount: 900,
+      currency: "EUR",
+    })
+    expect(view(subscription(BillingStatus.Canceled))).toBeNull()
+    expect(view(null)).toBeNull()
+    expect(view(subscription(BillingStatus.Active), false)).toBeNull()
   })
 
   it("offers a trial on the paid plan only", () => {

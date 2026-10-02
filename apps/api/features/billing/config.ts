@@ -1,12 +1,19 @@
 import type { EnvReader } from "@spy4x/server/config"
 import type { BillingHandlerDependencies } from "./handlers.ts"
-import { type BillingProvider, createStripeBilling, type PlanRef } from "@spy4x/billing"
+import {
+  type BillingProvider,
+  createStripeBilling,
+  type PlanRef,
+  SubscriptionStatus,
+} from "@spy4x/billing"
 import {
   type BillingRepository,
   DEFAULT_GRACE_DAYS,
   effectivePlanId,
+  isSeatBilled,
   PRO_PLAN_ID,
 } from "@domain/billing"
+import { canManageInvitations, type GroupRole } from "@domain/groups"
 
 /**
  * The webhook signing secret of the development provider. It is public on purpose: the e2e tests
@@ -145,6 +152,24 @@ export function createPlanOf(
   return async (groupId) => effectivePlanId(await billing.get(groupId), now(), graceDays)
 }
 
+/**
+ * Whether a new invitation to the group needs its creator to confirm the per-member price: billing
+ * is on, the creator may manage invitations, and the group pays per member. Anyone else learns
+ * nothing about the group's bill from the answer.
+ */
+export function createSeatPriced(
+  billing: Pick<BillingRepository, "get">,
+  roleOf: (groupId: string, userId: number) => Promise<GroupRole | null>,
+  enabled: boolean,
+): (groupId: string, userId: number) => Promise<boolean> {
+  return async (groupId, userId) => {
+    if (!enabled) return false
+    const role = await roleOf(groupId, userId)
+    if (role === null || !canManageInvitations(role)) return false
+    return isSeatBilled(await billing.get(groupId))
+  }
+}
+
 function readTrialRequiresCard(value: string | undefined): boolean {
   if (value === undefined || value === "true") return true
   if (value === "false") return false
@@ -191,6 +216,25 @@ export function createFakeBilling(proPriceId: string): BillingProvider {
       return Promise.resolve({
         ok: true,
         value: { id: `cs_fake_${crypto.randomUUID()}`, url: request.successUrl },
+      })
+    },
+    // Nothing is billed in development, so the change is only answered: the subscription as it
+    // would stand, on the Pro plan.
+    updateQuantity(request) {
+      return Promise.resolve({
+        ok: true,
+        value: {
+          id: request.subscriptionId,
+          customerId: "cus_fake",
+          status: SubscriptionStatus.Active,
+          planId: PRO_PLAN_ID,
+          priceId: proPriceId,
+          currentPeriodEnd: null,
+          cancelAtPeriodEnd: false,
+          trialEnd: null,
+          quantity: request.quantity,
+          reference: null,
+        },
       })
     },
     createPortalSession(request) {
