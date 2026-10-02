@@ -110,6 +110,7 @@ const GROUP_ERROR_CODES: Record<
   INVALID_REQUEST: "bad_request",
   LAST_GROUP: "conflict",
   LAST_OWNER: "conflict",
+  MEMBER_NOT_FOUND: "not_found",
   ROLE_INSUFFICIENT: "forbidden",
   USER_NOT_ACTIVE: "unauthorized",
 }

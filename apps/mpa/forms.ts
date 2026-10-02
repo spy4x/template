@@ -91,6 +91,7 @@ export const API_BODIES = {
   }),
   groupRename: (form: FormData) => ({ name: field(form, "name") }),
   groupSelect: (form: FormData) => ({ groupId: field(form, "groupId") }),
+  groupMemberRole: (form: FormData) => ({ role: numberField(form, "role") }),
   noteCreate: (form: FormData) => ({
     id: field(form, "id"),
     title: field(form, "title"),

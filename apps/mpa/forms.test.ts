@@ -33,6 +33,11 @@ describe("API_BODIES", () => {
     expect(API_BODIES.groupRename(form({ name: "Trek", extra: "x" }))).toEqual({ name: "Trek" })
   })
 
+  it("sends a member's new role as a number, and leaves anything else for the API to refuse", () => {
+    expect(API_BODIES.groupMemberRole(form({ role: "2", userId: "7" }))).toEqual({ role: 2 })
+    expect(API_BODIES.groupMemberRole(form({ role: "admin" }))).toEqual({ role: "admin" })
+  })
+
   it("leaves a version that is not a whole number for the API to refuse", () => {
     expect(API_BODIES.noteDelete(form({ version: "1e3" }))).toEqual({ version: "1e3" })
   })

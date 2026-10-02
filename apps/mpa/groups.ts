@@ -1,5 +1,6 @@
 import type { DeletedGroupRow, GroupRow } from "@ui/groups-screen.tsx"
 import type { GroupPickerData } from "@ui/group-picker.tsx"
+import type { GroupMemberRow } from "@ui/group-members.tsx"
 import { type Api, isOk, isRecord } from "./api.ts"
 
 /** The most groups one `GET /api/groups` answers with. */
@@ -70,4 +71,17 @@ export async function readPicker(api: Api): Promise<GroupPickerData | null> {
  */
 export async function selectGroup(api: Api, groupId: string): Promise<boolean> {
   return isOk(await api.call("PUT", "/api/groups/selected", { groupId }))
+}
+
+/**
+ * The members of a group (`GET /api/groups/:groupId/members`), or `null` when the read failed or
+ * the person is not a member: the settings page then says the members could not be read.
+ */
+export async function readMembers(api: Api, groupId: string): Promise<GroupMemberRow[] | null> {
+  const answer = await api.call("GET", `/api/groups/${encodeURIComponent(groupId)}/members`)
+  if (!isOk(answer) || !isRecord(answer.body) || !Array.isArray(answer.body.members)) return null
+  return answer.body.members.filter((member): member is GroupMemberRow =>
+    isRecord(member) && typeof member.userId === "number" && typeof member.name === "string" &&
+    typeof member.role === "number" && typeof member.joinedAt === "string"
+  )
 }

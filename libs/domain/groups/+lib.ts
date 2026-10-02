@@ -28,6 +28,7 @@ export type GroupErrorCode =
   | "INVALID_REQUEST"
   | "LAST_GROUP"
   | "LAST_OWNER"
+  | "MEMBER_NOT_FOUND"
   | "ROLE_INSUFFICIENT"
   | "USER_NOT_ACTIVE"
 
@@ -66,6 +67,12 @@ export interface GroupSummary {
   id: string
   name: string
   role: GroupRole
+  /**
+   * How many members the group has, and the first few of them in the order they joined: what the
+   * groups list draws as a stack of avatars. Only the list read fills these two.
+   */
+  memberCount?: number
+  members?: GroupMemberPreview[]
   authorizationRevision: string
   /**
    * The sequence of the last change committed to the group, as a decimal string (BIGINT). A client
@@ -74,6 +81,32 @@ export interface GroupSummary {
    */
   changeSequence: string
   updatedAt: Date
+}
+
+/** Most members a group in the list carries in `members`; the rest are only counted. */
+export const GROUP_MEMBER_PREVIEW_LIMIT = 5
+
+/** A member as the groups list shows them in an avatar stack. */
+export interface GroupMemberPreview {
+  /** Their first and last name; empty when they set none. */
+  name: string
+}
+
+/** One member of a group, as the group's members list shows them. */
+export interface GroupMemberSummary {
+  userId: number
+  /** Their first and last name; empty when they set none. */
+  name: string
+  /**
+   * The address they sign in with, or `null` for an account that has none. Present only for a
+   * reader who may see addresses ({@link canSeeMemberEmails}).
+   */
+  email?: string | null
+  role: GroupRole
+  /** When they became a member. */
+  joinedAt: Date
+  /** This member is the person who asked. */
+  isYou: boolean
 }
 
 /** A deleted group its owner can still restore; `deletedAt` is when it was deleted. */
@@ -204,6 +237,77 @@ export class GroupDeletedListQuery
   constructor(public data: GroupDeletedListPayload) {}
 }
 
+export interface GroupMembersPayload {
+  actor: Actor
+  groupId: string
+}
+
+/**
+ * The members of a group, in the order they joined. Any member may read them; a non-member is told
+ * `GROUP_NOT_FOUND`.
+ */
+export class GroupMembersQuery
+  implements Query<GroupMembersPayload, { members: GroupMemberSummary[] }> {
+  __resultType?: { members: GroupMemberSummary[] }
+  constructor(public data: GroupMembersPayload) {}
+}
+
+export interface GroupMemberRolePayload {
+  actor: Actor
+  groupId: string
+  userId: number
+  role: GroupRole
+  requestId?: string
+  /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
+  idempotencyKey?: string
+}
+
+/**
+ * Gives a member another role, by {@link assertCanChangeRole}: the owner may make anyone else a
+ * viewer, editor or admin; an admin may move viewers and editors between those two.
+ */
+export class GroupMemberRoleCommand
+  implements Command<GroupMemberRolePayload, { member: GroupMemberSummary }> {
+  __resultType?: { member: GroupMemberSummary }
+  constructor(public data: GroupMemberRolePayload) {}
+}
+
+export interface GroupMemberRemovePayload {
+  actor: Actor
+  groupId: string
+  userId: number
+  requestId?: string
+  /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
+  idempotencyKey?: string
+}
+
+/**
+ * Removes a member, by {@link assertCanRemoveMember}. What they wrote stays in the group under
+ * their name. A member left with no group gets a new one, as a delete gives them.
+ */
+export class GroupMemberRemoveCommand
+  implements Command<GroupMemberRemovePayload, { removed: true }> {
+  __resultType?: { removed: true }
+  constructor(public data: GroupMemberRemovePayload) {}
+}
+
+export interface GroupLeavePayload {
+  actor: Actor
+  groupId: string
+  requestId?: string
+  /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
+  idempotencyKey?: string
+}
+
+/**
+ * The actor leaves a group. Any member but the owner may (`LAST_OWNER`: ownership must move
+ * first); nobody may leave their last group (`LAST_GROUP`).
+ */
+export class GroupLeaveCommand implements Command<GroupLeavePayload, { left: true }> {
+  __resultType?: { left: true }
+  constructor(public data: GroupLeavePayload) {}
+}
+
 export interface GroupListPayload {
   actor: Actor
   page: GroupListPage
@@ -329,6 +433,38 @@ export interface GroupRepository {
   restore(groupId: string, actorId: number, requestId?: string): Promise<GroupSummary | null>
   /** The groups the user owns that can still be restored, most recently deleted first. */
   listRestorable(userId: number): Promise<DeletedGroupSummary[]>
+  /**
+   * The members of an active group, in the order they joined, as `actorId` sees them (`isYou`).
+   * `null` when the group is missing or deleted, or `actorId` is not a member.
+   */
+  listMembers(groupId: string, actorId: number): Promise<GroupMemberSummary[] | null>
+  /**
+   * Gives a member a new role and announces the change, in one transaction that checks
+   * {@link assertCanChangeRole} again on locked rows. `null` when the group is missing or deleted.
+   */
+  changeMemberRole(
+    groupId: string,
+    userId: number,
+    role: GroupRole,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupMemberSummary | null>
+  /**
+   * Removes a member and announces it, in one transaction that checks
+   * {@link assertCanRemoveMember} again on locked rows; gives them a new group when this was their
+   * last. `false` when the group is missing or deleted.
+   */
+  removeMember(
+    groupId: string,
+    userId: number,
+    actorId: number,
+    requestId?: string,
+  ): Promise<boolean>
+  /**
+   * The actor leaves the group, in one transaction that checks {@link assertCanLeave} and the
+   * last-group rule. `false` when the group is missing or deleted.
+   */
+  leave(groupId: string, actorId: number, requestId?: string): Promise<boolean>
 }
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -393,6 +529,57 @@ export function parseGroupIdRequest(value: unknown): { groupId: string } {
   return { groupId: parseGroupId(value.groupId) }
 }
 
+/** A member's user id from a request: a positive 32-bit integer, or `INVALID_REQUEST`. */
+export function parseMemberUserId(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 2_147_483_647) {
+    throw new GroupError("INVALID_REQUEST", "User id must be a positive integer")
+  }
+  return value
+}
+
+/** A member's user id from a path segment: digits only, then {@link parseMemberUserId}. */
+export function parseMemberUserIdParam(value: string): number {
+  return parseMemberUserId(/^[1-9]\d{0,9}$/.test(value) ? Number(value) : value)
+}
+
+/** A role a member can be given: viewer, editor or admin. The owner role moves only by transfer. */
+export function parseMemberRole(value: unknown): GroupRole {
+  if (value !== GroupRole.VIEWER && value !== GroupRole.EDITOR && value !== GroupRole.ADMIN) {
+    throw new GroupError("INVALID_REQUEST", "Role must be 1 (viewer), 2 (editor) or 3 (admin)")
+  }
+  return value
+}
+
+/** The body of a role change over REST, where the path names the group and member: `{ role }`. */
+export function parseMemberRoleBody(value: unknown): { role: GroupRole } {
+  if (!hasExactKeys(value, ["role"])) {
+    throw new GroupError("INVALID_REQUEST", "Expected exactly role")
+  }
+  return { role: parseMemberRole(value.role) }
+}
+
+/** The payload of a role change over the socket: exactly `{ groupId, role, userId }`. */
+export function parseMemberRoleRequest(
+  value: unknown,
+): { groupId: string; userId: number; role: GroupRole } {
+  if (!hasExactKeys(value, ["groupId", "role", "userId"])) {
+    throw new GroupError("INVALID_REQUEST", "Expected exactly groupId, userId and role")
+  }
+  return {
+    groupId: parseGroupId(value.groupId),
+    userId: parseMemberUserId(value.userId),
+    role: parseMemberRole(value.role),
+  }
+}
+
+/** The payload of a request that names one member over the socket: exactly `{ groupId, userId }`. */
+export function parseMemberRequest(value: unknown): { groupId: string; userId: number } {
+  if (!hasExactKeys(value, ["groupId", "userId"])) {
+    throw new GroupError("INVALID_REQUEST", "Expected exactly groupId and userId")
+  }
+  return { groupId: parseGroupId(value.groupId), userId: parseMemberUserId(value.userId) }
+}
+
 /** A group id from a request: a lowercase UUID v4, or `INVALID_REQUEST`. */
 export function parseGroupId(value: unknown): string {
   if (typeof value !== "string" || !UUID_V4_PATTERN.test(value)) {
@@ -433,6 +620,14 @@ export function canRename(role: GroupRole): boolean {
   return isGroupRole(role) && role >= GroupRole.ADMIN
 }
 
+/**
+ * Whether `role` may read the sign-in addresses of the group's members: an admin or the owner,
+ * who manage the members. Viewers and editors see names only.
+ */
+export function canSeeMemberEmails(role: GroupRole): boolean {
+  return isGroupRole(role) && role >= GroupRole.ADMIN
+}
+
 /** Whether `role` may delete or restore the group: only the owner. */
 export function canDelete(role: GroupRole): boolean {
   return isGroupRole(role) && role === GroupRole.OWNER
@@ -454,6 +649,83 @@ export function assertCanDelete(role: GroupRole | null): void {
   if (role === null || !canRead(role)) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
   if (!canDelete(role)) {
     throw new GroupError("ROLE_INSUFFICIENT", "Only the owner can delete or restore a group")
+  }
+}
+
+/**
+ * The roles `actor` may give a member who holds `target`, other than the one they hold: by
+ * {@link canManageMember}, never the owner role (it moves only by a transfer of ownership), and
+ * nothing for the owner, whose role changes only by that transfer. Empty when there is no choice.
+ */
+export function assignableRoles(actor: GroupRole, target: GroupRole): GroupRole[] {
+  if (target === GroupRole.OWNER) return []
+  return [GroupRole.VIEWER, GroupRole.EDITOR, GroupRole.ADMIN].filter((next) =>
+    next !== target && canManageMember(actor, target, next)
+  )
+}
+
+/** Whether `actor` may remove a member who holds `target`: by {@link canManageMember}, never the owner. */
+export function canRemoveMember(actor: GroupRole, target: GroupRole): boolean {
+  return target !== GroupRole.OWNER && canManageMember(actor, target)
+}
+
+/** Whether a member with `role` may leave the group: anyone but the owner. */
+export function canLeave(role: GroupRole): boolean {
+  return canRead(role) && role !== GroupRole.OWNER
+}
+
+/**
+ * Throws unless `actor` may give the member who holds `target` the role `next`. `actor` is `null`
+ * for a non-member (`GROUP_NOT_FOUND`, as a missing group answers) and `target` for a person who
+ * is not a member (`MEMBER_NOT_FOUND`). The owner's own role, and the owner role itself, change
+ * only by a transfer of ownership (`LAST_OWNER`). Giving a member the role they hold is allowed
+ * and changes nothing.
+ */
+export function assertCanChangeRole(
+  actor: GroupRole | null,
+  target: GroupRole | null,
+  next: GroupRole,
+): void {
+  if (actor === null || !canRead(actor)) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+  if (target === null || !canRead(target)) {
+    throw new GroupError("MEMBER_NOT_FOUND", "This person is not a member of the group")
+  }
+  if (target === GroupRole.OWNER || next === GroupRole.OWNER) {
+    throw new GroupError("LAST_OWNER", "The owner's role changes only by transferring ownership")
+  }
+  if (!canManageMember(actor, target, next)) {
+    throw new GroupError(
+      "ROLE_INSUFFICIENT",
+      "Only the owner, or an admin for viewers and editors, can change a role",
+    )
+  }
+}
+
+/** Throws unless `actor` may remove the member who holds `target`. See {@link assertCanChangeRole}. */
+export function assertCanRemoveMember(actor: GroupRole | null, target: GroupRole | null): void {
+  if (actor === null || !canRead(actor)) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+  if (target === null || !canRead(target)) {
+    throw new GroupError("MEMBER_NOT_FOUND", "This person is not a member of the group")
+  }
+  if (target === GroupRole.OWNER) {
+    throw new GroupError("LAST_OWNER", "The owner cannot be removed from the group")
+  }
+  if (!canRemoveMember(actor, target)) {
+    throw new GroupError(
+      "ROLE_INSUFFICIENT",
+      "Only the owner, or an admin for viewers and editors, can remove a member",
+    )
+  }
+}
+
+/** Throws unless a member with `role` may leave: anyone but the owner. `null` is a non-member. */
+export function assertCanLeave(role: GroupRole | null): void {
+  if (role === null || !canRead(role)) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+  if (!canLeave(role)) {
+    throw new GroupError(
+      "LAST_OWNER",
+      "The owner cannot leave the group. Transfer ownership to another member first.",
+    )
   }
 }
 

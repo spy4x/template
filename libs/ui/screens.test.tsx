@@ -23,8 +23,10 @@ import {
   GroupRole,
   parseCreateGroupRequest,
   parseGroupIdRequest,
+  parseMemberRoleBody,
   parseRenameGroupBody,
 } from "@domain/groups"
+import type { GroupMemberRow } from "./group-members.tsx"
 import { GroupSettingsScreen, type GroupSettingsScreenProps } from "./group-settings-screen.tsx"
 import { GroupsScreen, type GroupsScreenProps, ROLE_TEXT } from "./groups-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
@@ -462,6 +464,33 @@ describe("GroupsScreen", () => {
     expect(html).not.toContain("No groups yet.")
   })
 
+  it("stacks the members' avatars on each card, counting the ones it does not name", () => {
+    const html = renderToString(
+      <GroupsScreen
+        {...groupsDefaults}
+        groups={[{
+          id: "g-1",
+          name: "Team",
+          role: GroupRole.OWNER,
+          memberCount: 7,
+          members: ["Ann", "Bo", "Cy", "Di", "Ed"].map((name) => ({ name })),
+        }]}
+      />,
+    )
+
+    expect(html).toContain('aria-label="Members of Team (7)"')
+    expect(html).toContain(">+3<")
+    expect(html).toContain(">A<")
+  })
+
+  it("draws no avatar stack when the list did not say who the members are", () => {
+    const html = renderToString(
+      <GroupsScreen {...groupsDefaults} groups={[{ id: "g-1", name: "Team", role: 1 }]} />,
+    )
+
+    expect(html).not.toContain("Members of Team")
+  })
+
   it("says so when there are no groups, and says loading while it fetches", () => {
     expect(renderToString(<GroupsScreen {...groupsDefaults} />)).toContain("No groups yet.")
     expect(renderToString(<GroupsScreen {...groupsDefaults} loading />)).toContain(
@@ -622,9 +651,10 @@ describe("GroupSettingsScreen", () => {
       expect(html).toContain("General")
       expect(html).toContain("Team")
       expect(html).toContain(`data-e2e="group-general-role">${ROLE_TEXT[role]}<`)
-      // The only form is "Open notes": nothing to rename or delete, and no button that does nothing.
+      // "Open notes" and "Leave": nothing to rename or delete, and no button that does nothing.
       expect(surface.forms).toEqual([
         { action: FORM_ACTIONS.groupSelect, method: "post", fields: ["groupId"] },
+        { action: GROUP_PATHS.leave("g-1"), method: "post", fields: [] },
       ])
       expect(surface.scriptOnlyButtons).toEqual([])
       expect(html).not.toContain('<input type="text"')
@@ -642,7 +672,8 @@ describe("GroupSettingsScreen", () => {
       fields: ["name"],
     })
     expect(parseRenameGroupBody({ name: "Trip" })).toEqual({ name: "Trip" })
-    expect(surface.forms).toHaveLength(2)
+    // Open notes, rename and leave.
+    expect(surface.forms).toHaveLength(3)
     expect(renderToString(screen)).not.toContain("group-section-danger")
     expect(surface.scriptOnlyButtons).toEqual([])
   })
@@ -722,6 +753,215 @@ describe("GroupSettingsScreen", () => {
     expect(renderToString(<GroupSettingsScreen {...settingsDefaults} group={null} loading />))
       .toContain("Loading the group...")
     expect(noScriptSurface(missing).links).toEqual(["/groups"])
+  })
+})
+
+const memberRows: GroupMemberRow[] = [
+  {
+    userId: 1,
+    name: "Ann Owner",
+    email: "ann@example.com",
+    role: GroupRole.OWNER,
+    joinedAt: "2026-09-01T08:00:00.000Z",
+    isYou: false,
+  },
+  {
+    userId: 2,
+    name: "",
+    email: "admin@example.com",
+    role: GroupRole.ADMIN,
+    joinedAt: "2026-09-02T08:00:00.000Z",
+    isYou: false,
+  },
+  {
+    userId: 3,
+    name: "Ed Itor",
+    email: null,
+    role: GroupRole.EDITOR,
+    joinedAt: "2026-09-03T08:00:00.000Z",
+    isYou: false,
+  },
+  {
+    userId: 4,
+    name: "",
+    email: null,
+    role: GroupRole.VIEWER,
+    joinedAt: "2026-09-04T08:00:00.000Z",
+    isYou: false,
+  },
+]
+
+/** The members as `userId` sees them. */
+const membersFor = (userId: number) =>
+  memberRows.map((member) => ({ ...member, isYou: member.userId === userId }))
+
+/** The `<li>` of one member in rendered HTML. */
+function memberItem(html: string, userId: number): string {
+  const item = html.match(
+    new RegExp(`<li[^>]*data-e2e="group-member"[^>]*data-user-id="${userId}"[\\s\\S]*?</li>`),
+  )
+  if (!item) throw new Error(`no member ${userId}`)
+  return item[0]
+}
+
+describe("GroupSettingsScreen members", () => {
+  const asMember = (
+    role: GroupRole,
+    userId: number,
+    props: Partial<GroupSettingsScreenProps> = {},
+  ) => (
+    <GroupSettingsScreen
+      {...settingsDefaults}
+      group={{ ...settingsDefaults.group!, role }}
+      members={membersFor(userId)}
+      {...props}
+    />
+  )
+
+  it("lists every member with a name, role and join date, and marks the person", () => {
+    const html = renderToString(asMember(GroupRole.VIEWER, 4))
+
+    expect(html).toContain("Members (4)")
+    expect(memberItem(html, 1)).toContain('data-e2e="group-member-name">Ann Owner<')
+    expect(memberItem(html, 1)).toContain("ann@example.com")
+    // No name: the address stands in, and with neither a placeholder does.
+    expect(memberItem(html, 2)).toContain('data-e2e="group-member-name">admin@example.com<')
+    expect(memberItem(html, 4)).toContain('data-e2e="group-member-name">Unnamed member<')
+    expect(memberItem(html, 3)).toContain('data-e2e="group-member-role">Editor<')
+    expect(memberItem(html, 3)).toContain('<time datetime="2026-09-03T08:00:00.000Z">2026-09-03<')
+    expect(memberItem(html, 4)).toContain(">You<")
+    expect(memberItem(html, 3)).not.toContain(">You<")
+  })
+
+  it("shows no address when the API sent the members without one", () => {
+    const withoutAddresses = membersFor(4).map(({ email: _email, ...member }) => member)
+    const html = renderToString(asMember(GroupRole.VIEWER, 4, { members: withoutAddresses }))
+
+    expect(html).not.toContain("@example.com")
+    expect(memberItem(html, 1)).toContain('data-e2e="group-member-name">Ann Owner<')
+    expect(memberItem(html, 2)).toContain('data-e2e="group-member-name">Unnamed member<')
+  })
+
+  for (const role of [GroupRole.VIEWER, GroupRole.EDITOR]) {
+    it(`gives a ${GroupRole[role]} no member controls`, () => {
+      const surface = noScriptSurface(asMember(role, 4))
+
+      expect(surface.forms.map((form) => form.action)).toEqual([
+        FORM_ACTIONS.groupSelect,
+        GROUP_PATHS.leave("g-1"),
+      ])
+    })
+  }
+
+  it("gives the owner a role form and a remove form for every other member", () => {
+    const screen = asMember(GroupRole.OWNER, 1)
+    const html = renderToString(screen)
+    const surface = noScriptSurface(screen)
+
+    for (const userId of [2, 3, 4]) {
+      expect(formAt(surface, GROUP_PATHS.memberRole("g-1", userId))).toEqual({
+        action: `/groups/g-1/members/${userId}/role`,
+        method: "post",
+        fields: ["role"],
+      })
+      expect(formAt(surface, GROUP_PATHS.memberRemove("g-1", userId)).fields).toEqual([])
+    }
+    // The posted value is what the API accepts as `{ role }`.
+    expect(parseMemberRoleBody({ role: Number("2") })).toEqual({ role: GroupRole.EDITOR })
+    expect(memberItem(html, 1)).not.toContain("<form")
+    // The owner may hand out admin; the owner role is never offered.
+    expect(memberItem(html, 3)).toContain('<option value="3">Admin</option>')
+    expect(html).not.toContain('<option value="4"')
+    expect(memberItem(html, 3)).toMatch(/<label[^>]*for="group-member-role-3"[^>]*>Role of Ed Itor/)
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("gives an admin forms for the viewers and editors only, and no admin role to hand out", () => {
+    const screen = asMember(GroupRole.ADMIN, 2)
+    const html = renderToString(screen)
+    const actions = noScriptSurface(screen).forms.map((form) => form.action)
+
+    for (const userId of [3, 4]) {
+      expect(actions).toContain(GROUP_PATHS.memberRole("g-1", userId))
+      expect(actions).toContain(GROUP_PATHS.memberRemove("g-1", userId))
+    }
+    for (const userId of [1, 2]) {
+      expect(memberItem(html, userId)).not.toContain("<form")
+    }
+    expect(memberItem(html, 3)).not.toContain('<option value="3"')
+  })
+
+  it("puts the remove form behind a confirmation that names the member", () => {
+    const html = renderToString(asMember(GroupRole.OWNER, 1))
+    const item = memberItem(html, 3)
+
+    expect(item).toMatch(/<details[^>]*>[\s\S]*Remove Ed Itor\.\.\.[\s\S]*<form/)
+    expect(item).not.toMatch(/<details[^>]* open/)
+    expect(item).toContain("They lose access right away")
+  })
+
+  it("shows a refused change under the member it was about", () => {
+    const html = renderToString(
+      asMember(GroupRole.OWNER, 1, { memberError: { userId: 3, message: "Not allowed" } }),
+    )
+
+    expect(memberItem(html, 3)).toContain("Not allowed")
+    expect(memberItem(html, 4)).not.toContain("Not allowed")
+  })
+
+  it("says the members are loading, or why they could not be read", () => {
+    expect(renderToString(asMember(GroupRole.OWNER, 1, { members: null })))
+      .toContain("Loading the members...")
+    expect(renderToString(asMember(GroupRole.OWNER, 1, { membersError: "Offline" })))
+      .toContain("Offline")
+  })
+})
+
+describe("GroupSettingsScreen leave", () => {
+  const asRole = (role: GroupRole, props: Partial<GroupSettingsScreenProps> = {}) => (
+    <GroupSettingsScreen
+      {...settingsDefaults}
+      group={{ ...settingsDefaults.group!, role }}
+      {...props}
+    />
+  )
+
+  it("gives a member a leave form with no fields, behind a confirmation", () => {
+    const screen = asRole(GroupRole.EDITOR)
+    const html = renderToString(screen)
+
+    expect(formAt(noScriptSurface(screen), GROUP_PATHS.leave("g-1")).fields).toEqual([])
+    expect(html).toMatch(/<details[^>]*>[\s\S]*group-leave-confirmation[\s\S]*<\/details>/)
+    expect(html).not.toMatch(/data-e2e="group-leave-details" open/)
+    expect(html).toContain("Leave &quot;Team&quot;?")
+  })
+
+  it("tells the owner they cannot leave, with no leave form", () => {
+    const screen = asRole(GroupRole.OWNER)
+
+    expect(renderToString(screen)).toContain("You own this group, so you cannot leave it.")
+    expect(noScriptSurface(screen).forms.map((form) => form.action))
+      .not.toContain(GROUP_PATHS.leave("g-1"))
+  })
+
+  it("disables leaving the person's only group and says why", () => {
+    const screen = asRole(GroupRole.VIEWER, { isLastGroup: true })
+    const html = renderToString(screen)
+
+    const button = html.match(/<button\b[^>]*data-e2e="group-leave"[^>]*>/)![0]
+    // The class list holds "disabled:" variants, so look for the attribute itself.
+    expect(button).toMatch(/\sdisabled(?=[\s/>])/)
+    expect(attribute(button, "aria-describedby")).toBe("group-leave-why")
+    expect(html).toContain("This is your only group, so you cannot leave it.")
+    expect(noScriptSurface(screen).forms.map((form) => form.action))
+      .not.toContain(GROUP_PATHS.leave("g-1"))
+  })
+
+  it("opens the leave section when the leave was refused, so the reason is seen", () => {
+    const html = renderToString(asRole(GroupRole.VIEWER, { leaveError: "Try again" }))
+
+    expect(html).toMatch(/data-e2e="group-leave-details" open/)
+    expect(html).toContain("Try again")
   })
 })
 

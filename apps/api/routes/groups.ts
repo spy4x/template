@@ -8,9 +8,14 @@ import {
   GroupDeletedListQuery,
   GroupGetQuery,
   GroupGetResult,
+  GroupLeaveCommand,
   GroupListPageKey,
   GroupListQuery,
   GroupListResult,
+  GroupMemberRemoveCommand,
+  GroupMemberRoleCommand,
+  GroupMembersQuery,
+  type GroupMemberSummary,
   GroupRenameCommand,
   GroupRestoreCommand,
   GroupSelectCommand,
@@ -19,6 +24,8 @@ import {
   parseCreateGroupRequest,
   parseGroupId,
   parseGroupIdRequest,
+  parseMemberRoleBody,
+  parseMemberUserIdParam,
   parseRenameGroupBody,
   type SelectedGroup,
 } from "@domain/groups"
@@ -39,6 +46,10 @@ export interface GroupsRouteDependencies {
   delete(command: GroupDeleteCommand): Promise<{ group: DeletedGroupSummary }>
   restore(command: GroupRestoreCommand): Promise<{ group: GroupSummary }>
   deleted(query: GroupDeletedListQuery): Promise<{ groups: DeletedGroupSummary[] }>
+  members(query: GroupMembersQuery): Promise<{ members: GroupMemberSummary[] }>
+  setRole(command: GroupMemberRoleCommand): Promise<{ member: GroupMemberSummary }>
+  removeMember(command: GroupMemberRemoveCommand): Promise<{ removed: true }>
+  leave(command: GroupLeaveCommand): Promise<{ left: true }>
   cursor: {
     encode(userId: number, pageKey: GroupListPageKey): Promise<string>
     decode(cursor: string, expectedUserId: number): Promise<GroupListPageKey>
@@ -136,6 +147,59 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
       return c.json(
         await dependencies.restore(
           new GroupRestoreCommand({
+            actor: actorFromAuth(c.get("auth")!),
+            groupId,
+            requestId: c.get("requestId"),
+            idempotencyKey: c.req.header("idempotency-key"),
+          }),
+        ),
+      )
+    })
+    .get("/:groupId/members", async (c) => {
+      const groupId = parseGroupId(c.req.param("groupId"))
+      return c.json(
+        await dependencies.members(
+          new GroupMembersQuery({ actor: actorFromAuth(c.get("auth")!), groupId }),
+        ),
+      )
+    })
+    .patch("/:groupId/members/:userId", requireSameOrigin, async (c) => {
+      const groupId = parseGroupId(c.req.param("groupId"))
+      const userId = parseMemberUserIdParam(c.req.param("userId"))
+      const { role } = parseMemberRoleBody(await readJsonBody(c))
+      return c.json(
+        await dependencies.setRole(
+          new GroupMemberRoleCommand({
+            actor: actorFromAuth(c.get("auth")!),
+            groupId,
+            userId,
+            role,
+            requestId: c.get("requestId"),
+            idempotencyKey: c.req.header("idempotency-key"),
+          }),
+        ),
+      )
+    })
+    .delete("/:groupId/members/:userId", requireSameOrigin, async (c) => {
+      const groupId = parseGroupId(c.req.param("groupId"))
+      const userId = parseMemberUserIdParam(c.req.param("userId"))
+      return c.json(
+        await dependencies.removeMember(
+          new GroupMemberRemoveCommand({
+            actor: actorFromAuth(c.get("auth")!),
+            groupId,
+            userId,
+            requestId: c.get("requestId"),
+            idempotencyKey: c.req.header("idempotency-key"),
+          }),
+        ),
+      )
+    })
+    .post("/:groupId/leave", requireSameOrigin, async (c) => {
+      const groupId = parseGroupId(c.req.param("groupId"))
+      return c.json(
+        await dependencies.leave(
+          new GroupLeaveCommand({
             actor: actorFromAuth(c.get("auth")!),
             groupId,
             requestId: c.get("requestId"),

@@ -24,12 +24,16 @@ const actor = {
 
 const signal = new AbortController().signal
 
-/** The rename, delete and restore requests, which these tests never call. */
+/** The rename, delete, restore and member requests, which these tests never call. */
 const UNUSED_GROUP_CHANGES = {
   rename: () => Promise.reject(new Error("not used")),
   delete: () => Promise.reject(new Error("not used")),
   restore: () => Promise.reject(new Error("not used")),
   deleted: () => Promise.reject(new Error("not used")),
+  members: () => Promise.reject(new Error("not used")),
+  setRole: () => Promise.reject(new Error("not used")),
+  removeMember: () => Promise.reject(new Error("not used")),
+  leave: () => Promise.reject(new Error("not used")),
 }
 
 function harness() {
@@ -353,6 +357,10 @@ describe("group changes over the socket", () => {
       delete: record("delete"),
       restore: record("restore"),
       deleted: () => Promise.resolve({ groups: [] }),
+      members: () => Promise.reject(new Error("not used")),
+      setRole: () => Promise.reject(new Error("not used")),
+      removeMember: () => Promise.reject(new Error("not used")),
+      leave: () => Promise.reject(new Error("not used")),
     })
     return { requests, seen }
   }

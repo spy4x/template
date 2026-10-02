@@ -121,6 +121,14 @@ export const GROUP_PATHS = {
   delete: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/delete`,
   /** `POST` restores a deleted group. Takes no fields. */
   restore: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/restore`,
+  /** `POST` gives a member a new role: `{ role }`. */
+  memberRole: (groupId: string, userId: number) =>
+    `/groups/${encodeURIComponent(groupId)}/members/${userId}/role`,
+  /** `POST` removes a member. Takes no fields. */
+  memberRemove: (groupId: string, userId: number) =>
+    `/groups/${encodeURIComponent(groupId)}/members/${userId}/remove`,
+  /** `POST` leaves the group. Takes no fields. */
+  leave: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/leave`,
 } as const
 
 /** `EnhancedForm` announces nothing itself: each screen shows its own busy button and error. */

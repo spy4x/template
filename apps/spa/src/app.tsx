@@ -11,6 +11,7 @@ import { notesStore } from "./state/notes.ts"
 import { selectionStore } from "./state/selection.ts"
 import { connectRealtime, disconnectRealtime } from "./state/realtime.ts"
 import { profileStore } from "./state/profile.ts"
+import { membersStore } from "./state/members.ts"
 import { createPull } from "./state/pull.ts"
 import { emailStore } from "./state/email.ts"
 import { flushOutbox, startOffline, stopOffline } from "./offline/index.ts"
@@ -145,6 +146,7 @@ export function App() {
       disconnectRealtime({ forget: true })
       void stopOffline({ forget: true })
       groupsStore.reset()
+      membersStore.reset()
       notesStore.reset()
       profileStore.reset()
       selectionStore.reset()
@@ -161,6 +163,7 @@ export function App() {
       selection: selectionStore,
       groups: groupsStore,
       notes: notesStore,
+      members: membersStore,
     })
     startOffline(userId)
     selectionStore.start(userId)

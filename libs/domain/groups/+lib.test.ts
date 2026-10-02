@@ -1,9 +1,13 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import {
+  assertCanChangeRole,
   assertCanDelete,
+  assertCanLeave,
+  assertCanRemoveMember,
   assertCanRename,
   assertOwnerRemains,
+  assignableRoles,
   canDelete,
   canManageMember,
   canMutateNotes,
@@ -13,6 +17,10 @@ import {
   GroupRole,
   parseCreateGroupRequest,
   parseGroupIdRequest,
+  parseMemberRequest,
+  parseMemberRoleBody,
+  parseMemberRoleRequest,
+  parseMemberUserIdParam,
   parseRenameGroupBody,
   parseRenameGroupRequest,
 } from "./+lib.ts"
@@ -151,5 +159,111 @@ describe("group domain", () => {
       expect(() => parseGroupIdRequest(value)).toThrow(GroupError)
     }
     expect(() => parseGroupIdRequest({ groupId, name: "x" })).toThrow(GroupError)
+  })
+})
+
+const { VIEWER, EDITOR, ADMIN, OWNER } = GroupRole
+const ROLES = [VIEWER, EDITOR, ADMIN, OWNER]
+
+describe("group members", () => {
+  it("lets the owner give anyone else viewer, editor or admin, and never the owner role", () => {
+    expect(assignableRoles(OWNER, VIEWER)).toEqual([EDITOR, ADMIN])
+    expect(assignableRoles(OWNER, EDITOR)).toEqual([VIEWER, ADMIN])
+    expect(assignableRoles(OWNER, ADMIN)).toEqual([VIEWER, EDITOR])
+    expect(assignableRoles(OWNER, OWNER)).toEqual([])
+  })
+
+  it("lets an admin move viewers and editors between those two roles only", () => {
+    expect(assignableRoles(ADMIN, VIEWER)).toEqual([EDITOR])
+    expect(assignableRoles(ADMIN, EDITOR)).toEqual([VIEWER])
+    expect(assignableRoles(ADMIN, ADMIN)).toEqual([])
+    expect(assignableRoles(ADMIN, OWNER)).toEqual([])
+  })
+
+  it("gives a viewer or an editor no role to hand out", () => {
+    for (const actor of [VIEWER, EDITOR]) {
+      for (const target of ROLES) expect(assignableRoles(actor, target)).toEqual([])
+    }
+  })
+
+  it("refuses a viewer every role change and every removal", () => {
+    for (const target of [VIEWER, EDITOR, ADMIN]) {
+      for (const next of [VIEWER, EDITOR, ADMIN]) {
+        expect(codeOf(() => assertCanChangeRole(VIEWER, target, next))).toBe("ROLE_INSUFFICIENT")
+      }
+      expect(codeOf(() => assertCanRemoveMember(VIEWER, target))).toBe("ROLE_INSUFFICIENT")
+    }
+  })
+
+  it("checks a role change as assignableRoles offers it", () => {
+    for (const actor of ROLES) {
+      for (const target of [VIEWER, EDITOR, ADMIN]) {
+        for (const next of [VIEWER, EDITOR, ADMIN]) {
+          if (next === target) continue
+          const allowed = codeOf(() => assertCanChangeRole(actor, target, next)) === undefined
+          expect(allowed).toBe(assignableRoles(actor, target).includes(next))
+        }
+      }
+    }
+  })
+
+  it("never changes the owner's role or hands out the owner role", () => {
+    expect(codeOf(() => assertCanChangeRole(OWNER, OWNER, ADMIN))).toBe("LAST_OWNER")
+    expect(codeOf(() => assertCanChangeRole(OWNER, ADMIN, OWNER))).toBe("LAST_OWNER")
+  })
+
+  it("lets the owner remove anyone else and an admin remove viewers and editors", () => {
+    for (const target of [VIEWER, EDITOR, ADMIN]) {
+      expect(codeOf(() => assertCanRemoveMember(OWNER, target))).toBeUndefined()
+    }
+    expect(codeOf(() => assertCanRemoveMember(ADMIN, VIEWER))).toBeUndefined()
+    expect(codeOf(() => assertCanRemoveMember(ADMIN, EDITOR))).toBeUndefined()
+    expect(codeOf(() => assertCanRemoveMember(ADMIN, ADMIN))).toBe("ROLE_INSUFFICIENT")
+    expect(codeOf(() => assertCanRemoveMember(EDITOR, VIEWER))).toBe("ROLE_INSUFFICIENT")
+    expect(codeOf(() => assertCanRemoveMember(OWNER, OWNER))).toBe("LAST_OWNER")
+  })
+
+  it("tells a non-member the group does not exist, and names a missing member", () => {
+    expect(codeOf(() => assertCanChangeRole(null, VIEWER, EDITOR))).toBe("GROUP_NOT_FOUND")
+    expect(codeOf(() => assertCanRemoveMember(null, VIEWER))).toBe("GROUP_NOT_FOUND")
+    expect(codeOf(() => assertCanLeave(null))).toBe("GROUP_NOT_FOUND")
+    expect(codeOf(() => assertCanChangeRole(OWNER, null, EDITOR))).toBe("MEMBER_NOT_FOUND")
+    expect(codeOf(() => assertCanRemoveMember(OWNER, null))).toBe("MEMBER_NOT_FOUND")
+  })
+
+  it("lets every member but the owner leave", () => {
+    for (const role of [VIEWER, EDITOR, ADMIN]) {
+      expect(codeOf(() => assertCanLeave(role))).toBeUndefined()
+    }
+    expect(codeOf(() => assertCanLeave(OWNER))).toBe("LAST_OWNER")
+  })
+
+  it("parses a role change and a member request strictly", () => {
+    const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
+    expect(parseMemberRoleBody({ role: 2 })).toEqual({ role: EDITOR })
+    expect(parseMemberRoleRequest({ groupId, userId: 7, role: 3 }))
+      .toEqual({ groupId, userId: 7, role: ADMIN })
+    expect(parseMemberRequest({ groupId, userId: 7 })).toEqual({ groupId, userId: 7 })
+    expect(parseMemberUserIdParam("42")).toBe(42)
+    const badBodies = [{ role: 4 }, { role: 0 }, { role: "2" }, {}, { role: 2, userId: 1 }]
+    for (const value of badBodies) {
+      expect(codeOf(() => parseMemberRoleBody(value))).toBe("INVALID_REQUEST")
+    }
+    const badRequests = [
+      { groupId, userId: "7", role: 2 },
+      { groupId, userId: 0, role: 2 },
+      { groupId, userId: 1.5, role: 2 },
+      { groupId, role: 2 },
+      { groupId: "nope", userId: 7, role: 2 },
+    ]
+    for (const value of badRequests) {
+      expect(codeOf(() => parseMemberRoleRequest(value))).toBe("INVALID_REQUEST")
+    }
+    for (const value of [{ groupId }, { groupId, userId: -1 }, { groupId, userId: 7, x: 1 }]) {
+      expect(codeOf(() => parseMemberRequest(value))).toBe("INVALID_REQUEST")
+    }
+    for (const value of ["0", "007", "1e3", "-1", "2147483648", "abc"]) {
+      expect(codeOf(() => parseMemberUserIdParam(value))).toBe("INVALID_REQUEST")
+    }
   })
 })

@@ -17,6 +17,9 @@ import { handler as groupSettings } from "./routes/groups/[groupId]/index.tsx"
 import { handler as renameGroup } from "./routes/groups/[groupId]/rename.ts"
 import { handler as deleteGroup } from "./routes/groups/[groupId]/delete.ts"
 import { handler as restoreGroup } from "./routes/groups/[groupId]/restore.ts"
+import { handler as leaveGroup } from "./routes/groups/[groupId]/leave.ts"
+import { handler as memberRole } from "./routes/groups/[groupId]/members/[userId]/role.ts"
+import { handler as memberRemove } from "./routes/groups/[groupId]/members/[userId]/remove.ts"
 import { handler as oldNotes } from "./routes/groups/[groupId]/notes/index.tsx"
 import { handler as oldNote } from "./routes/groups/[groupId]/notes/[noteId]/index.tsx"
 import { handler as emailPage } from "./routes/email/index.tsx"
@@ -69,6 +72,9 @@ function appWith(fetch: typeof globalThis.fetch) {
     .post("/groups/:groupId/rename", renameGroup.POST!)
     .post("/groups/:groupId/delete", deleteGroup.POST!)
     .post("/groups/:groupId/restore", restoreGroup.POST!)
+    .post("/groups/:groupId/leave", leaveGroup.POST!)
+    .post("/groups/:groupId/members/:userId/role", memberRole.POST!)
+    .post("/groups/:groupId/members/:userId/remove", memberRemove.POST!)
     .get("/groups/:groupId/notes", oldNotes.GET!)
     .get("/groups/:groupId/notes/:noteId", oldNote.GET!)
     .post("/forgot-password", forgotPassword.POST!)
@@ -858,6 +864,109 @@ describe("the groups pages", () => {
 
     expect(html).toContain("This is your only group, so it cannot be deleted.")
     expect(html).not.toContain(`action="/groups/${groupId}/delete"`)
+  })
+
+  const membersOf = (path: string, method: string) =>
+    path === `/api/groups/${groupId}/members` && method === "GET"
+      ? Response.json({
+        members: [
+          { userId: 1, name: "Ada", email: null, role: 4, joinedAt: "2026-01-01T00:00:00Z" },
+          { userId: 7, name: "Vic", email: null, role: 1, joinedAt: "2026-02-01T00:00:00Z" },
+        ],
+      })
+      : settings(path, method)
+
+  it("lists the members on a group's settings, with the owner's forms for each member below them", async () => {
+    const { fetch } = notesApi(groupId, membersOf)
+
+    const html = await (await get(fetch, `/groups/${groupId}`)).text()
+
+    expect(html).toContain("Members (2)")
+    expect(html).toContain("Vic")
+    expect(html).toContain(`action="/groups/${groupId}/members/7/role"`)
+    expect(html).toContain(`action="/groups/${groupId}/members/7/remove"`)
+    expect(html).not.toContain(`action="/groups/${groupId}/members/1/role"`)
+  })
+
+  it("changes a member's role through PATCH with the role as a number, and returns to the settings page", async () => {
+    const { calls, fetch } = notesApi(groupId, () => Response.json({ member: {} }))
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/members/7/role`, { role: "2" }),
+      info,
+    )
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe(`/groups/${groupId}`)
+    expect(calls.filter((call) => call.method === "PATCH")).toEqual([
+      { method: "PATCH", path: `/api/groups/${groupId}/members/7`, body: { role: 2 } },
+    ])
+  })
+
+  it("shows a refused role change under that member's row", async () => {
+    const { fetch } = notesApi(
+      groupId,
+      (path, method) =>
+        method === "PATCH"
+          ? refusal(403, "ROLE_INSUFFICIENT", "Group role is insufficient")
+          : membersOf(path, method),
+    )
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/members/7/role`, { role: "3" }),
+      info,
+    )
+    const html = await response.text()
+
+    expect(response.status).toBe(403)
+    const row = html.slice(html.indexOf('data-user-id="7"'))
+    expect(row).toContain("Group role is insufficient")
+  })
+
+  it("removes a member through DELETE and returns to the settings page", async () => {
+    const { calls, fetch } = notesApi(groupId, () => Response.json({ removed: true }))
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/members/7/remove`, {}),
+      info,
+    )
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe(`/groups/${groupId}`)
+    expect(calls.filter((call) => call.method === "DELETE").map((call) => call.path))
+      .toEqual([`/api/groups/${groupId}/members/7`])
+  })
+
+  it("leaves through POST and shows the groups page", async () => {
+    const { calls, fetch } = notesApi(groupId, () => Response.json({ left: true }))
+
+    const response = await appWith(fetch)(formPost(`/groups/${otherGroupId}/leave`, {}), info)
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe("/groups")
+    expect(calls.filter((call) => call.method === "POST").map((call) => call.path))
+      .toEqual([`/api/groups/${otherGroupId}/leave`])
+  })
+
+  it("shows why a leave was refused on the settings page, with the confirmation open", async () => {
+    const { fetch } = notesApi(
+      groupId,
+      (path, method) =>
+        method === "POST"
+          ? refusal(409, "LAST_GROUP", "A person must keep at least one group")
+          : path === `/api/groups/${otherGroupId}`
+          ? Response.json({ group: { id: otherGroupId, name: "Work", role: 1 } })
+          : notesList(),
+    )
+
+    const response = await appWith(fetch)(formPost(`/groups/${otherGroupId}/leave`, {}), info)
+    const html = await response.text()
+
+    expect(response.status).toBe(409)
+    expect(html).toContain("A person must keep at least one group")
+    expect(html).toMatch(
+      /<details[^>]*data-e2e="group-leave-details"[^>]* open|<details[^>]* open[^>]*data-e2e="group-leave-details"/,
+    )
   })
 
   it("lists the groups that can still be restored, each with a restore form", async () => {

@@ -333,7 +333,8 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 
 - The password and two-factor calls are still REST: they change the session the socket is bound
   to. The MPA has no socket, so the profile and push REST routes stay for it.
-- Group membership cannot be changed through the product: tests seed a second member with `POST /api/test/add-member`.
+- Nobody can be added to a group through the product yet (invitations are #131): tests seed a
+  second member with `POST /api/test/add-member`. Role changes, removal and leaving are built.
 - No local projection in the SPA, no offline outbox, no conflict UI. The page keeps its cursors in
   `localStorage` and rereads the whole group list to catch up.
 - The worker publishes a group change with `pg_notify`, which reaches only API instances that are
@@ -469,8 +470,17 @@ Each is intended to be one small PR. Small PRs are an explicit requirement here.
 
 1. **SPA local projection and offline outbox.**
 
-Member removal and role changes (#130) call `recordAccessChange` in their transaction, with the
-removed member in its list of users who lost access (a demoted member keeps access).
+Member removal, role changes and leaving (#130) call `recordAccessChange` in their transaction,
+with the removed member in its list of users who lost access (a demoted member keeps access).
+Note writes and rename read the actor's role again inside their own transaction with
+`lockActorRole` (`libs/server/groups/group-change-log.ts`): it locks the group row, then the
+membership `FOR SHARE`, so a write racing a removal or demotion waits for it and is then refused
+(#230). The member commands lock the group row too, then the memberships of the actor and the
+target with `lockMemberRoles` (`FOR UPDATE`), and check the rule on those rows. Keep the group row
+first in both: the other order deadlocks a write against a member change (the "lock order" tests
+in `tests/integration/group-write-race.integration.test.ts`). `recordAccessChange` and
+`recordGroupChange` take a transaction, never the pool. Members' sign-in addresses go only to the
+owner and admins (`canSeeMemberEmails`); other members get no `email` field.
 
 Extraction from the sibling Financy project is tracked separately in
 [docs/financy-extraction-inventory.md](financy-extraction-inventory.md);

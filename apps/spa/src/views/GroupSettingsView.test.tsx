@@ -4,6 +4,7 @@ import { renderToString } from "preact-render-to-string"
 import { Router } from "wouter-preact"
 import { GroupRole } from "@domain/groups"
 import { groupsStore } from "../state/groups.ts"
+import { membersStore } from "../state/members.ts"
 import { GroupSettingsView } from "./GroupSettingsView.tsx"
 
 const known = {
@@ -25,7 +26,10 @@ const render = (groupId: string) =>
   )
 
 describe("GroupSettingsView", () => {
-  afterEach(() => groupsStore.reset())
+  afterEach(() => {
+    groupsStore.reset()
+    membersStore.reset()
+  })
 
   it("says the group does not exist, and shows no other group, for an address that names a group the person is not in", () => {
     groupsStore.groups.value = [known]
@@ -53,5 +57,23 @@ describe("GroupSettingsView", () => {
 
     expect(html).toContain("Could not load the groups")
     expect(html).not.toContain("Loading the group...")
+  })
+
+  it("shows the members the store holds for this group, and never another group's", () => {
+    groupsStore.groups.value = [known]
+    membersStore.members.value = [{
+      userId: 2,
+      name: "Vera Viewer",
+      email: null,
+      role: GroupRole.VIEWER,
+      joinedAt: "2026-10-01T00:00:00.000Z",
+      isYou: false,
+    }]
+
+    membersStore.groupId.value = strangerId
+    expect(render(known.id)).not.toContain("Vera Viewer")
+
+    membersStore.groupId.value = known.id
+    expect(render(known.id)).toContain("Vera Viewer")
   })
 })

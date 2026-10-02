@@ -1,5 +1,6 @@
 import type postgres from "postgres"
 import {
+  assertCanWriteNotes,
   type DeletedNote,
   type Note,
   NOTE_EVENTS,
@@ -13,7 +14,11 @@ import {
   NoteVersionConflictError,
   type NoteWriteResult,
 } from "@domain/notes"
-import { GroupNotActiveError, recordGroupChange } from "@server/groups/group-change-log.ts"
+import {
+  GroupNotActiveError,
+  lockActorRole,
+  recordGroupChange,
+} from "@server/groups/group-change-log.ts"
 
 interface NoteRow extends postgres.Row, Note {}
 
@@ -32,7 +37,7 @@ interface DeletedRow extends postgres.Row {
  * missing group, and the note write rolls back with it.
  */
 async function recordNoteChange(
-  sql: postgres.Sql,
+  sql: postgres.TransactionSql,
   groupId: string,
   actorId: number,
   eventKind: string,
@@ -48,9 +53,29 @@ async function recordNoteChange(
 }
 
 /**
- * Notes in Postgres. Every write runs in one transaction that also records the change on the
- * group (`recordGroupChange`): the group's sequence moves and an outbox row is written, or neither
- * happens. It checks no role; the handlers decide who may call it.
+ * Checks, in the write's own transaction, that the actor may still change the group's notes: the
+ * handler's check ran before it, and the owner may have removed or demoted the actor since. A group
+ * deleted since is answered as a missing group.
+ */
+async function assertWriterNow(
+  transaction: postgres.TransactionSql,
+  groupId: string,
+  actorId: number,
+): Promise<void> {
+  try {
+    assertCanWriteNotes(await lockActorRole(transaction, groupId, actorId))
+  } catch (error) {
+    if (error instanceof GroupNotActiveError) {
+      throw new NoteError("GROUP_NOT_FOUND", "Group not found")
+    }
+    throw error
+  }
+}
+
+/**
+ * Notes in Postgres. Every write runs in one transaction that first checks the actor's role on
+ * the locked membership row and then records the change on the group (`recordGroupChange`): the
+ * group's sequence moves and an outbox row is written, or neither happens.
  */
 export class PostgresNoteRepository implements NoteRepository {
   constructor(private readonly sql: postgres.Sql) {}
@@ -97,6 +122,7 @@ export class PostgresNoteRepository implements NoteRepository {
   async create(input: NoteCreateInput, actorId: number): Promise<NoteWriteResult> {
     return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
       const repository = new PostgresNoteRepository(transaction)
+      await assertWriterNow(transaction, input.groupId, actorId)
       // `change_sequence` is set below, once the change is recorded: recording it before the insert
       // would announce a change for a retry that inserts nothing.
       const inserted = (
@@ -111,7 +137,13 @@ export class PostgresNoteRepository implements NoteRepository {
         `
       )[0]
       if (inserted) {
-        const note = await repository.stamp(input.groupId, input.id, actorId, NOTE_EVENTS.created)
+        const note = await repository.stamp(
+          transaction,
+          input.groupId,
+          input.id,
+          actorId,
+          NOTE_EVENTS.created,
+        )
         return { note, created: true }
       }
 
@@ -132,6 +164,7 @@ export class PostgresNoteRepository implements NoteRepository {
   async update(input: NoteUpdateInput, actorId: number): Promise<Note> {
     return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
       const repository = new PostgresNoteRepository(transaction)
+      await assertWriterNow(transaction, input.groupId, actorId)
       const updated = await transaction<{ id: string }[]>`
         UPDATE notes
         SET title = ${input.title},
@@ -146,13 +179,20 @@ export class PostgresNoteRepository implements NoteRepository {
         RETURNING id
       `
       if (updated.length === 0) return await repository.refuseStaleWrite(input.groupId, input.id)
-      return await repository.stamp(input.groupId, input.id, actorId, NOTE_EVENTS.updated)
+      return await repository.stamp(
+        transaction,
+        input.groupId,
+        input.id,
+        actorId,
+        NOTE_EVENTS.updated,
+      )
     })
   }
 
   async delete(input: NoteDeleteInput, actorId: number): Promise<DeletedNote> {
     return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
       const repository = new PostgresNoteRepository(transaction)
+      await assertWriterNow(transaction, input.groupId, actorId)
       const deleted = (
         await transaction<DeletedRow[]>`
           UPDATE notes
@@ -189,12 +229,13 @@ export class PostgresNoteRepository implements NoteRepository {
    * the note and returns the note as it now reads.
    */
   private async stamp(
+    transaction: postgres.TransactionSql,
     groupId: string,
     id: string,
     actorId: number,
     eventKind: string,
   ): Promise<Note> {
-    const sequence = await recordNoteChange(this.sql, groupId, actorId, eventKind)
+    const sequence = await recordNoteChange(transaction, groupId, actorId, eventKind)
     const row = (
       await this.sql<NoteRow[]>`
         UPDATE notes SET change_sequence = ${sequence}::bigint

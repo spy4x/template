@@ -2,6 +2,7 @@ import type { JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
 import { Button } from "@spy4x/preact-ui/button"
 import { Badge } from "@spy4x/preact-ui/badge"
+import { AvatarGroup } from "@spy4x/preact-ui/avatar"
 import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
@@ -17,6 +18,10 @@ export interface GroupRow {
   id: string
   name: string
   role: GroupRole
+  /** How many members the group has; the card shows its avatar stack when it is known. */
+  memberCount?: number
+  /** The first few members, oldest first, for the avatar stack. */
+  members?: readonly { name: string }[]
 }
 
 /** A group its owner deleted and can still restore. */
@@ -161,6 +166,14 @@ export function GroupsScreen(
                         <span class="text-xs text-muted">
                           {ROLE_TEXT[group.role]}
                         </span>
+                        {group.memberCount !== undefined && group.members && (
+                          <AvatarGroup
+                            items={stackItems(group.members, group.memberCount)}
+                            label={`Members of ${group.name}`}
+                            size="xs"
+                            class="pt-1"
+                          />
+                        )}
                       </div>
                       <div class="flex flex-wrap items-center gap-2">
                         <Link
@@ -269,4 +282,16 @@ export function GroupsScreen(
 function restorableUntil(deletedAt: string): string {
   return new Date(new Date(deletedAt).getTime() + GROUP_RESTORE_DAYS * 24 * 60 * 60_000)
     .toISOString()
+}
+
+/**
+ * The avatars of a group's card: the members the list named, then a nameless one for each member
+ * it did not, so the stack's `+N` chip and its label count everyone.
+ */
+function stackItems(
+  members: readonly { name: string }[],
+  count: number,
+): { name: string }[] {
+  const unnamed = Math.max(0, count - members.length)
+  return [...members, ...Array.from({ length: unnamed }, () => ({ name: "" }))]
 }

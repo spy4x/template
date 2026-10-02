@@ -2,14 +2,21 @@ import type { CommandHandler, QueryHandler } from "@spy4x/platform/cqrs"
 import type { GroupRepository } from "@domain/groups"
 import { GroupSelectedEvent } from "../../cqrs/events.ts"
 import {
+  assertCanChangeRole,
   assertCanDelete,
+  assertCanLeave,
+  assertCanRemoveMember,
   assertCanRename,
   GroupCreateCommand,
   GroupDeleteCommand,
   GroupDeletedListQuery,
   GroupError,
   GroupGetQuery,
+  GroupLeaveCommand,
   GroupListQuery,
+  GroupMemberRemoveCommand,
+  GroupMemberRoleCommand,
+  GroupMembersQuery,
   GroupRenameCommand,
   GroupRestoreCommand,
   GroupSelectCommand,
@@ -125,4 +132,74 @@ export function createGroupDeletedListHandler(
   repository: GroupRepository,
 ): QueryHandler<GroupDeletedListQuery> {
   return async ({ data }) => ({ groups: await repository.listRestorable(data.actor.userId) })
+}
+
+/** The members of a group, for any member; a person who is not one is told it does not exist. */
+export function createGroupMembersHandler(
+  repository: GroupRepository,
+): QueryHandler<GroupMembersQuery> {
+  return async ({ data }) => {
+    const members = await repository.listMembers(data.groupId, data.actor.userId)
+    if (!members) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+    return { members }
+  }
+}
+
+/**
+ * Changes a member's role. The owner and an admin may give a role below their own to a member
+ * below them; nobody gives or takes the owner role here. Checked first on the roles read now, and
+ * again by the repository on locked rows.
+ */
+export function createGroupMemberRoleHandler(
+  repository: GroupRepository,
+): CommandHandler<GroupMemberRoleCommand> {
+  return async ({ data }) => {
+    const actor = await repository.getForMember(data.groupId, data.actor.userId)
+    const target = actor ? await repository.getForMember(data.groupId, data.userId) : null
+    assertCanChangeRole(actor?.role ?? null, target?.role ?? null, data.role)
+    const member = await repository.changeMemberRole(
+      data.groupId,
+      data.userId,
+      data.role,
+      data.actor.userId,
+      data.requestId,
+    )
+    if (!member) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+    return { member }
+  }
+}
+
+/**
+ * Removes a member: the owner and an admin may remove a member below them. The removed person's
+ * open pages lose the group through the access-lost hint the repository records.
+ */
+export function createGroupMemberRemoveHandler(
+  repository: GroupRepository,
+): CommandHandler<GroupMemberRemoveCommand> {
+  return async ({ data }) => {
+    const actor = await repository.getForMember(data.groupId, data.actor.userId)
+    const target = actor ? await repository.getForMember(data.groupId, data.userId) : null
+    assertCanRemoveMember(actor?.role ?? null, target?.role ?? null)
+    const removed = await repository.removeMember(
+      data.groupId,
+      data.userId,
+      data.actor.userId,
+      data.requestId,
+    )
+    if (!removed) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+    return { removed: true }
+  }
+}
+
+/** Leaves a group: any member but the owner, and never the person's last group. */
+export function createGroupLeaveHandler(
+  repository: GroupRepository,
+): CommandHandler<GroupLeaveCommand> {
+  return async ({ data }) => {
+    const access = await repository.getForMember(data.groupId, data.actor.userId)
+    assertCanLeave(access?.role ?? null)
+    const left = await repository.leave(data.groupId, data.actor.userId, data.requestId)
+    if (!left) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+    return { left: true }
+  }
 }

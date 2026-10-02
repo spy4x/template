@@ -15,7 +15,11 @@ import {
   GroupDeleteCommand,
   GroupDeletedListQuery,
   GroupGetQuery,
+  GroupLeaveCommand,
   GroupListQuery,
+  GroupMemberRemoveCommand,
+  GroupMemberRoleCommand,
+  GroupMembersQuery,
   GroupRenameCommand,
   GroupRestoreCommand,
   GroupSelectCommand,
@@ -35,6 +39,10 @@ import { groupDeleteHandler } from "@api/cqrs/command-handlers/group-delete.ts"
 import { groupRestoreHandler } from "@api/cqrs/command-handlers/group-restore.ts"
 import { groupDeletedListHandler } from "@api/cqrs/query-handlers/group-deleted-list.ts"
 import { groupSelectedHandler } from "@api/cqrs/query-handlers/group-selected.ts"
+import { groupMembersHandler } from "@api/cqrs/query-handlers/group-members.ts"
+import { groupMemberRoleHandler } from "@api/cqrs/command-handlers/group-member-role.ts"
+import { groupMemberRemoveHandler } from "@api/cqrs/command-handlers/group-member-remove.ts"
+import { groupLeaveHandler } from "@api/cqrs/command-handlers/group-leave.ts"
 import {
   NoteCreateCommand,
   NoteDeleteCommand,
@@ -90,6 +98,9 @@ commandBus.register(GroupSelectCommand, groupSelectHandler)
 commandBus.register(GroupRenameCommand, groupRenameHandler)
 commandBus.register(GroupDeleteCommand, groupDeleteHandler)
 commandBus.register(GroupRestoreCommand, groupRestoreHandler)
+commandBus.register(GroupMemberRoleCommand, groupMemberRoleHandler)
+commandBus.register(GroupMemberRemoveCommand, groupMemberRemoveHandler)
+commandBus.register(GroupLeaveCommand, groupLeaveHandler)
 commandBus.register(NoteCreateCommand, noteCreateHandler)
 commandBus.register(NoteUpdateCommand, noteUpdateHandler)
 commandBus.register(NoteDeleteCommand, noteDeleteHandler)
@@ -99,6 +110,7 @@ queryBus.register(GroupListQuery, groupListHandler)
 queryBus.register(GroupGetQuery, groupGetHandler)
 queryBus.register(GroupSelectedQuery, groupSelectedHandler)
 queryBus.register(GroupDeletedListQuery, groupDeletedListHandler)
+queryBus.register(GroupMembersQuery, groupMembersHandler)
 queryBus.register(NoteListQuery, noteListHandler)
 queryBus.register(NoteGetQuery, noteGetHandler)
 
