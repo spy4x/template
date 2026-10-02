@@ -921,6 +921,8 @@ describe("GroupSettingsScreen members", () => {
     expect(item).toMatch(/<details[^>]*>[\s\S]*Remove Ed Itor\.\.\.[\s\S]*<form/)
     expect(item).not.toMatch(/<details[^>]* open/)
     expect(item).toContain("They lose access right away")
+    // A used team link binds to an account, not a person, so the owner is told to revoke it.
+    expect(item).toContain("revoke such links under Invitations")
   })
 
   it("shows a refused change under the member it was about", () => {
