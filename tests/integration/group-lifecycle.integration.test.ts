@@ -267,16 +267,32 @@ Deno.test("delete: two deletes at once never leave a person without a group", as
         (${bobsGroup.id}, ${ann}, ${GroupRole.EDITOR}, ${bob})
     `
 
-    const results = await Promise.allSettled([
+    // Both deletes start while a third transaction holds both people's rows, and run on together
+    // when it lets go: without locks on every member they would not see each other's work.
+    const hold = await sql.reserve()
+    await hold`BEGIN`
+    await hold`SELECT id FROM users WHERE id IN (${ann}, ${bob}) ORDER BY id FOR UPDATE`
+    const results = Promise.allSettled([
       repository.softDelete(annsGroup.id, ann),
       repository.softDelete(bobsGroup.id, bob),
     ])
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const [{ waiting }] = await sql<{ waiting: number }[]>`
+        SELECT count(*)::int AS waiting FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock' AND datname = current_database()
+      `
+      if (waiting >= 2) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    await hold`COMMIT`
+    hold.release()
+    const settled = await results
 
     for (const person of [ann, bob]) {
       const { groups } = await repository.listForUser(person, { limit: 10 })
       expect(groups.length).toBeGreaterThan(0)
     }
-    const refused = results.filter((result) => result.status === "rejected")
+    const refused = settled.filter((result) => result.status === "rejected")
     expect(refused.length).toBe(1)
     expect((refused[0] as PromiseRejectedResult).reason).toMatchObject({ code: "LAST_GROUP" })
   })
