@@ -3,7 +3,15 @@ import { expect } from "@std/expect"
 import postgres from "postgres"
 import { GroupRole } from "@domain/groups"
 import { NoteError } from "@domain/notes"
-import { GroupNotActiveError, recordGroupChange } from "@server/groups/group-change-log.ts"
+import {
+  GroupNotActiveError,
+  recordAccessChange,
+  recordGroupChange,
+} from "@server/groups/group-change-log.ts"
+import {
+  type GroupAccessLoss,
+  listenForGroupAccessLoss,
+} from "@server/groups/group-change-notify.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { purgeDeletedGroups } from "@server/groups/purge-deleted-groups.ts"
@@ -163,15 +171,134 @@ Deno.test("delete: nobody keeps the deleted group selected", async () => {
   })
 })
 
-Deno.test("delete: members of the deleted group still get its change hint", async () => {
+/** The group's authorization revision, as a decimal string. */
+async function revision(sql: postgres.Sql, groupId: string): Promise<string> {
+  return (await sql<{ revision: string }[]>`
+    SELECT authorization_revision::text AS revision FROM groups WHERE id = ${groupId}
+  `)[0].revision
+}
+
+/**
+ * Listens for the access losses of one group. Each is stored with whether the group read as
+ * deleted on another connection the moment it arrived, which says if it came after the commit.
+ */
+async function listenForLosses(sql: postgres.Sql, groupId: string) {
+  const losses: { loss: GroupAccessLoss; deletedWhenHeard: boolean }[] = []
+  const reads: Promise<void>[] = []
+  const stop = await listenForGroupAccessLoss(sql, (loss) => {
+    if (loss.groupId !== groupId) return
+    reads.push((async () => {
+      const row = (await sql<{ deleted: boolean }[]>`
+        SELECT deleted_at IS NOT NULL AS deleted FROM groups WHERE id = ${groupId}
+      `)[0]
+      losses.push({ loss, deletedWhenHeard: row.deleted })
+    })())
+  })
+  /** Waits a moment for stragglers, then returns every loss heard, in arrival order. */
+  async function heard(count: number) {
+    const deadline = Date.now() + 5_000
+    while (losses.length < count && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    await Promise.all(reads)
+    return losses
+  }
+  return { heard, stop }
+}
+
+Deno.test("delete and restore each raise the group's authorization revision; a refusal does not", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner, admin } = await team(sql)
+    expect(await revision(sql, groupId)).toBe("1")
+
+    expect(await repository.softDelete(groupId, admin)).toBeNull()
+    expect(await revision(sql, groupId)).toBe("1")
+
+    const deleted = await repository.softDelete(groupId, owner)
+    expect(deleted?.authorizationRevision).toBe("2")
+    expect(await revision(sql, groupId)).toBe("2")
+
+    const restored = await repository.restore(groupId, owner)
+    expect(restored?.authorizationRevision).toBe("3")
+    expect(await revision(sql, groupId)).toBe("3")
+  })
+})
+
+Deno.test("delete: every member leaves the hint list and is named, after the commit, as having lost the group", async () => {
   await withSchema(async (sql) => {
     const { repository, groupId, owner, admin, editor, viewer, onlyHere } = await team(sql)
+    const everyone = [owner, admin, editor, viewer, onlyHere].sort((a, b) => a - b)
+    expect(await repository.listMemberUserIds(groupId)).toEqual(everyone)
+    const listener = await listenForLosses(sql, groupId)
+    try {
+      const deleted = await repository.softDelete(groupId, owner)
 
-    await repository.softDelete(groupId, owner)
+      expect(await repository.listMemberUserIds(groupId)).toEqual([])
+      const losses = await listener.heard(1)
+      expect(losses.length).toBe(1)
+      expect(losses[0].deletedWhenHeard).toBe(true)
+      expect(losses[0].loss.sequence).toBe(Number(deleted!.changeSequence))
+      expect([...losses[0].loss.userIds].sort((a, b) => a - b)).toEqual(everyone)
 
-    expect(await repository.listMemberUserIds(groupId)).toEqual(
-      [owner, admin, editor, viewer, onlyHere].sort((a, b) => a - b),
-    )
+      // The restore gives the group back and takes nobody's access away.
+      await repository.restore(groupId, owner)
+      expect(await repository.listMemberUserIds(groupId)).toEqual(everyone)
+      expect((await listener.heard(2)).length).toBe(1)
+    } finally {
+      await listener.stop()
+    }
+  })
+})
+
+Deno.test("delete: a group with more members than one notification holds names all of them", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner } = await team(sql)
+    const crowd = (await sql<IdRow[]>`
+      WITH auth_user AS (
+        INSERT INTO auth_users SELECT FROM generate_series(1, 1200) RETURNING id
+      )
+      INSERT INTO users (id) SELECT id FROM auth_user RETURNING id
+    `).map((row) => row.id)
+    // They also join the owner's other group, so the delete strands nobody (no new groups to make).
+    const home = (await sql<{ groupId: string }[]>`
+      SELECT group_id FROM group_members WHERE user_id = ${owner} AND group_id <> ${groupId}
+    `)[0].groupId
+    await sql`
+      INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+      SELECT target, id, ${GroupRole.VIEWER}, ${owner}
+      FROM unnest(${crowd}::int4[]) AS id, unnest(${[groupId, home]}::uuid[]) AS target
+    `
+    const members = await repository.listMemberUserIds(groupId)
+    const listener = await listenForLosses(sql, groupId)
+    try {
+      await repository.softDelete(groupId, owner)
+
+      const losses = await listener.heard(3)
+      expect(losses.length).toBe(3)
+      const named = losses.flatMap(({ loss }) => loss.userIds).sort((a, b) => a - b)
+      expect(named).toEqual(members)
+    } finally {
+      await listener.stop()
+    }
+  })
+})
+
+Deno.test("an access change that rolls back raises no revision and names nobody", async () => {
+  await withSchema(async (sql) => {
+    const { groupId, owner, admin } = await team(sql)
+    const listener = await listenForLosses(sql, groupId)
+    try {
+      await expect(sql.begin(async (transaction: postgres.TransactionSql) => {
+        await recordAccessChange(transaction, groupId, owner, "group.member_removed", [admin])
+        throw new Error("the removal fails after its change was recorded")
+      })).rejects.toThrow("removal fails")
+
+      expect(await revision(sql, groupId)).toBe("1")
+      expect(await listener.heard(1)).toEqual([])
+    } finally {
+      await listener.stop()
+    }
   })
 })
 

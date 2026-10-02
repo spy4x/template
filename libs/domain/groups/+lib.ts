@@ -284,9 +284,10 @@ export interface GroupRepository {
   /** The group as the list shows it, or `null` when it is missing or the user is not a member. */
   getSummaryForMember(groupId: string, userId: number): Promise<GroupSummary | null>
   /**
-   * The ids of the active users who are members of a group, deleted or not; who a change is pushed
-   * to. A deleted group counts, so the hint of its deletion (and of its restore) reaches the members
-   * whose page still shows it.
+   * The ids of the active users who can see a group now: its members while it is not deleted. A
+   * group change is pushed to them, read again for every hint, so someone who lost access stops
+   * getting the group's hints. The change that took their access away tells them itself (the
+   * server's `recordAccessChange`).
    */
   listMemberUserIds(groupId: string): Promise<number[]>
   /** The actor's access to an active group, or `null` for a missing, deleted or foreign group. */

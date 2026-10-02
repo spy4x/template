@@ -65,3 +65,48 @@ export async function listenForGroupChanges(
   })
   return () => subscription.unlisten()
 }
+
+/**
+ * The Postgres channel on which a change that takes people's access to a group away names them. It
+ * is sent from inside that change's transaction (`recordAccessChange` in `group-change-log.ts`), so Postgres delivers
+ * it only once the change has committed, and never for one that rolled back.
+ */
+export const GROUP_ACCESS_LOST_CHANNEL = "group_access_lost"
+
+/** The change at `sequence` took these users' access to the group away. */
+export interface GroupAccessLoss {
+  groupId: string
+  sequence: number
+  userIds: number[]
+}
+
+/** Reads a notification payload; `null` for anything that is not a well-formed access loss. */
+export function parseGroupAccessLoss(payload: string): GroupAccessLoss | null {
+  let value: unknown
+  try {
+    value = JSON.parse(payload)
+  } catch {
+    return null
+  }
+  if (typeof value !== "object" || value === null) return null
+  const { userIds, ...rest } = value as Record<string, unknown>
+  const change = parseGroupChange(JSON.stringify(rest))
+  if (!change || !Array.isArray(userIds) || userIds.length === 0) return null
+  const valid = userIds.every((id) => typeof id === "number" && Number.isSafeInteger(id) && id > 0)
+  return valid ? { ...change, userIds: userIds as number[] } : null
+}
+
+/**
+ * Calls `onLoss` for every access loss announced on {@link GROUP_ACCESS_LOST_CHANNEL}. Returns a
+ * function that stops listening.
+ */
+export async function listenForGroupAccessLoss(
+  sql: postgres.Sql,
+  onLoss: (loss: GroupAccessLoss) => void,
+): Promise<() => Promise<void>> {
+  const subscription = await sql.listen(GROUP_ACCESS_LOST_CHANNEL, (payload) => {
+    const loss = parseGroupAccessLoss(payload)
+    if (loss) onLoss(loss)
+  })
+  return () => subscription.unlisten()
+}

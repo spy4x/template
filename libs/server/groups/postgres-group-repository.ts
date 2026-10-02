@@ -15,7 +15,7 @@ import {
   GroupSummary,
   SelectedGroup,
 } from "@domain/groups"
-import { recordGroupChange } from "./group-change-log.ts"
+import { recordAccessChange, recordGroupChange } from "./group-change-log.ts"
 
 interface GroupRow extends postgres.Row {
   id: string
@@ -168,6 +168,7 @@ export class PostgresGroupRepository implements GroupRepository {
       SELECT group_members.user_id
       FROM group_members
       INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+      INNER JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL
       WHERE group_members.group_id = ${groupId}
       ORDER BY group_members.user_id
     `
@@ -462,15 +463,27 @@ export class PostgresGroupRepository implements GroupRepository {
       }
 
       await repository.audit(groupId, actorId, GROUP_DELETED_EVENT, requestId)
-      const sequence = await repository.recordChange(groupId, actorId, GROUP_DELETED_EVENT, {
-        allowDeleted: true,
-      })
+      // Every member loses the group, the owner included: each of their pages must drop it.
+      const members = await transaction<MemberRow[]>`
+        SELECT group_members.user_id
+        FROM group_members
+        INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+        WHERE group_members.group_id = ${groupId}
+      `
+      const change = await recordAccessChange(
+        transaction,
+        groupId,
+        actorId,
+        GROUP_DELETED_EVENT,
+        members.map((member) => member.userId),
+        { allowDeleted: true },
+      )
       return {
         id: groupId,
         name: group.name,
         role: GroupRole.OWNER,
-        authorizationRevision: group.authorizationRevision,
-        changeSequence: sequence,
+        authorizationRevision: change.authorizationRevision,
+        changeSequence: change.sequence,
         updatedAt: deleted.updatedAt,
         deletedAt: deleted.deletedAt,
       }
@@ -496,13 +509,20 @@ export class PostgresGroupRepository implements GroupRepository {
         `
       )[0]
       await repository.audit(groupId, actorId, GROUP_RESTORED_EVENT, requestId)
-      const sequence = await repository.recordChange(groupId, actorId, GROUP_RESTORED_EVENT)
+      // Nobody loses access: the members get the group back, and its hint reaches them.
+      const change = await recordAccessChange(
+        transaction,
+        groupId,
+        actorId,
+        GROUP_RESTORED_EVENT,
+        [],
+      )
       return {
         id: groupId,
         name: group.name,
         role: GroupRole.OWNER,
-        authorizationRevision: group.authorizationRevision,
-        changeSequence: sequence,
+        authorizationRevision: change.authorizationRevision,
+        changeSequence: change.sequence,
         updatedAt: restored.updatedAt,
       }
     })
@@ -589,10 +609,10 @@ export class PostgresGroupRepository implements GroupRepository {
     groupId: string,
     actorId: number,
     restorable: boolean,
-  ): Promise<{ name: string; authorizationRevision: string } | null> {
+  ): Promise<{ name: string } | null> {
     const row = (
-      await this.sql<{ name: string; authorizationRevision: string }[]>`
-        SELECT groups.name, groups.authorization_revision::text AS authorization_revision
+      await this.sql<{ name: string }[]>`
+        SELECT groups.name
         FROM groups
         INNER JOIN group_members
           ON group_members.group_id = groups.id
