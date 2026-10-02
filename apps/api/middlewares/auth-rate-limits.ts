@@ -30,6 +30,16 @@ export const EMAIL_CODE_MAILS_PER_ADDRESS = 3
 /** The window of {@link EMAIL_CODE_MAILS_PER_ADDRESS}: one hour. */
 export const EMAIL_CODE_ADDRESS_WINDOW_MS = 60 * 60_000
 
+/**
+ * Code mails one account may send to an address it wants to move to, per
+ * {@link EMAIL_CHANGE_ACCOUNT_WINDOW_MS}, whatever the address. The account pays, not the address:
+ * the address may belong to someone else, whose own budget must stay theirs.
+ */
+export const EMAIL_CHANGE_MAILS_PER_ACCOUNT = 3
+
+/** The window of {@link EMAIL_CHANGE_MAILS_PER_ACCOUNT}: one hour. */
+export const EMAIL_CHANGE_ACCOUNT_WINDOW_MS = 60 * 60_000
+
 /** The rate limits the auth routes mount. Each one answers 429 with `Retry-After` when spent. */
 export interface AuthRateLimits {
   /**
@@ -58,6 +68,11 @@ export interface AuthRateLimits {
    * `resetByAddress` spends a reset link, and refuses the same way when the store fails.
    */
   emailCodeByAddress(email: string): Promise<RateLimitDecision>
+  /**
+   * Spends one of the account's {@link EMAIL_CHANGE_MAILS_PER_ACCOUNT} code mails to a new address,
+   * and refuses the same way as `emailCodeByAddress` when the store fails.
+   */
+  emailChangeByUser(userId: number): Promise<RateLimitDecision>
 }
 
 /** Limits per window, from `config.rateLimiter`. */
@@ -71,8 +86,8 @@ export interface AuthRateLimitSettings {
   otpLimit: number
   /**
    * Builds the store one limiter keeps its budgets in. `name` is that limiter's own key prefix:
-   * `ratelimit-strict`, `ratelimit-otp`, `ratelimit-reset`, `ratelimit-email-code` or
-   * `ratelimit-normal`. Production passes
+   * `ratelimit-strict`, `ratelimit-otp`, `ratelimit-reset`, `ratelimit-email-code`,
+   * `ratelimit-email-change` or `ratelimit-normal`. Production passes
    * `createRedisRateLimitStore` over Valkey; tests pass an in-process store.
    */
   store: (name: string) => RateLimitStore
@@ -94,10 +109,10 @@ export interface AuthRateLimitSettings {
  * evicted like any cached key; a budget under attack is touched on every attempt and is the last to
  * go, and the Postgres failure counter still bounds one-time-code guesses.
  *
- * When Valkey fails, the strict, one-time-code and reset limits refuse the request (the error
- * reaches Hono's error handler, which answers 500): they stand between an attacker and a password,
- * a six-digit code or someone else's inbox, and letting attempts through unseen is the attack they
- * exist to stop. The normal
+ * When Valkey fails, the strict, one-time-code, reset and code-mail limits refuse the request (the
+ * error reaches Hono's error handler, which answers 500): they stand between an attacker and a
+ * password, a six-digit code or someone else's inbox, and letting attempts through unseen is the
+ * attack they exist to stop. The normal
  * limit lets the request through and reports the error through `settings.onStoreError`, so sign-out
  * and `/me` keep working while Valkey is down, as the rest of the signed-in API does. The normal
  * limit uses `failOpenLimiter` for that; the others must never be wrapped in it. A correct
@@ -109,8 +124,10 @@ export interface AuthRateLimitSettings {
  * spends the address's own budget (`resetByAddress`), so many IPs together still cannot flood one
  * inbox. `/totp/check` and `/totp/connect/finish` spend one user's one-time-code
  * budget, so switching routes buys no extra guesses. The e-mail address routes (asking for a code,
- * checking one, changing the address) spend the user's strict budget, and every code mail also
- * spends the address's own budget (`emailCodeByAddress`). Every other auth route spends one normal
+ * checking one, changing the address) spend the user's strict budget. A code mail to the account's
+ * own address also spends that address's budget (`emailCodeByAddress`). A code mail to an address
+ * the account wants to move to spends the account's budget instead (`emailChangeByUser`): that
+ * address may be someone else's, and a stranger must not run its owner's budget out. Every other auth route spends one normal
  * budget per user, else per IP. Each route mounts its limiter after its cross-site check, so a
  * refused cross-site request spends nobody's budget.
  *
@@ -152,6 +169,12 @@ export function createAuthRateLimits(settings: AuthRateLimitSettings): AuthRateL
     limit: EMAIL_CODE_MAILS_PER_ADDRESS,
     clock,
   })
+  // Keyed by the account, so asking to move to someone else's address spends only the asker's.
+  const emailChange = createStoreLimiter(store("ratelimit-email-change"), {
+    windowMs: EMAIL_CHANGE_ACCOUNT_WINDOW_MS,
+    limit: EMAIL_CHANGE_MAILS_PER_ACCOUNT,
+    clock,
+  })
   const normal = failOpenLimiter(
     createStoreLimiter(store("ratelimit-normal"), { windowMs, limit: settings.limit, clock }),
     { limit: settings.limit, onError: settings.onStoreError },
@@ -190,5 +213,6 @@ export function createAuthRateLimits(settings: AuthRateLimitSettings): AuthRateL
     resetByAddress: async (email) => await reset.check(`auth-reset:${await sha256Hex(email)}`),
     emailCodeByAddress: async (email) =>
       await emailCode.check(`auth-email-code:${await sha256Hex(email)}`),
+    emailChangeByUser: async (userId) => await emailChange.check(`auth-email-change:${userId}`),
   }
 }

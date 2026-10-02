@@ -287,12 +287,16 @@ export function createAuthRoute(
     .get(`/email`, rateLimits.normal, async (c) => {
       return c.json(await signIn.emailStatus(c.get("auth")!))
     })
-    // The normal limit: every mail also spends the address's own hourly budget.
+    // The normal limit, and an hourly mail budget: the account's own address spends its own, an
+    // address the account wants to move to spends the account's, since it may be someone else's.
     .post(`/email/send`, rateLimits.normal, async (c) => {
       const authData = c.get("auth")!
-      const email = emailToVerify(await signIn.emailStatus(authData))
+      const status = await signIn.emailStatus(authData)
+      const email = emailToVerify(status)
       if (email === null) return c.json({ error: EMAIL_NOTHING_TO_VERIFY }, 400)
-      const decision = await rateLimits.emailCodeByAddress(email)
+      const decision = status.pending === null
+        ? await rateLimits.emailCodeByAddress(email)
+        : await rateLimits.emailChangeByUser(authData.user.id)
       if (!decision.allowed) {
         return tooMany(
           c,
@@ -345,13 +349,10 @@ export function createAuthRoute(
         return c.json({ success: true, message: "Your address stays as it is." })
       }
       // The change waits either way; a refused mail is asked for again later with /email/send.
-      const decision = await rateLimits.emailCodeByAddress(email)
+      // The account pays, not the address: it may be someone else's, with a budget of its own.
+      const decision = await rateLimits.emailChangeByUser(authData.user.id)
       if (!decision.allowed) {
-        return tooMany(
-          c,
-          decision.retryAfterMs,
-          "Too many codes for this address, try again later.",
-        )
+        return tooMany(c, decision.retryAfterMs, "Too many address changes, try again later.")
       }
       await requestEmailCode(authData.user.id, email)
       return c.json({
