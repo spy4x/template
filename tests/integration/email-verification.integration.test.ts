@@ -568,3 +568,17 @@ Deno.test("a password reset and an address move of one account", async (t) => {
     )
   })
 })
+
+Deno.test("checking a password accepts only the account's current one", async () => {
+  await withSchema(async (sql) => {
+    const signIn = buildSignIn(sql)
+    const ann = await signedUp(signIn, "ann@example.com")
+    const annId = (await ann("GET", "/me")).body.id as number
+
+    expect(await signIn.checkPassword(annId, PASSWORD)).toBe(true)
+    expect(await signIn.checkPassword(annId, "wrong-password")).toBe(false)
+    // An account with no password key is refused rather than let through.
+    await sql`DELETE FROM auth_keys WHERE user_id = ${annId}`
+    expect(await signIn.checkPassword(annId, PASSWORD)).toBe(false)
+  })
+})

@@ -55,6 +55,8 @@ const ERROR_DEFINITIONS: Record<GroupFeatureErrorCode, ErrorDefinition> = {
     message: "Cancel the group's subscription in the billing portal before deleting it",
   },
   MEMBER_NOT_FOUND: { status: 404, message: "Member not found" },
+  NAME_MISMATCH: { status: 400, message: "Type the group's name exactly as it is shown" },
+  PASSWORD_INVALID: { status: 400, message: "The password is incorrect" },
   PLAN_FEATURE_MISSING: { status: 402, message: "The group's plan does not include this" },
   PLAN_LIMIT_REACHED: { status: 402, message: "The group has reached its plan's limit" },
   MFA_REQUIRED: { status: 401, message: "Complete MFA to access groups" },

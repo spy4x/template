@@ -98,6 +98,11 @@ export interface GroupSettingsScreenProps {
    * is none.
    */
   invitations?: ComponentChildren
+  /**
+   * The Transfer ownership section (`GroupTransferSection`), drawn above Delete; left out, there
+   * is none.
+   */
+  transfer?: ComponentChildren
 }
 
 /**
@@ -105,8 +110,8 @@ export interface GroupSettingsScreenProps {
  * only what the person's role allows: General is read by every member, and an admin or the owner
  * can rename the group there. Every member reads the members; the owner and an admin manage those
  * below them, and invite new ones in the Invitations section. Every member but the owner can
- * leave, and the delete section is the owner's alone. Ownership and moving data add their sections
- * here, each guarded by the role that may use it.
+ * leave, and the transfer and delete sections are the owner's alone. Moving data adds its section
+ * here, guarded by the role that may use it.
  */
 export function GroupSettingsScreen(
   {
@@ -138,6 +143,7 @@ export function GroupSettingsScreen(
     onLeave,
     billing,
     invitations,
+    transfer,
   }: GroupSettingsScreenProps,
 ): JSX.Element {
   const nameInput = useRef<HTMLInputElement>(null)
@@ -272,6 +278,8 @@ export function GroupSettingsScreen(
         error={leaveError}
         onLeave={onLeave}
       />
+
+      {transfer}
 
       {canDelete(group.role) && (
         <section aria-labelledby="group-danger" data-e2e="group-section-danger">

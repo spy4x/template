@@ -31,6 +31,7 @@ import {
   GroupRestoreCommand,
   GroupSelectCommand,
   GroupSelectedQuery,
+  GroupTransferCommand,
   InvitationPreviewQuery,
   MyInvitationsQuery,
 } from "@domain/groups"
@@ -62,6 +63,7 @@ import { groupMembersHandler } from "@api/cqrs/query-handlers/group-members.ts"
 import { groupMemberRoleHandler } from "@api/cqrs/command-handlers/group-member-role.ts"
 import { groupMemberRemoveHandler } from "@api/cqrs/command-handlers/group-member-remove.ts"
 import { groupLeaveHandler } from "@api/cqrs/command-handlers/group-leave.ts"
+import { groupTransferHandler } from "@api/cqrs/command-handlers/group-transfer.ts"
 import {
   NoteCreateCommand,
   NoteDeleteCommand,
@@ -79,6 +81,7 @@ import { billingCheckoutHandler } from "@api/cqrs/command-handlers/billing-check
 import { billingPortalHandler } from "@api/cqrs/command-handlers/billing-portal.ts"
 import { billingGetHandler } from "@api/cqrs/query-handlers/billing-get.ts"
 import {
+  GroupOwnershipTransferredEvent,
   GroupSelectedEvent,
   PushDevicesUpdatedEvent,
   UserProfileUpdatedEvent,
@@ -88,6 +91,7 @@ import { realtimeOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/re
 import { realtimeOnGroupSelectedHandler } from "@api/cqrs/event-handlers/realtime-on-group-selected.ts"
 import { realtimeOnPushDevicesUpdatedHandler } from "@api/cqrs/event-handlers/realtime-on-push-devices-updated.ts"
 import { realtimeOnUserSignedOutHandler } from "@api/cqrs/event-handlers/realtime-on-user-signed-out.ts"
+import { pushOnOwnershipTransferredHandler } from "@api/cqrs/event-handlers/push-on-ownership-transferred.ts"
 
 // Audit rows have no listener: sign-up, sign-in, sign-out and the profile change write their
 // `auth_audits` row in the transaction of the change itself, so the change and its row are kept
@@ -102,10 +106,13 @@ import { realtimeOnUserSignedOutHandler } from "@api/cqrs/event-handlers/realtim
 //   request, so a failure here delays the close by one interval at most.
 // - The two hint listeners are best-effort for the same reason. A hint a tab misses is caught up
 //   by the read the page makes whenever its socket opens again.
+// - The push to a group's new owner is a courtesy: the transfer is already committed, and the new
+//   owner sees it in their groups whether the push arrives or not.
 subscribe(UserSignedOutEvent, realtimeOnUserSignedOutHandler)
 subscribe(UserProfileUpdatedEvent, realtimeOnUserProfileUpdatedHandler)
 subscribe(PushDevicesUpdatedEvent, realtimeOnPushDevicesUpdatedHandler)
 subscribe(GroupSelectedEvent, realtimeOnGroupSelectedHandler)
+subscribe(GroupOwnershipTransferredEvent, pushOnOwnershipTransferredHandler)
 
 // After the session gate (added where the bus is built), in the order `command-middleware.ts`
 // explains. The idempotency store needs the database, so it is attached here and not there.
@@ -128,6 +135,7 @@ commandBus.register(GroupRestoreCommand, groupRestoreHandler)
 commandBus.register(GroupMemberRoleCommand, groupMemberRoleHandler)
 commandBus.register(GroupMemberRemoveCommand, groupMemberRemoveHandler)
 commandBus.register(GroupLeaveCommand, groupLeaveHandler)
+commandBus.register(GroupTransferCommand, groupTransferHandler)
 commandBus.register(
   GroupInvitationCreateCommand,
   createInvitationCreateHandler(invitationDependencies),

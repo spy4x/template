@@ -228,7 +228,8 @@ function MemberItem(
                   Remove {label}{" "}
                   from this group? They lose access right away, on every device. What they wrote
                   stays in the group. If this is their only group, they get a new empty one named
-                  "Personal".
+                  "Personal". A team link they still hold lets them back in from another account, so
+                  revoke such links under Invitations.
                 </p>
                 <div>
                   <Button

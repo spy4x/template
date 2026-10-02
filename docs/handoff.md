@@ -499,6 +499,16 @@ demoted loses those above what they may now invite with, in the same transaction
 a removed member cannot rejoin through the team link they used. On a plan without `memberRoles`
 an invitation adds a viewer only, on create and on accept; the role picker says so.
 
+Ownership transfer (#132): `POST /api/groups/:id/transfer` takes `{ userId, name, password }`, over
+HTTP only, never the socket, so the password does not cross a long-lived channel. It spends the
+per-user budget a password change spends (`strictByUser`), checks the role, then the typed name,
+then the password, so a refused request spends no password check. One transaction demotes the old
+owner to admin before it promotes the new one: the partial unique index
+`group_members_one_owner_key` allows one owner row per group and cannot be deferred. The old
+owner's admin links are revoked, and their viewer and editor links stay; the new owner's links stay.
+The new owner gets a web push. A subscription moves with the group, and the settings section says
+so.
+
 Extraction from the sibling Financy project is tracked separately in
 [docs/financy-extraction-inventory.md](financy-extraction-inventory.md);
 delete rows there as they land.

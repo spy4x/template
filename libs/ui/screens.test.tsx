@@ -27,9 +27,15 @@ import {
   parseGroupIdRequest,
   parseMemberRoleBody,
   parseRenameGroupBody,
+  parseTransferBody,
 } from "@domain/groups"
 import type { GroupMemberRow } from "./group-members.tsx"
 import { GroupSettingsScreen, type GroupSettingsScreenProps } from "./group-settings-screen.tsx"
+import {
+  EMPTY_TRANSFER_DRAFT,
+  GroupTransferSection,
+  type GroupTransferSectionProps,
+} from "./group-transfer.tsx"
 import { GroupsScreen, type GroupsScreenProps, ROLE_TEXT } from "./groups-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
 import { FORM_ACTIONS, GROUP_PATHS, NEXT_PARAM, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
@@ -921,6 +927,8 @@ describe("GroupSettingsScreen members", () => {
     expect(item).toMatch(/<details[^>]*>[\s\S]*Remove Ed Itor\.\.\.[\s\S]*<form/)
     expect(item).not.toMatch(/<details[^>]* open/)
     expect(item).toContain("They lose access right away")
+    // A used team link binds to an account, not a person, so the owner is told to revoke it.
+    expect(item).toContain("revoke such links under Invitations")
   })
 
   it("shows a refused change under the member it was about", () => {
@@ -1548,5 +1556,99 @@ describe("MyInvitationsSection without JavaScript", () => {
       expect(formAt(surface, action).fields).toEqual(["invitationId"])
     }
     expect(renderToString(<MyInvitationsSection invitations={[]} />)).toBe("")
+  })
+})
+
+const transferDefaults: GroupTransferSectionProps = {
+  groupId: "g-1",
+  groupName: "Team",
+  role: GroupRole.OWNER,
+  members: membersFor(1),
+  draft: EMPTY_TRANSFER_DRAFT,
+}
+
+describe("GroupTransferSection without JavaScript", () => {
+  it("posts exactly the fields the API's transfer body takes", () => {
+    const form = formAt(
+      noScriptSurface(<GroupTransferSection {...transferDefaults} />),
+      GROUP_PATHS.transfer("g-1"),
+    )
+
+    expect(form.method).toBe("post")
+    expect(form.fields).toEqual(["name", "password", "userId"])
+    // The API refuses unknown keys, so a body with exactly these names proves they match it.
+    const sample: Record<string, unknown> = { name: "Team", password: "secret", userId: 2 }
+    expect(parseTransferBody(Object.fromEntries(form.fields.map((key) => [key, sample[key]]))))
+      .toEqual({ name: "Team", password: "secret", userId: 2 })
+  })
+
+  it("offers every member but the owner, the first one picked until the owner picks", () => {
+    const html = renderToString(<GroupTransferSection {...transferDefaults} />)
+    const offered = [...html.matchAll(/<option[^>]*value="(\d+)"/g)].map((m) => m[1])
+
+    expect(offered).toEqual(["2", "3", "4"])
+    expect(html).toContain(`<option selected value="2">`)
+    expect(
+      renderToString(
+        <GroupTransferSection
+          {...transferDefaults}
+          draft={{ ...EMPTY_TRANSFER_DRAFT, userId: 3 }}
+        />,
+      ),
+    ).toContain(`<option selected value="3">`)
+  })
+
+  for (const role of [GroupRole.ADMIN, GroupRole.EDITOR, GroupRole.VIEWER]) {
+    it(`draws nothing for a person whose role is ${GroupRole[role]}`, () => {
+      expect(renderToString(<GroupTransferSection {...transferDefaults} role={role} />)).toBe("")
+    })
+  }
+
+  it("tells an owner alone in the group to invite someone first, with no form", () => {
+    const alone = [memberRows[0]].map((member) => ({ ...member, isYou: true }))
+    const screen = <GroupTransferSection {...transferDefaults} members={alone} />
+
+    expect(renderToString(screen)).toContain(`data-e2e="group-transfer-nobody"`)
+    expect(noScriptSurface(screen).forms).toEqual([])
+  })
+
+  it("says the transfer comes before deleting the account, and the subscription moves", () => {
+    const plain = renderToString(<GroupTransferSection {...transferDefaults} />)
+    const paid = renderToString(<GroupTransferSection {...transferDefaults} hasSubscription />)
+
+    expect(plain).toContain("Before you can delete your account")
+    expect(plain).toContain("you become an admin")
+    expect(plain).not.toContain("The subscription moves with the group")
+    expect(paid).toContain("The subscription moves with the group")
+  })
+
+  it("opens with a refused transfer under the field it names, tied to that field", () => {
+    const html = renderToString(
+      <GroupTransferSection
+        {...transferDefaults}
+        error={{ field: "password", message: "The password is incorrect" }}
+      />,
+    )
+
+    expect(html).toMatch(/<details[^>]* open/)
+    const password = html.match(/<input[^>]*name="password"[^>]*>/)?.[0] ?? ""
+    expect(password).toMatch(/aria-describedby="[^"]*group-transfer-password-error/)
+    expect(html).toContain(`id="group-transfer-password-error"`)
+  })
+
+  it("is drawn in the settings page between Leave and Delete", () => {
+    const html = renderToString(
+      <GroupSettingsScreen
+        {...settingsDefaults}
+        transfer={<GroupTransferSection {...transferDefaults} />}
+      />,
+    )
+
+    expect(html.indexOf("group-section-leave")).toBeLessThan(
+      html.indexOf("group-section-transfer"),
+    )
+    expect(html.indexOf("group-section-transfer")).toBeLessThan(
+      html.indexOf("group-section-danger"),
+    )
   })
 })

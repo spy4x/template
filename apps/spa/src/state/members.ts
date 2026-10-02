@@ -2,6 +2,12 @@ import { signal } from "@preact/signals"
 import { RealtimeRequestError } from "@spy4x/realtime"
 import { type PlanRefusal, readPlanRefusal } from "@domain/billing"
 import type { GroupRole } from "@domain/groups"
+import {
+  EMPTY_TRANSFER_DRAFT,
+  type TransferDraft,
+  type TransferError,
+  transferErrorField,
+} from "@ui/group-transfer.tsx"
 import { apiFetch } from "./api.ts"
 import { realtimeCommand } from "./realtime.ts"
 
@@ -24,6 +30,18 @@ export interface MembersDependencies {
   }>
   removeMember(input: { groupId: string; userId: number }): Promise<{ removed: true }>
   leave(input: { groupId: string }): Promise<{ left: true }>
+  /** Hands the group to `userId`; throws a {@link TransferRefused} with the API's answer. */
+  transfer(
+    input: { groupId: string; userId: number; name: string; password: string },
+  ): Promise<void>
+}
+
+/** A refused transfer: the API's message and error code. */
+export class TransferRefused extends Error {
+  constructor(message: string, readonly code: string | undefined) {
+    super(message)
+    this.name = "TransferRefused"
+  }
 }
 
 function describe(error: unknown, fallback: string): string {
@@ -51,6 +69,9 @@ export function createMembersStore(dependencies: MembersDependencies) {
   >(null)
   const leaving = signal(false)
   const leaveError = signal<string | null>(null)
+  const transferDraft = signal<TransferDraft>(EMPTY_TRANSFER_DRAFT)
+  const transferring = signal(false)
+  const transferError = signal<TransferError | null>(null)
   let reads = 0
 
   /** Reads the members of the open group again. Does nothing while no group is open. */
@@ -79,6 +100,8 @@ export function createMembersStore(dependencies: MembersDependencies) {
       loadError.value = null
       memberError.value = null
       leaveError.value = null
+      transferDraft.value = EMPTY_TRANSFER_DRAFT
+      transferError.value = null
     }
     return refresh()
   }
@@ -139,6 +162,33 @@ export function createMembersStore(dependencies: MembersDependencies) {
     }
   }
 
+  /**
+   * Hands the open group to the member in the draft. The password leaves the draft either way, so
+   * it is held no longer than the request. Resolves to whether it worked; on success the members
+   * are read again, since two roles changed.
+   */
+  async function transfer(): Promise<boolean> {
+    const id = groupId.value
+    const { userId, name, password } = transferDraft.value
+    if (id === null || userId === null || transferring.value) return false
+    transferring.value = true
+    transferError.value = null
+    transferDraft.value = { ...transferDraft.value, password: "" }
+    try {
+      await dependencies.transfer({ groupId: id, userId, name, password })
+      transferDraft.value = EMPTY_TRANSFER_DRAFT
+      await refresh()
+      return true
+    } catch (cause) {
+      transferError.value = cause instanceof TransferRefused
+        ? { field: transferErrorField(cause.code), message: cause.message }
+        : { field: null, message: "Could not transfer the group" }
+      return false
+    } finally {
+      transferring.value = false
+    }
+  }
+
   function reset(): void {
     reads++
     groupId.value = null
@@ -149,6 +199,9 @@ export function createMembersStore(dependencies: MembersDependencies) {
     memberError.value = null
     leaving.value = false
     leaveError.value = null
+    transferDraft.value = EMPTY_TRANSFER_DRAFT
+    transferring.value = false
+    transferError.value = null
   }
 
   return {
@@ -160,11 +213,15 @@ export function createMembersStore(dependencies: MembersDependencies) {
     memberError,
     leaving,
     leaveError,
+    transferDraft,
+    transferring,
+    transferError,
     open,
     refresh,
     changeRole,
     remove,
     leave,
+    transfer,
     reset,
   }
 }
@@ -184,4 +241,31 @@ export const membersStore = createMembersStore({
   setRole: (input) => realtimeCommand("group.setRole", input),
   removeMember: (input) => realtimeCommand("group.removeMember", input),
   leave: (input) => realtimeCommand("group.leave", input),
+  // Over REST, not the socket: the password goes in this one request.
+  transfer: async ({ groupId, ...body }) => {
+    let response: Response
+    try {
+      response = await fetch(`/api/groups/${encodeURIComponent(groupId)}/transfer`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    } catch (_unreachable) {
+      throw new TransferRefused("The server is out of reach. Try again.", undefined)
+    }
+    if (response.ok) return
+    const error = (await response.json().catch(() => null) as { error?: unknown } | null)?.error
+    const { code, message } = typeof error === "object" && error !== null
+      ? error as { code?: unknown; message?: unknown }
+      : {}
+    throw new TransferRefused(
+      typeof message === "string"
+        ? message
+        : response.status === 429
+        ? "Too many attempts. Wait a few minutes, then try again."
+        : "Something went wrong. Try again.",
+      typeof code === "string" ? code : undefined,
+    )
+  },
 })

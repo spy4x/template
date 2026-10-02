@@ -32,6 +32,8 @@ export type GroupErrorCode =
   | "LAST_GROUP"
   | "LAST_OWNER"
   | "MEMBER_NOT_FOUND"
+  | "NAME_MISMATCH"
+  | "PASSWORD_INVALID"
   | "ROLE_INSUFFICIENT"
   | "USER_NOT_ACTIVE"
 
@@ -319,6 +321,30 @@ export class GroupLeaveCommand implements Command<GroupLeavePayload, { left: tru
   constructor(public data: GroupLeavePayload) {}
 }
 
+export interface GroupTransferPayload {
+  actor: Actor
+  groupId: string
+  /** The member who becomes the owner. */
+  userId: number
+  /** The group's name as the owner typed it, to confirm which group they hand over. */
+  name: string
+  /** The owner's current password, checked as a password change checks it. */
+  password: string
+  requestId?: string
+}
+
+/**
+ * Hands the group to another member, by {@link assertCanTransfer}: the member becomes the owner
+ * and the owner becomes an admin, in one transaction, so the group never has zero or two owners.
+ * The owner confirms with the group's name and their password. It carries no retry key: a retry
+ * after it landed is refused, since the person is no longer the owner, and no stored answer should
+ * stand in for a password check.
+ */
+export class GroupTransferCommand implements Command<GroupTransferPayload, { transferred: true }> {
+  __resultType?: { transferred: true }
+  constructor(public data: GroupTransferPayload) {}
+}
+
 export interface GroupListPayload {
   actor: Actor
   page: GroupListPage
@@ -476,6 +502,16 @@ export interface GroupRepository {
    * last-group rule. `false` when the group is missing or deleted.
    */
   leave(groupId: string, actorId: number, requestId?: string): Promise<boolean>
+  /**
+   * Makes `userId` the owner and `actorId` an admin and announces it, in one transaction that checks
+   * {@link assertCanTransfer} again on locked rows. `false` when the group is missing or deleted.
+   */
+  transferOwnership(
+    groupId: string,
+    userId: number,
+    actorId: number,
+    requestId?: string,
+  ): Promise<boolean>
 }
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -589,6 +625,25 @@ export function parseMemberRequest(value: unknown): { groupId: string; userId: n
     throw new GroupError("INVALID_REQUEST", "Expected exactly groupId and userId")
   }
   return { groupId: parseGroupId(value.groupId), userId: parseMemberUserId(value.userId) }
+}
+
+/**
+ * The body of a transfer of ownership over REST, where the path names the group: exactly
+ * `{ name, password, userId }`. The name and password are checked by the handler, not here.
+ */
+export function parseTransferBody(
+  value: unknown,
+): { userId: number; name: string; password: string } {
+  if (!hasExactKeys(value, ["name", "password", "userId"])) {
+    throw new GroupError("INVALID_REQUEST", "Expected exactly userId, name and password")
+  }
+  if (typeof value.name !== "string" || value.name.length > 200) {
+    throw new GroupError("INVALID_REQUEST", "Name must be a string")
+  }
+  if (typeof value.password !== "string" || value.password.length > 1024) {
+    throw new GroupError("INVALID_REQUEST", "Password must be a string")
+  }
+  return { userId: parseMemberUserId(value.userId), name: value.name, password: value.password }
 }
 
 /** A group id from a request: a lowercase UUID v4, or `INVALID_REQUEST`. */
@@ -742,6 +797,38 @@ export function assertCanLeave(role: GroupRole | null): void {
       "LAST_OWNER",
       "The owner cannot leave the group. Transfer ownership to another member first.",
     )
+  }
+}
+
+/** Whether `actor` may hand the group to a member who holds `target`: the owner, to anyone else. */
+export function canTransfer(actor: GroupRole, target: GroupRole): boolean {
+  return actor === GroupRole.OWNER && canRead(target) && target !== GroupRole.OWNER
+}
+
+/**
+ * Throws unless `actor` may hand the group to the member who holds `target`: only the owner may,
+ * to another member. `null` is a non-member, as in {@link assertCanChangeRole}.
+ */
+export function assertCanTransfer(actor: GroupRole | null, target: GroupRole | null): void {
+  if (actor === null || !canRead(actor)) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+  if (actor !== GroupRole.OWNER) {
+    throw new GroupError("ROLE_INSUFFICIENT", "Only the owner can transfer ownership")
+  }
+  if (target === null || !canRead(target)) {
+    throw new GroupError("MEMBER_NOT_FOUND", "This person is not a member of the group")
+  }
+  if (!canTransfer(actor, target)) {
+    throw new GroupError("INVALID_REQUEST", "You already own this group")
+  }
+}
+
+/**
+ * Throws `NAME_MISMATCH` unless `typed` is the group's name: the owner confirms which group they
+ * hand over. Spaces around it are ignored; letters must match exactly.
+ */
+export function assertTransferNameMatches(typed: string, name: string): void {
+  if (typed.trim() !== name.trim()) {
+    throw new GroupError("NAME_MISMATCH", "Type the group's name exactly as it is shown")
   }
 }
 

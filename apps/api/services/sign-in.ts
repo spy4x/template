@@ -200,6 +200,12 @@ export interface SignIn {
    * account signs in with the address.
    */
   resetPassword(email: string, code: string, newPassword: string): Promise<boolean>
+  /**
+   * Whether `password` is the current password of user `userId`, checked as a password change
+   * checks it. A step that must not run on a stolen session alone, such as handing a group to
+   * someone else, asks for it. `false` for an account with no password.
+   */
+  checkPassword(userId: number, password: string): Promise<boolean>
   /** Where the user's address stands. */
   emailStatus(state: AppAuthState): Promise<EmailStatus>
   /**
@@ -593,6 +599,11 @@ export function createSignIn(options: SignInOptions): SignIn {
         await sessionsOver(tx.sessionStore).signOutUser(user.id)
         return true
       })
+    },
+
+    async checkPassword(userId, password) {
+      const key = await passwordKeyOf(db.authStore, userId)
+      return !!key?.secret && (await hasher.verify(password, key.secret)).valid
     },
 
     async emailStatus({ user }) {

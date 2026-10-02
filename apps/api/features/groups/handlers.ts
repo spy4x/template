@@ -1,12 +1,14 @@
 import type { CommandHandler, QueryHandler } from "@spy4x/platform/cqrs"
 import type { GroupRepository } from "@domain/groups"
-import { GroupSelectedEvent } from "../../cqrs/events.ts"
+import { GroupOwnershipTransferredEvent, GroupSelectedEvent } from "../../cqrs/events.ts"
 import {
   assertCanChangeRole,
   assertCanDelete,
   assertCanLeave,
   assertCanRemoveMember,
   assertCanRename,
+  assertCanTransfer,
+  assertTransferNameMatches,
   GroupCreateCommand,
   GroupDeleteCommand,
   GroupDeletedListQuery,
@@ -21,6 +23,7 @@ import {
   GroupRestoreCommand,
   GroupSelectCommand,
   GroupSelectedQuery,
+  GroupTransferCommand,
 } from "@domain/groups"
 
 /**
@@ -201,5 +204,45 @@ export function createGroupLeaveHandler(
     const left = await repository.leave(data.groupId, data.actor.userId, data.requestId)
     if (!left) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
     return { left: true }
+  }
+}
+
+/**
+ * Hands the group to another member. The checks run cheapest first, and the password last, so a
+ * request the role or the name already refuses spends no password attempt: only the owner, to a
+ * member, with the group's name typed as it is and their current password. The repository checks
+ * the roles again on locked rows; the new owner is told by web push after the write.
+ */
+export function createGroupTransferHandler(
+  repository: GroupRepository,
+  { checkPassword, emit }: {
+    checkPassword(userId: number, password: string): Promise<boolean>
+    emit(event: GroupOwnershipTransferredEvent): void
+  },
+): CommandHandler<GroupTransferCommand> {
+  return async ({ data }) => {
+    const actorId = data.actor.userId
+    const access = await repository.getForMember(data.groupId, actorId)
+    const target = await repository.getForMember(data.groupId, data.userId)
+    assertCanTransfer(access?.role ?? null, target?.role ?? null)
+    assertTransferNameMatches(data.name, access!.group.name)
+    if (!await checkPassword(actorId, data.password)) {
+      throw new GroupError("PASSWORD_INVALID", "The password is incorrect")
+    }
+    const moved = await repository.transferOwnership(
+      data.groupId,
+      data.userId,
+      actorId,
+      data.requestId,
+    )
+    if (!moved) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+    emit(
+      new GroupOwnershipTransferredEvent({
+        groupId: data.groupId,
+        groupName: access!.group.name,
+        newOwnerId: data.userId,
+      }),
+    )
+    return { transferred: true }
   }
 }

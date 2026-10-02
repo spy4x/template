@@ -2,6 +2,7 @@ import { useEffect } from "preact/hooks"
 import { useLocation } from "wouter-preact"
 import { GroupSettingsScreen } from "@ui/group-settings-screen.tsx"
 import { GroupInvitationsSection } from "@ui/group-invitations.tsx"
+import { GroupTransferSection } from "@ui/group-transfer.tsx"
 import { canManageInvitations } from "@domain/groups"
 import { entitlementsOf } from "@domain/billing"
 import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
@@ -11,6 +12,19 @@ import { selectionStore } from "../state/selection.ts"
 import { billingStore } from "../state/billing.ts"
 import { invitationsStore } from "../state/invitations.ts"
 import { GroupBillingCard } from "./BillingViews.tsx"
+
+/**
+ * Hands the open group over. When it worked, the groups are read again: this person is an admin
+ * now, and the groups list holds their role. Resolves to whether the transfer worked.
+ */
+export async function transferAndRefresh(
+  team: Pick<typeof membersStore, "transfer">,
+  groups: Pick<typeof groupsStore, "refreshFromUser">,
+): Promise<boolean> {
+  const moved = await team.transfer()
+  if (moved) await groups.refreshFromUser()
+  return moved
+}
 
 /**
  * Wires one group's settings screen to the groups store, which already holds every group, and to
@@ -65,8 +79,7 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
       renameError={failure?.action === "rename" ? failure.message : null}
       onRename={() => void store.rename(groupId)}
       isLastGroup={store.groups.value.length <= 1}
-      hasSubscription={billingStore.current.value?.groupId === groupId &&
-        billingStore.current.value.billing.subscribed}
+      hasSubscription={billingOurs?.subscribed ?? false}
       members={ours ? team.members.value : null}
       memberCount={ours ? team.memberCount.value ?? undefined : undefined}
       membersError={ours ? team.loadError.value : null}
@@ -115,6 +128,20 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
           revokeError={invites.revokeError.value}
           onRevoke={(invitationId) => void invites.revoke(invitationId)}
           navigate={navigate}
+        />
+      )}
+      transfer={group && (
+        <GroupTransferSection
+          groupId={groupId}
+          groupName={group.name}
+          role={group.role}
+          members={ours ? team.members.value : null}
+          hasSubscription={billingOurs?.subscribed ?? false}
+          draft={team.transferDraft.value}
+          onDraftChange={(next) => (team.transferDraft.value = next)}
+          transferring={team.transferring.value}
+          error={ours ? team.transferError.value : null}
+          onTransfer={() => void transferAndRefresh(team, store)}
         />
       )}
     />

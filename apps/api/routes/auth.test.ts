@@ -88,6 +88,7 @@ function fakeSignIn(
     disconnectTotp: () => (calls.push("disconnectTotp"), Promise.resolve(true)),
     changePassword: () => (calls.push("changePassword"), Promise.resolve(succeed)),
     resetPassword: () => (calls.push("resetPassword"), Promise.resolve(succeed)),
+    checkPassword: () => (calls.push("checkPassword"), Promise.resolve(succeed)),
     // Without success there is nothing to prove, the code is wrong and the password too.
     emailStatus: () => (calls.push("emailStatus"), Promise.resolve(succeed ? UNPROVEN : PROVEN)),
     requestEmailChange: () => (

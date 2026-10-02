@@ -8,6 +8,12 @@ import {
   GroupInvitationsSection,
   type InvitationDraft,
 } from "@ui/group-invitations.tsx"
+import {
+  EMPTY_TRANSFER_DRAFT,
+  GroupTransferSection,
+  type TransferDraft,
+  type TransferError,
+} from "@ui/group-transfer.tsx"
 import { entitlementsOf, type PlanRefusal } from "@domain/billing"
 import { readGroupInvitations } from "./invitations.tsx"
 import { readBilling } from "./billing.tsx"
@@ -17,8 +23,8 @@ import type { State } from "./utils.ts"
 
 /**
  * One group's settings page, for the `GET` and for a refused rename, delete, member change,
- * leave, invitation or revoke, which shows the refusal where the person acted and keeps what they
- * typed. A new invitation's link is drawn this once, in the answer to its create.
+ * leave, invitation, revoke or transfer, which shows the refusal where the person acted and keeps
+ * what they typed. A new invitation's link is drawn this once, in the answer to its create.
  */
 export async function renderGroupSettings(
   ctx: FreshContext<State>,
@@ -34,7 +40,10 @@ export async function renderGroupSettings(
     createRefusal = null,
     created = null,
     revokeError = null,
+    transferDraft = EMPTY_TRANSFER_DRAFT,
+    transferError = null,
     status,
+    retryAfter,
   }: {
     name?: string
     renameError?: string | null
@@ -48,7 +57,12 @@ export async function renderGroupSettings(
     createRefusal?: PlanRefusal | null
     created?: CreatedInvitation | null
     revokeError?: { invitationId: string; message: string } | null
+    /** What a refused transfer posted, without the password, which is never sent back. */
+    transferDraft?: TransferDraft
+    transferError?: TransferError | null
     status?: number
+    /** The API's `Retry-After` of a refused request, passed on with its status. */
+    retryAfter?: string
   } = {},
 ): Promise<Response> {
   const session = await readSession(ctx.state.api)
@@ -100,8 +114,22 @@ export async function renderGroupSettings(
             error={billingError ?? (billing ? null : "The plan could not be read")}
           />
         )}
+        transfer={group && (
+          <GroupTransferSection
+            groupId={groupId}
+            groupName={group.name}
+            role={group.role}
+            members={members?.members ?? null}
+            hasSubscription={billing?.subscribed ?? false}
+            draft={transferDraft}
+            error={transferError}
+          />
+        )}
       />
     </Frame>,
-    { status: status ?? (group ? 200 : 404) },
+    {
+      status: status ?? (group ? 200 : 404),
+      headers: retryAfter ? { "retry-after": retryAfter } : undefined,
+    },
   )
 }

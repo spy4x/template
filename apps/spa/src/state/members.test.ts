@@ -2,7 +2,12 @@ import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { RealtimeRequestError } from "@spy4x/realtime"
 import { GroupRole } from "@domain/groups"
-import { createMembersStore, type MemberItem, type MembersDependencies } from "./members.ts"
+import {
+  createMembersStore,
+  type MemberItem,
+  type MembersDependencies,
+  TransferRefused,
+} from "./members.ts"
 
 function member(userId: number, role = GroupRole.VIEWER): MemberItem {
   return {
@@ -26,6 +31,7 @@ const UNUSED: MembersDependencies = {
   setRole: () => Promise.reject(new Error("unused")),
   removeMember: () => Promise.reject(new Error("unused")),
   leave: () => Promise.reject(new Error("unused")),
+  transfer: () => Promise.reject(new Error("unused")),
 }
 
 function refused(message: string) {
@@ -177,5 +183,70 @@ describe("members store", () => {
     expect(await store.leave()).toBe(true)
     expect(left).toEqual([{ groupId: "g" }])
     expect(store.leaveError.value).toBeNull()
+  })
+
+  it("transfers to the drafted member, forgets the password and reads the members again", async () => {
+    const sent: unknown[] = []
+    let reads = 0
+    const store = createMembersStore({
+      ...UNUSED,
+      list: () => (reads++, UNUSED.list({ groupId: "g" })),
+      transfer: (input) => (sent.push(input), Promise.resolve()),
+    })
+    await store.open("g")
+    store.transferDraft.value = { userId: 2, name: "Team", password: "secret" }
+
+    expect(await store.transfer()).toBe(true)
+
+    expect(sent).toEqual([{ groupId: "g", userId: 2, name: "Team", password: "secret" }])
+    expect(store.transferDraft.value).toEqual({ userId: null, name: "", password: "" })
+    expect(reads).toBe(2)
+  })
+
+  it("shows a refused transfer under the field it names, and drops the password", async () => {
+    const store = createMembersStore({
+      ...UNUSED,
+      transfer: () =>
+        Promise.reject(new TransferRefused("The password is incorrect", "PASSWORD_INVALID")),
+    })
+    await store.open("g")
+    store.transferDraft.value = { userId: 2, name: "Team", password: "wrong" }
+
+    expect(await store.transfer()).toBe(false)
+
+    expect(store.transferError.value).toEqual({
+      field: "password",
+      message: "The password is incorrect",
+    })
+    expect(store.transferDraft.value).toEqual({ userId: 2, name: "Team", password: "" })
+    expect(store.transferring.value).toBe(false)
+  })
+
+  it("sends nothing while no member is drafted", async () => {
+    const sent: unknown[] = []
+    const store = createMembersStore({
+      ...UNUSED,
+      transfer: (input) => (sent.push(input), Promise.resolve()),
+    })
+    await store.open("g")
+
+    expect(await store.transfer()).toBe(false)
+    expect(sent).toEqual([])
+  })
+
+  it("keeps a transfer draft and its refusal while the same group is read again, and drops both for another group", async () => {
+    const store = createMembersStore(UNUSED)
+    await store.open("a")
+    const draft = { userId: 2, name: "Team", password: "" }
+    const error = { field: "name" as const, message: "Type it exactly" }
+    store.transferDraft.value = draft
+    store.transferError.value = error
+
+    await store.open("a")
+    expect([store.transferDraft.value, store.transferError.value]).toEqual([draft, error])
+
+    await store.open("b")
+    expect(store.transferDraft.value).toEqual({ userId: null, name: "", password: "" })
+    expect(store.transferError.value).toBe(null)
   })
 })

@@ -57,7 +57,10 @@ export interface AuthRateLimits {
    * no user is known yet.
    */
   strictByIp: MiddlewareHandler<APIContext>
-  /** Strict limit per signed-in user, for password change. */
+  /**
+   * Strict limit per signed-in user, for every step that checks the current password: changing it
+   * or the address, and handing a group to another member (`/groups/:groupId/transfer`).
+   */
   strictByUser: MiddlewareHandler<APIContext>
   /**
    * Slow limit per signed-in user, for checking a six-digit one-time code: `/totp/check` and
