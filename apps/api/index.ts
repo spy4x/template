@@ -15,6 +15,12 @@ import { createUsersRoute } from "./routes/users.ts"
 import { wsRoute } from "./routes/ws.ts"
 import { createGroupsRoute } from "./routes/groups.ts"
 import { createNotesRoute } from "./routes/notes.ts"
+import {
+  createGroupInvitationsRoute,
+  createInvitationsRoute,
+  type InvitationsRouteDependencies,
+} from "./routes/invitations.ts"
+import { invitationRateLimits } from "./cqrs/invitation-dependencies.ts"
 import { createBillingRoute } from "./routes/billing.ts"
 import { createBillingWebhookRoute } from "./routes/billing-webhook.ts"
 import { billingSetup } from "./services/billing.ts"
@@ -112,6 +118,19 @@ app.route(
     expectedOrigin,
   }),
 )
+const invitationRoutes: InvitationsRouteDependencies = {
+  create: (command) => commandBus.execute(command),
+  list: (query) => queryBus.execute(query),
+  revoke: (command) => commandBus.execute(command),
+  preview: (query) => queryBus.execute(query),
+  mine: (query) => queryBus.execute(query),
+  accept: (command) => commandBus.execute(command),
+  decline: (command) => commandBus.execute(command),
+  rateLimits: invitationRateLimits,
+  expectedOrigin,
+}
+app.route("/groups/:groupId/invitations", createGroupInvitationsRoute(invitationRoutes))
+app.route("/invitations", createInvitationsRoute(invitationRoutes))
 app.route(
   "/groups/:groupId/billing",
   createBillingRoute({
