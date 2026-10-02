@@ -7,6 +7,9 @@
 # Needs from the environment: a Postgres and a Valkey that are already running, as `DB_HOST`,
 # `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`, `KV_HOSTNAME`, `KV_PORT` and `KV_PASSWORD`, and a
 # browser Playwright can start (the e2e image has one). Run it from the repository root.
+# The tests do not run in `DB_NAME`: the script connects there, drops and creates its own database
+# `template_e2e` and runs the stack against that, so it never shares a database with another test
+# run on the same Postgres (CI runs it beside the integration tests).
 # `FRONT_PORT`, `API_PORT` and `MPA_PORT` default to 8080, 8000 and 8001.
 set -euo pipefail
 
@@ -68,6 +71,27 @@ export RATE_LIMITER_OTP_WINDOW_MS=900000
 export RATE_LIMITER_OTP_LIMIT=1000
 export API_URL="http://127.0.0.1:$API_PORT"
 export MPA_BASE_URL="http://$DOMAIN"
+
+# A fresh database of its own. Dropped first, so a rerun starts empty instead of failing on
+# "already exists" or inheriting rows from the last run. `DB_NAME` is only the database to connect
+# to; it must exist.
+E2E_DB_NAME=template_e2e
+deno eval '
+import postgres from "postgres"
+const name = Deno.args[0]
+const sql = postgres({
+  host: Deno.env.get("DB_HOST"),
+  port: Number(Deno.env.get("DB_PORT")),
+  user: Deno.env.get("DB_USER"),
+  password: Deno.env.get("DB_PASS"),
+  database: Deno.env.get("DB_NAME"),
+  max: 1,
+})
+await sql.unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
+await sql.unsafe(`CREATE DATABASE ${name}`)
+await sql.end()
+' "$E2E_DB_NAME"
+export DB_NAME=$E2E_DB_NAME
 
 deno task db:migrate
 
