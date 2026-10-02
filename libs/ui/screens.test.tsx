@@ -1505,6 +1505,23 @@ describe("InvitationScreen without JavaScript", () => {
 })
 
 describe("MyInvitationsSection without JavaScript", () => {
+  it("is drawn on the groups page under its heading, through the slot", () => {
+    const html = renderToString(
+      <GroupsScreen
+        groups={[]}
+        selectedId={null}
+        name=""
+        creating={false}
+        loading={false}
+        error={null}
+        invitations={<MyInvitationsSection invitations={[preview]} />}
+      />,
+    )
+
+    expect(html.indexOf("<h1")).toBeLessThan(html.indexOf('data-e2e="my-invitations"'))
+    expect(html.indexOf('data-e2e="my-invitations"')).toBeLessThan(html.indexOf("New group"))
+  })
+
   it("posts each invitation's id to accept or decline, and draws nothing with none", () => {
     const surface = noScriptSurface(<MyInvitationsSection invitations={[preview]} />)
 
