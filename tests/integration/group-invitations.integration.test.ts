@@ -301,15 +301,17 @@ Deno.test("invitations: a removed admin cannot rejoin through a link they made",
   })
 })
 
-Deno.test("invitations: an admin demoted to viewer who leaves cannot come back as an editor", async () => {
+Deno.test("invitations: a demoted admin's links stop at once, and they cannot come back as an editor", async () => {
   await withSchema(async (sql) => {
-    const { repository, groupId, owner, admin } = await team(sql)
+    const { repository, groupId, owner, admin, stranger } = await team(sql)
     const invitations = new PostgresInvitationRepository(sql)
-    const editorLink = await invite(invitations, groupId, admin, { role: GroupRole.EDITOR })
+    const editorLink = await invite(invitations, groupId, admin, { maxUses: 5 })
 
     await repository.changeMemberRole(groupId, admin, GroupRole.VIEWER, owner)
-    await repository.leave(groupId, admin)
 
+    expect(await refusal(invitations.accept(editorLink.lookup, stranger, NO_LIMITS)))
+      .toBe("INVITATION_REVOKED")
+    await repository.leave(groupId, admin)
     expect(await refusal(invitations.accept(editorLink.lookup, admin, NO_LIMITS)))
       .toBe("INVITATION_REVOKED")
     expect(await memberRole(sql, groupId, admin)).toBe(null)

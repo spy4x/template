@@ -1302,6 +1302,33 @@ describe("invitations", () => {
       return rest(path, method)
     })
 
+  it("offers a viewer only in the create form when the group is on the free plan", async () => {
+    const billing = (planId: string) => ({
+      enabled: true,
+      planId,
+      status: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      canManage: true,
+      subscribed: false,
+      hasCustomer: false,
+    })
+    const page = async (planId: string) => {
+      const { fetch } = owner((path) =>
+        path === `/api/groups/${groupId}/billing`
+          ? Response.json({ billing: billing(planId) })
+          : notesList()
+      )
+      const html = await (await get(fetch, `/groups/${groupId}`)).text()
+      const start = html.indexOf('data-e2e="invitation-role"')
+      const select = html.slice(start, html.indexOf("</select>", start))
+      return [...select.matchAll(/<option[^>]*value="(\d)"/g)].map((m) => m[1])
+    }
+
+    expect(await page("free")).toEqual(["1"])
+    expect(await page("pro")).toEqual(["1", "2", "3"])
+  })
+
   it("creates with the form's values and draws the new link once, on the app's own origin", async () => {
     const { calls, fetch } = owner((path, method) =>
       path === `/api/groups/${groupId}/invitations` && method === "POST"
