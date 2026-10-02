@@ -90,7 +90,7 @@ async function readPage(
 ): Promise<Response | { session: Session; group: NotesGroup | null }> {
   const { api } = ctx.state
   const session = await readSession(api)
-  if (!session.user) return ctx.redirect(signInPath(session), 303)
+  if (!session.user) return ctx.redirect(signInPath(session, ctx.req), 303)
   const picker = session.picker
   // The picker holds one page of groups; a person with more may have selected one beyond it.
   const membership = picker?.selectedId

@@ -28,7 +28,7 @@ import {
 import { GroupSettingsScreen, type GroupSettingsScreenProps } from "./group-settings-screen.tsx"
 import { GroupsScreen, type GroupsScreenProps, ROLE_TEXT } from "./groups-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
-import { FORM_ACTIONS, GROUP_PATHS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
+import { FORM_ACTIONS, GROUP_PATHS, NEXT_PARAM, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 import {
   noteCreateRequestSchema,
   noteDeleteRequestSchema,
@@ -148,6 +148,27 @@ describe("AuthScreen without JavaScript", () => {
     ])
     expect(surface.links).toEqual(["/sign-in"])
     expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("posts next as a hidden field of every auth form and keeps it on every link between them", () => {
+    const next = "/notes/abc"
+    const withNextQuery = (path: string) => `${path}?next=%2Fnotes%2Fabc`
+    const signIn = noScriptSurface(<AuthScreen {...authDefaults} next={next} />)
+    const signUp = noScriptSurface(<AuthScreen {...authDefaults} screen="sign-up" next={next} />)
+    const code = noScriptSurface(
+      <AuthScreen {...authDefaults} screen="one-time-code" isMfaRequired next={next} />,
+    )
+    expect(formAt(signIn, FORM_ACTIONS.signIn).fields)
+      .toEqual([...schemaKeys(authSignInSchema), NEXT_PARAM].sort())
+    expect(formAt(signUp, FORM_ACTIONS.signUp).fields)
+      .toEqual([...schemaKeys(authSignUpSchema), NEXT_PARAM].sort())
+    expect(formAt(code, FORM_ACTIONS.oneTimeCode).fields)
+      .toEqual([...schemaKeys(authOTPSchema), NEXT_PARAM].sort())
+    expect(signIn.links).toEqual([withNextQuery(SCREEN_PATHS.signUp), SCREEN_PATHS.forgotPassword])
+    expect(signUp.links).toEqual([withNextQuery(SCREEN_PATHS.signIn)])
+    expect(code.links).toEqual([withNextQuery(SCREEN_PATHS.signIn)])
+    expect(renderToString(<AuthScreen {...authDefaults} next={next} />))
+      .toContain(`<input type="hidden" name="next" value="/notes/abc"`)
   })
 
   it("links a signed-in user on to the profile instead of asking again", () => {

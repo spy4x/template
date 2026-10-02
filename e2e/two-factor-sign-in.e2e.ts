@@ -1,33 +1,8 @@
 import { expect, test } from "./fixtures/stack.ts"
 import { gotoApp, submitAuthForm } from "./fixtures/app.ts"
+import { currentStep, totpCode } from "./fixtures/totp.ts"
 
 const apiBase = "http://app.localhost"
-const STEP_SECONDS = 30
-const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
-
-/** The one-time code (RFC 6238: SHA-1, six digits, 30-second steps) for `secret` at `step`. */
-async function totpCode(secret: string, step: number): Promise<string> {
-  let bits = ""
-  for (const char of secret.replace(/=+$/, "").toUpperCase()) {
-    bits += BASE32.indexOf(char).toString(2).padStart(5, "0")
-  }
-  const key = new Uint8Array((bits.match(/.{8}/g) ?? []).map((byte) => parseInt(byte, 2)))
-  const counter = new Uint8Array(8)
-  new DataView(counter.buffer).setBigUint64(0, BigInt(step))
-  const hmacKey = await crypto.subtle.importKey(
-    "raw",
-    key,
-    { name: "HMAC", hash: "SHA-1" },
-    false,
-    ["sign"],
-  )
-  const hmac = new Uint8Array(await crypto.subtle.sign("HMAC", hmacKey, counter))
-  const offset = hmac[hmac.length - 1] & 0x0f
-  const value = new DataView(hmac.buffer).getUint32(offset) & 0x7fffffff
-  return String(value % 1_000_000).padStart(6, "0")
-}
-
-const currentStep = () => Math.floor(Date.now() / 1000 / STEP_SECONDS)
 
 test.describe("two-factor sign-in", () => {
   test("signs in with a one-time code after the password step", async ({ page, request }) => {

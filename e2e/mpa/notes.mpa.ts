@@ -31,10 +31,12 @@ test("a person without JavaScript signs up, signs out, signs in, picks a group a
     await page.locator("[data-e2e=signout]").click()
     await expect(page).toHaveURL("/sign-in")
     await page.goto("/groups")
-    await expect(page, "a signed-out visitor is sent to sign in").toHaveURL("/sign-in")
+    await expect(page, "a signed-out visitor is sent to sign in").toHaveURL(
+      "/sign-in?next=%2Fgroups",
+    )
 
     await submitCredentials(page, email)
-    await expect(page).toHaveURL("/")
+    await expect(page, "sign-in returns to the page asked for").toHaveURL("/groups")
 
     await page.getByRole("navigation", { name: "Main navigation" })
       .getByRole("link", { name: "Groups" }).click()
