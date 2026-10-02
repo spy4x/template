@@ -105,6 +105,7 @@ const GROUP_ERROR_CODES: Record<
   "bad_request" | "unauthorized" | "forbidden" | "not_found" | "conflict"
 > = {
   GROUP_NOT_FOUND: "not_found",
+  GROUP_SUBSCRIBED: "conflict",
   ID_ALREADY_EXISTS: "conflict",
   INVALID_CURSOR: "bad_request",
   INVALID_REQUEST: "bad_request",

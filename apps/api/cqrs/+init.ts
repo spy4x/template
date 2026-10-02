@@ -55,6 +55,10 @@ import { noteUpdateHandler } from "@api/cqrs/command-handlers/note-update.ts"
 import { noteDeleteHandler } from "@api/cqrs/command-handlers/note-delete.ts"
 import { noteListHandler } from "@api/cqrs/query-handlers/note-list.ts"
 import { noteGetHandler } from "@api/cqrs/query-handlers/note-get.ts"
+import { BillingCheckoutCommand, BillingGetQuery, BillingPortalCommand } from "@domain/billing"
+import { billingCheckoutHandler } from "@api/cqrs/command-handlers/billing-checkout.ts"
+import { billingPortalHandler } from "@api/cqrs/command-handlers/billing-portal.ts"
+import { billingGetHandler } from "@api/cqrs/query-handlers/billing-get.ts"
 import {
   GroupSelectedEvent,
   PushDevicesUpdatedEvent,
@@ -104,6 +108,8 @@ commandBus.register(GroupLeaveCommand, groupLeaveHandler)
 commandBus.register(NoteCreateCommand, noteCreateHandler)
 commandBus.register(NoteUpdateCommand, noteUpdateHandler)
 commandBus.register(NoteDeleteCommand, noteDeleteHandler)
+commandBus.register(BillingCheckoutCommand, billingCheckoutHandler)
+commandBus.register(BillingPortalCommand, billingPortalHandler)
 queryBus.register(UserProfileGetQuery, userProfileGetHandler)
 queryBus.register(PushListQuery, pushListHandler)
 queryBus.register(GroupListQuery, groupListHandler)
@@ -113,5 +119,6 @@ queryBus.register(GroupDeletedListQuery, groupDeletedListHandler)
 queryBus.register(GroupMembersQuery, groupMembersHandler)
 queryBus.register(NoteListQuery, noteListHandler)
 queryBus.register(NoteGetQuery, noteGetHandler)
+queryBus.register(BillingGetQuery, billingGetHandler)
 
 console.log("✅ CQRS handlers initialized")

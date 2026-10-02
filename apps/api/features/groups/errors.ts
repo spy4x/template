@@ -48,6 +48,10 @@ const ERROR_DEFINITIONS: Record<GroupFeatureErrorCode, ErrorDefinition> = {
   INVALID_REQUEST: { status: 400, message: "Request is invalid" },
   LAST_GROUP: { status: 409, message: "A person must keep at least one group" },
   LAST_OWNER: { status: 409, message: "The owner keeps the group and their role" },
+  GROUP_SUBSCRIBED: {
+    status: 409,
+    message: "Cancel the group's subscription in the billing portal before deleting it",
+  },
   MEMBER_NOT_FOUND: { status: 404, message: "Member not found" },
   MFA_REQUIRED: { status: 401, message: "Complete MFA to access groups" },
   REQUEST_ORIGIN_INVALID: { status: 403, message: "Request origin is invalid" },

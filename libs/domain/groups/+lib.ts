@@ -23,6 +23,7 @@ export enum GroupRole {
 
 export type GroupErrorCode =
   | "GROUP_NOT_FOUND"
+  | "GROUP_SUBSCRIBED"
   | "ID_ALREADY_EXISTS"
   | "INVALID_CURSOR"
   | "INVALID_REQUEST"
@@ -630,6 +631,11 @@ export function canSeeMemberEmails(role: GroupRole): boolean {
 
 /** Whether `role` may delete or restore the group: only the owner. */
 export function canDelete(role: GroupRole): boolean {
+  return isGroupRole(role) && role === GroupRole.OWNER
+}
+
+/** Whether `role` may pay for the group and change its plan: only the owner. */
+export function canManageBilling(role: GroupRole): boolean {
   return isGroupRole(role) && role === GroupRole.OWNER
 }
 

@@ -15,6 +15,9 @@ import { createUsersRoute } from "./routes/users.ts"
 import { wsRoute } from "./routes/ws.ts"
 import { createGroupsRoute } from "./routes/groups.ts"
 import { createNotesRoute } from "./routes/notes.ts"
+import { createBillingRoute } from "./routes/billing.ts"
+import { createBillingWebhookRoute } from "./routes/billing-webhook.ts"
+import { billingSetup } from "./services/billing.ts"
 import { createMutationGuards } from "./middlewares/mutation-guards.ts"
 import { createTotpFailures } from "./services/totp-failures.ts"
 import { createEmailCodeFailures } from "./services/email-code-failures.ts"
@@ -107,6 +110,24 @@ app.route(
     get: (query) => queryBus.execute(query),
     cursor: noteListCursor,
     expectedOrigin,
+  }),
+)
+app.route(
+  "/groups/:groupId/billing",
+  createBillingRoute({
+    get: (query) => queryBus.execute(query),
+    checkout: (command) => commandBus.execute(command),
+    portal: (command) => commandBus.execute(command),
+    expectedOrigin,
+  }),
+)
+// No session and no origin check: the provider calls it, and its signature is the only proof.
+app.route(
+  "/webhooks/billing",
+  createBillingWebhookRoute({
+    provider: billingSetup.provider,
+    applyEvent: (event) => db.billing.applyEvent(event),
+    log,
   }),
 )
 app.route(

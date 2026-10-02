@@ -1,0 +1,133 @@
+import type { EnvReader } from "@spy4x/server/config"
+import { type BillingProvider, createStripeBilling, type PlanRef } from "@spy4x/billing"
+import { PRO_PLAN_ID } from "@domain/billing"
+
+/**
+ * The webhook signing secret of the development provider. It is public on purpose: the e2e tests
+ * and a developer sign recorded Stripe events with it (`e2e/fixtures/billing.ts` keeps a copy, and
+ * a test checks the two match). Production refuses the development provider, so it never verifies
+ * a real webhook.
+ */
+export const FAKE_WEBHOOK_SECRET = "whsec_template_development_only"
+
+/** The price the development provider maps to the Pro plan when `STRIPE_PRICE_PRO` is unset. */
+export const FAKE_PRO_PRICE_ID = "price_fake_pro"
+
+/** Which provider takes payments. */
+export enum BillingMode {
+  /** No payments: every group is on the free plan and the billing routes answer 404. */
+  Off = 1,
+  /** Stripe, with the keys from the environment. */
+  Stripe = 2,
+  /** Development only: checkout and portal return straight to the app, webhooks are signed locally. */
+  Fake = 3,
+}
+
+export interface BillingSetup {
+  mode: BillingMode
+  /** `null` when billing is off. */
+  provider: BillingProvider | null
+}
+
+/** Thrown at start-up when billing is asked for but cannot run. Names variables, never values. */
+export class BillingConfigError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "BillingConfigError"
+  }
+}
+
+const STRIPE_KEYS = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_PRO"] as const
+
+/**
+ * Reads `BILLING_PROVIDER` (`stripe`, `fake` or `off`) and builds the provider.
+ *
+ * - Unset, it is `fake` in development and `off` in production, so a deployment with no billing
+ *   keys starts and keeps every group on the free plan.
+ * - `stripe` needs `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `STRIPE_PRICE_PRO`; a missing
+ *   one stops start-up with an error naming it.
+ * - `fake` is refused in production.
+ *
+ * `fetch` replaces the network for Stripe's API calls; tests pass one, the app never does.
+ */
+export function readBillingSetup(
+  env: EnvReader,
+  appEnv: "dev" | "prod",
+  options: { fetch?: typeof fetch } = {},
+): BillingSetup {
+  const chosen = env.get("BILLING_PROVIDER") ?? (appEnv === "dev" ? "fake" : "off")
+  switch (chosen) {
+    case "off":
+      return { mode: BillingMode.Off, provider: null }
+    case "fake":
+      if (appEnv !== "dev") {
+        throw new BillingConfigError(
+          "BILLING_PROVIDER=fake is for development only; use stripe or off in production",
+        )
+      }
+      return {
+        mode: BillingMode.Fake,
+        provider: createFakeBilling(env.get("STRIPE_PRICE_PRO") ?? FAKE_PRO_PRICE_ID),
+      }
+    case "stripe": {
+      const missing = STRIPE_KEYS.filter((name) => env.get(name) === undefined)
+      if (missing.length > 0) {
+        throw new BillingConfigError(
+          `BILLING_PROVIDER=stripe needs ${missing.join(", ")} (see docs/billing.md)`,
+        )
+      }
+      return {
+        mode: BillingMode.Stripe,
+        provider: createStripeBilling({
+          secretKey: env.get("STRIPE_SECRET_KEY")!,
+          webhookSecret: env.get("STRIPE_WEBHOOK_SECRET")!,
+          plans: planRefs(env.get("STRIPE_PRICE_PRO")!),
+          fetch: options.fetch,
+        }),
+      }
+    }
+    default:
+      throw new BillingConfigError("BILLING_PROVIDER must be stripe, fake or off")
+  }
+}
+
+function planRefs(proPriceId: string): PlanRef[] {
+  return [{ planId: PRO_PLAN_ID, priceId: proPriceId }]
+}
+
+/**
+ * The development provider. Checkout and the portal send the person straight back to the app, as if
+ * they had paid or closed the portal; the plan changes only when a signed webhook says so, exactly
+ * as with Stripe. Webhooks are verified and parsed by the real Stripe adapter with
+ * {@link FAKE_WEBHOOK_SECRET}, and its network is a `fetch` that refuses every call.
+ */
+export function createFakeBilling(proPriceId: string): BillingProvider {
+  const stripe = createStripeBilling({
+    secretKey: "sk_test_fake",
+    webhookSecret: FAKE_WEBHOOK_SECRET,
+    plans: planRefs(proPriceId),
+    fetch: () => Promise.reject(new Error("The development billing provider makes no requests")),
+  })
+  const known = new Set([PRO_PLAN_ID])
+  return {
+    createCheckout(request) {
+      if (!known.has(request.planId)) {
+        return Promise.resolve({
+          ok: false,
+          error: { code: "unknown_plan", message: "unknown plan", status: null },
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        value: { id: `cs_fake_${crypto.randomUUID()}`, url: request.successUrl },
+      })
+    },
+    createPortalSession(request) {
+      return Promise.resolve({
+        ok: true,
+        value: { id: `bps_fake_${crypto.randomUUID()}`, url: request.returnUrl },
+      })
+    },
+    parseEvent: (rawBody, headers) => stripe.parseEvent(rawBody, headers),
+  }
+}

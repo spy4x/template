@@ -22,6 +22,8 @@ import { EmailView } from "./views/EmailView.tsx"
 import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView.tsx"
 import { GroupsView } from "./views/GroupsView.tsx"
 import { GroupSettingsView } from "./views/GroupSettingsView.tsx"
+import { PricingView } from "./views/BillingViews.tsx"
+import { billingStore } from "./state/billing.ts"
 import { NoteEditorView } from "./views/NoteEditorView.tsx"
 import { NotesView } from "./views/NotesView.tsx"
 import { ProfileView } from "./views/ProfileView.tsx"
@@ -64,6 +66,9 @@ function Routes() {
       <Route path="/groups" component={GroupsView} />
       <Route path="/groups/:groupId">
         {(params) => <GroupSettingsView groupId={params.groupId} />}
+      </Route>
+      <Route path="/groups/:groupId/pricing">
+        {(params) => <PricingView groupId={params.groupId} />}
       </Route>
       <Route path="/groups/:groupId/notes">
         {(params) => <OpenIfSelected groupId={params.groupId} />}
@@ -151,6 +156,7 @@ export function App() {
       profileStore.reset()
       selectionStore.reset()
       emailStore.reset()
+      billingStore.reset()
       return
     }
     // The REST read is the pull: it runs at start-up, after every reconnect and for every push
