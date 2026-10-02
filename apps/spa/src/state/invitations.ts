@@ -1,0 +1,278 @@
+import { signal } from "@preact/signals"
+import { type PlanRefusal, readPlanRefusal } from "@domain/billing"
+import type { GroupRole } from "@domain/groups"
+import {
+  type CreatedInvitation,
+  EMPTY_INVITATION_DRAFT,
+  type InvitationDraft,
+  type InvitationPreviewRow,
+  type InvitationRow,
+} from "@ui/group-invitations.tsx"
+
+/** `fetch`, or a test's stand-in for it. */
+export type InvitationFetch = (url: string, init?: RequestInit) => Promise<Response>
+
+/** A refused call: the API's own message, and the plan refusal when the plan said no. */
+export interface InvitationFailure {
+  message: string
+  plan: PlanRefusal | null
+}
+
+type Outcome<T> = { ok: true; data: T } | { ok: false; failure: InvitationFailure }
+
+/** Which invitation an answer is for: the token of a link, or the id of one sent to an address. */
+export type InvitationRef = { token: string } | { invitationId: string }
+
+const OFFLINE = "The server is out of reach. Try again."
+
+function groupPath(groupId: string, rest = ""): string {
+  return `/api/groups/${encodeURIComponent(groupId)}/invitations${rest}`
+}
+
+/**
+ * Invitations on both sides: a group's pending ones with create and revoke, for its owner and
+ * admins, and the one behind a link or sent to the person's address, with accept and decline.
+ *
+ * It calls `fetch` itself instead of `apiFetch`: these answers say why an invitation no longer
+ * works in `error.message`, which `apiFetch` drops. The created link is kept in memory only, and
+ * dropped when the page closes, since it is never shown again.
+ */
+export function createInvitationsStore(
+  { fetch = globalThis.fetch, origin = () => globalThis.location.origin }: {
+    fetch?: InvitationFetch
+    /** The app's origin, which the copied link starts with. */
+    origin?: () => string
+  } = {},
+) {
+  async function call<T>(method: string, url: string, body?: unknown): Promise<Outcome<T>> {
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method,
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      })
+    } catch (_unreachable) {
+      return { ok: false, failure: { message: OFFLINE, plan: null } }
+    }
+    const json: unknown = await response.json().catch(() => null)
+    if (response.ok) return { ok: true, data: json as T }
+    const error = (json as { error?: unknown } | null)?.error
+    const message = typeof error === "object" && error !== null &&
+        typeof (error as { message?: unknown }).message === "string"
+      ? (error as { message: string }).message
+      : "Something went wrong. Try again."
+    return { ok: false, failure: { message, plan: readPlanRefusal(error) } }
+  }
+
+  // The group's side.
+  const groupId = signal<string | null>(null)
+  const invitations = signal<readonly InvitationRow[] | null>(null)
+  const loadError = signal<string | null>(null)
+  const draft = signal<InvitationDraft>(EMPTY_INVITATION_DRAFT)
+  const creating = signal(false)
+  const createError = signal<InvitationFailure | null>(null)
+  const created = signal<CreatedInvitation | null>(null)
+  const revokingId = signal<string | null>(null)
+  const revokeError = signal<{ invitationId: string; message: string } | null>(null)
+  let reads = 0
+
+  /** Reads the open group's pending invitations. A viewer or editor gets an error, never shown. */
+  async function refresh(): Promise<void> {
+    const id = groupId.value
+    if (id === null) return
+    const read = ++reads
+    const result = await call<{ invitations: InvitationRow[] }>("GET", groupPath(id))
+    if (read !== reads || groupId.value !== id) return
+    if (result.ok) {
+      invitations.value = result.data.invitations
+      loadError.value = null
+    } else loadError.value = result.failure.message
+  }
+
+  /** Shows the invitations of `id`. */
+  function open(id: string): Promise<void> {
+    if (groupId.value !== id) {
+      closeGroup()
+      groupId.value = id
+    }
+    return refresh()
+  }
+
+  /** Creates an invitation from the draft and keeps its link to show this once. */
+  async function create(): Promise<boolean> {
+    const id = groupId.value
+    if (id === null || creating.value) return false
+    creating.value = true
+    createError.value = null
+    created.value = null
+    const { role, expiresInDays, maxUses, email, sendEmail } = draft.value
+    const result = await call<{ token: string; mailSent: boolean }>("POST", groupPath(id), {
+      role,
+      expiresInDays,
+      maxUses,
+      email: email.trim() || null,
+      sendEmail,
+    })
+    creating.value = false
+    if (groupId.value !== id) return false
+    if (!result.ok) {
+      createError.value = result.failure
+      return false
+    }
+    created.value = {
+      link: new URL(`/invite/${encodeURIComponent(result.data.token)}`, origin()).href,
+      mailAsked: sendEmail,
+      mailSent: result.data.mailSent,
+    }
+    draft.value = EMPTY_INVITATION_DRAFT
+    await refresh()
+    return true
+  }
+
+  /** Revokes one pending invitation. */
+  async function revoke(invitationId: string): Promise<boolean> {
+    const id = groupId.value
+    if (id === null || revokingId.value !== null) return false
+    revokingId.value = invitationId
+    revokeError.value = null
+    const result = await call("DELETE", groupPath(id, `/${encodeURIComponent(invitationId)}`))
+    revokingId.value = null
+    if (groupId.value !== id) return false
+    if (!result.ok) {
+      revokeError.value = { invitationId, message: result.failure.message }
+      return false
+    }
+    invitations.value = invitations.value?.filter((row) => row.id !== invitationId) ?? null
+    return true
+  }
+
+  function closeGroup(): void {
+    reads++
+    groupId.value = null
+    invitations.value = null
+    loadError.value = null
+    draft.value = EMPTY_INVITATION_DRAFT
+    creating.value = false
+    createError.value = null
+    created.value = null
+    revokingId.value = null
+    revokeError.value = null
+  }
+
+  // The invited person's side.
+  const preview = signal<InvitationPreviewRow | null>(null)
+  const previewLoading = signal(false)
+  const previewError = signal<string | null>(null)
+  const mine = signal<readonly InvitationPreviewRow[]>([])
+  /** The invitation whose answer is in flight: its token or id. */
+  const answering = signal<string | null>(null)
+  const answerError = signal<
+    { ref: string; message: string; plan: PlanRefusal | null } | null
+  >(null)
+
+  /** Reads the invitation behind a link. */
+  async function loadPreview(token: string): Promise<void> {
+    previewLoading.value = true
+    previewError.value = null
+    preview.value = null
+    answerError.value = null
+    const result = await call<{ invitation: InvitationPreviewRow }>(
+      "POST",
+      "/api/invitations/preview",
+      { token },
+    )
+    previewLoading.value = false
+    if (result.ok) preview.value = result.data.invitation
+    else previewError.value = result.failure.message
+  }
+
+  /** Reads the invitations sent to an address the person proved. */
+  async function loadMine(): Promise<void> {
+    const result = await call<{ invitations: InvitationPreviewRow[] }>(
+      "GET",
+      "/api/invitations/mine",
+    )
+    if (result.ok) mine.value = result.data.invitations
+  }
+
+  function keyOf(ref: InvitationRef): string {
+    return "token" in ref ? ref.token : ref.invitationId
+  }
+
+  async function answer<T>(path: string, ref: InvitationRef): Promise<T | null> {
+    if (answering.value !== null) return null
+    answering.value = keyOf(ref)
+    answerError.value = null
+    const result = await call<T>("POST", path, ref)
+    answering.value = null
+    if (result.ok) return result.data
+    answerError.value = { ref: keyOf(ref), ...result.failure }
+    return null
+  }
+
+  /** Accepts; resolves to the group joined, or `null` when it was refused. */
+  async function accept(
+    ref: InvitationRef,
+  ): Promise<{ groupId: string; role: GroupRole } | null> {
+    const joined = await answer<{ groupId: string; role: GroupRole }>(
+      "/api/invitations/accept",
+      ref,
+    )
+    if (joined && "invitationId" in ref) {
+      mine.value = mine.value.filter((row) => row.id !== ref.invitationId)
+    }
+    return joined
+  }
+
+  /** Declines; resolves to whether it worked. */
+  async function decline(ref: InvitationRef): Promise<boolean> {
+    const done = await answer("/api/invitations/decline", ref)
+    if (done && "invitationId" in ref) {
+      mine.value = mine.value.filter((row) => row.id !== ref.invitationId)
+    }
+    return done !== null
+  }
+
+  function reset(): void {
+    closeGroup()
+    preview.value = null
+    previewLoading.value = false
+    previewError.value = null
+    mine.value = []
+    answering.value = null
+    answerError.value = null
+  }
+
+  return {
+    groupId,
+    invitations,
+    loadError,
+    draft,
+    creating,
+    createError,
+    created,
+    revokingId,
+    revokeError,
+    open,
+    refresh,
+    create,
+    revoke,
+    closeGroup,
+    preview,
+    previewLoading,
+    previewError,
+    mine,
+    answering,
+    answerError,
+    loadPreview,
+    loadMine,
+    accept,
+    decline,
+    reset,
+  }
+}
+
+/** The app's invitations store. */
+export const invitationsStore = createInvitationsStore()

@@ -25,6 +25,10 @@ describe("where a visit goes before sign-in is finished", () => {
     expect(signInRedirect("/email", "", signedOut)).toBe("/sign-in?next=%2Femail")
   })
 
+  it("sends an invitation link to sign-in first, with the invitation as next", () => {
+    expect(signInRedirect("/invite/AbC_9", "", signedOut)).toBe("/sign-in?next=%2Finvite%2FAbC_9")
+  })
+
   it("sends a session that owes its code to the code page, with the page as next", () => {
     expect(signInRedirect("/notes/abc", "", codeOwed)).toBe("/totp?next=%2Fnotes%2Fabc")
   })

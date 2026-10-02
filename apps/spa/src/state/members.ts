@@ -18,7 +18,7 @@ export interface MemberItem {
 
 /** What the members store needs from the outside. Injected so tests need no network. */
 export interface MembersDependencies {
-  list(input: { groupId: string }): Promise<{ members: MemberItem[] }>
+  list(input: { groupId: string }): Promise<{ members: MemberItem[]; memberCount: number }>
   setRole(input: { groupId: string; userId: number; role: GroupRole }): Promise<{
     member: MemberItem
   }>
@@ -40,6 +40,8 @@ export function createMembersStore(dependencies: MembersDependencies) {
   const groupId = signal<string | null>(null)
   /** The members, or `null` until the first read of this group answers. */
   const members = signal<readonly MemberItem[] | null>(null)
+  /** How many members the group has; the list stops at the API's limit, this does not. */
+  const memberCount = signal<number | null>(null)
   const loadError = signal<string | null>(null)
   /** The member whose role change or removal is in flight. */
   const pendingUserId = signal<number | null>(null)
@@ -60,6 +62,7 @@ export function createMembersStore(dependencies: MembersDependencies) {
       const result = await dependencies.list({ groupId: id })
       if (read !== reads || groupId.value !== id) return
       members.value = result.members
+      memberCount.value = result.memberCount
       loadError.value = null
     } catch (cause) {
       if (read !== reads || groupId.value !== id) return
@@ -72,6 +75,7 @@ export function createMembersStore(dependencies: MembersDependencies) {
     if (groupId.value !== id) {
       groupId.value = id
       members.value = null
+      memberCount.value = null
       loadError.value = null
       memberError.value = null
       leaveError.value = null
@@ -114,6 +118,7 @@ export function createMembersStore(dependencies: MembersDependencies) {
     return change(userId, async (id) => {
       await dependencies.removeMember({ groupId: id, userId })
       members.value = members.value?.filter((m) => m.userId !== userId) ?? null
+      if (memberCount.value !== null) memberCount.value--
     }, "Could not remove the member")
   }
 
@@ -138,6 +143,7 @@ export function createMembersStore(dependencies: MembersDependencies) {
     reads++
     groupId.value = null
     members.value = null
+    memberCount.value = null
     loadError.value = null
     pendingUserId.value = null
     memberError.value = null
@@ -148,6 +154,7 @@ export function createMembersStore(dependencies: MembersDependencies) {
   return {
     groupId,
     members,
+    memberCount,
     loadError,
     pendingUserId,
     memberError,
@@ -168,7 +175,7 @@ export function createMembersStore(dependencies: MembersDependencies) {
  */
 export const membersStore = createMembersStore({
   async list({ groupId }) {
-    const result = await apiFetch<{ members: MemberItem[] }>(
+    const result = await apiFetch<{ members: MemberItem[]; memberCount: number }>(
       `/api/groups/${encodeURIComponent(groupId)}/members`,
     )
     if (!result.ok) throw new Error(result.error.message)

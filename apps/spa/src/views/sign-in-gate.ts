@@ -1,8 +1,11 @@
 import { NEXT_PARAM, SCREEN_PATHS, withNext } from "@ui/progressive.tsx"
 import type { SessionState } from "../state/session.ts"
 
-/** The pages only a signed-in person can use: the notes, the groups and the e-mail address. */
-const MEMBERS_ONLY = /^\/(notes|groups|email)(\/|$)/
+/**
+ * The pages only a signed-in person can use: the notes, the groups, the e-mail address and an
+ * invitation, which a visitor answers once signed in or signed up.
+ */
+const MEMBERS_ONLY = /^\/(notes|groups|email|invite)(\/|$)/
 
 /**
  * Where a visit to `path` goes when the session is not fully signed in: to sign-in, or to the code
