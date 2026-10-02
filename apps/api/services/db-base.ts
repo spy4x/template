@@ -3,7 +3,7 @@ import type { AuthSessionRecord, AuthStore } from "@spy4x/server/auth"
 import { createPostgresAuthStore, createPostgresSessionStore } from "@spy4x/server/auth/postgres"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import type { SessionStore } from "@spy4x/server/sign-in"
-import type { User, UserBase } from "@domain/identity"
+import type { AuthAuditBase, User, UserBase } from "@domain/identity"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { emailChanges } from "@server/auth/email-verification.ts"
@@ -101,6 +101,22 @@ export class AppDbBase extends DbServiceBase {
         WHERE method = ${PASSWORD_METHOD} AND subject = ${where.subject}
         FOR UPDATE
       `
+    }
+  }
+
+  /**
+   * The `auth_audits` rows. Built per access, like `group`: each row is written inside the
+   * transaction of the action it records, so the action and its row are kept or undone together.
+   */
+  get authAudit() {
+    const sql = this.sql
+    return {
+      insert: async (row: AuthAuditBase): Promise<void> => {
+        await sql`
+          INSERT INTO auth_audits (user_id, event_type, identifier, ip, user_agent)
+          VALUES (${row.userId}, ${row.eventType}, ${row.identifier}, ${row.ip}, ${row.userAgent})
+        `
+      },
     }
   }
 

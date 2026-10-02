@@ -1,6 +1,6 @@
 import { RedisKvStore } from "@spy4x/server/kv"
 import type { Type } from "arktype"
-import { AuthAudit, User } from "@domain/identity"
+import { User } from "@domain/identity"
 import { config } from "../services/config.ts"
 
 import { buildMethods as buildMethodsBase } from "@spy4x/platform/cache"
@@ -34,7 +34,6 @@ export async function isCacheConnected(): Promise<boolean> {
 
 export class PublicAPICache {
   user = buildMethods<User>(`user`)
-  authAudit = buildMethods<AuthAudit>(`authAudit`)
 }
 
 export const publicAPICache = new PublicAPICache()

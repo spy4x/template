@@ -27,6 +27,10 @@
  *   whoever set it up never showed they own the mailbox. A new address waits in `email_changes`
  *   until its code proves it; only then does the password key move to it, so the account signs in
  *   with the old address until that moment.
+ * - **Audit rows in the same transaction (#191).** Sign-up, sign-in and sign-out each write their
+ *   `auth_audits` row inside the transaction that changes the session, so a failed row undoes the
+ *   action. Sign-in checks the password with the package's `checkCredentials` first and creates
+ *   the session itself, so the transaction holds no connection while a hash is verified.
  *
  * Reads no environment and imports no singleton, so the integration tests construct it against
  * their own schema.
@@ -65,8 +69,11 @@ import {
   PasswordSignInError,
   type PasswordSignInOptions,
 } from "@spy4x/server/auth/password"
+import { requestInfoFromContext } from "@spy4x/platform/request-info"
 import { GroupError } from "@domain/groups"
 import {
+  type AuthAuditBase,
+  AuthAuditEventType,
   type EmailStatus,
   emailToVerify,
   type User,
@@ -142,8 +149,8 @@ export interface SignIn {
   /** Middleware and guards from `createAuth`. */
   auth: Auth<AuthSessionRecord, User>
   /**
-   * Creates the auth user, password key, profile, first group and session in one transaction
-   * and sets the cookie. `null` when the address is not one `normalizeEmail` accepts, or an account
+   * Creates the auth user, password key, profile, first group, session and audit row in one
+   * transaction and sets the cookie. `null` when the address is not one `normalizeEmail` accepts, or an account
    * already signs in with it.
    *
    * @param firstGroupId The id of the person's first group. Defaults to a random UUID.
@@ -156,10 +163,14 @@ export interface SignIn {
   ): Promise<SignedIn | null>
   /**
    * Checks the password of the account that signs in with `login`, an address or an older
-   * account's username, starts a session and sets the cookie. `null` when refused.
+   * account's username, then starts a session, records the time and writes the audit row in one
+   * transaction, and sets the cookie. `null` when refused.
    */
   signIn(c: Context, login: string, password: string): Promise<SignedIn | null>
-  /** Signs out the session in the request's cookie, if any, and clears the cookie. */
+  /**
+   * Signs out the session in the request's cookie, if any, and clears the cookie. A signed-in
+   * request also gets its audit row, in the same transaction.
+   */
   signOut(c: Context): Promise<void>
   /** Starts authenticator-app enrolment, or returns the unfinished one. */
   connectTotpStart(state: AppAuthState): Promise<TotpConnectStart>
@@ -233,6 +244,26 @@ export function normalizeUsername(raw: unknown): string | null {
   return username
 }
 
+/**
+ * The `auth_audits` row of an action by `userId` in this request. The address is read as the API
+ * always read it, trusting `X-Forwarded-For` and `X-Real-IP` from the proxy in front of it.
+ */
+function auditRow(
+  c: Context,
+  userId: number,
+  eventType: AuthAuditEventType,
+  identifier: string | null = null,
+): AuthAuditBase {
+  const request = requestInfoFromContext(c, { trustedProxy: true })
+  return {
+    userId,
+    eventType,
+    identifier,
+    ip: request.ip || null,
+    userAgent: request.userAgent || null,
+  }
+}
+
 /** Builds the app's sign-in over the package building blocks. */
 export function createSignIn(options: SignInOptions): SignIn {
   const { db } = options
@@ -282,17 +313,15 @@ export function createSignIn(options: SignInOptions): SignIn {
   ): PasswordSignIn => createPasswordSignIn({ hasher, ...options })
 
   // Sign-in: a user with an authenticator app owes it. A user without a profile row gets no
-  // session at all, as before: the throw stops the provider before `sessions.create`.
-  const signInOptions = {
-    store: db.authStore,
-    sessions,
-    secondFactorFor: secondFactorFrom((user) => {
-      if (!user) throw new MissingProfileError()
-      return user.mfa === UserMFAStatus.CONFIGURED
-        ? SecondFactorStatus.Pending
-        : SecondFactorStatus.NotRequired
-    }),
-  }
+  // session at all, as before: the throw comes before the session is created.
+  const signInSecondFactor = secondFactorFrom((user) => {
+    if (!user) throw new MissingProfileError()
+    return user.mfa === UserMFAStatus.CONFIGURED
+      ? SecondFactorStatus.Pending
+      : SecondFactorStatus.NotRequired
+  })
+  // Sign-in only checks the password through these; it creates the session itself (`signIn`).
+  const signInOptions = { store: db.authStore, sessions }
   const signInByAddress = passwordsOver(signInOptions)
   // Older accounts sign in with their username. Both providers read the same `password` keys.
   const signInByUsername = passwordsOver({
@@ -354,6 +383,9 @@ export function createSignIn(options: SignInOptions): SignIn {
             lastLoginAt: new Date(),
           })
           await tx.group.createFirst({ id: firstGroupId, name: "Personal" }, user.id)
+          await tx.authAudit.insert(
+            auditRow(c, user.id, AuthAuditEventType.SIGNED_UP, normalizeEmail(rawEmail)),
+          )
           return { user, ...signedUp.session }
         })
       } catch (error) {
@@ -367,29 +399,54 @@ export function createSignIn(options: SignInOptions): SignIn {
     async signIn(c, login, password) {
       // Either path runs exactly one hash verification, so neither tells an unknown login apart.
       const provider = normalizeEmail(login) === null ? signInByUsername : signInByAddress
-      let result
+      let checked
+      let secondFactor
       try {
-        result = await provider.signIn({ email: login, password })
+        // The hash is verified before `db.begin()`, so no pool connection waits on it.
+        checked = await provider.checkCredentials({ email: login, password })
+        secondFactor = await signInSecondFactor(checked.user)
       } catch (error) {
         if (error instanceof PasswordSignInError || error instanceof MissingProfileError) {
           return null
         }
         throw error
       }
-      const { session, cookieValue } = result.session
-      await cookie.set(c, session, cookieValue)
-      const updated = await db.user.updateOne({
-        id: result.user.id,
-        data: { lastLoginAt: new Date() },
+      // The session, the last sign-in time and the audit row are kept or undone together.
+      const created = await db.begin(async (tx) => {
+        const started = await sessionsOver(tx.sessionStore).create({
+          userId: checked.user.id,
+          keyId: checked.key.id,
+          secondFactor,
+        })
+        const user = await tx.user.updateOne({
+          id: checked.user.id,
+          data: { lastLoginAt: new Date() },
+        })
+        // `updateOne` returns `undefined` only when the row vanished after the password check - a
+        // race, not a normal "not found".
+        if (!user) throw new Error("User not found")
+        await tx.authAudit.insert(auditRow(c, user.id, AuthAuditEventType.SIGNED_IN))
+        return { user, ...started }
       })
-      // `updateOne` returns `undefined` only when the row vanished after the provider read it - a
-      // race, not a normal "not found".
-      if (!updated) throw new Error("User not found")
-      return { user: updated, session }
+      await cookie.set(c, created.session, created.cookieValue)
+      return { user: created.user, session: created.session }
     },
 
     async signOut(c) {
-      await auth.endSession(c)
+      // What `auth.endSession` does, with the audit row in the sign-out's transaction. A request
+      // without a valid session writes no row, as before; a failed row keeps the session and cookie.
+      const state: AppAuthState | null = c.get("auth") ?? null
+      const value = await cookie.read(c)
+      if (value !== null || state !== null) {
+        await db.begin(async (tx) => {
+          if (value !== null) await sessionsOver(tx.sessionStore).signOut(value)
+          if (state) {
+            await tx.authAudit.insert(auditRow(c, state.user.id, AuthAuditEventType.SIGNED_OUT))
+          }
+        })
+      }
+      cookie.clear(c)
+      c.set("auth", null)
     },
 
     async connectTotpStart({ user, session }) {

@@ -51,35 +51,26 @@ import {
   GroupSelectedEvent,
   PushDevicesUpdatedEvent,
   UserProfileUpdatedEvent,
-  UserSignedInEvent,
   UserSignedOutEvent,
-  UserSignedUpEvent,
 } from "@api/cqrs/events.ts"
-import { authAuditOnUserSignedUpHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-signed-up.ts"
-import { authAuditOnUserSignedInHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-signed-in.ts"
-import { authAuditOnUserSignedOutHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-signed-out.ts"
-import { authAuditOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/auth-audit-on-user-profile-updated.ts"
 import { realtimeOnUserProfileUpdatedHandler } from "@api/cqrs/event-handlers/realtime-on-user-profile-updated.ts"
 import { realtimeOnGroupSelectedHandler } from "@api/cqrs/event-handlers/realtime-on-group-selected.ts"
 import { realtimeOnPushDevicesUpdatedHandler } from "@api/cqrs/event-handlers/realtime-on-push-devices-updated.ts"
 import { realtimeOnUserSignedOutHandler } from "@api/cqrs/event-handlers/realtime-on-user-signed-out.ts"
 
+// Audit rows have no listener: sign-up, sign-in, sign-out and the profile change write their
+// `auth_audits` row in the transaction of the change itself, so the change and its row are kept
+// or undone together (#191).
+//
 // Every listener is best-effort: a failure is logged and counted (`services/eventBus.ts`) and
 // nothing retries it, because the in-process bus holds no copy of the event.
 //
-// - The four audit listeners ought to be durable, since a lost row is a lost audit record. They
-//   stay best-effort until an outbox row can carry the event: today a row has no payload, and the
-//   audit row needs the address and user agent, which cannot be read back later.
 // - The socket-closing listener is best-effort by nature: sockets live in this process and the
 //   worker, which runs outbox jobs, cannot close them. Its durable backstop is already in place:
 //   every socket is revalidated on a timer (`realtime.startRevalidation`) and before each
 //   request, so a failure here delays the close by one interval at most.
 // - The two hint listeners are best-effort for the same reason. A hint a tab misses is caught up
 //   by the read the page makes whenever its socket opens again.
-subscribe(UserSignedUpEvent, authAuditOnUserSignedUpHandler)
-subscribe(UserSignedInEvent, authAuditOnUserSignedInHandler)
-subscribe(UserSignedOutEvent, authAuditOnUserSignedOutHandler)
-subscribe(UserProfileUpdatedEvent, authAuditOnUserProfileUpdatedHandler)
 subscribe(UserSignedOutEvent, realtimeOnUserSignedOutHandler)
 subscribe(UserProfileUpdatedEvent, realtimeOnUserProfileUpdatedHandler)
 subscribe(PushDevicesUpdatedEvent, realtimeOnPushDevicesUpdatedHandler)
