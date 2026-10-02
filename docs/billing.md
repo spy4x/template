@@ -11,10 +11,10 @@ plan card are built on `@spy4x/preact-ui/billing` (`PricingTable`, `PlanCard`, `
 
 The catalog is `PLANS` in `libs/domain/billing/+lib.ts`:
 
-| Plan id | Name | Price         | Stripe price                     |
-| ------- | ---- | ------------- | -------------------------------- |
-| `free`  | Free | 0             | none                             |
-| `pro`   | Pro  | €9.00 a month | `STRIPE_PRICE_PRO` (environment) |
+| Plan id | Name | Price                    | Stripe price                     |
+| ------- | ---- | ------------------------ | -------------------------------- |
+| `free`  | Free | 0                        | none                             |
+| `pro`   | Pro  | €9.00 per member a month | `STRIPE_PRICE_PRO` (environment) |
 
 Pro starts with a 14-day trial (`trialDays` on the plan).
 
@@ -22,8 +22,37 @@ A group is on a paid plan while its subscription is trialing or active, and for 
 while it is past due (below). A canceled, incomplete or paused subscription, or one billing a price
 that is not in the catalog, puts the group back on Free. To add a plan, add it to `PLANS`, add its
 price variable to `readBillingSetup` (`apps/api/features/billing/config.ts`), to
-`infra/envs/.env.example` and to the api service's `environment` in
+`infra/envs/.env.example` and to the `environment` of the api and worker services in
 `infra/compose/compose.shared.yml`.
+
+## Per-member pricing
+
+Pro is billed per member (`perSeat` on the plan, [#205](https://github.com/spy4x/template/issues/205)).
+The subscription's quantity is the group's member count, the owner included: the same count that
+`maxMembers` caps. A pending invitation reserves no seat; accepting it does.
+
+- **Checkout** asks Stripe for one seat per member at that moment.
+- **A change of members** (someone joins through an invitation, is removed, or leaves) is committed
+  first. When the worker publishes that change, it also queues a seat sync job in the outbox. The
+  job reads the member count and, when it differs from the quantity stored, asks the provider to
+  set it (`BillingProvider.updateQuantity`). Stripe prorates by its default: the rest of the period
+  is added to, or credited on, the next invoice; nothing is charged at once. The app computes no
+  money.
+- **With the provider down** the member is added all the same. The job fails and the outbox tries
+  it again with backoff, with the same idempotency key, so Stripe applies it once. The stored
+  quantity catches up when the provider answers.
+- **The webhook** stores the quantity Stripe reports. When it differs from the member count (a
+  change made in the dashboard, or a sync that has not run yet), it queues a seat sync in the same
+  transaction.
+- **The nightly cleanup** queues a seat sync for every group whose stored quantity differs from its
+  count. That catches a sync the outbox gave up on after a long outage, and a count that moved
+  without a group change, such as a member's account being deleted.
+
+**The owner confirms the price.** In a group billed per member, the invitation form shows what one
+more member adds to the bill and a box to accept it (`SeatPriceConfirm`). A create without
+`acceptSeatPrice: true` is refused with `SEAT_PRICE_NOT_ACCEPTED`, so the confirmation holds without
+JavaScript too. Only the owner and admins, who may create invitations, are asked; anyone else learns
+nothing about the bill from the answer. The plan card shows the price times the members.
 
 ## Failed payments
 
@@ -218,6 +247,10 @@ ones. Any other value of `BILLING_PROVIDER` also stops the start.
 `BILLING_TRIAL_REQUIRES_CARD` is `true` or `false`: whether starting a trial asks for a card
 ("Trials" above). Unset or empty means `true`; any other value stops the start.
 
+The worker reads the same variables: it runs the seat sync ("Per-member pricing" above) with the
+same provider. Compose passes them to both services, and `tests/compose-api-env.test.ts` checks
+that neither misses one.
+
 ## Flow
 
 1. The owner opens **See plans** on the group's settings, then **Choose Pro**. The API asks Stripe
@@ -317,3 +350,10 @@ provider, so its public secret cannot sign a real event.
 - The notice banner is on the group's settings page only, not on every page of the group.
 - A trial is given once per group, not once per person: an owner who creates a new group can try
   the paid plan again there.
+- An invitation created before its group moved to per-member billing carries no price
+  confirmation; accepting it still adds a seat. An admin confirms the price as the owner does.
+- The pricing page shows Pro's price without "per member"; the plan's feature list says it.
+- Seat syncs of one group run one after another only because one worker drains the outbox. Two
+  workers could send two syncs at once; the nightly check corrects the quantity either way.
+- The worker imports `readBillingSetup` from the API (`apps/api/features/billing/config.ts`)
+  rather than from a shared library.
