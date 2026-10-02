@@ -55,7 +55,7 @@ export function NoteEditorView({ noteId = null }: { noteId?: string | null }) {
           else store.draft.value = value
         }}
         draftId={store.draftId.value}
-        errors={{ title: errors.title, form: errors.form ?? listError }}
+        errors={{ title: errors.title, form: errors.form ?? listError, plan: errors.plan }}
         saving={creating ? store.creating.value : store.saving.value}
         onSave={async () => {
           if (creating) {
