@@ -98,7 +98,9 @@ ADR 002 is recent and reverses part of ADR 001. In short:
 - `Origin` is validated at the WebSocket upgrade. Handshakes are not governed by
   CORS, and `SameSite=Lax` still admits a same-site subdomain.
 - Live sockets are re-evaluated on sign-out, session expiry and
-  `authorization_revision` change.
+  `authorization_revision` change. A session that may no longer act loses its sockets; a person
+  who loses a group keeps the socket and stops getting that group's hints
+  (`docs/design/group-sync.md`, "Access changes on open sockets").
 
 ## Which documents to trust
 
@@ -323,7 +325,6 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 
 ## What is not built yet
 
-- `authorization_revision` exists as a column on `groups` and is **never incremented**.
 - The password and two-factor calls are still REST: they change the session the socket is bound
   to. The MPA has no socket, so the profile and push REST routes stay for it.
 - Group membership cannot be changed through the product: tests seed a second member with `POST /api/test/add-member`.
@@ -404,13 +405,15 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    group, and the settings page then shows the button disabled with the reason. A member whose only
    group it was gets a new group named "Personal" in the same transaction. Every read of groups
    filters `deleted_at`, so the selection falls back to the oldest remaining group at read time;
-   nothing has to clear a stored choice. `listMemberUserIds` deliberately includes a deleted group,
-   so the group-change hint of the delete reaches every member's socket and their pages read
-   again. The owner restores it from the "Deleted groups" section of `/groups`
-   (`POST /api/groups/:id/restore`, `group.restore`, `POST /groups/:id/restore`; the list is
-   `GET /api/groups/deleted`, `group.deleted`) for `GROUP_RESTORE_DAYS` (30) days, by the database
-   clock. The nightly `outbox.cleanup` job also runs `purgeDeletedGroups`, which removes groups past
-   that for good, with their notes and members, so a group may live up to a day longer
+   nothing has to clear a stored choice. The delete is an access change: it raises the group's
+   `authorization_revision` and names every member on the `group_access_lost` channel at its
+   commit, so each member's socket gets the delete's hint and their pages read again.
+   `listMemberUserIds` leaves a deleted group out, so no later hint for it reaches anyone. The
+   restore raises the revision too. The owner restores it from the "Deleted groups" section of
+   `/groups` (`POST /api/groups/:id/restore`, `group.restore`, `POST /groups/:id/restore`; the list
+   is `GET /api/groups/deleted`, `group.deleted`) for `GROUP_RESTORE_DAYS` (30) days, by the
+   database clock. The nightly `outbox.cleanup` job also runs `purgeDeletedGroups`, which removes
+   groups past that for good, with their notes and members, so a group may live up to a day longer
    than 30 days but can no longer be restored. The settings page of a deleted group is a 404.
 10. **The personal kind is gone** (migration `2026_10_07_0001_group_kind_removed.sql`: it drops
    `groups.kind` and its indexes and rewrites no row, so every group, membership and note stays).
@@ -454,8 +457,10 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
 
 Each is intended to be one small PR. Small PRs are an explicit requirement here.
 
-1. **Increment `authorization_revision`** on membership and role changes.
-2. **SPA local projection and offline outbox.**
+1. **SPA local projection and offline outbox.**
+
+Member removal and role changes (#130) call `recordAccessChange` in their transaction, with the
+removed member in its list of users who lost access (a demoted member keeps access).
 
 Extraction from the sibling Financy project is tracked separately in
 [docs/financy-extraction-inventory.md](financy-extraction-inventory.md);

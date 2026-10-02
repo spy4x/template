@@ -386,7 +386,7 @@ Deno.test({
       })
 
       await t.step(
-        "member ids name only active users, and a deleted group still has them",
+        "member ids name only active users, and a deleted group has none",
         async () => {
           const repository = new PostgresGroupRepository(sql)
           const groupId = crypto.randomUUID()
@@ -402,6 +402,8 @@ Deno.test({
             activeUserTwo,
           ])
           expect(await repository.listMemberUserIds(crypto.randomUUID())).toEqual([])
+          await sql`UPDATE groups SET deleted_at = NOW() WHERE id = ${groupId}`
+          expect(await repository.listMemberUserIds(groupId)).toEqual([])
         },
       )
 

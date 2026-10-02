@@ -2,10 +2,12 @@
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import { OutboxProcessor, PostgresOutboxRepository } from "@spy4x/server/outbox"
+import { NotifyStatus } from "@spy4x/realtime"
 import { drainMicrotasks, FakeClock, FakeSocket } from "@spy4x/realtime/testing"
 import { GroupChangeNotifier, listenForGroupChanges } from "@server/groups/group-change-notify.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { Realtime } from "../../apps/api/services/realtime.ts"
+import { type GroupNewsTarget, listenForGroupNews } from "../../apps/api/services/group-news.ts"
 import { buildAuthData } from "../../apps/api/_testing/fake-auth.ts"
 import { requireDbConnection } from "./db-connection.ts"
 
@@ -18,6 +20,31 @@ const SETTLE_MS = 5_000
 // NOTIFY is database-wide, not schema-wide. On Woodpecker the e2e-mpa step runs a worker against
 // the same database while this suite runs, so a listener also hears other processes' changes.
 // Every listener here keeps only the groups this test created.
+
+/**
+ * Passes the news of one group on to `realtime`, the way `listenForGroupNews` hands it to the
+ * API's socket service, and records each sequence once it was handled. Another group's news is
+ * dropped: it may come from another process on the same database, whose user ids can match.
+ */
+function onlyGroup(realtime: Realtime, groupId: string) {
+  const announced: number[] = []
+  const lost: number[] = []
+  const target: GroupNewsTarget = {
+    async notifyGroupChange(id, sequence) {
+      if (id !== groupId) return NotifyStatus.NoRecipients
+      const status = await realtime.notifyGroupChange(id, sequence)
+      announced.push(sequence)
+      return status
+    },
+    notifyAccessLoss(id, sequence, userIds) {
+      if (id !== groupId) return 0
+      const reached = realtime.notifyAccessLoss(id, sequence, userIds)
+      lost.push(sequence)
+      return reached
+    },
+  }
+  return { target, announced, lost }
+}
 
 /** Runs `body` on a fresh schema built from schema.sql. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
@@ -48,6 +75,15 @@ async function insertUser(sql: postgres.Sql): Promise<number> {
     INSERT INTO users (id) SELECT id FROM auth_user RETURNING id
   `
   return rows[0].id
+}
+
+/** Resolves once `ready()` holds, checking every 20 ms; rejects after {@link SETTLE_MS}. */
+async function until(ready: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + SETTLE_MS
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
 }
 
 /** Resolves with the first value pushed, or rejects after {@link SETTLE_MS}. */
@@ -136,15 +172,12 @@ Deno.test("a committed group change reaches its members' sockets as a hint", asy
         realtime.attach(socket, buildAuthData({ user: { id: userId } }))
       }
       const groupId = crypto.randomUUID()
-      const heard = next<{ groupId: string; sequence: number }>()
-      const stop = await listenForGroupChanges(sql, (change) => {
-        if (change.groupId !== groupId) return
-        realtime.notifyGroupChange(change.groupId, change.sequence).then(() => heard.push(change))
-      })
+      const news = onlyGroup(realtime, groupId)
+      const stop = await listenForGroupNews(sql, news.target, () => {})
       try {
         await repository.create({ id: groupId, name: "Members only" }, owner)
         await processor.drainOnce()
-        await heard.promise
+        await until(() => news.announced.includes(1), "the hint of the creation")
         await drainMicrotasks()
 
         expect(ownerSocket.frames()).toEqual([
@@ -156,5 +189,78 @@ Deno.test("a committed group change reaches its members' sockets as a hint", asy
         realtime.shutdown()
       }
     })
+  })
+})
+
+Deno.test("a member who loses a group keeps the socket and gets no hint for it after the loss", async () => {
+  await withSchema(async (sql) => {
+    const repository = new PostgresGroupRepository(sql)
+    const processor = new OutboxProcessor(
+      new PostgresOutboxRepository(sql),
+      new GroupChangeNotifier(sql),
+    )
+    const owner = await insertUser(sql)
+    const member = await insertUser(sql)
+    // Both keep a group of their own, so the delete leaves neither without one.
+    await repository.create({ id: crypto.randomUUID(), name: "Owner's own" }, owner)
+    await repository.create({ id: crypto.randomUUID(), name: "Member's own" }, member)
+    const groupId = crypto.randomUUID()
+    await repository.create({ id: groupId, name: "Shared" }, owner)
+    await sql`
+      INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+      VALUES (${groupId}, ${member}, 2, ${owner})
+    `
+    await processor.drainOnce()
+
+    const realtime = new Realtime({
+      clock: new FakeClock(),
+      entitledSession: () => Promise.resolve(null),
+      memberUserIds: (id) => new PostgresGroupRepository(sql).listMemberUserIds(id),
+      requests: {},
+      log: () => {},
+    })
+    const memberSocket = new FakeSocket("wss://app.example.com/api/ws")
+    memberSocket.openFromPeer()
+    realtime.attach(memberSocket, buildAuthData({ user: { id: member } }))
+    // The API's listeners, as apps/api/index.ts starts them, kept to this test's group.
+    const { target, announced, lost } = onlyGroup(realtime, groupId)
+    const stop = await listenForGroupNews(sql, target, () => {})
+    const hint = (sequence: number) => ({
+      kind: "change.hint",
+      groupId,
+      aggregate: "group",
+      sequence,
+    })
+    try {
+      // The rename's outbox row is still waiting when the delete commits, as it would be when the
+      // worker is a moment behind: its hint is resolved after the member lost the group.
+      await repository.rename(groupId, "Renamed", owner)
+      const deleted = await repository.softDelete(groupId, owner)
+      const deletedAt = Number(deleted!.changeSequence)
+      await until(() => lost.includes(deletedAt), "the access loss of the delete")
+      await processor.drainOnce()
+      await until(
+        () => announced.includes(deletedAt - 1) && announced.includes(deletedAt),
+        "the outbox hints of the rename and the delete",
+      )
+      // Any later announcement for the group, too.
+      await realtime.notifyGroupChange(groupId, deletedAt + 1)
+      await drainMicrotasks()
+
+      expect(memberSocket.frames()).toEqual([hint(deletedAt)])
+      expect(realtime.count(member)).toBe(1)
+
+      // Access comes back with the restore, and so do the hints.
+      const restored = await repository.restore(groupId, owner)
+      const restoredAt = Number(restored!.changeSequence)
+      await processor.drainOnce()
+      await until(() => announced.includes(restoredAt), "the outbox hint of the restore")
+      await drainMicrotasks()
+
+      expect(memberSocket.frames()).toEqual([hint(deletedAt), hint(restoredAt)])
+    } finally {
+      await stop()
+      realtime.shutdown()
+    }
   })
 })

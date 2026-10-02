@@ -221,7 +221,8 @@ clears Signals. A stable device ID contains no user content and may remain.
 - Invitation targets an existing user by normalized username. It lasts seven days. One pending
   invitation per `(group_id, invitee_user_id)` is allowed. Recipient acceptance creates membership
   and marks invitation accepted atomically.
-- Membership/invitation changes increment `authorization_revision` in the same transaction.
+- Membership/invitation changes increment `authorization_revision` in the same transaction, through
+  `recordAccessChange` (see "Access changes on open sockets" below).
 - Missing group and absent/revoked membership return indistinguishable `GROUP_NOT_FOUND` responses.
   Insufficient role may return `ROLE_INSUFFICIENT` only after membership is established.
 
@@ -847,6 +848,47 @@ These routes prove ordinary REST and MPA parity. They dispatch the same notes CQ
    server-derived data removed.
 7. UI stops rendering group before any push/pull starts.
 8. A direct stale push also rechecks authorization and returns concealed `GROUP_NOT_FOUND`.
+
+### Access changes on open sockets (#110)
+
+This is what is built; the steps above describe the offline device, this the online one.
+
+1. Every change that alters who may see a group, or what they may do in it, calls
+   `recordAccessChange` (`libs/server/groups/group-change-log.ts`) in its own transaction instead
+   of `recordGroupChange`. Today that is the delete and the restore; removing a member and changing
+   a role (#130) call it too. It stamps the change (sequence and outbox row), raises
+   `groups.authorization_revision` by one, and names the users who can no longer see the group
+   with `pg_notify` on the `group_access_lost` channel.
+2. Postgres delivers a notification sent inside a transaction only when that transaction commits,
+   and never when it rolls back. The API therefore hears of a loss only after the change is
+   visible: the read the page makes when it gets the hint already misses the group.
+3. The API (`Realtime.notifyAccessLoss`) sends each named user's sockets the hint of that change.
+   Their page reads again and drops the group. The socket stays open.
+4. Every other hint for the group goes to `listMemberUserIds`, read from the database for each
+   hint: the members of a group that is not deleted. Someone who lost access is no longer in it,
+   so they get no further hints. A hint for an earlier change that the worker sends after the loss
+   does not reach them either.
+5. A restore names nobody: the members get the group back, and the restore's own hint reaches them
+   through the outbox like any change.
+
+Edge cases. The member whose only group was deleted gets a new group named "Personal" in the same
+transaction; that group is created at revision 1 and its creation hint reaches them, so nothing
+else is needed. The purge removes groups whose members lost access at the delete, 30 days before;
+it bumps nothing and names nobody. A demoted member who may still read the group has not lost
+access: they keep its hints, and every request is checked against their new role.
+
+**Decision: keep the socket, stop hinting.** ADR 002 allows closing a socket that is no longer
+entitled. A socket here belongs to a person, not to a group: it serves their other groups, their
+profile and their devices, and every request on it is authorized again from the database. Closing
+it would cost the person a reconnect and a full read for every group change elsewhere, and would
+tell them nothing a hint does not. What the socket must not do is carry news of a group the person
+lost, and resolving every hint's recipients again from the database guarantees that without any
+per-socket list that could go stale. Closing stays the answer when the session itself is revoked
+(sign-out, expiry, a second factor owed).
+
+What remains possible: a hint already resolved a moment before a loss commits can still go out
+after it. It carries only the group id and a sequence, and the read it causes is authorized, so it
+shows nothing.
 
 ### Fixed-high-water pull and interruption
 

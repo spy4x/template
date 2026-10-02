@@ -21,7 +21,7 @@ import { createEmailCodeFailures } from "./services/email-code-failures.ts"
 import { createAuthRateLimits } from "./middlewares/auth-rate-limits.ts"
 import { commandBus } from "./services/commandBus.ts"
 import { queryBus } from "./services/queryBus.ts"
-import { listenForGroupChanges } from "@server/groups/group-change-notify.ts"
+import { listenForGroupNews } from "./services/group-news.ts"
 import { groupListCursor } from "./services/group-list-cursor.ts"
 import { noteListCursor } from "./services/note-list-cursor.ts"
 import { realtime } from "./services/realtimeHub.ts"
@@ -138,12 +138,8 @@ if (config.isDev) {
   )
 }
 
-// A change the worker announced reaches the members' open sockets as a sequence-stamped hint.
-await listenForGroupChanges(sql, ({ groupId, sequence }) => {
-  realtime.notifyGroupChange(groupId, sequence).catch((error) =>
-    log(`error: cannot push the change of group ${groupId}`, error)
-  )
-})
+// Group changes and access losses announced by Postgres become hints on the open sockets.
+await listenForGroupNews(sql, realtime, log)
 // Sockets whose session was signed out, expired or lost its second factor while open are closed
 // within this interval; the per-request check already refuses their frames.
 realtime.startRevalidation(REALTIME_REVALIDATE_INTERVAL_MS)

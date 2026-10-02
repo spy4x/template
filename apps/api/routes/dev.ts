@@ -75,6 +75,9 @@ export function createDevRoute(deps: DevRouteDeps) {
       const { login, groupId, role } = validation.data
       const key = await findPasswordKey(deps, login)
       if (!key) return c.json({ error: "No such user" }, 404)
+      // TODO(#130): adding a member or changing their role here does not raise the group's
+      // authorization_revision. Once roles and removal exist, go through the repository so the
+      // write calls `recordAccessChange` (libs/server/groups/group-change-log.ts).
       const added = await deps.sql`
         INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
         SELECT groups.id, ${key.userId}, ${role}, groups.owner_user_id
