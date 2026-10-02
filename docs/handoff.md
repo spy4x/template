@@ -235,7 +235,10 @@ These cost real time to find. Do not rediscover them.
    **Changing the address.** `POST /api/auth/email/change` with `{ email,
    password }` stores the new address in `email_changes` and mails it a code;
    the account keeps signing in with the old address until that code is
-   entered. The verify call then moves the password key to the new address,
+   entered. A code mail to a new address, the first one or a resend, spends the
+   account's budget (3 an hour, `ratelimit-email-change` in Valkey), not the
+   address's: the address may be someone else's, and a stranger must not run its
+   owner's budget out (#224). The verify call then moves the password key to the new address,
    signs out every other session and gives this one a new cookie. A username
    account adds its first address the same way, and from then on signs in with
    the address instead of the username. A password reset drops a waiting change.
