@@ -27,6 +27,12 @@ import {
   InvitationScreen,
   MyInvitationsSection,
 } from "./group-invitations.tsx"
+import {
+  EMPTY_TRANSFER_DRAFT,
+  GroupTransferSection,
+  type GroupTransferSectionProps,
+  type TransferDraft,
+} from "./group-transfer.tsx"
 import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
 import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
@@ -1137,5 +1143,76 @@ describe("invitation answers in the browser", () => {
     expect(await submit(FORM_ACTIONS.invitationAccept)).toBe(true)
     expect(await submit(FORM_ACTIONS.invitationDecline)).toBe(true)
     expect([accept.calls, decline.calls]).toEqual([[["i-1"]], [["i-1"]]])
+  })
+})
+
+describe("GroupTransferSection in the browser", () => {
+  const member = (userId: number, role: GroupRole) => ({
+    userId,
+    name: `Member ${userId}`,
+    email: null,
+    role,
+    joinedAt: "2026-09-01T08:00:00.000Z",
+    isYou: role === GroupRole.OWNER,
+  })
+  const defaults: GroupTransferSectionProps = {
+    groupId: "g-1",
+    groupName: "Team",
+    role: GroupRole.OWNER,
+    members: [member(1, GroupRole.OWNER), member(5, GroupRole.EDITOR), member(6, GroupRole.ADMIN)],
+    draft: { ...EMPTY_TRANSFER_DRAFT, userId: 5 },
+  }
+
+  it("puts the first member offered into the app's draft when none is picked", async () => {
+    const drafts = spy<[TransferDraft]>()
+    await mount(
+      <GroupTransferSection {...defaults} draft={EMPTY_TRANSFER_DRAFT} onDraftChange={drafts.fn} />,
+    )
+
+    expect(drafts.calls).toEqual([[{ ...EMPTY_TRANSFER_DRAFT, userId: 5 }]])
+  })
+
+  it("reports each typed field as a new draft and transfers through the app's callback", async () => {
+    const drafts = spy<[TransferDraft]>()
+    const transfer = spy<[]>()
+    await mount(
+      <GroupTransferSection {...defaults} onDraftChange={drafts.fn} onTransfer={transfer.fn} />,
+    )
+
+    await type("[data-e2e=group-transfer-name]", "Team")
+    await type("[data-e2e=group-transfer-password]", "secret")
+
+    expect(drafts.calls.map(([draft]) => draft)).toEqual([
+      { userId: 5, name: "Team", password: "" },
+      { userId: 5, name: "", password: "secret" },
+    ])
+    expect(await submit(GROUP_PATHS.transfer("g-1"))).toBe(true)
+    expect(transfer.calls).toHaveLength(1)
+  })
+
+  it("posts the transfer natively when the app takes nothing over", async () => {
+    await mount(<GroupTransferSection {...defaults} />)
+
+    expect(await submit(GROUP_PATHS.transfer("g-1"))).toBe(false)
+  })
+
+  it("moves focus to the field a refusal names, and to the message when it names none", async () => {
+    await mount(<GroupTransferSection {...defaults} />)
+    expect(focused()).not.toBe("group-transfer-name")
+
+    await rerender(
+      <GroupTransferSection {...defaults} error={{ field: "name", message: "Type it exactly" }} />,
+    )
+    expect(focused()).toBe("group-transfer-name")
+
+    await rerender(
+      <GroupTransferSection {...defaults} error={{ field: "password", message: "Wrong" }} />,
+    )
+    expect(focused()).toBe("group-transfer-password")
+
+    await rerender(
+      <GroupTransferSection {...defaults} error={{ field: null, message: "Not a member" }} />,
+    )
+    expect(focused()).toBe("group-transfer-error")
   })
 })

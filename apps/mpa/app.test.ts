@@ -18,6 +18,7 @@ import { handler as renameGroup } from "./routes/groups/[groupId]/rename.ts"
 import { handler as deleteGroup } from "./routes/groups/[groupId]/delete.ts"
 import { handler as restoreGroup } from "./routes/groups/[groupId]/restore.ts"
 import { handler as leaveGroup } from "./routes/groups/[groupId]/leave.ts"
+import { handler as transferGroup } from "./routes/groups/[groupId]/transfer.ts"
 import { handler as memberRole } from "./routes/groups/[groupId]/members/[userId]/role.ts"
 import { handler as memberRemove } from "./routes/groups/[groupId]/members/[userId]/remove.ts"
 import { handler as oldNotes } from "./routes/groups/[groupId]/notes/index.tsx"
@@ -78,6 +79,7 @@ function appWith(fetch: typeof globalThis.fetch) {
     .post("/groups/:groupId/delete", deleteGroup.POST!)
     .post("/groups/:groupId/restore", restoreGroup.POST!)
     .post("/groups/:groupId/leave", leaveGroup.POST!)
+    .post("/groups/:groupId/transfer", transferGroup.POST!)
     .post("/groups/:groupId/members/:userId/role", memberRole.POST!)
     .post("/groups/:groupId/members/:userId/remove", memberRemove.POST!)
     .get("/groups/:groupId/notes", oldNotes.GET!)
@@ -1029,6 +1031,60 @@ describe("the groups pages", () => {
     expect(html).toContain("A person must keep at least one group")
     expect(html).toMatch(
       /<details[^>]*data-e2e="group-leave-details"[^>]* open|<details[^>]* open[^>]*data-e2e="group-leave-details"/,
+    )
+  })
+
+  it("transfers through POST with the chosen member, the name and the password, then shows the settings", async () => {
+    const { calls, fetch } = notesApi(groupId, () => Response.json({ transferred: true }))
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/transfer`, { userId: "7", name: "Trip", password: "pw-secret" }),
+      info,
+    )
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe(`/groups/${groupId}`)
+    expect(calls.filter((call) => call.method === "POST"))
+      .toEqual([{
+        method: "POST",
+        path: `/api/groups/${groupId}/transfer`,
+        body: { userId: 7, name: "Trip", password: "pw-secret" },
+      }])
+  })
+
+  it("shows a wrong password under its field, keeps the member and the name, and never sends the password back", async () => {
+    const member = (userId: number, role: number, name: string) => ({
+      userId,
+      name,
+      email: null,
+      role,
+      joinedAt: "2026-10-01T00:00:00.000Z",
+      isYou: userId === 1,
+    })
+    const { fetch } = notesApi(groupId, (path, method) => {
+      if (method === "POST") return refusal(400, "PASSWORD_INVALID", "The password is incorrect")
+      if (path === `/api/groups/${groupId}/members`) {
+        return Response.json({
+          members: [member(1, 4, "Ada"), member(5, 1, "Bob"), member(7, 2, "Cyd")],
+          memberCount: 3,
+        })
+      }
+      return settings(path, method)
+    })
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/transfer`, { userId: "7", name: "Trip", password: "pw-secret" }),
+      info,
+    )
+    const html = await response.text()
+
+    expect(response.status).toBe(400)
+    expect(html).not.toContain("pw-secret")
+    expect(html).toMatch(/id="group-transfer-password-error"[^>]*>The password is incorrect</)
+    expect(html).toMatch(/<option selected value="7">Cyd<\/option>/)
+    expect(html).toMatch(/data-e2e="group-transfer-name"[^>]*value="Trip"/)
+    expect(html).toMatch(
+      /<details[^>]*data-e2e="group-transfer-details"[^>]* open|<details[^>]* open[^>]*data-e2e="group-transfer-details"/,
     )
   })
 

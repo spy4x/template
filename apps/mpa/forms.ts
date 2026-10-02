@@ -92,6 +92,11 @@ export const API_BODIES = {
   groupRename: (form: FormData) => ({ name: field(form, "name") }),
   groupSelect: (form: FormData) => ({ groupId: field(form, "groupId") }),
   groupMemberRole: (form: FormData) => ({ role: numberField(form, "role") }),
+  groupTransfer: (form: FormData) => ({
+    userId: numberField(form, "userId"),
+    name: field(form, "name"),
+    password: field(form, "password"),
+  }),
   billingCheckout: (form: FormData) => ({ planId: field(form, "planId") }),
   invitationCreate: (form: FormData) => ({
     role: numberField(form, "role"),

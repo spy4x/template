@@ -103,4 +103,32 @@ describe("GroupSettingsView", () => {
     billingStore.current.value = { groupId: known.id, billing: plan(PRO_PLAN_ID) }
     expect(render(known.id)).not.toContain(hint)
   })
+
+  it("shows the transfer section to the owner only, offering every other member", () => {
+    const vera = {
+      userId: 2,
+      name: "Vera Viewer",
+      email: null,
+      role: GroupRole.VIEWER,
+      joinedAt: "2026-10-01T00:00:00.000Z",
+      isYou: false,
+    }
+    membersStore.groupId.value = known.id
+    membersStore.members.value = [{
+      ...vera,
+      userId: 1,
+      name: "Olga Owner",
+      role: GroupRole.OWNER,
+      isYou: true,
+    }, vera]
+
+    groupsStore.groups.value = [known]
+    expect(render(known.id)).not.toContain(`data-e2e="group-section-transfer"`)
+
+    groupsStore.groups.value = [{ ...known, role: GroupRole.OWNER }]
+    const html = render(known.id)
+    expect(html).toContain(`data-e2e="group-section-transfer"`)
+    expect(html).toMatch(/<option[^>]*value="2"[^>]*>Vera Viewer<\/option>/)
+    expect(html).not.toMatch(/<option[^>]*>Olga Owner<\/option>/)
+  })
 })
