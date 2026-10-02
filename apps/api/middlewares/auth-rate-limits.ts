@@ -40,6 +40,16 @@ export const EMAIL_CHANGE_MAILS_PER_ACCOUNT = 3
 /** The window of {@link EMAIL_CHANGE_MAILS_PER_ACCOUNT}: one hour. */
 export const EMAIL_CHANGE_ACCOUNT_WINDOW_MS = 60 * 60_000
 
+/**
+ * Code mails all accounts together may send to one address they want to move to, per
+ * {@link EMAIL_CHANGE_ADDRESS_WINDOW_MS}. Separate from {@link EMAIL_CODE_MAILS_PER_ADDRESS}, so
+ * many accounts cannot flood an inbox, yet cannot run its owner's own budget out either.
+ */
+export const EMAIL_CHANGE_MAILS_PER_ADDRESS = 3
+
+/** The window of {@link EMAIL_CHANGE_MAILS_PER_ADDRESS}: one hour. */
+export const EMAIL_CHANGE_ADDRESS_WINDOW_MS = 60 * 60_000
+
 /** The rate limits the auth routes mount. Each one answers 429 with `Retry-After` when spent. */
 export interface AuthRateLimits {
   /**
@@ -73,6 +83,11 @@ export interface AuthRateLimits {
    * and refuses the same way as `emailCodeByAddress` when the store fails.
    */
   emailChangeByUser(userId: number): Promise<RateLimitDecision>
+  /**
+   * Spends one of the address's {@link EMAIL_CHANGE_MAILS_PER_ADDRESS} code mails from accounts
+   * that want to move to it, and refuses the same way as `emailCodeByAddress` when the store fails.
+   */
+  emailChangeByAddress(email: string): Promise<RateLimitDecision>
 }
 
 /** Limits per window, from `config.rateLimiter`. */
@@ -87,8 +102,8 @@ export interface AuthRateLimitSettings {
   /**
    * Builds the store one limiter keeps its budgets in. `name` is that limiter's own key prefix:
    * `ratelimit-strict`, `ratelimit-otp`, `ratelimit-reset`, `ratelimit-email-code`,
-   * `ratelimit-email-change` or `ratelimit-normal`. Production passes
-   * `createRedisRateLimitStore` over Valkey; tests pass an in-process store.
+   * `ratelimit-email-change`, `ratelimit-email-change-address` or `ratelimit-normal`. Production
+   * passes `createRedisRateLimitStore` over Valkey; tests pass an in-process store.
    */
   store: (name: string) => RateLimitStore
   /**
@@ -126,9 +141,11 @@ export interface AuthRateLimitSettings {
  * budget, so switching routes buys no extra guesses. The e-mail address routes (asking for a code,
  * checking one, changing the address) spend the user's strict budget. A code mail to the account's
  * own address also spends that address's budget (`emailCodeByAddress`). A code mail to an address
- * the account wants to move to spends the account's budget instead (`emailChangeByUser`): that
- * address may be someone else's, and a stranger must not run its owner's budget out. Every other auth route spends one normal
- * budget per user, else per IP. Each route mounts its limiter after its cross-site check, so a
+ * the account wants to move to spends the account's budget (`emailChangeByUser`) and a separate
+ * budget of that address for change mails (`emailChangeByAddress`) instead: the address may be
+ * someone else's, and a stranger must not run its owner's budget out, while many strangers
+ * together still cannot flood it. Every other auth route spends one normal budget per user, else
+ * per IP. Each route mounts its limiter after its cross-site check, so a
  * refused cross-site request spends nobody's budget.
  *
  * The one-time-code limit is separate because a six-digit code is a small secret: one random guess
@@ -175,6 +192,12 @@ export function createAuthRateLimits(settings: AuthRateLimitSettings): AuthRateL
     limit: EMAIL_CHANGE_MAILS_PER_ACCOUNT,
     clock,
   })
+  // Keyed by a hash of the target address: all accounts that ask to move to it share this one.
+  const emailChangeAddress = createStoreLimiter(store("ratelimit-email-change-address"), {
+    windowMs: EMAIL_CHANGE_ADDRESS_WINDOW_MS,
+    limit: EMAIL_CHANGE_MAILS_PER_ADDRESS,
+    clock,
+  })
   const normal = failOpenLimiter(
     createStoreLimiter(store("ratelimit-normal"), { windowMs, limit: settings.limit, clock }),
     { limit: settings.limit, onError: settings.onStoreError },
@@ -214,5 +237,7 @@ export function createAuthRateLimits(settings: AuthRateLimitSettings): AuthRateL
     emailCodeByAddress: async (email) =>
       await emailCode.check(`auth-email-code:${await sha256Hex(email)}`),
     emailChangeByUser: async (userId) => await emailChange.check(`auth-email-change:${userId}`),
+    emailChangeByAddress: async (email) =>
+      await emailChangeAddress.check(`auth-email-change-address:${await sha256Hex(email)}`),
   }
 }

@@ -25,6 +25,7 @@ import {
   type AuthRateLimits,
   createAuthRateLimits,
   EMAIL_CHANGE_MAILS_PER_ACCOUNT,
+  EMAIL_CHANGE_MAILS_PER_ADDRESS,
   EMAIL_CODE_MAILS_PER_ADDRESS,
   RESET_MAILS_PER_ADDRESS,
 } from "../middlewares/auth-rate-limits.ts"
@@ -32,6 +33,7 @@ import type { Lockout } from "@spy4x/server/lockout"
 import { createKvStore, type RateLimitStore } from "@spy4x/platform/rate-limit"
 import {
   createAuthRoute,
+  EMAIL_CHANGE_TOO_MANY,
   EMAIL_CODE_REFUSED,
   EMAIL_NOTHING_TO_VERIFY,
   EMAIL_TAKEN,
@@ -1025,7 +1027,8 @@ describe("auth routes prove an e-mail address with a code", () => {
       strangerStatuses.push((await send(stranger.app, toOwned, sameOriginHeaders)).status)
     }
     // A resend of the stranger's pending change spends the stranger's budget too.
-    strangerStatuses.push((await send(stranger.app, sendCode, sameOriginHeaders)).status)
+    const resend = await send(stranger.app, sendCode, sameOriginHeaders)
+    strangerStatuses.push(resend.status)
     const owner = buildApp(undefined, { rateLimits })
     const anonymous = buildApp(null, { rateLimits })
 
@@ -1041,7 +1044,82 @@ describe("auth routes prove an e-mail address with a code", () => {
     expect(code.status).toBe(200)
     expect(owner.mailed).toEqual([owned])
     expect(strangerStatuses).toEqual([...Array(EMAIL_CHANGE_MAILS_PER_ACCOUNT).fill(200), 429])
+    // The same words as a refused change, so a refusal tells nothing about who owns the address.
+    expect(await resend.json()).toEqual({ error: EMAIL_CHANGE_TOO_MANY })
   })
+
+  it(`answers change mail ${EMAIL_CHANGE_MAILS_PER_ADDRESS + 1} to one address from as many accounts with 429, and leaves the owner a code and a reset link`, async () => {
+    const rateLimits = createAuthRateLimits(generousLimits)
+    const owned = "alice@example.com"
+    const toOwned = { ...change, body: { email: owned, password: "correct-horse" } }
+    const responses = []
+    let strangerMails = 0
+    // Users 2, 3, … each ask once, so no account's own budget is near its end.
+    for (let attempt = 0; attempt <= EMAIL_CHANGE_MAILS_PER_ADDRESS; attempt++) {
+      const stranger = buildApp(buildAuthData({ user: { id: attempt + 2 } }), { rateLimits })
+      responses.push(await send(stranger.app, toOwned, sameOriginHeaders))
+      strangerMails += stranger.mailed.length
+    }
+    const owner = buildApp(undefined, { rateLimits })
+    const anonymous = buildApp(null, { rateLimits })
+
+    const code = await send(owner.app, sendCode, sameOriginHeaders)
+    const reset = await send(
+      anonymous.app,
+      { method: "POST", path: "/auth/password/forgot", body: { email: owned } },
+      sameOriginWithoutCookieHeaders,
+    )
+
+    expect(responses.map((response) => response.status))
+      .toEqual([...Array(EMAIL_CHANGE_MAILS_PER_ADDRESS).fill(200), 429])
+    expect(await responses.at(-1)!.json()).toEqual({ error: EMAIL_CHANGE_TOO_MANY })
+    expect(strangerMails).toBe(EMAIL_CHANGE_MAILS_PER_ADDRESS)
+    expect(code.status).toBe(200)
+    expect(owner.mailed).toEqual([owned])
+    expect(reset.status).toBe(200)
+    expect(anonymous.queued).toEqual([owned])
+  })
+
+  it("gives each account its own change budget, whatever the addresses", async () => {
+    const rateLimits = createAuthRateLimits(generousLimits)
+    const changeTo = (email: string) => ({
+      ...change,
+      body: { email, password: "correct-horse" },
+    })
+    const first = buildApp(buildAuthData({ user: { id: 2 } }), { rateLimits })
+    const second = buildApp(buildAuthData({ user: { id: 3 } }), { rateLimits })
+    const firstStatuses = []
+    // A new address each time, so only the account's budget runs out.
+    for (let attempt = 0; attempt <= EMAIL_CHANGE_MAILS_PER_ACCOUNT; attempt++) {
+      const email = `first-${attempt}@example.com`
+      firstStatuses.push((await send(first.app, changeTo(email), sameOriginHeaders)).status)
+    }
+
+    const other = await send(second.app, changeTo("second@example.com"), sameOriginHeaders)
+
+    expect(firstStatuses).toEqual([...Array(EMAIL_CHANGE_MAILS_PER_ACCOUNT).fill(200), 429])
+    expect(other.status).toBe(200)
+    expect(second.mailed).toEqual(["second@example.com"])
+  })
+
+  for (const broken of ["ratelimit-email-change", "ratelimit-email-change-address"]) {
+    it(`refuses an address change and a pending resend without mailing while ${broken} is down`, async () => {
+      const { app, mailed } = buildApp(undefined, {
+        rateLimits: createAuthRateLimits({
+          ...generousLimits,
+          store: (name) => name === broken ? brokenStore() : memoryStore(),
+        }),
+        signIn: { emailStatus: () => Promise.resolve({ ...PROVEN, pending: "new@example.com" }) },
+      })
+
+      const changed = await send(app, change, sameOriginHeaders)
+      const resent = await send(app, sendCode, sameOriginHeaders)
+
+      expect(changed.status).toBe(500)
+      expect(resent.status).toBe(500)
+      expect(mailed).toEqual([])
+    })
+  }
 
   it("queues a code for the new address as normalizeEmail leaves it", async () => {
     const { app, mailed } = buildApp()
