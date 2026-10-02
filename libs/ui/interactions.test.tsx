@@ -13,6 +13,8 @@ import { render, type VNode } from "preact"
 import { act } from "preact/test-utils"
 import { UserMFAStatus, type UserPushTokenPublic } from "@domain/identity"
 import { GroupRole } from "@domain/groups"
+import type { PlanRefusal } from "@domain/billing"
+import { BILLING_PATHS } from "./billing-screen.tsx"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
 import { GroupSettingsScreen } from "./group-settings-screen.tsx"
@@ -465,6 +467,29 @@ describe("NoteEditorScreen in the browser", () => {
 
     expect(focused()).toBe("note-title")
   })
+
+  it("moves focus to the plan's refusal and follows its upgrade link through navigate", async () => {
+    const navigate = spy<[string]>()
+    const refusal: PlanRefusal = {
+      code: "PLAN_LIMIT_REACHED",
+      entitlement: "maxNotes",
+      limit: 10,
+      canUpgrade: true,
+    }
+    await mount(<NoteEditorScreen {...editorDefaults} navigate={navigate.fn} />)
+
+    await rerender(
+      <NoteEditorScreen
+        {...editorDefaults}
+        navigate={navigate.fn}
+        errors={{ title: null, form: "Upgrade", plan: refusal }}
+      />,
+    )
+
+    expect(focused()).toBe("plan-refusal")
+    expect(await click("[data-e2e=plan-refusal] a")).toBe(true)
+    expect(navigate.calls).toEqual([[BILLING_PATHS.pricing(groupId)]])
+  })
 })
 
 const groupsDefaults: GroupsScreenProps = {
@@ -806,6 +831,23 @@ describe("GroupSettingsScreen members and leave in the browser", () => {
     expect(focused()).toBe("group-member-error")
     expect(document.activeElement?.closest("[data-e2e=group-member]")?.getAttribute("data-user-id"))
       .toBe("7")
+  })
+
+  it("moves focus to the plan's refusal under the member whose role change it refused", async () => {
+    const refusal: PlanRefusal = {
+      code: "PLAN_FEATURE_MISSING",
+      entitlement: "memberRoles",
+      limit: null,
+      canUpgrade: false,
+    }
+    await mount(screen({ memberError: null }))
+
+    await rerender(screen({ memberError: { userId: 7, message: "Upgrade", plan: refusal } }))
+
+    expect(focused()).toBe("plan-refusal")
+    expect(document.activeElement?.closest("[data-e2e=group-member]")?.getAttribute("data-user-id"))
+      .toBe("7")
+    expect(find("[data-e2e=plan-refusal-ask-owner]").textContent).toContain("Ask the group's owner")
   })
 
   it("leaves through the app's callback, and posts natively without it", async () => {

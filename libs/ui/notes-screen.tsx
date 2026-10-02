@@ -5,6 +5,7 @@ import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { Link } from "@spy4x/preact-ui/link"
+import type { PlanRefusal } from "@domain/billing"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 
 /** One note as the screen shows it. */
@@ -25,6 +26,8 @@ export interface NoteDraft {
 export interface NoteFormErrors {
   title: string | null
   form: string | null
+  /** The group's plan refused the write: shown as an upgrade prompt in place of `form`. */
+  plan?: PlanRefusal | null
 }
 
 /** The group whose notes are shown. */

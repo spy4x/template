@@ -8,9 +8,11 @@ import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Select } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
+import type { PlanRefusal } from "@domain/billing"
 import { assignableRoles, canLeave, canRemoveMember, GroupRole } from "@domain/groups"
 import { ROLE_TEXT } from "./groups-screen.tsx"
-import { GROUP_PATHS, ScreenForm } from "./progressive.tsx"
+import { PlanRefusalNotice } from "./plan-refusal.tsx"
+import { GROUP_PATHS, type Navigate, ScreenForm } from "./progressive.tsx"
 
 /** One member of a group as the members section shows them. */
 export interface GroupMemberRow {
@@ -38,6 +40,8 @@ export function memberLabel(member: Pick<GroupMemberRow, "name" | "email">): str
 export interface MemberError {
   userId: number
   message: string
+  /** The group's plan refused the change: shown as an upgrade prompt in place of `message`. */
+  plan?: PlanRefusal | null
 }
 
 export interface GroupMembersSectionProps {
@@ -59,6 +63,8 @@ export interface GroupMembersSectionProps {
   onRoleChange?: (userId: number, role: GroupRole) => void
   /** Removes a member. A form that posts nothing to `GROUP_PATHS.memberRemove`. */
   onRemove?: (userId: number) => void
+  /** Follows the upgrade link of a plan refusal; without it, the browser does. */
+  navigate?: Navigate
 }
 
 /**
@@ -75,6 +81,7 @@ export function GroupMembersSection(
     memberError = null,
     onRoleChange,
     onRemove,
+    navigate,
   }: GroupMembersSectionProps,
 ): JSX.Element {
   return (
@@ -103,6 +110,10 @@ export function GroupMembersSection(
                       member={member}
                       pending={pendingUserId === member.userId}
                       error={memberError?.userId === member.userId ? memberError.message : null}
+                      refusal={memberError?.userId === member.userId
+                        ? memberError.plan ?? null
+                        : null}
+                      navigate={navigate}
                       onRoleChange={onRoleChange}
                       onRemove={onRemove}
                     />
@@ -117,12 +128,14 @@ export function GroupMembersSection(
 }
 
 function MemberItem(
-  { groupId, actorRole, member, pending, error, onRoleChange, onRemove }: {
+  { groupId, actorRole, member, pending, error, refusal, navigate, onRoleChange, onRemove }: {
     groupId: string
     actorRole: GroupRole
     member: GroupMemberRow
     pending: boolean
     error: string | null
+    refusal: PlanRefusal | null
+    navigate?: Navigate
     onRoleChange?: (userId: number, role: GroupRole) => void
     onRemove?: (userId: number) => void
   },
@@ -136,8 +149,8 @@ function MemberItem(
   // A refused change has no field of its own, so focus lands on the message under the row.
   const message = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (error) message.current?.focus()
-  }, [error])
+    if (error && !refusal) message.current?.focus()
+  }, [error, refusal])
   const selectId = `group-member-role-${member.userId}`
 
   return (
@@ -222,9 +235,20 @@ function MemberItem(
           </div>
         </details>
       )}
-      <div ref={message} tabIndex={-1} data-e2e="group-member-error">
-        <ErrorState message={error} />
-      </div>
+      {refusal
+        ? (
+          <PlanRefusalNotice
+            groupId={groupId}
+            refusal={refusal}
+            navigate={navigate}
+            headingLevel={3}
+          />
+        )
+        : (
+          <div ref={message} tabIndex={-1} data-e2e="group-member-error">
+            <ErrorState message={error} />
+          </div>
+        )}
     </li>
   )
 }

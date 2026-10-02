@@ -246,6 +246,7 @@ export function GroupSettingsScreen(
         memberError={memberError}
         onRoleChange={onRoleChange}
         onRemove={onRemoveMember}
+        navigate={navigate}
       />
 
       {billing}

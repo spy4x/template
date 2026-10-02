@@ -11,6 +11,7 @@ import { Stack } from "@spy4x/preact-ui/layout"
 import { Link } from "@spy4x/preact-ui/link"
 import { NOTE_BODY_MAX_LENGTH, NOTE_TITLE_MAX_LENGTH } from "@domain/notes"
 import type { NoteDraft, NoteFormErrors, NotesGroup } from "./notes-screen.tsx"
+import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
 /** The note a page edits: its id, the version the edit started from, and whether it moved on. */
@@ -190,7 +191,13 @@ function EditorCard(props: WithGroup): JSX.Element {
           {note
             ? <input type="hidden" name="version" value={String(note.version)} />
             : <input type="hidden" name="id" value={props.draftId} />}
-          <NoteFields value={value} onChange={onChange} errors={errors} />
+          <NoteFields
+            groupId={group.id}
+            value={value}
+            onChange={onChange}
+            errors={errors}
+            navigate={navigate}
+          />
           {note?.conflict && (
             <p class="mt-2 text-sm" data-e2e="note-conflict">
               <Link
@@ -322,10 +329,12 @@ function ConfirmDeletePage(
  * error, focus moves to it, so a keyboard or screen reader user lands on what to fix.
  */
 function NoteFields(
-  { value, onChange, errors }: {
+  { groupId, value, onChange, errors, navigate }: {
+    groupId: string
     value: NoteDraft
     onChange?: (value: NoteDraft) => void
     errors: NoteFormErrors
+    navigate?: Navigate
   },
 ): JSX.Element {
   const title = useRef<HTMLInputElement>(null)
@@ -356,7 +365,9 @@ function NoteFields(
           onInput={(e) => onChange?.({ ...value, body: e.currentTarget.value })}
         />
       </Field>
-      <ErrorState message={errors.form} />
+      {errors.plan
+        ? <PlanRefusalNotice groupId={groupId} refusal={errors.plan} navigate={navigate} />
+        : <ErrorState message={errors.form} />}
     </Stack>
   )
 }
