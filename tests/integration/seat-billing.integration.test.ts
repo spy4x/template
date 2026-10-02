@@ -11,7 +11,7 @@ import {
 import { PRO_PLAN_ID } from "@domain/billing"
 import { GroupRole } from "@domain/groups"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
-import { queueSeatDrift, SEAT_SYNC_JOB } from "@server/billing/seat-sync.ts"
+import { queueSeatDrift, queueSeatSync, SEAT_SYNC_JOB } from "@server/billing/seat-sync.ts"
 import {
   invitationLookup,
   newInvitationToken,
@@ -151,6 +151,14 @@ Deno.test("seats of a group billed per member follow its members", async (t) => 
       expect(await queuedSyncs(sql, groupId)).toBe(0)
       expect(await drain(processor)).toBe(0)
       expect(calls).toEqual([])
+    })
+
+    await t.step("a seat change for a group already in step calls no provider", async () => {
+      await queueSeatSync(sql, groupId)
+
+      expect(await drain(processor)).toBe(0)
+      expect(calls).toEqual([])
+      expect(await queuedSyncs(sql, groupId)).toBe(0)
     })
 
     await t.step(
