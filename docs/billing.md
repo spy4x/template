@@ -16,6 +16,8 @@ The catalog is `PLANS` in `libs/domain/billing/+lib.ts`:
 | `free`  | Free | 0             | none                             |
 | `pro`   | Pro  | €9.00 a month | `STRIPE_PRICE_PRO` (environment) |
 
+Pro starts with a 14-day trial (`trialDays` on the plan).
+
 A group is on a paid plan while its subscription is trialing or active, and for a grace period
 while it is past due (below). A canceled, incomplete or paused subscription, or one billing a price
 that is not in the catalog, puts the group back on Free. To add a plan, add it to `PLANS`, add its
@@ -54,6 +56,53 @@ retries. A payment that succeeds during the retries restores the plan. When the 
 checkout; the other two settings leave it past due or unpaid, which this app treats the same way,
 Free after the grace period. Keep step 6: a cancelled subscription also lets the owner check out
 again, which a past-due one blocks (409 `ALREADY_SUBSCRIBED`).
+
+## Trials
+
+A group's first checkout of a plan with `trialDays` asks Stripe for a trial of that length. A
+group that already has a Stripe customer, because it paid or trialed before, checks out without
+one, so a trial is given once per group. Stripe asks for a card at the trial's checkout for now;
+a trial without a card waits on `@spy4x/billing` 1.36.0
+([spy4x/ts-libs#395](https://github.com/spy4x/ts-libs/pull/395)).
+
+The webhook stores the trial's end (`subscriptions.trial_end`). The group has the plan while the
+subscription is trialing and the stored end is still ahead, and gets Free from that instant on,
+even before Stripe's next event arrives. When the trial converts, Stripe reports the subscription
+active and the plan stays.
+
+## Cancelling and undoing
+
+The owner cancels in the Stripe customer portal, which cancels at the end of the paid period
+(Stripe's `cancel_at_period_end`). The group keeps its plan until `current_period_end`, and gets
+Free from that instant on. Until then the owner can renew the plan in the same portal; the next
+webhook clears the flag and the plan simply continues. The portal must allow both (step 5 below).
+
+`effectivePlanId` and `accessEndsAt` in `libs/domain/billing/+lib.ts` hold both bounds, the
+trial's and the cancellation's, with the same request clock as the grace period.
+
+## Notices
+
+The owner is told three things, by e-mail and by a banner on the group's settings page in both
+apps. Other members see neither.
+
+| Notice         | When                                                   | Banner shown                        |
+| -------------- | ------------------------------------------------------ | ----------------------------------- |
+| Trial ending   | 3 days before the trial ends (`TRIAL_NOTICE_DAYS`)     | from then until the trial ends      |
+| Payment failed | on the first past-due event                            | while past due, with the grace end  |
+| Plan ending    | when a cancellation at period end arrives              | until the period ends or it is undone |
+
+`billingNoticeOf` (`libs/domain/billing/+lib.ts`) decides the banner from the stored subscription
+and the request clock. A failed payment wins over the other two.
+
+The webhook queues each mail as a job in the outbox, in the transaction that stores the event
+(`libs/server/billing/billing-notices.ts`): a failed payment and a cancellation at once, a trial's
+notice at its end minus three days. A job is keyed by its group, its kind and its time, so a
+repeated or reordered event queues nothing twice. When a job runs, the worker reads the
+subscription again and sends only a notice that still holds: a payment that went through, an
+undone cancellation or a converted trial sends nothing, and a trial whose end moved is told only by
+the job for the new end (`libs/server/jobs/billing-notice-mail.ts`). The mail goes to the owner's
+first proven address; an owner with none gets no mail, and the worker logs a warning without the
+address. A failed send is retried. With mail off, nothing is sent.
 
 ## Who may do what
 
@@ -182,6 +231,11 @@ Delivery rules the webhook keeps:
   over an earlier one whatever order they arrive in; two events of the same kind in the same second
   keep the one that arrives last. See "Known limits".
 - The end of an old subscription does not end a newer one that replaced it.
+- A subscription that pays (trialing or active) is replaced only by an event of the same
+  subscription, or by another subscription that pays. A late failed payment of an old subscription
+  never replaces the newer one that pays
+  ([#242](https://github.com/spy4x/template/issues/242)). A cancelled subscription is replaced by
+  any other.
 - A bad or missing signature gets 400; a body that cannot be read after a valid signature, and
   events this app does not handle, get 200 so Stripe stops sending them; a failure while storing
   gets 500 so Stripe retries.
@@ -205,7 +259,9 @@ cards such as `4242 4242 4242 4242` pay without money.
    `stripe listen` prints a `whsec_...` signing secret: put it in `STRIPE_WEBHOOK_SECRET`.
 4. Set `BILLING_PROVIDER=stripe` and restart the API.
 5. Configure the customer portal once in the dashboard (Settings, Billing, Customer portal), or
-   Stripe refuses to open it.
+   Stripe refuses to open it. Allow customers to cancel subscriptions "at the end of the billing
+   period", not immediately, so the group keeps what it paid for, and allow them to renew a
+   cancelled subscription, which is how an owner undoes a cancellation.
 6. Set failed payments to cancel the subscription (Settings, Billing, Subscriptions and emails,
    "Manage failed payments for subscriptions": when all retries fail, cancel the subscription).
    The grace period ("Failed payments" above) already drops a past-due group to Free after
@@ -249,6 +305,9 @@ provider, so its public secret cannot sign a real event.
   how many it kept. The group is past its restore window, so the owner cannot reach the portal:
   cancel the subscription in the Stripe dashboard, and the next purge removes the group.
 - Payment events are stored (so repeats are skipped) but change nothing yet.
-- The end of a grace period records no `group.plan.changed` event, since no webhook arrives then.
-  Every check reads the plan with the current time, so the cut-off holds; an open page shows the
-  old plan until it reads the billing again (a reload, or the next change of the group).
+- The end of a grace period, a trial or a cancelled period records no `group.plan.changed` event,
+  since no webhook arrives at that instant. Every check reads the plan with the current time, so
+  the cut-off holds; an open page shows the old plan until it reads the billing again (a reload, or
+  the next change of the group).
+- The notice banner is on the group's settings page only, not on every page of the group.
+- A trial needs a card until the template moves to `@spy4x/billing` 1.36.0 (Trials, above).
