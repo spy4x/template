@@ -165,6 +165,8 @@ describe("billing domain", () => {
     })
     expect(readPlanRefusal({ ...body, code: "ROLE_INSUFFICIENT" })).toBeNull()
     expect(readPlanRefusal({ ...body, canUpgrade: "yes" })).toBeNull()
+    expect(readPlanRefusal({ ...body, entitlement: "maxSeats" })).toBeNull()
+    expect(readPlanRefusal({ ...body, entitlement: "toString" })).toBeNull()
     expect(readPlanRefusal(null)).toBeNull()
   })
 })

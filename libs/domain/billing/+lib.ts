@@ -277,6 +277,9 @@ export function readPlanRefusal(value: unknown): PlanRefusal | null {
   const { code, entitlement, limit, canUpgrade } = value as Record<string, unknown>
   if (code !== "PLAN_FEATURE_MISSING" && code !== "PLAN_LIMIT_REACHED") return null
   if (typeof entitlement !== "string" || typeof canUpgrade !== "boolean") return null
+  // A key this build does not know has no wording to show, so it is no refusal it can draw.
+  const known = [...Object.keys(UNLIMITED.features), ...Object.keys(UNLIMITED.limits)]
+  if (!known.includes(entitlement)) return null
   if (limit !== null && typeof limit !== "number") return null
   return { code, entitlement: entitlement as FeatureKey | LimitKey, limit, canUpgrade }
 }
