@@ -38,6 +38,24 @@ describe("API_BODIES", () => {
     expect(API_BODIES.groupMemberRole(form({ role: "admin" }))).toEqual({ role: "admin" })
   })
 
+  it("sends an invitation's numbers as numbers and its mail box as a boolean, unticked as false", () => {
+    const fields = { role: "2", expiresInDays: "7", maxUses: "3", email: "" }
+    expect(API_BODIES.invitationCreate(form({ ...fields, sendEmail: "true" }))).toEqual({
+      role: 2,
+      expiresInDays: 7,
+      maxUses: 3,
+      email: "",
+      sendEmail: true,
+    })
+    expect(API_BODIES.invitationCreate(form(fields)).sendEmail).toBe(false)
+  })
+
+  it("answers an invitation by its token, or by its id when the form has no token", () => {
+    expect(API_BODIES.invitationAnswer(form({ token: "t", invitationId: "i" })))
+      .toEqual({ token: "t" })
+    expect(API_BODIES.invitationAnswer(form({ invitationId: "i" }))).toEqual({ invitationId: "i" })
+  })
+
   it("leaves a version that is not a whole number for the API to refuse", () => {
     expect(API_BODIES.noteDelete(form({ version: "1e3" }))).toEqual({ version: "1e3" })
   })

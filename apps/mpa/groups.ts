@@ -77,11 +77,18 @@ export async function selectGroup(api: Api, groupId: string): Promise<boolean> {
  * The members of a group (`GET /api/groups/:groupId/members`), or `null` when the read failed or
  * the person is not a member: the settings page then says the members could not be read.
  */
-export async function readMembers(api: Api, groupId: string): Promise<GroupMemberRow[] | null> {
+export async function readMembers(
+  api: Api,
+  groupId: string,
+): Promise<{ members: GroupMemberRow[]; memberCount: number | undefined } | null> {
   const answer = await api.call("GET", `/api/groups/${encodeURIComponent(groupId)}/members`)
   if (!isOk(answer) || !isRecord(answer.body) || !Array.isArray(answer.body.members)) return null
-  return answer.body.members.filter((member): member is GroupMemberRow =>
-    isRecord(member) && typeof member.userId === "number" && typeof member.name === "string" &&
-    typeof member.role === "number" && typeof member.joinedAt === "string"
-  )
+  const { memberCount } = answer.body
+  return {
+    members: answer.body.members.filter((member): member is GroupMemberRow =>
+      isRecord(member) && typeof member.userId === "number" && typeof member.name === "string" &&
+      typeof member.role === "number" && typeof member.joinedAt === "string"
+    ),
+    memberCount: typeof memberCount === "number" ? memberCount : undefined,
+  }
 }

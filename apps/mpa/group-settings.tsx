@@ -2,14 +2,23 @@ import type { FreshContext } from "fresh"
 import { GroupSettingsScreen } from "@ui/group-settings-screen.tsx"
 import type { MemberError } from "@ui/group-members.tsx"
 import { BillingCard } from "@ui/billing-screen.tsx"
+import {
+  type CreatedInvitation,
+  EMPTY_INVITATION_DRAFT,
+  GroupInvitationsSection,
+  type InvitationDraft,
+} from "@ui/group-invitations.tsx"
+import type { PlanRefusal } from "@domain/billing"
+import { readGroupInvitations } from "./invitations.tsx"
 import { readBilling } from "./billing.tsx"
 import { readGroup, readMembers } from "./groups.ts"
 import { Frame, readSession, signInPath } from "./session.tsx"
 import type { State } from "./utils.ts"
 
 /**
- * One group's settings page, for the `GET` and for a refused rename, delete, member change or
- * leave, which shows the refusal where the person acted and keeps what they typed.
+ * One group's settings page, for the `GET` and for a refused rename, delete, member change,
+ * leave, invitation or revoke, which shows the refusal where the person acted and keeps what they
+ * typed. A new invitation's link is drawn this once, in the answer to its create.
  */
 export async function renderGroupSettings(
   ctx: FreshContext<State>,
@@ -20,6 +29,11 @@ export async function renderGroupSettings(
     memberError = null,
     leaveError = null,
     billingError = null,
+    invitationDraft = EMPTY_INVITATION_DRAFT,
+    createError = null,
+    createRefusal = null,
+    created = null,
+    revokeError = null,
     status,
   }: {
     name?: string
@@ -29,6 +43,11 @@ export async function renderGroupSettings(
     leaveError?: string | null
     /** Why the portal could not be opened, shown in the plan section. */
     billingError?: string | null
+    invitationDraft?: InvitationDraft
+    createError?: string | null
+    createRefusal?: PlanRefusal | null
+    created?: CreatedInvitation | null
+    revokeError?: { invitationId: string; message: string } | null
     status?: number
   } = {},
 ): Promise<Response> {
@@ -40,6 +59,7 @@ export async function renderGroupSettings(
     readMembers(ctx.state.api, groupId),
     readBilling(ctx.state.api, groupId),
   ])
+  const invitations = await readGroupInvitations(ctx.state.api, groupId, group?.role)
   return ctx.render(
     <Frame session={session} path={ctx.url.pathname}>
       <GroupSettingsScreen
@@ -52,10 +72,24 @@ export async function renderGroupSettings(
         // Unknown when the picker could not be read; the server refuses the last group anyway.
         isLastGroup={session.picker !== null && session.picker.groups.length <= 1}
         hasSubscription={billing?.subscribed ?? false}
-        members={members}
+        members={members?.members ?? null}
+        memberCount={members?.memberCount}
         membersError={members ? null : "The members could not be read"}
         memberError={memberError}
         leaveError={leaveError}
+        invitations={group && (
+          <GroupInvitationsSection
+            groupId={groupId}
+            actorRole={group.role}
+            invitations={invitations.invitations}
+            error={invitations.error}
+            draft={invitationDraft}
+            createError={createError}
+            createRefusal={createRefusal}
+            created={created}
+            revokeError={revokeError}
+          />
+        )}
         billing={group && (
           <BillingCard
             groupId={groupId}
