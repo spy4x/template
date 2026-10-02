@@ -1088,6 +1088,69 @@ describe("the groups pages", () => {
     )
   })
 
+  /** The owner and one editor, so the transfer form is drawn. */
+  const transferMembers = () =>
+    Response.json({
+      members: [
+        { userId: 1, name: "Ada", email: null, role: 4, joinedAt: "2026-10-01", isYou: true },
+        { userId: 7, name: "Cyd", email: null, role: 2, joinedAt: "2026-10-01", isYou: false },
+      ],
+      memberCount: 2,
+    })
+
+  it("tells the owner of a subscribed group that the subscription moves and stays on their card", async () => {
+    const billing = (subscribed: boolean) => ({
+      enabled: true,
+      planId: "pro",
+      status: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      trialEnd: null,
+      notice: null,
+      canManage: true,
+      subscribed,
+      hasCustomer: subscribed,
+    })
+    const explanation = async (subscribed: boolean) => {
+      const { fetch } = notesApi(groupId, (path, method) => {
+        if (path === `/api/groups/${groupId}/members`) return transferMembers()
+        if (path === `/api/groups/${groupId}/billing`) {
+          return Response.json({ billing: billing(subscribed) })
+        }
+        return settings(path, method)
+      })
+      const html = await (await get(fetch, `/groups/${groupId}`)).text()
+      const start = html.indexOf('data-e2e="group-transfer-explanation"')
+      expect(start).toBeGreaterThan(-1)
+      return html.slice(start, html.indexOf("</p>", start))
+    }
+
+    expect(await explanation(true)).toContain("stays on your card")
+    expect(await explanation(false)).not.toContain("subscription")
+  })
+
+  it("passes the API's 429 and Retry-After on from a refused transfer", async () => {
+    const { fetch } = notesApi(groupId, (path, method) => {
+      if (method === "POST") {
+        return Response.json(
+          { error: { code: "RATE_LIMITED", message: "Too many attempts" } },
+          { status: 429, headers: { "retry-after": "60" } },
+        )
+      }
+      if (path === `/api/groups/${groupId}/members`) return transferMembers()
+      return settings(path, method)
+    })
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/transfer`, { userId: "7", name: "Trip", password: "pw" }),
+      info,
+    )
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get("retry-after")).toBe("60")
+    expect(await response.text()).toContain("Too many attempts")
+  })
+
   it("lists the groups that can still be restored, each with a restore form", async () => {
     const { fetch } = notesApi(groupId, (path) =>
       path === "/api/groups/deleted"

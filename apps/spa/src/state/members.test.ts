@@ -233,4 +233,20 @@ describe("members store", () => {
     expect(await store.transfer()).toBe(false)
     expect(sent).toEqual([])
   })
+
+  it("keeps a transfer draft and its refusal while the same group is read again, and drops both for another group", async () => {
+    const store = createMembersStore(UNUSED)
+    await store.open("a")
+    const draft = { userId: 2, name: "Team", password: "" }
+    const error = { field: "name" as const, message: "Type it exactly" }
+    store.transferDraft.value = draft
+    store.transferError.value = error
+
+    await store.open("a")
+    expect([store.transferDraft.value, store.transferError.value]).toEqual([draft, error])
+
+    await store.open("b")
+    expect(store.transferDraft.value).toEqual({ userId: null, name: "", password: "" })
+    expect(store.transferError.value).toBe(null)
+  })
 })
