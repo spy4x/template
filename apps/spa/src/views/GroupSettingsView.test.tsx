@@ -8,7 +8,7 @@ import { VIEWERS_ONLY_HINT } from "@ui/group-invitations.tsx"
 import { billingStore } from "../state/billing.ts"
 import { groupsStore } from "../state/groups.ts"
 import { membersStore } from "../state/members.ts"
-import { GroupSettingsView } from "./GroupSettingsView.tsx"
+import { GroupSettingsView, transferAndRefresh } from "./GroupSettingsView.tsx"
 
 const known = {
   id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001",
@@ -174,5 +174,29 @@ describe("GroupSettingsView", () => {
     expect(render(known.id)).not.toContain(sentence)
     billingStore.current.value = { groupId: known.id, billing: subscribed }
     expect(render(known.id)).toContain(sentence)
+  })
+})
+
+describe("transferAndRefresh", () => {
+  it("reads the groups again after a transfer that worked, so the new role shows", async () => {
+    let reads = 0
+    const moved = await transferAndRefresh(
+      { transfer: () => Promise.resolve(true) },
+      { refreshFromUser: () => Promise.resolve(void reads++) },
+    )
+
+    expect(moved).toBe(true)
+    expect(reads).toBe(1)
+  })
+
+  it("leaves the groups alone after a refused transfer", async () => {
+    let reads = 0
+    const moved = await transferAndRefresh(
+      { transfer: () => Promise.resolve(false) },
+      { refreshFromUser: () => Promise.resolve(void reads++) },
+    )
+
+    expect(moved).toBe(false)
+    expect(reads).toBe(0)
   })
 })

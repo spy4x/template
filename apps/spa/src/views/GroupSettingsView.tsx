@@ -14,6 +14,19 @@ import { invitationsStore } from "../state/invitations.ts"
 import { GroupBillingCard } from "./BillingViews.tsx"
 
 /**
+ * Hands the open group over. When it worked, the groups are read again: this person is an admin
+ * now, and the groups list holds their role. Resolves to whether the transfer worked.
+ */
+export async function transferAndRefresh(
+  team: Pick<typeof membersStore, "transfer">,
+  groups: Pick<typeof groupsStore, "refreshFromUser">,
+): Promise<boolean> {
+  const moved = await team.transfer()
+  if (moved) await groups.refreshFromUser()
+  return moved
+}
+
+/**
  * Wires one group's settings screen to the groups store, which already holds every group, and to
  * the members store, which reads this group's members when the page opens.
  */
@@ -128,11 +141,7 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
           onDraftChange={(next) => (team.transferDraft.value = next)}
           transferring={team.transferring.value}
           error={ours ? team.transferError.value : null}
-          onTransfer={() =>
-            void team.transfer().then(async (moved) => {
-              // This person is an admin now: the list holds their role, so read it again.
-              if (moved) await store.refreshFromUser()
-            })}
+          onTransfer={() => void transferAndRefresh(team, store)}
         />
       )}
     />
