@@ -92,6 +92,8 @@ describe("GroupSettingsView", () => {
       canManage: false,
       subscribed: false,
       hasCustomer: false,
+      trialEnd: null,
+      notice: null,
     })
     const hint = VIEWERS_ONLY_HINT
 
