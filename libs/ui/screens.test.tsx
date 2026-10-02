@@ -952,8 +952,23 @@ describe("EmailScreen without JavaScript", () => {
   it("asks for the code of the waiting new address, and keeps the old one shown", () => {
     const status = { email: "ann@example.com", proven: true, pending: "new@example.com" }
     const html = renderToString(<EmailScreen {...emailDefaults} status={status} />)
-    expect(html).toContain("We sent a code to <strong>new@example.com</strong>")
+    expect(html).toContain("Enter the code from the mail to <strong>new@example.com</strong>")
     expect(html).toContain("You sign in with <strong>ann@example.com</strong>")
+  })
+})
+
+describe("EmailScreen wording", () => {
+  it("tells a username account that the address replaces the username for sign-in", () => {
+    const status = { email: null, proven: false, pending: null }
+    const html = renderToString(<EmailScreen {...emailDefaults} status={status} />)
+    expect(html).toContain("you sign in with that address instead of your username")
+  })
+
+  it("claims no mail was sent, since mail may be off", () => {
+    const status = { email: "ann@example.com", proven: false, pending: null }
+    const page = renderToString(<EmailScreen {...emailDefaults} status={status} />)
+    const banner = renderToString(<EmailBanner status={status} />)
+    for (const html of [page, banner]) expect(html.toLowerCase()).not.toMatch(/\bsent\b/)
   })
 })
 

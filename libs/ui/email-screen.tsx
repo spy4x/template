@@ -33,7 +33,7 @@ export function EmailBanner(
       data-e2e="email-banner"
     >
       <p>
-        Verify your e-mail address: we sent a code to <strong>{email}</strong>.{" "}
+        Verify your e-mail address <strong>{email}</strong> with the code we mail there.{" "}
         <Link href={SCREEN_PATHS.email} navigate={navigate} class="pc-link">
           Enter the code
         </Link>
@@ -138,7 +138,9 @@ export function EmailScreen(
           <CardHeader title="Enter the code" headingLevel={2} />
           <CardBody>
             <p class="mb-4 text-sm">
-              We sent a code to <strong>{target}</strong>. It works once, for 10 minutes.
+              Enter the code from the mail to{" "}
+              <strong>{target}</strong>. A code works once, for 10 minutes; if none arrived, ask for
+              a new one.
               {status.pending && " Your address changes once you enter it."}
             </p>
             <ScreenForm
@@ -207,8 +209,9 @@ export function EmailScreen(
         />
         <CardBody>
           <p class="mb-4 text-sm">
-            We send a code to the new address.{" "}
-            {status.email && `You keep signing in with ${status.email} until you enter it.`}
+            We send a code to the new address. {status.email === null
+              ? "Once you enter it, you sign in with that address instead of your username."
+              : `You keep signing in with ${status.email} until you enter it.`}
           </p>
           <ScreenForm
             action={FORM_ACTIONS.emailChange}
