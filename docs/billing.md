@@ -16,10 +16,37 @@ The catalog is `PLANS` in `libs/domain/billing/+lib.ts`:
 | `free`  | Free | 0             | none                             |
 | `pro`   | Pro  | €9.00 a month | `STRIPE_PRICE_PRO` (environment) |
 
-A group is on a paid plan while its subscription is trialing, active or past due. A canceled,
-incomplete or paused subscription, or one billing a price that is not in the catalog, puts the group
-back on Free. To add a plan, add it to `PLANS`, add its price variable to `readBillingSetup`
+A group is on a paid plan while its subscription is trialing or active, and for a grace period
+while it is past due (below). A canceled, incomplete or paused subscription, or one billing a price
+that is not in the catalog, puts the group back on Free. To add a plan, add it to `PLANS`, add its price variable to `readBillingSetup`
 (`apps/api/features/billing/config.ts`) and to `infra/envs/.env.example`.
+
+## Failed payments
+
+When a renewal charge fails, Stripe marks the subscription `past_due` and retries the card on its
+own schedule. The group keeps its plan for a grace period, `BILLING_GRACE_DAYS` days (default 7)
+counted from the first past-due event, and gets the Free plan's entitlements after it. Nothing is
+deleted: the subscription stays stored as past due, and everything over a Free cap stays as in
+"Downgrade" below.
+
+- The start is `subscriptions.past_due_since`, the `created` time of the first past-due event.
+  Later past-due events keep it; Stripe's `unpaid` arrives as past due too
+  (`@spy4x/billing` maps both to `PastDue`), so giving up on retries does not restart the clock.
+- Any other status clears it. A payment that makes the subscription active again brings the plan
+  back at once; a later failure starts a new grace period.
+- `effectivePlanId(subscription, now, graceDays)` in `libs/domain/billing/+lib.ts` decides. The
+  command bus's plan check and the billing read both call it with the current time, so the cut-off
+  is exact to the request, with no job.
+
+**How it meets Stripe's retries.** Stripe's retry window ("Manage failed payments", up to about two
+months) and this grace period are separate clocks. While Stripe retries, the subscription stays
+`past_due` even with "cancel the subscription" chosen, so the grace period is what bounds free use:
+a group gets at most `BILLING_GRACE_DAYS` of its plan after the first failure, however long Stripe
+retries. A payment that succeeds during the retries restores the plan. When the retries end,
+"cancel the subscription" (step 6 below) ends the subscription for good, so the group needs a new
+checkout; the other two settings leave it past due or unpaid, which this app treats the same way,
+Free after the grace period. Keep step 6: a cancelled subscription also lets the owner check out
+again, which a past-due one blocks (409 `ALREADY_SUBSCRIBED`).
 
 ## Who may do what
 
@@ -125,6 +152,9 @@ again inside its transaction, as the note repository does.
 With `stripe` and any of the three keys missing, the API refuses to start and names the missing
 ones. Any other value of `BILLING_PROVIDER` also stops the start.
 
+`BILLING_GRACE_DAYS` sets the grace period for failed payments: a whole number of days from 0 to
+90, 7 when unset or empty. Any other value stops the start.
+
 ## Flow
 
 1. The owner opens **See plans** on the group's settings, then **Choose Pro**. The API asks Stripe
@@ -171,9 +201,10 @@ cards such as `4242 4242 4242 4242` pay without money.
    Stripe refuses to open it.
 6. Set failed payments to cancel the subscription (Settings, Billing, Subscriptions and emails,
    "Manage failed payments for subscriptions": when all retries fail, cancel the subscription).
-   This app counts a past-due subscription as paid, and `@spy4x/billing` maps Stripe's `unpaid` to
-   past due too, so with "Mark the subscription as unpaid" or "Leave the subscription overdue" a
-   group whose card fails keeps Pro with no end date.
+   The grace period ("Failed payments" above) already drops a past-due group to Free after
+   `BILLING_GRACE_DAYS`, whichever option is chosen; cancelling ends the subscription for good and
+   lets the owner check out again, where a subscription left unpaid or overdue blocks a new
+   checkout.
 
 In production, add the webhook endpoint `https://<domain>/api/webhooks/billing` in the dashboard
 with the same five events, use its signing secret, and set failed payments as in step 6. Keys live
@@ -211,3 +242,6 @@ provider, so its public secret cannot sign a real event.
   how many it kept. The group is past its restore window, so the owner cannot reach the portal:
   cancel the subscription in the Stripe dashboard, and the next purge removes the group.
 - Payment events are stored (so repeats are skipped) but change nothing yet.
+- The end of a grace period records no `group.plan.changed` event, since no webhook arrives then.
+  Every check reads the plan with the current time, so the cut-off holds; an open page shows the
+  old plan until it reads the billing again (a reload, or the next change of the group).
