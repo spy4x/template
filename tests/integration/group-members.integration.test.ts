@@ -97,7 +97,7 @@ Deno.test("members: every member sees the list, with names, roles, which one is 
       ])
     }
     const read = (await repository.listMembers(groupId, owner))!
-    // The count is every member, so a list cut off at its cap still says how many there are.
+    // The count is read apart from the list, so a list cut off at its cap still has it.
     expect(read.memberCount).toBe(5)
     const members = read.members
     expect(members[0]).toMatchObject({ name: "Ann Owner", role: GroupRole.OWNER, email: null })
