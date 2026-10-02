@@ -468,11 +468,15 @@ Each is intended to be one small PR. Small PRs are an explicit requirement here.
 
 Member removal, role changes and leaving (#130) call `recordAccessChange` in their transaction,
 with the removed member in its list of users who lost access (a demoted member keeps access).
-Every group write (note create, update and delete, rename, the member commands) reads the actor's
-role again inside its own transaction with `lockActorRole` (`libs/server/groups/group-change-log.ts`):
-it locks the group row, then the membership `FOR SHARE`, so a write racing a removal or demotion
-waits for it and is then refused (#230). `recordAccessChange` and `recordGroupChange` take a
-transaction, never the pool.
+Note writes and rename read the actor's role again inside their own transaction with
+`lockActorRole` (`libs/server/groups/group-change-log.ts`): it locks the group row, then the
+membership `FOR SHARE`, so a write racing a removal or demotion waits for it and is then refused
+(#230). The member commands lock the group row too, then the memberships of the actor and the
+target with `lockMemberRoles` (`FOR UPDATE`), and check the rule on those rows. Keep the group row
+first in both: the other order deadlocks a write against a member change (the "lock order" tests
+in `tests/integration/group-write-race.integration.test.ts`). `recordAccessChange` and
+`recordGroupChange` take a transaction, never the pool. Members' sign-in addresses go only to the
+owner and admins (`canSeeMemberEmails`); other members get no `email` field.
 
 Extraction from the sibling Financy project is tracked separately in
 [docs/financy-extraction-inventory.md](financy-extraction-inventory.md);
