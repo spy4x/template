@@ -6,6 +6,10 @@ import { CommandBus, QueryBus } from "@spy4x/platform/cqrs"
 import {
   GroupDeleteCommand,
   GroupDeletedListQuery,
+  GroupLeaveCommand,
+  GroupMemberRemoveCommand,
+  GroupMemberRoleCommand,
+  GroupMembersQuery,
   GroupRenameCommand,
   GroupRestoreCommand,
   GroupRole,
@@ -19,13 +23,17 @@ import { Realtime } from "../../services/realtime.ts"
 import {
   createGroupDeletedListHandler,
   createGroupDeleteHandler,
+  createGroupLeaveHandler,
+  createGroupMemberRemoveHandler,
+  createGroupMemberRoleHandler,
+  createGroupMembersHandler,
   createGroupRenameHandler,
   createGroupRestoreHandler,
 } from "./handlers.ts"
 import { createGroupSocketRequests } from "./socket.ts"
 
 /**
- * Rename, delete and restore over both transports, on one pair of buses as the API wires them:
+ * Rename, delete, restore and the member commands over both transports, on one pair of buses as the API wires them:
  * the REST route and the socket parse, and the handlers decide who may act. Nothing here stubs a
  * handler, so a transport that skipped the buses, or a handler that skipped the role check, fails.
  */
@@ -49,9 +57,13 @@ function stack() {
   commands.register(GroupRenameCommand, createGroupRenameHandler(groups))
   commands.register(GroupDeleteCommand, createGroupDeleteHandler(groups))
   commands.register(GroupRestoreCommand, createGroupRestoreHandler(groups))
+  commands.register(GroupMemberRoleCommand, createGroupMemberRoleHandler(groups))
+  commands.register(GroupMemberRemoveCommand, createGroupMemberRemoveHandler(groups))
+  commands.register(GroupLeaveCommand, createGroupLeaveHandler(groups))
   const queries = new QueryBus()
   queries.use(createSessionGate([]))
   queries.register(GroupDeletedListQuery, createGroupDeletedListHandler(groups))
+  queries.register(GroupMembersQuery, createGroupMembersHandler(groups))
   const unused = () => Promise.reject(new Error("not part of this test"))
   const buses = {
     create: unused,
@@ -64,6 +76,10 @@ function stack() {
     delete: (command: GroupDeleteCommand) => commands.execute(command),
     restore: (command: GroupRestoreCommand) => commands.execute(command),
     deleted: (query: GroupDeletedListQuery) => queries.execute(query),
+    members: (query: GroupMembersQuery) => queries.execute(query),
+    setRole: (command: GroupMemberRoleCommand) => commands.execute(command),
+    removeMember: (command: GroupMemberRemoveCommand) => commands.execute(command),
+    leave: (command: GroupLeaveCommand) => commands.execute(command),
   } satisfies GroupsRouteDependencies
   return { groups, buses }
 }
@@ -117,7 +133,7 @@ function socket(buses: GroupsRouteDependencies, userId: number) {
   return {
     command: (name: string, payload: unknown, id?: string) =>
       send("client.command", name, payload, id),
-    query: (name: string) => send("client.query", name, undefined),
+    query: (name: string, payload?: unknown) => send("client.query", name, payload),
     shutdown: () => realtime.shutdown(),
   }
 }
@@ -411,6 +427,24 @@ describe("changing a group over the socket", () => {
 describe("a write from another site", () => {
   const crossSite = { origin: "https://evil.example.net", "sec-fetch-site": "cross-site" }
 
+  it("is refused for a role change, a removal and a leave, and changes nothing", async () => {
+    const { groups, buses } = stack()
+    const owner = rest(buses, OWNER)
+    const viewer = rest(buses, VIEWER)
+
+    const responses = [
+      await owner("PATCH", `/${groupId}/members/${EDITOR}`, { role: GroupRole.VIEWER }, crossSite),
+      await owner("DELETE", `/${groupId}/members/${EDITOR}`, undefined, crossSite),
+      await viewer("POST", `/${groupId}/leave`, undefined, crossSite),
+    ]
+
+    for (const response of responses) {
+      expect(response.status).toBe(403)
+      expect((await response.json()).error.code).toBe("REQUEST_ORIGIN_INVALID")
+    }
+    expect(groups.writes).toBe(0)
+  })
+
   it("is refused for rename, delete and restore, and changes nothing", async () => {
     const { groups, buses } = stack()
     const owner = rest(buses, OWNER)
@@ -426,5 +460,269 @@ describe("a write from another site", () => {
     }
     expect(groups.writes).toBe(0)
     expect(groups.name).toBe("Team")
+  })
+})
+
+/**
+ * Who may manage whom: everyone tries to make the editor a viewer and to remove the viewer. Only
+ * an admin and the owner manage members, and only those below them.
+ */
+const MANAGERS = [
+  { name: "a viewer", user: VIEWER, manage: false, leave: true },
+  { name: "an editor", user: EDITOR, manage: false, leave: true },
+  { name: "an admin", user: ADMIN, manage: true, leave: true },
+  { name: "the owner", user: OWNER, manage: true, leave: false },
+]
+
+describe("the members of a group over REST", () => {
+  it("lists them for every member, marking the caller, and hides them from a stranger", async () => {
+    const { buses } = stack()
+
+    for (const person of MANAGERS) {
+      const response = await rest(buses, person.user)("GET", `/${groupId}/members`)
+      expect(response.status).toBe(200)
+      const { members } = await response.json()
+      expect(members.map((member: { userId: number }) => member.userId)).toEqual([
+        VIEWER,
+        EDITOR,
+        ADMIN,
+        OWNER,
+      ])
+      expect(members.filter((member: { isYou: boolean }) => member.isYou)).toMatchObject([
+        { userId: person.user },
+      ])
+    }
+    const stranger = await rest(buses, STRANGER)("GET", `/${groupId}/members`)
+    expect(stranger.status).toBe(404)
+    expect((await stranger.json()).error.code).toBe("GROUP_NOT_FOUND")
+  })
+
+  for (const person of MANAGERS) {
+    it(`${person.manage ? "lets" : "refuses"} ${person.name} change a role`, async () => {
+      const { groups, buses } = stack()
+
+      const response = await rest(buses, person.user)(
+        "PATCH",
+        `/${groupId}/members/${EDITOR}`,
+        { role: GroupRole.VIEWER },
+      )
+
+      if (person.manage) {
+        expect(response.status).toBe(200)
+        expect((await response.json()).member).toMatchObject({
+          userId: EDITOR,
+          role: GroupRole.VIEWER,
+        })
+        expect(groups.writes).toBe(1)
+      } else {
+        expect(response.status).toBe(403)
+        expect((await response.json()).error.code).toBe("ROLE_INSUFFICIENT")
+        expect(groups.writes).toBe(0)
+      }
+    })
+
+    it(`${person.manage ? "lets" : "refuses"} ${person.name} remove a viewer`, async () => {
+      const { groups, buses } = stack()
+
+      const response = await rest(buses, person.user)("DELETE", `/${groupId}/members/${VIEWER}`)
+
+      if (person.manage) {
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ removed: true })
+        expect(groups.writes).toBe(1)
+      } else {
+        expect(response.status).toBe(403)
+        expect((await response.json()).error.code).toBe("ROLE_INSUFFICIENT")
+        expect(groups.writes).toBe(0)
+      }
+    })
+
+    it(`${person.leave ? "lets" : "refuses"} ${person.name} leave`, async () => {
+      const { groups, buses } = stack()
+
+      const response = await rest(buses, person.user)("POST", `/${groupId}/leave`)
+
+      if (person.leave) {
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ left: true })
+        expect(groups.writes).toBe(1)
+      } else {
+        expect(response.status).toBe(409)
+        expect((await response.json()).error.code).toBe("LAST_OWNER")
+        expect(groups.writes).toBe(0)
+      }
+    })
+  }
+
+  it("keeps the owner's role and membership, and refuses to name a new owner", async () => {
+    const { groups, buses } = stack()
+    const admin = rest(buses, ADMIN)
+
+    const demoted = await admin("PATCH", `/${groupId}/members/${OWNER}`, { role: GroupRole.VIEWER })
+    const removed = await admin("DELETE", `/${groupId}/members/${OWNER}`)
+    // The owner role is not one a request can name: ownership moves only by a transfer.
+    const promoted = await rest(buses, OWNER)("PATCH", `/${groupId}/members/${EDITOR}`, {
+      role: GroupRole.OWNER,
+    })
+
+    for (const response of [demoted, removed]) {
+      expect(response.status).toBe(409)
+      expect((await response.json()).error.code).toBe("LAST_OWNER")
+    }
+    expect(promoted.status).toBe(400)
+    expect(groups.writes).toBe(0)
+  })
+
+  it("tells a stranger the group does not exist, and a member the person is not one", async () => {
+    const { groups, buses } = stack()
+
+    const stranger = await rest(buses, STRANGER)("DELETE", `/${groupId}/members/${VIEWER}`)
+    const missing = await rest(buses, OWNER)("DELETE", `/${groupId}/members/${STRANGER}`)
+    const leaving = await rest(buses, STRANGER)("POST", `/${groupId}/leave`)
+
+    expect(stranger.status).toBe(404)
+    expect((await stranger.json()).error.code).toBe("GROUP_NOT_FOUND")
+    expect(missing.status).toBe(404)
+    expect((await missing.json()).error.code).toBe("MEMBER_NOT_FOUND")
+    expect(leaving.status).toBe(404)
+    expect((await leaving.json()).error.code).toBe("GROUP_NOT_FOUND")
+    expect(groups.writes).toBe(0)
+  })
+
+  it("answers 409 LAST_GROUP when a member leaves their only group", async () => {
+    const { groups, buses } = stack()
+    groups.lastGroup = true
+
+    const response = await rest(buses, VIEWER)("POST", `/${groupId}/leave`)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error.code).toBe("LAST_GROUP")
+  })
+
+  it("refuses a malformed user id or role", async () => {
+    const { groups, buses } = stack()
+    const owner = rest(buses, OWNER)
+
+    const responses = [
+      await owner("PATCH", `/${groupId}/members/0`, { role: GroupRole.VIEWER }),
+      await owner("PATCH", `/${groupId}/members/1e3`, { role: GroupRole.VIEWER }),
+      await owner("DELETE", `/${groupId}/members/-2`),
+      await owner("PATCH", `/${groupId}/members/${EDITOR}`, { role: 9 }),
+      await owner("PATCH", `/${groupId}/members/${EDITOR}`, { role: "1" }),
+      await owner("PATCH", `/${groupId}/members/${EDITOR}`, { role: 1, userId: VIEWER }),
+    ]
+
+    for (const response of responses) expect(response.status).toBe(400)
+    expect(groups.writes).toBe(0)
+  })
+
+  it("passes the request id of every member change to the audit trail", async () => {
+    const { groups, buses } = stack()
+    const owner = rest(buses, OWNER)
+
+    await owner("PATCH", `/${groupId}/members/${EDITOR}`, { role: GroupRole.VIEWER })
+    await owner("DELETE", `/${groupId}/members/${VIEWER}`)
+    await rest(buses, ADMIN)("POST", `/${groupId}/leave`)
+
+    expect(groups.requestIds).toEqual(["req-groups", "req-groups", "req-groups"])
+  })
+})
+
+describe("the members of a group over the socket", () => {
+  for (const person of MANAGERS) {
+    it(`${person.manage ? "lets" : "refuses"} ${person.name} change a role and remove`, async () => {
+      const { groups, buses } = stack()
+      const ws = socket(buses, person.user)
+
+      const changed = await ws.command("group.setRole", {
+        groupId,
+        userId: EDITOR,
+        role: GroupRole.VIEWER,
+      })
+      const removed = await ws.command("group.removeMember", { groupId, userId: VIEWER })
+
+      if (person.manage) {
+        expect(changed).toMatchObject({
+          kind: "server.result",
+          payload: { member: { userId: EDITOR, role: GroupRole.VIEWER } },
+        })
+        expect(removed).toMatchObject({ kind: "server.result", payload: { removed: true } })
+        expect(groups.writes).toBe(2)
+      } else {
+        for (const frame of [changed, removed]) {
+          expect(frame).toMatchObject({
+            kind: "server.error",
+            code: "forbidden",
+            details: { code: "ROLE_INSUFFICIENT" },
+          })
+        }
+        expect(groups.writes).toBe(0)
+      }
+      ws.shutdown()
+    })
+
+    it(`${person.leave ? "lets" : "refuses"} ${person.name} leave`, async () => {
+      const { groups, buses } = stack()
+      const ws = socket(buses, person.user)
+
+      const frame = await ws.command("group.leave", { groupId })
+
+      if (person.leave) {
+        expect(frame).toMatchObject({ kind: "server.result", payload: { left: true } })
+      } else {
+        expect(frame).toMatchObject({
+          kind: "server.error",
+          code: "conflict",
+          details: { code: "LAST_OWNER" },
+        })
+        expect(groups.writes).toBe(0)
+      }
+      ws.shutdown()
+    })
+  }
+
+  it("lists the members, and answers a missing member and a stranger as not found", async () => {
+    const { groups, buses } = stack()
+    const owner = socket(buses, OWNER)
+    const stranger = socket(buses, STRANGER)
+
+    const listed = await owner.query("group.members", { groupId })
+    const missing = await owner.command("group.removeMember", { groupId, userId: STRANGER })
+    const hidden = await stranger.query("group.members", { groupId })
+
+    expect(listed).toMatchObject({ kind: "server.result" })
+    expect((listed as { payload: { members: unknown[] } }).payload.members).toHaveLength(4)
+    expect(missing).toMatchObject({
+      kind: "server.error",
+      code: "not_found",
+      details: { code: "MEMBER_NOT_FOUND" },
+    })
+    expect(hidden).toMatchObject({
+      kind: "server.error",
+      code: "not_found",
+      details: { code: "GROUP_NOT_FOUND" },
+    })
+    expect(groups.writes).toBe(0)
+    owner.shutdown()
+    stranger.shutdown()
+  })
+
+  it("refuses a payload with a missing or extra field", async () => {
+    const { groups, buses } = stack()
+    const ws = socket(buses, OWNER)
+
+    const frames = [
+      await ws.command("group.setRole", { groupId, userId: EDITOR }),
+      await ws.command("group.setRole", { groupId, userId: EDITOR, role: 1, name: "x" }),
+      await ws.command("group.removeMember", { groupId, userId: "3" }),
+      await ws.command("group.removeMember", { groupId, userId: EDITOR, role: 1 }),
+      await ws.command("group.leave", { groupId, userId: OWNER }),
+    ]
+
+    for (const frame of frames) {
+      expect(frame).toMatchObject({ kind: "server.error", code: "bad_request" })
+    }
+    expect(groups.writes).toBe(0)
+    ws.shutdown()
   })
 })

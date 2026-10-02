@@ -8,14 +8,17 @@ import {
   recordAccessChange,
   recordGroupChange,
 } from "@server/groups/group-change-log.ts"
-import {
-  type GroupAccessLoss,
-  listenForGroupAccessLoss,
-} from "@server/groups/group-change-notify.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { purgeDeletedGroups } from "@server/groups/purge-deleted-groups.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import {
+  type IdRow,
+  insertUser,
+  listenForLosses,
+  revision,
+  team,
+  withSchema,
+} from "./group-team.ts"
 
 /**
  * Rename, delete and restore of a group against a real Postgres built from schema.sql: who may do
@@ -23,68 +26,6 @@ import { requireDbConnection } from "./db-connection.ts"
  * "DB_HOST", "DB_USER", "DB_PASS" and "DB_NAME" (recipe in docs/handoff.md); it fails when they
  * are missing.
  */
-
-interface IdRow extends postgres.Row {
-  id: number
-}
-
-async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const connection = requireDbConnection()
-  const admin = postgres({ ...connection, max: 1, onnotice: () => {} })
-  const schema = `lifecycle_test_${crypto.randomUUID().replaceAll("-", "")}`
-  const sql = postgres({
-    ...connection,
-    max: 10,
-    transform: postgres.camel,
-    connection: { options: `-c search_path=${schema}` },
-    onnotice: () => {},
-  })
-  try {
-    await admin`CREATE SCHEMA ${admin(schema)}`
-    await sql.unsafe(await Deno.readTextFile("libs/server/db/schema.sql"))
-    await body(sql)
-  } finally {
-    await sql.end({ timeout: 5 })
-    await admin`DROP SCHEMA IF EXISTS ${admin(schema)} CASCADE`
-    await admin.end({ timeout: 5 })
-  }
-}
-
-async function insertUser(sql: postgres.Sql): Promise<number> {
-  const rows = await sql<IdRow[]>`
-    WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id)
-    INSERT INTO users (id) SELECT id FROM auth_user RETURNING id
-  `
-  return rows[0].id
-}
-
-/**
- * An owner with a first group and a team group, plus one member per role in the team and a
- * stranger. The members have a group of their own, except "onlyHere", whose only group is the team.
- */
-async function team(sql: postgres.Sql) {
-  const repository = new PostgresGroupRepository(sql)
-  const owner = await insertUser(sql)
-  await repository.ensureFirst({ id: crypto.randomUUID(), name: "Home" }, owner)
-  const created = await repository.create({ id: crypto.randomUUID(), name: "Team" }, owner)
-  const groupId = created.group.id
-  const admin = await insertUser(sql)
-  const editor = await insertUser(sql)
-  const viewer = await insertUser(sql)
-  const onlyHere = await insertUser(sql)
-  const stranger = await insertUser(sql)
-  for (const user of [admin, editor, viewer, stranger]) {
-    await repository.ensureFirst({ id: crypto.randomUUID(), name: "Own" }, user)
-  }
-  await sql`
-    INSERT INTO group_members (group_id, user_id, role, added_by_user_id) VALUES
-      (${groupId}, ${admin}, ${GroupRole.ADMIN}, ${owner}),
-      (${groupId}, ${editor}, ${GroupRole.EDITOR}, ${owner}),
-      (${groupId}, ${viewer}, ${GroupRole.VIEWER}, ${owner}),
-      (${groupId}, ${onlyHere}, ${GroupRole.EDITOR}, ${owner})
-  `
-  return { repository, groupId, owner, admin, editor, viewer, onlyHere, stranger }
-}
 
 async function expireDeletion(sql: postgres.Sql, groupId: string, days: number): Promise<void> {
   await sql`
@@ -170,42 +111,6 @@ Deno.test("delete: nobody keeps the deleted group selected", async () => {
     expect(await repository.select(editor, groupId)).toBeNull()
   })
 })
-
-/** The group's authorization revision, as a decimal string. */
-async function revision(sql: postgres.Sql, groupId: string): Promise<string> {
-  return (await sql<{ revision: string }[]>`
-    SELECT authorization_revision::text AS revision FROM groups WHERE id = ${groupId}
-  `)[0].revision
-}
-
-/**
- * Listens for the access losses of one group. Each is stored with whether the group read as
- * deleted on another connection the moment it arrived, which says if it came after the commit.
- */
-async function listenForLosses(sql: postgres.Sql, groupId: string) {
-  const losses: { loss: GroupAccessLoss; deletedWhenHeard: boolean }[] = []
-  const reads: Promise<void>[] = []
-  const stop = await listenForGroupAccessLoss(sql, (loss) => {
-    if (loss.groupId !== groupId) return
-    reads.push((async () => {
-      const row = (await sql<{ deleted: boolean }[]>`
-        SELECT deleted_at IS NOT NULL AS deleted FROM groups WHERE id = ${groupId}
-      `)[0]
-      losses.push({ loss, deletedWhenHeard: row.deleted })
-    })())
-  })
-  /** Waits a moment for stragglers, then returns every loss heard, in arrival order. */
-  async function heard(count: number) {
-    const deadline = Date.now() + 5_000
-    while (losses.length < count && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    await Promise.all(reads)
-    return losses
-  }
-  return { heard, stop }
-}
 
 Deno.test("delete and restore each raise the group's authorization revision; a refusal does not", async () => {
   await withSchema(async (sql) => {
@@ -581,7 +486,9 @@ Deno.test("delete: an unfinished note insert neither blocks the delete nor deadl
     expect(finished).toBe("deleted")
 
     // The note's write to the group now finds it deleted, and rolls the note back.
-    await expect(recordGroupChange(writing, groupId, owner, "note.created")).rejects
+    // A reserved connection inside BEGIN is a transaction, though postgres.js types it otherwise.
+    const inTransaction = writing as unknown as postgres.TransactionSql
+    await expect(recordGroupChange(inTransaction, groupId, owner, "note.created")).rejects
       .toBeInstanceOf(GroupNotActiveError)
     await writing`ROLLBACK`
     writing.release()

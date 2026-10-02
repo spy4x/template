@@ -4,6 +4,10 @@ import {
   GroupDeletedListQuery,
   GroupError,
   GroupGetQuery,
+  GroupLeaveCommand,
+  GroupMemberRemoveCommand,
+  GroupMemberRoleCommand,
+  GroupMembersQuery,
   GroupRenameCommand,
   GroupRestoreCommand,
   GroupSelectCommand,
@@ -11,12 +15,15 @@ import {
   parseCreateGroupRequest,
   parseGroupId,
   parseGroupIdRequest,
+  parseMemberRequest,
+  parseMemberRoleRequest,
   parseRenameGroupRequest,
 } from "@domain/groups"
 import type {
   DeletedGroupSummary,
   GroupCreateResult,
   GroupGetResult,
+  GroupMemberSummary,
   GroupSummary,
   SelectedGroup,
 } from "@domain/groups"
@@ -33,6 +40,10 @@ export interface GroupSocketDependencies extends GroupListDependencies {
   delete(command: GroupDeleteCommand): Promise<{ group: DeletedGroupSummary }>
   restore(command: GroupRestoreCommand): Promise<{ group: GroupSummary }>
   deleted(query: GroupDeletedListQuery): Promise<{ groups: DeletedGroupSummary[] }>
+  members(query: GroupMembersQuery): Promise<{ members: GroupMemberSummary[] }>
+  setRole(command: GroupMemberRoleCommand): Promise<{ member: GroupMemberSummary }>
+  removeMember(command: GroupMemberRemoveCommand): Promise<{ removed: true }>
+  leave(command: GroupLeaveCommand): Promise<{ left: true }>
 }
 
 /**
@@ -101,6 +112,40 @@ export function createGroupSocketRequests(dependencies: GroupSocketDependencies)
         const { groupId } = parseGroupIdRequest(payload)
         return await dependencies.restore(
           new GroupRestoreCommand({ actor, groupId, requestId, idempotencyKey }),
+        )
+      },
+    },
+    "group.members": {
+      kind: "query",
+      handle: async ({ actor, payload }) => {
+        const { groupId } = parseGroupIdRequest(payload)
+        return await dependencies.members(new GroupMembersQuery({ actor, groupId }))
+      },
+    },
+    "group.setRole": {
+      kind: "command",
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
+        const { groupId, userId, role } = parseMemberRoleRequest(payload)
+        return await dependencies.setRole(
+          new GroupMemberRoleCommand({ actor, groupId, userId, role, requestId, idempotencyKey }),
+        )
+      },
+    },
+    "group.removeMember": {
+      kind: "command",
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
+        const { groupId, userId } = parseMemberRequest(payload)
+        return await dependencies.removeMember(
+          new GroupMemberRemoveCommand({ actor, groupId, userId, requestId, idempotencyKey }),
+        )
+      },
+    },
+    "group.leave": {
+      kind: "command",
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
+        const { groupId } = parseGroupIdRequest(payload)
+        return await dependencies.leave(
+          new GroupLeaveCommand({ actor, groupId, requestId, idempotencyKey }),
         )
       },
     },

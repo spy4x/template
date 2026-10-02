@@ -68,6 +68,22 @@ class FakeGroupRepository implements GroupRepository {
     throw new Error("Not used")
   }
 
+  listMembers(): Promise<null> {
+    throw new Error("Not used")
+  }
+
+  changeMemberRole(): Promise<null> {
+    throw new Error("Not used")
+  }
+
+  removeMember(): Promise<boolean> {
+    throw new Error("Not used")
+  }
+
+  leave(): Promise<boolean> {
+    throw new Error("Not used")
+  }
+
   ensureFirst(_input: FirstGroupInput, _userId: number): Promise<void> {
     throw new Error("Not used")
   }

@@ -304,7 +304,8 @@ export interface NoteDeleteInput {
 
 /**
  * Where notes are kept. Every write records a change on the group in its own transaction (the
- * group's sequence and an outbox row), and none checks who may write: the handlers do.
+ * group's sequence and an outbox row). The handlers check who may write before they call it; a
+ * write checks again inside its transaction, as a role can change in between.
  */
 export interface NoteRepository {
   list(groupId: string, page: NoteListPage): Promise<NoteListResult>

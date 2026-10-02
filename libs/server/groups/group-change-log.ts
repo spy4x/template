@@ -1,5 +1,5 @@
 import type postgres from "postgres"
-import { GROUP_AGGREGATE } from "@domain/groups"
+import { GROUP_AGGREGATE, type GroupRole } from "@domain/groups"
 import { GROUP_ACCESS_LOST_CHANNEL, type GroupAccessLoss } from "./group-change-notify.ts"
 
 /** The group is missing or deleted, so nothing may be written inside it. */
@@ -12,6 +12,39 @@ export class GroupNotActiveError extends Error {
 
 interface ChangeSequenceRow extends postgres.Row {
   sequence: string
+}
+
+/**
+ * Locks an active group for a write by `actorId` and reads the actor's role in it, in the write's
+ * own transaction. Returns `null` when the actor is not an active member; throws
+ * {@link GroupNotActiveError} when the group is missing or deleted.
+ *
+ * A role checked before the transaction can be stale by the time the write commits: the owner may
+ * remove or demote the actor in between. Every group-scoped write therefore calls this first and
+ * checks the role it returns. The group row is locked first, in the order every member change
+ * takes (group, then membership), so the two wait for each other instead of deadlocking; the
+ * membership row is read `FOR SHARE`, so a removal or a role change committed first is seen, and
+ * one that comes later waits until this write commits.
+ */
+export async function lockActorRole(
+  sql: postgres.TransactionSql,
+  groupId: string,
+  actorId: number,
+): Promise<GroupRole | null> {
+  const active = await sql`
+    SELECT 1 FROM groups WHERE id = ${groupId} AND deleted_at IS NULL FOR NO KEY UPDATE
+  `
+  if (active.length === 0) throw new GroupNotActiveError(groupId)
+  const member = (
+    await sql<{ role: GroupRole }[]>`
+      SELECT group_members.role
+      FROM group_members
+      INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+      WHERE group_members.group_id = ${groupId} AND group_members.user_id = ${actorId}
+      FOR SHARE OF group_members
+    `
+  )[0]
+  return member?.role ?? null
 }
 
 /**
@@ -32,7 +65,7 @@ interface ChangeSequenceRow extends postgres.Row {
  * records its change with `allowDeleted`, as it has just set `deleted_at`.
  */
 export async function recordGroupChange(
-  sql: postgres.Sql,
+  sql: postgres.TransactionSql,
   groupId: string,
   actorId: number,
   eventKind: string,
@@ -101,7 +134,7 @@ export interface RecordedAccessChange {
  * who can see the group when it is sent, which no longer includes the users named here.
  */
 export async function recordAccessChange(
-  sql: postgres.Sql,
+  sql: postgres.TransactionSql,
   groupId: string,
   actorId: number,
   eventKind: string,

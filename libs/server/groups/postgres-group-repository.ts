@@ -1,21 +1,32 @@
 import type postgres from "postgres"
 import {
+  assertCanChangeRole,
+  assertCanLeave,
+  assertCanRemoveMember,
+  canRename,
   CreatedGroup,
   CreateGroupInput,
   DeletedGroupSummary,
   FirstGroupInput,
   Group,
+  GROUP_MEMBER_PREVIEW_LIMIT,
   GROUP_RESTORE_DAYS,
   GroupAccess,
   GroupError,
   GroupListPage,
   GroupListResult,
+  GroupMemberSummary,
   GroupRepository,
   GroupRole,
   GroupSummary,
   SelectedGroup,
 } from "@domain/groups"
-import { recordAccessChange, recordGroupChange } from "./group-change-log.ts"
+import {
+  GroupNotActiveError,
+  lockActorRole,
+  recordAccessChange,
+  recordGroupChange,
+} from "./group-change-log.ts"
 
 interface GroupRow extends postgres.Row {
   id: string
@@ -42,6 +53,34 @@ interface GroupSummaryRow extends postgres.Row {
   updatedAt: Date
 }
 
+/** A renamed group as the `UPDATE` returns it; the role comes from the locked membership. */
+interface RenamedRow extends postgres.Row {
+  id: string
+  name: string
+  authorizationRevision: string
+  changeSequence: string
+  updatedAt: Date
+}
+
+interface GroupListRow extends GroupSummaryRow {
+  memberCount: number
+  members: { name: string }[]
+}
+
+interface MemberSummaryRow extends postgres.Row {
+  userId: number
+  name: string
+  email: string | null
+  role: GroupRole
+  joinedAt: Date
+  isYou: boolean
+}
+
+interface MemberRoleRow extends postgres.Row {
+  userId: number
+  role: GroupRole
+}
+
 interface ActiveUserRow extends postgres.Row {
   id: number
 }
@@ -63,6 +102,15 @@ const GROUP_CREATED_EVENT = "group.created"
 const GROUP_RENAMED_EVENT = "group.renamed"
 const GROUP_DELETED_EVENT = "group.deleted"
 const GROUP_RESTORED_EVENT = "group.restored"
+const MEMBER_ROLE_CHANGED_EVENT = "group.member_role_changed"
+const MEMBER_REMOVED_EVENT = "group.member_removed"
+const MEMBER_LEFT_EVENT = "group.member_left"
+
+/**
+ * Most members one members read returns. Members join by invitation (#131), so a group this large
+ * is not expected; the list then shows its oldest members and stops, instead of reading without end.
+ */
+const MEMBER_LIST_LIMIT = 1000
 
 /** The name of the group a person gets when a deletion would leave them with none. */
 const REPLACEMENT_GROUP_NAME = "Personal"
@@ -75,14 +123,41 @@ export class PostgresGroupRepository implements GroupRepository {
 
   async listForUser(userId: number, page: GroupListPage): Promise<GroupListResult> {
     const limit = Math.max(1, Math.min(100, page.limit))
-    const rows = await this.sql<GroupSummaryRow[]>`
+    // Each group carries its member count and its first members, for the list's avatar stack.
+    const rows = await this.sql<GroupListRow[]>`
       SELECT
         groups.id,
         groups.name,
         group_members.role,
         groups.authorization_revision::text AS authorization_revision,
         (groups.next_change_sequence - 1)::text AS change_sequence,
-        groups.updated_at
+        groups.updated_at,
+        (
+          SELECT COUNT(*)::int
+          FROM group_members AS member
+          INNER JOIN users AS person ON person.id = member.user_id AND person.deleted_at IS NULL
+          WHERE member.group_id = groups.id
+        ) AS member_count,
+        (
+          SELECT COALESCE(
+            json_agg(
+              json_build_object('name', first.name)
+              ORDER BY first.created_at, first.user_id
+            ),
+            '[]'::json
+          )
+          FROM (
+            SELECT
+              member.user_id,
+              member.created_at,
+              btrim(concat_ws(' ', person.first_name, person.last_name)) AS name
+            FROM group_members AS member
+            INNER JOIN users AS person ON person.id = member.user_id AND person.deleted_at IS NULL
+            WHERE member.group_id = groups.id
+            ORDER BY member.created_at, member.user_id
+            LIMIT ${GROUP_MEMBER_PREVIEW_LIMIT}
+          ) AS first
+        ) AS members
       FROM groups
       INNER JOIN group_members
         ON group_members.group_id = groups.id
@@ -279,12 +354,14 @@ export class PostgresGroupRepository implements GroupRepository {
     })
   }
 
-  private async hasActiveGroup(userId: number): Promise<boolean> {
+  /** Whether the user belongs to an active group, other than `except` when it is given. */
+  private async hasActiveGroup(userId: number, except?: string): Promise<boolean> {
     const rows = await this.sql`
       SELECT 1
       FROM group_members
       INNER JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL
       WHERE group_members.user_id = ${userId}
+        ${except === undefined ? this.sql`` : this.sql`AND group_members.group_id <> ${except}`}
       LIMIT 1
     `
     return rows.length > 0
@@ -381,29 +458,30 @@ export class PostgresGroupRepository implements GroupRepository {
   ): Promise<GroupSummary | null> {
     return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
       const repository = new PostgresGroupRepository(transaction)
+      // The role is read on the locked membership row: one the handler read before this
+      // transaction may be gone by now.
+      const role = await lockActorRole(transaction, groupId, actorId).catch((error) => {
+        if (error instanceof GroupNotActiveError) return null
+        throw error
+      })
+      if (role === null || !canRename(role)) return null
       const renamed = (
-        await transaction<GroupSummaryRow[]>`
+        await transaction<RenamedRow[]>`
           UPDATE groups
           SET name = ${name}, updated_at = CURRENT_TIMESTAMP
-          FROM group_members
-          WHERE groups.id = ${groupId}
-            AND groups.deleted_at IS NULL
-            AND group_members.group_id = groups.id
-            AND group_members.user_id = ${actorId}
-            AND group_members.role >= ${GroupRole.ADMIN}
+          WHERE id = ${groupId}
           RETURNING
-            groups.id,
-            groups.name,
-            group_members.role,
-            groups.authorization_revision::text AS authorization_revision,
-            groups.next_change_sequence::text AS change_sequence,
-            groups.updated_at
+            id,
+            name,
+            authorization_revision::text AS authorization_revision,
+            next_change_sequence::text AS change_sequence,
+            updated_at
         `
       )[0]
       if (!renamed) return null
       await repository.audit(groupId, actorId, GROUP_RENAMED_EVENT, requestId)
       const sequence = await repository.recordChange(groupId, actorId, GROUP_RENAMED_EVENT)
-      return { ...renamed, changeSequence: sequence }
+      return { ...renamed, role, changeSequence: sequence }
     })
   }
 
@@ -579,6 +657,166 @@ export class PostgresGroupRepository implements GroupRepository {
     return row ? { group: toGroup(row), role: row.role } : null
   }
 
+  async listMembers(groupId: string, actorId: number): Promise<GroupMemberSummary[] | null> {
+    if (!await this.isMember(groupId, actorId)) return null
+    return await this.readMembers(groupId, actorId)
+  }
+
+  /**
+   * The members of a group as `actorId` sees them, oldest first; with `only`, just that member.
+   * Their address is the one on their sign-in key, `null` for an account with none.
+   */
+  private async readMembers(
+    groupId: string,
+    actorId: number,
+    only?: number,
+  ): Promise<GroupMemberSummary[]> {
+    return await this.sql<MemberSummaryRow[]>`
+      SELECT
+        group_members.user_id,
+        btrim(concat_ws(' ', users.first_name, users.last_name)) AS name,
+        (
+          SELECT auth_keys.email
+          FROM auth_keys
+          WHERE auth_keys.user_id = group_members.user_id AND auth_keys.email IS NOT NULL
+          ORDER BY auth_keys.id
+          LIMIT 1
+        ) AS email,
+        group_members.role,
+        group_members.created_at AS joined_at,
+        group_members.user_id = ${actorId} AS is_you
+      FROM group_members
+      INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+      WHERE group_members.group_id = ${groupId}
+        ${only === undefined ? this.sql`` : this.sql`AND group_members.user_id = ${only}`}
+      ORDER BY group_members.created_at, group_members.user_id
+      LIMIT ${MEMBER_LIST_LIMIT}
+    `
+  }
+
+  /**
+   * The rule is checked twice: by the handler before it calls this, and here on rows this
+   * transaction has locked, so a role changed in between cannot slip through. Locking the group
+   * row first makes every member change of one group wait for the one before it.
+   */
+  async changeMemberRole(
+    groupId: string,
+    userId: number,
+    role: GroupRole,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupMemberSummary | null> {
+    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const repository = new PostgresGroupRepository(transaction)
+      if (!await repository.lockActiveGroup(groupId)) return null
+      const roles = await repository.lockMemberRoles(groupId, [actorId, userId])
+      assertCanChangeRole(roles.get(actorId) ?? null, roles.get(userId) ?? null, role)
+      if (roles.get(userId) !== role) {
+        await transaction`
+          UPDATE group_members
+          SET role = ${role}, updated_at = CURRENT_TIMESTAMP
+          WHERE group_id = ${groupId} AND user_id = ${userId}
+        `
+        await repository.audit(groupId, actorId, MEMBER_ROLE_CHANGED_EVENT, requestId)
+        // A demoted member can still read the group, so nobody loses access: the raised revision
+        // and the group's hint are what take a write away from their open pages.
+        await recordAccessChange(transaction, groupId, actorId, MEMBER_ROLE_CHANGED_EVENT, [])
+      }
+      return (await repository.readMembers(groupId, actorId, userId))[0]
+    })
+  }
+
+  async removeMember(
+    groupId: string,
+    userId: number,
+    actorId: number,
+    requestId?: string,
+  ): Promise<boolean> {
+    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const repository = new PostgresGroupRepository(transaction)
+      // Users before the group, as a delete locks them, so the two wait for each other in one
+      // order: a delete and a removal at once cannot both leave the person without a group.
+      await repository.lockUsers([actorId, userId], actorId)
+      if (!await repository.lockActiveGroup(groupId)) return false
+      const roles = await repository.lockMemberRoles(groupId, [actorId, userId])
+      assertCanRemoveMember(roles.get(actorId) ?? null, roles.get(userId) ?? null)
+      await repository.dropMember(groupId, userId)
+      await repository.audit(groupId, actorId, MEMBER_REMOVED_EVENT, requestId)
+      await recordAccessChange(transaction, groupId, actorId, MEMBER_REMOVED_EVENT, [userId])
+      return true
+    })
+  }
+
+  async leave(groupId: string, actorId: number, requestId?: string): Promise<boolean> {
+    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const repository = new PostgresGroupRepository(transaction)
+      await repository.lockUsers([actorId], actorId)
+      if (!await repository.lockActiveGroup(groupId)) return false
+      const roles = await repository.lockMemberRoles(groupId, [actorId])
+      assertCanLeave(roles.get(actorId) ?? null)
+      if (!await repository.hasActiveGroup(actorId, groupId)) {
+        throw new GroupError(
+          "LAST_GROUP",
+          "You cannot leave your only group. Create another first.",
+        )
+      }
+      await repository.dropMember(groupId, actorId)
+      await repository.audit(groupId, actorId, MEMBER_LEFT_EVENT, requestId)
+      await recordAccessChange(transaction, groupId, actorId, MEMBER_LEFT_EVENT, [actorId])
+      return true
+    })
+  }
+
+  /**
+   * Deletes one membership. What the member wrote stays in the group with their name on it. A
+   * member left with no active group gets a new one, as a delete gives them.
+   */
+  private async dropMember(groupId: string, userId: number): Promise<void> {
+    await this.sql`DELETE FROM group_members WHERE group_id = ${groupId} AND user_id = ${userId}`
+    if (!await this.hasActiveGroup(userId)) {
+      await this.insertFirst({ id: crypto.randomUUID(), name: REPLACEMENT_GROUP_NAME }, userId)
+    }
+  }
+
+  /** Locks the group's row while it is active; `false` when it is missing or deleted. */
+  private async lockActiveGroup(groupId: string): Promise<boolean> {
+    const rows = await this.sql`
+      SELECT 1 FROM groups WHERE id = ${groupId} AND deleted_at IS NULL FOR NO KEY UPDATE
+    `
+    return rows.length > 0
+  }
+
+  /** Locks the memberships of `userIds` in the group, in id order; the role of each active one. */
+  private async lockMemberRoles(
+    groupId: string,
+    userIds: number[],
+  ): Promise<Map<number, GroupRole>> {
+    const rows = await this.sql<MemberRoleRow[]>`
+      SELECT group_members.user_id, group_members.role
+      FROM group_members
+      INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+      WHERE group_members.group_id = ${groupId}
+        AND group_members.user_id IN ${this.sql(userIds)}
+      ORDER BY group_members.user_id
+      FOR UPDATE OF group_members
+    `
+    return new Map(rows.map((row) => [row.userId, row.role]))
+  }
+
+  /** Locks the rows of `userIds` in id order; throws `USER_NOT_ACTIVE` when `actorId` is not active. */
+  private async lockUsers(userIds: number[], actorId: number): Promise<void> {
+    const locked = await this.sql<ActiveUserRow[]>`
+      SELECT users.id
+      FROM users
+      WHERE users.deleted_at IS NULL AND users.id IN ${this.sql(userIds)}
+      ORDER BY users.id
+      FOR NO KEY UPDATE
+    `
+    if (!locked.some((user) => user.id === actorId)) {
+      throw new GroupError("USER_NOT_ACTIVE", "User is not active")
+    }
+  }
+
   /**
    * Locks the rows of the actor and of every member of the group, in id order, so two deletions
    * that touch the same people wait for each other instead of each leaving them a group the other
@@ -650,7 +888,18 @@ export class PostgresGroupRepository implements GroupRepository {
     eventKind: string,
     options: { allowDeleted?: boolean } = {},
   ): Promise<string> {
-    return await recordGroupChange(this.sql, groupId, actorId, eventKind, options)
+    return await recordGroupChange(this.transaction, groupId, actorId, eventKind, options)
+  }
+
+  /**
+   * The transaction this repository runs in. A change is recorded in the transaction of its write,
+   * so a repository built on the pool refuses to record one.
+   */
+  private get transaction(): postgres.TransactionSql {
+    if (!isTransaction(this.sql)) {
+      throw new Error("A group change must be recorded inside a transaction")
+    }
+    return this.sql
   }
 
   private async assertActiveUser(userId: number): Promise<void> {
@@ -700,4 +949,9 @@ function toSummary(
     changeSequence: (BigInt(group.nextChangeSequence) - 1n).toString(),
     updatedAt: group.updatedAt,
   }
+}
+
+/** Whether `sql` is a transaction's handle; only those have `savepoint`. */
+function isTransaction(sql: postgres.Sql): sql is postgres.TransactionSql {
+  return "savepoint" in sql
 }

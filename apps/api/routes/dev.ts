@@ -6,6 +6,7 @@ import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import { normalizeEmail } from "@spy4x/server/auth"
 import { authEmailSchema, authLoginSchema } from "@domain/identity"
 import { GroupRole } from "@domain/groups"
+import { recordAccessChange } from "@server/groups/group-change-log.ts"
 import { type } from "arktype"
 import type { Sql, Transaction } from "@spy4x/server/db"
 import type { AppDbBase } from "@api/services/db-base.ts"
@@ -75,18 +76,26 @@ export function createDevRoute(deps: DevRouteDeps) {
       const { login, groupId, role } = validation.data
       const key = await findPasswordKey(deps, login)
       if (!key) return c.json({ error: "No such user" }, 404)
-      // TODO(#130): adding a member or changing their role here does not raise the group's
-      // authorization_revision. Once roles and removal exist, go through the repository so the
-      // write calls `recordAccessChange` (libs/server/groups/group-change-log.ts).
-      const added = await deps.sql`
-        INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
-        SELECT groups.id, ${key.userId}, ${role}, groups.owner_user_id
-        FROM groups
-        WHERE groups.id = ${groupId} AND groups.deleted_at IS NULL
-        ON CONFLICT (group_id, user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()
-          WHERE group_members.role <> ${GroupRole.OWNER}
-        RETURNING user_id
-      `
+      // Through `recordAccessChange`, as every member change goes: the group's revision rises
+      // and its open pages hear of the change.
+      const added = await deps.sql.begin(async (tx: Transaction) => {
+        const rows = await tx`
+          INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+          SELECT groups.id, ${key.userId}, ${role}, groups.owner_user_id
+          FROM groups
+          WHERE groups.id = ${groupId} AND groups.deleted_at IS NULL
+          ON CONFLICT (group_id, user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()
+            WHERE group_members.role <> ${GroupRole.OWNER}
+          RETURNING user_id
+        `
+        if (rows.length > 0) {
+          const [{ ownerUserId }] = await tx<{ ownerUserId: number }[]>`
+            SELECT owner_user_id FROM groups WHERE id = ${groupId}
+          `
+          await recordAccessChange(tx, groupId, ownerUserId, "group.member_added", [])
+        }
+        return rows
+      })
       if (added.length === 0) {
         const owner = await deps.sql`
           SELECT 1 FROM group_members

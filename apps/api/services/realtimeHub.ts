@@ -26,6 +26,10 @@ export const realtime = new Realtime({
       delete: (command) => commandBus.execute(command),
       restore: (command) => commandBus.execute(command),
       deleted: (query) => queryBus.execute(query),
+      members: (query) => queryBus.execute(query),
+      setRole: (command) => commandBus.execute(command),
+      removeMember: (command) => commandBus.execute(command),
+      leave: (command) => commandBus.execute(command),
       cursor: groupListCursor,
     }),
     ...createProfileSocketRequests({

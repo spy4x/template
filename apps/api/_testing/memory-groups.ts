@@ -5,6 +5,7 @@ import {
   GroupError,
   type GroupListPage,
   type GroupListResult,
+  type GroupMemberSummary,
   type GroupRepository,
   GroupRole,
   type GroupSummary,
@@ -18,9 +19,9 @@ const AT = new Date("2026-10-02T10:00:00.000Z")
  * transports. It holds the rules the handlers decide with (who is a member, which group is deleted
  * and so restorable) and none of the database's: it does not enforce the last-group rule or give
  * stranded members a group, which the integration tests prove against Postgres; `lastGroup` makes
- * a delete fail as the database does for a person's only group. `writes` counts
- * every rename, delete and restore that reached it, so a refused request is shown to change
- * nothing.
+ * a delete or a leave fail as the database does for a person's only group. `writes` counts
+ * every rename, delete, restore and member change that reached it, so a refused request is shown
+ * to change nothing.
  */
 export class MemoryGroupRepository implements GroupRepository {
   writes = 0
@@ -126,6 +127,64 @@ export class MemoryGroupRepository implements GroupRepository {
         ? [{ ...this.#summary(access.role), deletedAt: AT }]
         : [],
     )
+  }
+
+  #member(userId: number, actorId: number): GroupMemberSummary {
+    return {
+      userId,
+      name: `Member ${userId}`,
+      email: null,
+      role: this.roles[userId],
+      joinedAt: AT,
+      isYou: userId === actorId,
+    }
+  }
+
+  listMembers(_groupId: string, actorId: number): Promise<GroupMemberSummary[] | null> {
+    if (!this.#access(actorId, false)) return Promise.resolve(null)
+    return Promise.resolve(
+      Object.keys(this.roles).map((userId) => this.#member(Number(userId), actorId)),
+    )
+  }
+
+  changeMemberRole(
+    _groupId: string,
+    userId: number,
+    role: GroupRole,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupMemberSummary | null> {
+    if (!this.#access(actorId, false)) return Promise.resolve(null)
+    this.roles[userId] = role
+    this.writes++
+    this.requestIds.push(requestId)
+    return Promise.resolve(this.#member(userId, actorId))
+  }
+
+  removeMember(
+    _groupId: string,
+    userId: number,
+    actorId: number,
+    requestId?: string,
+  ): Promise<boolean> {
+    if (!this.#access(actorId, false)) return Promise.resolve(false)
+    delete this.roles[userId]
+    this.writes++
+    this.requestIds.push(requestId)
+    return Promise.resolve(true)
+  }
+
+  leave(_groupId: string, actorId: number, requestId?: string): Promise<boolean> {
+    if (!this.#access(actorId, false)) return Promise.resolve(false)
+    if (this.lastGroup) {
+      return Promise.reject(
+        new GroupError("LAST_GROUP", "You cannot leave your only group. Create another first."),
+      )
+    }
+    delete this.roles[actorId]
+    this.writes++
+    this.requestIds.push(requestId)
+    return Promise.resolve(true)
   }
 
   getSelected(): Promise<SelectedGroup> {
