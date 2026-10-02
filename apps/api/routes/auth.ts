@@ -17,7 +17,7 @@ import {
   type User,
 } from "@domain/identity"
 import { EmailChangeOutcome, EmailVerifyOutcome, type SignIn } from "@api/services/sign-in.ts"
-import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
+import { UserSignedOutEvent } from "@api/cqrs/events.ts"
 import { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
 import type { Lockout } from "@spy4x/server/lockout"
@@ -28,7 +28,8 @@ import { readApiJson } from "@api/services/json-body.ts"
 /** What the auth routes call. `index.ts` passes the app's singletons; tests pass fakes. */
 export interface AuthRouteDependencies {
   signIn: SignIn
-  emit(event: UserSignedInEvent | UserSignedOutEvent | UserSignedUpEvent): void
+  /** Announces a sign-out, so the person's open sockets close. Audit rows are not events (#191). */
+  emit(event: UserSignedOutEvent): void
   mutationGuards: MutationGuards
   rateLimits: AuthRateLimits
   /** Persistent count of wrong one-time codes per user, with a growing lock. */
@@ -178,13 +179,6 @@ export function createAuthRoute(
       if (!signedIn) {
         return c.json({ error: "Invalid e-mail, username or password" }, 401)
       }
-      emit(
-        new UserSignedInEvent({
-          user: signedIn.user,
-          // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
-          request: requestInfoFromContext(c, { trustedProxy: true }),
-        }),
-      )
       return signInAnswer(c, signedIn)
     })
     .post(`/password/sign-up`, mutationGuards.anonymous, rateLimits.strictByIp, async (c) => {
@@ -202,14 +196,6 @@ export function createAuthRoute(
         // Sign-up necessarily tells that an address is taken; "Forgot password" is the way in.
         return c.json({ error: "This e-mail address cannot be used to sign up" }, 401)
       }
-      emit(
-        new UserSignedUpEvent({
-          user: signedUp.user,
-          email,
-          // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
-          request: requestInfoFromContext(c, { trustedProxy: true }),
-        }),
-      )
       try {
         await requestEmailCode(signedUp.user.id, email)
       } catch (error) {
