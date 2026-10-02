@@ -221,6 +221,8 @@ These cost real time to find. Do not rediscover them.
    `GET /api/auth/email` answers `{ email, proven, pending }`; `POST
    /api/auth/email/verify` takes `{ code }`; `POST /api/auth/email/send` asks for
    a new code (3 mails an hour per address, `ratelimit-email-code` in Valkey);
+   codes come from `createEmailProof` and are bound to the user and the address,
+   so another account proving the same address cannot spend this one's guesses;
    wrong codes also count against the account in `email_code_failures`
    (`@spy4x/server/lockout`: 5 in a row lock it for 15 minutes, doubling). A
    wrong and an expired code get the same answer. An unproven address cannot
@@ -232,7 +234,11 @@ These cost real time to find. Do not rediscover them.
    password }` stores the new address in `email_changes` and mails it a code;
    the account keeps signing in with the old address until that code is
    entered. The verify call then moves the password key to the new address,
-   signs out every other session and gives this one a new cookie.
+   signs out every other session and gives this one a new cookie. A username
+   account adds its first address the same way, and from then on signs in with
+   the address instead of the username. A password reset drops a waiting change.
+   A reset and a move of one account both lock its password key first
+   (`lockPasswordKey`), so neither copies a hash the other is replacing.
 
    **A squatted address.** Anyone can still sign up first with someone else's
    address, but it stays unproven and cannot carry a second factor. A reset
