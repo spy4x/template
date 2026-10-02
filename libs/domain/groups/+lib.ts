@@ -633,6 +633,11 @@ export function canDelete(role: GroupRole): boolean {
   return isGroupRole(role) && role === GroupRole.OWNER
 }
 
+/** Whether `role` may pay for the group and change its plan: only the owner. */
+export function canManageBilling(role: GroupRole): boolean {
+  return isGroupRole(role) && role === GroupRole.OWNER
+}
+
 /**
  * Throws unless `role` may rename the group. `null` means the actor is not a member, which answers
  * "group not found" so a stranger cannot tell a group exists.

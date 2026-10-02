@@ -1,7 +1,7 @@
 import { type } from "arktype"
 import type { Command, Query } from "@spy4x/platform/cqrs"
 import type { Actor } from "@domain/identity"
-import { canRead, GroupRole } from "@domain/groups"
+import { canManageBilling, canRead, GroupRole } from "@domain/groups"
 
 /**
  * Billing: one subscription per group, paid by the group's owner. A group without a paid
@@ -147,11 +147,6 @@ export class BillingError extends Error {
 }
 
 // #region Authorization
-/** Whether `role` may pay for the group or change how it pays: only the owner. */
-export function canManageBilling(role: GroupRole): boolean {
-  return role === GroupRole.OWNER
-}
-
 /** Throws unless `role` is a member's; a stranger is told the group does not exist. */
 export function assertCanReadBilling(role: GroupRole | null): asserts role is GroupRole {
   if (role === null || !canRead(role)) throw new BillingError("GROUP_NOT_FOUND", "Group not found")
@@ -230,6 +225,11 @@ export type BillingApplyOutcome =
  */
 export interface BillingRepository {
   get(groupId: string): Promise<StoredSubscription | null>
+  /**
+   * The actor's role in the group, read the way a group write reads it (`lockActorRole`): a removal
+   * or a role change committed first is seen, and `null` answers a stranger or a deleted group.
+   */
+  lockedRoleOf(groupId: string, userId: number): Promise<GroupRole | null>
   /** The provider customer that pays for the group, or `null` before its first checkout. */
   customerOf(groupId: string): Promise<string | null>
 }

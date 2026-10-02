@@ -93,13 +93,16 @@ export function createBillingPortalHandler(
   }
 }
 
-/** Only the owner passes, and only while billing is on. Returns the provider. */
+/**
+ * Only the owner of an active group passes, and only while billing is on. Returns the provider. The
+ * role is read the way group writes read it, so an ownership change committed first is seen.
+ */
 async function authorize(
-  { groups, provider }: BillingHandlerDependencies,
+  { billing, provider }: BillingHandlerDependencies,
   groupId: string,
   userId: number,
 ): Promise<BillingProvider> {
-  assertCanManageBilling(await groups.roleOf(groupId, userId))
+  assertCanManageBilling(await billing.lockedRoleOf(groupId, userId))
   if (!provider) throw new BillingError("BILLING_DISABLED", "Billing is off")
   return provider
 }

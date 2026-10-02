@@ -11,7 +11,12 @@ import {
   type BillingRepository,
   type StoredSubscription,
 } from "@domain/billing"
-import { recordGroupChange } from "@server/groups/group-change-log.ts"
+import type { GroupRole } from "@domain/groups"
+import {
+  GroupNotActiveError,
+  lockActorRole,
+  recordGroupChange,
+} from "@server/groups/group-change-log.ts"
 
 interface SubscriptionRow extends postgres.Row, StoredSubscription {}
 
@@ -69,6 +74,21 @@ export class PostgresBillingRepository implements BillingRepository {
         cancelAtPeriodEnd: row.cancelAtPeriodEnd,
       }
       : null
+  }
+
+  /**
+   * The actor's role through `lockActorRole`, in a transaction of its own. The transaction ends
+   * before the caller talks to the provider, so no group lock is held over the network.
+   */
+  async lockedRoleOf(groupId: string, userId: number): Promise<GroupRole | null> {
+    try {
+      return await this.sql.begin((transaction: postgres.TransactionSql) =>
+        lockActorRole(transaction, groupId, userId)
+      )
+    } catch (error) {
+      if (error instanceof GroupNotActiveError) return null
+      throw error
+    }
   }
 
   async customerOf(groupId: string): Promise<string | null> {

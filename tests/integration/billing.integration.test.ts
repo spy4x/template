@@ -8,6 +8,7 @@ import {
   SubscriptionStatus,
 } from "@spy4x/billing"
 import { BILLING_EVENTS, PRO_PLAN_ID } from "@domain/billing"
+import { GroupRole } from "@domain/groups"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { requireDbConnection } from "./db-connection.ts"
@@ -299,6 +300,33 @@ Deno.test("billing events against Postgres", async (t) => {
             event({ id: "evt_h1", reference: groupId, customerId: "cus_refused" }),
           ),
         ).toBe("applied")
+      },
+    )
+
+    await t.step(
+      "the owner check reads the role as group writes do: a removed member and a deleted group get none",
+      async () => {
+        const { groupId, owner } = await seedGroup(sql)
+        const editor = (await sql<{ id: number }[]>`
+          WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id)
+          INSERT INTO users (id) SELECT id FROM auth_user RETURNING id
+        `)[0].id
+        await sql`
+          INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+          VALUES (${groupId}, ${editor}, ${GroupRole.EDITOR}, ${owner})
+        `
+
+        const before = [
+          await billing.lockedRoleOf(groupId, owner),
+          await billing.lockedRoleOf(groupId, editor),
+        ]
+        await sql`DELETE FROM group_members WHERE group_id = ${groupId} AND user_id = ${editor}`
+        const removed = await billing.lockedRoleOf(groupId, editor)
+        await sql`UPDATE groups SET deleted_at = CURRENT_TIMESTAMP WHERE id = ${groupId}`
+        const deleted = await billing.lockedRoleOf(groupId, owner)
+
+        expect(before).toEqual([GroupRole.OWNER, GroupRole.EDITOR])
+        expect([removed, deleted]).toEqual([null, null])
       },
     )
   })

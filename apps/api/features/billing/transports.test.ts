@@ -62,17 +62,19 @@ function stack(
   } = {},
 ) {
   const recorder: Recorder = { checkouts: [], portals: [] }
+  const groups = roles({
+    [`${groupId}:${OWNER}`]: GroupRole.OWNER,
+    [`${groupId}:${ADMIN}`]: GroupRole.ADMIN,
+    [`${groupId}:${EDITOR}`]: GroupRole.EDITOR,
+    [`${groupId}:${VIEWER}`]: GroupRole.VIEWER,
+  })
   const dependencies = {
     billing: {
       get: () => Promise.resolve(subscription),
+      lockedRoleOf: (id: string, userId: number) => groups.roleOf(id, userId),
       customerOf: () => Promise.resolve(customer),
     },
-    groups: roles({
-      [`${groupId}:${OWNER}`]: GroupRole.OWNER,
-      [`${groupId}:${ADMIN}`]: GroupRole.ADMIN,
-      [`${groupId}:${EDITOR}`]: GroupRole.EDITOR,
-      [`${groupId}:${VIEWER}`]: GroupRole.VIEWER,
-    }),
+    groups,
     provider: enabled ? fakeProvider(recorder) : null,
     webAppUrl: "https://app.example.com",
     log: () => {},
