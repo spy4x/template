@@ -98,8 +98,32 @@ describe("members store", () => {
     expect(store.memberError.value).toEqual({
       userId: 2,
       message: "Only an admin can remove a member",
+      plan: null,
     })
     expect(store.members.value?.map((m) => m.userId)).toEqual([1, 2])
+  })
+
+  it("hands the screen the plan's refusal of a role change, read from the socket's details", async () => {
+    const refusal = {
+      code: "PLAN_FEATURE_MISSING",
+      entitlement: "memberRoles",
+      limit: null,
+      canUpgrade: true,
+    }
+    const store = createMembersStore({
+      ...UNUSED,
+      setRole: () =>
+        Promise.reject(new RealtimeRequestError("forbidden", "Upgrade to change roles", refusal)),
+    })
+    await store.open("g")
+
+    expect(await store.changeRole(2, GroupRole.EDITOR)).toBe(false)
+
+    expect(store.memberError.value).toEqual({
+      userId: 2,
+      message: "Upgrade to change roles",
+      plan: refusal,
+    })
   })
 
   it("drops a removed member from the list", async () => {
