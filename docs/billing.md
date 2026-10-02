@@ -170,13 +170,14 @@ cards such as `4242 4242 4242 4242` pay without money.
 5. Configure the customer portal once in the dashboard (Settings, Billing, Customer portal), or
    Stripe refuses to open it.
 6. Set failed payments to cancel the subscription (Settings, Billing, Subscriptions and emails,
-   "Manage failed payments", "If all retries for a payment fail": cancel the subscription). This app
-   counts a past-due subscription as paid, and Stripe reports "unpaid" as past due too, so with
-   "mark as unpaid" or "leave past-due" a group whose card fails keeps Pro with no end date.
+   "Manage failed payments for subscriptions": when all retries fail, cancel the subscription).
+   This app counts a past-due subscription as paid, and `@spy4x/billing` maps Stripe's `unpaid` to
+   past due too, so with "Mark the subscription as unpaid" or "Leave the subscription overdue" a
+   group whose card fails keeps Pro with no end date.
 
 In production, add the webhook endpoint `https://<domain>/api/webhooks/billing` in the dashboard
-with the same five events, use its signing secret, and set failed payments as in step 6. Keys live in the environment only; the
-tracked `.env.example` holds empty placeholders.
+with the same five events, use its signing secret, and set failed payments as in step 6. Keys live
+in the environment only; the tracked `.env.example` holds empty placeholders.
 
 ## The development provider
 
