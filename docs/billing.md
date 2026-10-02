@@ -18,8 +18,10 @@ The catalog is `PLANS` in `libs/domain/billing/+lib.ts`:
 
 A group is on a paid plan while its subscription is trialing or active, and for a grace period
 while it is past due (below). A canceled, incomplete or paused subscription, or one billing a price
-that is not in the catalog, puts the group back on Free. To add a plan, add it to `PLANS`, add its price variable to `readBillingSetup`
-(`apps/api/features/billing/config.ts`) and to `infra/envs/.env.example`.
+that is not in the catalog, puts the group back on Free. To add a plan, add it to `PLANS`, add its
+price variable to `readBillingSetup` (`apps/api/features/billing/config.ts`), to
+`infra/envs/.env.example` and to the api service's `environment` in
+`infra/compose/compose.shared.yml`.
 
 ## Failed payments
 
@@ -32,11 +34,16 @@ deleted: the subscription stays stored as past due, and everything over a Free c
 - The start is `subscriptions.past_due_since`, the `created` time of the first past-due event.
   Later past-due events keep it; Stripe's `unpaid` arrives as past due too
   (`@spy4x/billing` maps both to `PastDue`), so giving up on retries does not restart the clock.
+- A past-due event that arrives after a newer event is stale and ignored, as every event is (the
+  delivery rules under "Flow"). If Stripe delivers the first failure late, after a newer past-due
+  event, the grace period starts at that newer event instead. This only lengthens the grace in the
+  customer's favour, and only by as long as Stripe's delivery was delayed.
 - Any other status clears it. A payment that makes the subscription active again brings the plan
   back at once; a later failure starts a new grace period.
 - `effectivePlanId(subscription, now, graceDays)` in `libs/domain/billing/+lib.ts` decides. The
-  command bus's plan check and the billing read both call it with the current time, so the cut-off
-  is exact to the request, with no job.
+  command bus's plan check and the billing read both take the current time and the grace period
+  from `planClockOf` (`apps/api/features/billing/config.ts`), so the cut-off is exact to the
+  request, with no job.
 
 **How it meets Stripe's retries.** Stripe's retry window ("Manage failed payments", up to about two
 months) and this grace period are separate clocks. While Stripe retries, the subscription stays
