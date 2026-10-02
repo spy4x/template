@@ -133,4 +133,46 @@ describe("GroupSettingsView", () => {
     expect(html).toMatch(/<option[^>]*value="2"[^>]*>Vera Viewer<\/option>/)
     expect(html).not.toMatch(/<option[^>]*>Olga Owner<\/option>/)
   })
+
+  it("tells the owner the subscription moves and stays on their card, for the open group's plan only", () => {
+    groupsStore.groups.value = [{ ...known, role: GroupRole.OWNER }]
+    membersStore.groupId.value = known.id
+    membersStore.members.value = [
+      {
+        userId: 1,
+        name: "Olga Owner",
+        email: null,
+        role: GroupRole.OWNER,
+        joinedAt: "2026-10-01T00:00:00.000Z",
+        isYou: true,
+      },
+      {
+        userId: 2,
+        name: "Vera Viewer",
+        email: null,
+        role: GroupRole.VIEWER,
+        joinedAt: "2026-10-01T00:00:00.000Z",
+        isYou: false,
+      },
+    ]
+    const subscribed: GroupBilling = {
+      enabled: true,
+      planId: PRO_PLAN_ID,
+      status: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      canManage: true,
+      subscribed: true,
+      hasCustomer: true,
+      trialEnd: null,
+      notice: null,
+    }
+    const sentence = "stays on your card"
+
+    expect(render(known.id)).not.toContain(sentence)
+    billingStore.current.value = { groupId: strangerId, billing: subscribed }
+    expect(render(known.id)).not.toContain(sentence)
+    billingStore.current.value = { groupId: known.id, billing: subscribed }
+    expect(render(known.id)).toContain(sentence)
+  })
 })

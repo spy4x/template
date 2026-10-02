@@ -138,7 +138,7 @@ export function GroupTransferSection(
                           to another member. They become the owner and you become an admin. Only the
                           owner can delete the group, manage its plan or transfer it again.
                           {hasSubscription &&
-                            " The subscription moves with the group: the new owner manages it in the billing portal, and the current card is charged until they change it."}
+                            " The subscription moves with the group and stays on your card. The new owner can change its plan and see its billing details, and you can no longer cancel it. Ask them to add their own card."}
                         </p>
                         <Field id="group-transfer-member" label="New owner">
                           <Select
