@@ -96,7 +96,7 @@ test.describe("realtime when the app returns", () => {
     }
   })
 
-  test("shows no disconnect warning after a short trip to the background", async ({ page, request }) => {
+  test("shows no warning after a short trip to the background, but shows a later real drop", async ({ page, request }) => {
     const { cleanup, dropSockets } = await signedIn(
       { page, request },
       "e2e_resume_quiet@example.com",
@@ -115,6 +115,11 @@ test.describe("realtime when the app returns", () => {
 
       const texts = await statusTexts(page)
       expect(texts.filter((text) => text !== "Online")).toEqual([])
+
+      // The quiet period is over. A real drop while the page is visible must show, not stay hidden.
+      await page.context().setOffline(true)
+      await dropSockets()
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Offline")
     } finally {
       await page.context().setOffline(false)
       await cleanup({ soft: true })
