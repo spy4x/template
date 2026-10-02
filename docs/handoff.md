@@ -333,8 +333,9 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 
 - The password and two-factor calls are still REST: they change the session the socket is bound
   to. The MPA has no socket, so the profile and push REST routes stay for it.
-- Nobody can be added to a group through the product yet (invitations are #131): tests seed a
-  second member with `POST /api/test/add-member`. Role changes, removal and leaving are built.
+- Invitations (#131) are the only way into a group through the product; tests may still seed a
+  member with `POST /api/test/add-member`. An invitation stays valid after its creator leaves or
+  is demoted, and expired invitation rows are never deleted.
 - No local projection in the SPA, no offline outbox, no conflict UI. The page keeps its cursors in
   `localStorage` and rereads the whole group list to catch up.
 - The worker publishes a group change with `pg_notify`, which reaches only API instances that are
@@ -481,6 +482,18 @@ first in both: the other order deadlocks a write against a member change (the "l
 in `tests/integration/group-write-race.integration.test.ts`). `recordAccessChange` and
 `recordGroupChange` take a transaction, never the pool. Members' sign-in addresses go only to the
 owner and admins (`canSeeMemberEmails`); other members get no `email` field.
+
+Invitations (#131): only `sha256(token)` is stored (`group_invitations.token_hash`), so a link
+is shown once, in the answer to its create, and never again: the create sends no
+`Idempotency-Key`, since the idempotency store would keep the token, and the MPA draws the link
+in the create's answer instead of redirecting. The link is `/invite/:token`; the API takes the
+token only in a JSON body, never in a URL it logs, and both apps send no referrer from the
+invitation page. Pending invitations take no seat: the create is refused by the entitlement gate
+when the members alone fill the plan's `maxMembers`, and the accept counts the members again
+under the group row's lock (`PostgresInvitationRepository.accept`). An address-bound invitation is
+accepted only by an account that proved that address (`provenAddressOwner`). Create, accept and
+revoke write their audit rows in their own transaction. Creates are capped per user per hour,
+mails per address per hour, and previews and answers per IP (`invitation-rate-limits.ts`).
 
 Extraction from the sibling Financy project is tracked separately in
 [docs/financy-extraction-inventory.md](financy-extraction-inventory.md);
