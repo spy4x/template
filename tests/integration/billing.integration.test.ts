@@ -7,7 +7,7 @@ import {
   type SubscriptionEvent,
   SubscriptionStatus,
 } from "@spy4x/billing"
-import { BILLING_EVENTS, PRO_PLAN_ID } from "@domain/billing"
+import { BILLING_EVENTS, effectivePlanId, FREE_PLAN_ID, PRO_PLAN_ID } from "@domain/billing"
 import { GroupError, GroupRole } from "@domain/groups"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
@@ -441,6 +441,100 @@ Deno.test("billing events against Postgres", async (t) => {
         expect(refused).toBeInstanceOf(GroupError)
         expect(refused.code).toBe("GROUP_SUBSCRIBED")
         expect(deleted?.id).toBe(groupId)
+      },
+    )
+
+    await t.step(
+      "the first past-due event starts the grace period, a later one keeps it, a payment clears it",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const minutes = (n: number) => new Date(T0.getTime() + n * 60_000)
+        const days = (n: number) => minutes(n * 24 * 60)
+        const update = (id: string, status: SubscriptionStatus, at: Date) =>
+          billing.applyEvent(
+            event({
+              id,
+              reference: groupId,
+              customerId: "cus_m",
+              type: BillingEventType.SubscriptionUpdated,
+              status,
+              at,
+            }),
+          )
+        const planAt = async (now: Date) => effectivePlanId(await billing.get(groupId), now, 7)
+        await billing.applyEvent(event({ id: "evt_m1", reference: groupId, customerId: "cus_m" }))
+
+        await update("evt_m2", SubscriptionStatus.PastDue, minutes(1))
+        // Stripe's `unpaid`, two days later, arrives as past due too.
+        await update("evt_m3", SubscriptionStatus.PastDue, days(2))
+        const marked = await billing.get(groupId)
+        const plans = [
+          await planAt(new Date(minutes(1).getTime() + 7 * 24 * 60 * 60_000 - 1)),
+          await planAt(new Date(minutes(1).getTime() + 7 * 24 * 60 * 60_000)),
+        ]
+        await update("evt_m4", SubscriptionStatus.Active, days(9))
+        const paid = await billing.get(groupId)
+        const planAfterPayment = await planAt(days(9))
+        await update("evt_m5", SubscriptionStatus.PastDue, days(40))
+
+        expect(marked).toMatchObject({
+          status: SubscriptionStatus.PastDue,
+          pastDueSince: minutes(1),
+        })
+        expect(plans).toEqual([PRO_PLAN_ID, FREE_PLAN_ID])
+        expect(paid).toMatchObject({ status: SubscriptionStatus.Active, pastDueSince: null })
+        expect(planAfterPayment).toBe(PRO_PLAN_ID)
+        expect((await billing.get(groupId))?.pastDueSince).toEqual(days(40))
+      },
+    )
+
+    await t.step(
+      "a new subscription that replaces a past-due one does not inherit its grace start",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        await billing.applyEvent(
+          event({
+            id: "evt_n1",
+            reference: groupId,
+            customerId: "cus_n",
+            status: SubscriptionStatus.PastDue,
+          }),
+        )
+        const later = new Date(T0.getTime() + 5 * 24 * 60 * 60_000)
+
+        await billing.applyEvent(
+          event({
+            id: "evt_n2",
+            reference: groupId,
+            customerId: "cus_n",
+            subscriptionId: "sub_n2",
+            status: SubscriptionStatus.PastDue,
+            at: later,
+          }),
+        )
+
+        expect(await billing.get(groupId)).toMatchObject({
+          providerSubscriptionId: "sub_n2",
+          pastDueSince: later,
+        })
+      },
+    )
+
+    await t.step(
+      "the database refuses a past-due subscription without a grace start, and a start on any other",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const insert = (status: SubscriptionStatus, since: Date | null) =>
+          sql`
+            INSERT INTO subscriptions (group_id, provider_subscription_id, plan_id, status,
+              provider_event_at, provider_event_rank, past_due_since)
+            VALUES (${groupId}, 'sub_o', 'pro', ${status}, ${T0}, 1, ${since})
+          `
+
+        await expect(insert(SubscriptionStatus.PastDue, null))
+          .rejects.toThrow("subscriptions_past_due_since_check")
+        await expect(insert(SubscriptionStatus.Active, T0))
+          .rejects.toThrow("subscriptions_past_due_since_check")
       },
     )
   })

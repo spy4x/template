@@ -465,6 +465,7 @@ services:
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - STRIPE_PRICE_PRO=${STRIPE_PRICE_PRO:-}
+      - BILLING_GRACE_DAYS=${BILLING_GRACE_DAYS:-}
     deploy:
       resources:
         limits:

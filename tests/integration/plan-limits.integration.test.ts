@@ -3,7 +3,7 @@ import { expect } from "@std/expect"
 import postgres from "postgres"
 import { CommandBus } from "@spy4x/platform/cqrs"
 import { BillingEventType, type SubscriptionEvent, SubscriptionStatus } from "@spy4x/billing"
-import { effectivePlanId, PlanError, PRO_PLAN_ID } from "@domain/billing"
+import { DEFAULT_GRACE_DAYS, effectivePlanId, PlanError, PRO_PLAN_ID } from "@domain/billing"
 import { UserMFAStatus } from "@domain/identity"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { NoteCreateCommand, NoteDeleteCommand, NoteUpdateCommand } from "@domain/notes"
@@ -42,7 +42,8 @@ function noteBus(sql: postgres.Sql, usage?: EntitlementGateDependencies["usage"]
   const bus = new CommandBus()
   bus.use(createEntitlementGate({
     billingEnabled: true,
-    planOf: async (groupId) => effectivePlanId(await billing.get(groupId)),
+    planOf: async (groupId) =>
+      effectivePlanId(await billing.get(groupId), new Date(), DEFAULT_GRACE_DAYS),
     roleOf: groups.roleOf,
     usage: usage ?? { maxNotes: (groupId) => notes.count(groupId) },
   }, ENTITLEMENT_NEEDS))
