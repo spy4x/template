@@ -27,8 +27,8 @@ export type FeatureKey =
 /**
  * A count a plan caps. A product adds its own keys the same way as {@link FeatureKey}.
  *
- * - `maxMembers`: members of the group, the owner included. No command adds a member yet; the
- *   invitations (#131) will count against it.
+ * - `maxMembers`: members of the group, the owner included. Creating an invitation and accepting
+ *   one count against it; a pending invitation takes no seat.
  * - `maxNotes`: notes in the group that are not deleted.
  * - `storageBytes`: bytes of attachments. Attachments (#157) are not built yet; only the key ships.
  */
@@ -73,8 +73,7 @@ export const PLANS: readonly Plan[] = [
     amount: 0,
     currency: "EUR",
     description: "For trying things out.",
-    // No member count in the text until `maxMembers` is enforced (#131).
-    features: ["Up to 10 notes"],
+    features: ["Up to 10 notes", "Up to 3 members"],
     entitlements: {
       features: { memberRoles: false },
       limits: { maxMembers: 3, maxNotes: 10, storageBytes: 50 * 1024 * 1024 },
@@ -87,7 +86,12 @@ export const PLANS: readonly Plan[] = [
     amount: 900,
     currency: "EUR",
     description: "For a group that relies on it.",
-    features: ["Unlimited notes", "Promote members to editor or admin", "Priority support"],
+    features: [
+      "Unlimited notes",
+      "Up to 50 members",
+      "Promote members to editor or admin",
+      "Priority support",
+    ],
     entitlements: {
       features: { memberRoles: true },
       limits: { maxMembers: 50, maxNotes: null, storageBytes: 10 * 1024 * 1024 * 1024 },

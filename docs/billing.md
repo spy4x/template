@@ -131,7 +131,7 @@ answers.
 | -------------- | ------- | ------- | ------- | ------------------------------------------------------------ |
 | `memberRoles`  | feature | no      | yes     | Promoting a member (`GroupMemberRoleCommand`)                |
 | `maxNotes`     | limit   | 10      | no cap  | Creating a note (`NoteCreateCommand`)                        |
-| `maxMembers`   | limit   | 3       | 50      | Not yet: no command adds a member until invitations (#131)   |
+| `maxMembers`   | limit   | 3       | 50      | Inviting (`GroupInvitationCreateCommand`) and accepting      |
 | `storageBytes` | limit   | 50 MiB  | 10 GiB  | Not yet: the key ships for attachments (#157)                |
 
 A limit of `null` means no cap.
