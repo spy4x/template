@@ -61,6 +61,7 @@ Deno.test({
       await applyMigration(sql, "2026_10_04_0001_groups_ms_precision.sql")
       await applyMigration(sql, "2026_10_05_0001_user_settings.sql")
       await applyMigration(sql, "2026_10_06_0001_password_reset.sql")
+      await applyMigration(sql, "2026_10_08_0001_email_verification.sql")
 
       await t.step("backfill is rerunnable and covers only active users", async () => {
         await applyMigration(sql, "2026_08_18_0002_personal_group_backfill.sql")
@@ -475,6 +476,9 @@ const SNAPSHOT_TABLES = [
   "user_settings",
   "password_reset_requests",
   "dev_mail",
+  "email_changes",
+  "email_code_requests",
+  "email_code_failures",
 ]
 
 /**
