@@ -65,8 +65,9 @@ test.describe("plan limits", () => {
       const listed = await page.request.get(`${apiBase}/api/groups/${groupId}/notes?limit=100`)
       expect((await listed.json()).notes).toHaveLength(FREE_NOTES)
 
-      await refusal.getByRole("link", { name: "See plans" }).click()
-      await expect(page).toHaveURL(`/groups/${groupId}/pricing`)
+      // Following it would leave the typed draft, so the unsaved-text guard would ask first.
+      await expect(refusal.getByRole("link", { name: "See plans" }))
+        .toHaveAttribute("href", `/groups/${groupId}/pricing`)
 
       await upgrade(request, groupId)
       expect(await addNote(page, groupId, "On Pro")).toBe(201)
