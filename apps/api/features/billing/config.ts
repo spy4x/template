@@ -1,4 +1,5 @@
 import type { EnvReader } from "@spy4x/server/config"
+import type { BillingHandlerDependencies } from "./handlers.ts"
 import { type BillingProvider, createStripeBilling, type PlanRef } from "@spy4x/billing"
 import {
   type BillingRepository,
@@ -34,6 +35,8 @@ export interface BillingSetup {
   provider: BillingProvider | null
   /** Days a past-due group keeps its plan while the provider retries the charge. */
   graceDays: number
+  /** Whether starting a trial asks for a card (`BILLING_TRIAL_REQUIRES_CARD`, default true). */
+  trialRequiresCard: boolean
 }
 
 /** Thrown at start-up when billing is asked for but cannot run. Names variables, never values. */
@@ -50,9 +53,9 @@ const STRIPE_KEYS = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE
 export const MAX_GRACE_DAYS = 90
 
 /**
- * Reads `BILLING_PROVIDER` (`stripe`, `fake` or `off`) and builds the provider, and
+ * Reads `BILLING_PROVIDER` (`stripe`, `fake` or `off`) and builds the provider,
  * `BILLING_GRACE_DAYS`, a whole number of days from 0 to {@link MAX_GRACE_DAYS} (unset:
- * {@link DEFAULT_GRACE_DAYS}).
+ * {@link DEFAULT_GRACE_DAYS}), and `BILLING_TRIAL_REQUIRES_CARD`, `true` or `false` (unset: true).
  *
  * - Unset, it is `fake` in development and `off` in production, so a deployment with no billing
  *   keys starts and keeps every group on the free plan.
@@ -68,10 +71,11 @@ export function readBillingSetup(
   options: { fetch?: typeof fetch } = {},
 ): BillingSetup {
   const graceDays = readGraceDays(env.get("BILLING_GRACE_DAYS"))
+  const trialRequiresCard = readTrialRequiresCard(env.get("BILLING_TRIAL_REQUIRES_CARD"))
   const chosen = env.get("BILLING_PROVIDER") ?? (appEnv === "dev" ? "fake" : "off")
   switch (chosen) {
     case "off":
-      return { mode: BillingMode.Off, provider: null, graceDays }
+      return { mode: BillingMode.Off, provider: null, graceDays, trialRequiresCard }
     case "fake":
       if (appEnv !== "dev") {
         throw new BillingConfigError(
@@ -82,6 +86,7 @@ export function readBillingSetup(
         mode: BillingMode.Fake,
         provider: createFakeBilling(env.get("STRIPE_PRICE_PRO") ?? FAKE_PRO_PRICE_ID),
         graceDays,
+        trialRequiresCard,
       }
     case "stripe": {
       const missing = STRIPE_KEYS.filter((name) => env.get(name) === undefined)
@@ -99,6 +104,7 @@ export function readBillingSetup(
           fetch: options.fetch,
         }),
         graceDays,
+        trialRequiresCard,
       }
     }
     default:
@@ -120,6 +126,16 @@ export function planClockOf(setup: Pick<BillingSetup, "graceDays">): PlanClock {
   return { graceDays: setup.graceDays, now: () => new Date() }
 }
 
+/**
+ * The settings the billing handlers take from the setup: the {@link PlanClock} and whether a trial
+ * asks for a card. The API's wiring spreads this, so a setting the setup reads reaches the handlers.
+ */
+export function billingSettingsOf(
+  setup: Pick<BillingSetup, "graceDays" | "trialRequiresCard">,
+): Pick<BillingHandlerDependencies, "graceDays" | "now" | "trialRequiresCard"> {
+  return { ...planClockOf(setup), trialRequiresCard: setup.trialRequiresCard }
+}
+
 /** The plan a group is on at this moment, for the command bus's plan check. */
 export function createPlanOf(
   billing: Pick<BillingRepository, "get">,
@@ -127,6 +143,12 @@ export function createPlanOf(
 ): (groupId: string) => Promise<string> {
   const { graceDays, now } = planClockOf(setup)
   return async (groupId) => effectivePlanId(await billing.get(groupId), now(), graceDays)
+}
+
+function readTrialRequiresCard(value: string | undefined): boolean {
+  if (value === undefined || value === "true") return true
+  if (value === "false") return false
+  throw new BillingConfigError("BILLING_TRIAL_REQUIRES_CARD must be true or false")
 }
 
 function readGraceDays(value: string | undefined): number {

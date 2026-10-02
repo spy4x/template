@@ -1,15 +1,13 @@
 import { signal } from "@preact/signals"
 import type { ApiResult } from "@spy4x/platform/api"
-import { type GroupBilling, providerPageUrl } from "@domain/billing"
+import { type GroupBilling, providerPageUrl, readGroupBilling } from "@domain/billing"
 import { apiFetch } from "./api.ts"
 
 /** `apiFetch`, or a test's stand-in for it. */
 export type BillingFetch = <T>(url: string, init?: RequestInit) => Promise<ApiResult<T>>
 
-/** `GroupBilling` as JSON carries it: the date is an ISO string. */
-type GroupBillingJson = Omit<GroupBilling, "currentPeriodEnd"> & { currentPeriodEnd: string | null }
-
 const OFFLINE = "The server is out of reach. Try again."
+const UNREADABLE = "The plan could not be read."
 const UNSAFE_PAGE = "The payment provider answered with an address this app does not open."
 
 function billingPath(groupId: string, action = ""): string {
@@ -40,19 +38,17 @@ export function createBillingStore(
 
   async function load(groupId: string): Promise<void> {
     try {
-      const result = await fetch<{ billing: GroupBillingJson }>(billingPath(groupId))
+      const result = await fetch<{ billing: unknown }>(billingPath(groupId))
       if (!result.ok) {
         error.value = { groupId, message: result.error.message, id: ++refusals }
         return
       }
-      const { currentPeriodEnd, ...rest } = result.data.billing
-      current.value = {
-        groupId,
-        billing: {
-          ...rest,
-          currentPeriodEnd: currentPeriodEnd ? new Date(currentPeriodEnd) : null,
-        },
+      const billing = readGroupBilling(result.data.billing)
+      if (!billing) {
+        error.value = { groupId, message: UNREADABLE, id: ++refusals }
+        return
       }
+      current.value = { groupId, billing }
       if (error.value?.groupId === groupId) error.value = null
     } catch (_unreachable) {
       error.value = { groupId, message: OFFLINE, id: ++refusals }

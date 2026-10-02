@@ -1,5 +1,5 @@
 import type { FreshContext } from "fresh"
-import { BillingStatus, type GroupBilling, providerPageUrl } from "@domain/billing"
+import { type GroupBilling, providerPageUrl, readGroupBilling } from "@domain/billing"
 import { PricingScreen } from "@ui/billing-screen.tsx"
 import { type Api, isOk, isRecord } from "./api.ts"
 import { readGroup } from "./groups.ts"
@@ -12,29 +12,8 @@ import type { State } from "./utils.ts"
  */
 export async function readBilling(api: Api, groupId: string): Promise<GroupBilling | null> {
   const answer = await api.call("GET", `/api/groups/${encodeURIComponent(groupId)}/billing`)
-  if (!isOk(answer) || !isRecord(answer.body) || !isRecord(answer.body.billing)) return null
-  const billing = answer.body.billing
-  const { enabled, planId, status, currentPeriodEnd, cancelAtPeriodEnd, canManage } = billing
-  const { subscribed, hasCustomer } = billing
-  if (
-    typeof enabled !== "boolean" || typeof planId !== "string" ||
-    typeof cancelAtPeriodEnd !== "boolean" || typeof canManage !== "boolean" ||
-    typeof subscribed !== "boolean" || typeof hasCustomer !== "boolean" ||
-    !(status === null || (typeof status === "number" && status in BillingStatus)) ||
-    !(currentPeriodEnd === null || typeof currentPeriodEnd === "string")
-  ) {
-    return null
-  }
-  return {
-    enabled,
-    planId,
-    status: status as BillingStatus | null,
-    currentPeriodEnd: currentPeriodEnd === null ? null : new Date(currentPeriodEnd),
-    cancelAtPeriodEnd,
-    canManage,
-    subscribed,
-    hasCustomer,
-  }
+  if (!isOk(answer) || !isRecord(answer.body)) return null
+  return readGroupBilling(answer.body.billing)
 }
 
 /** The provider page an answer of checkout or portal names, or `null`. */

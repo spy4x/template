@@ -26,6 +26,8 @@ export interface BillingHandlerDependencies {
   log: (message: string, detail?: unknown) => void
   /** Days a past-due group keeps its plan (`BILLING_GRACE_DAYS`). */
   graceDays: number
+  /** Whether a trial's checkout asks for a card (`BILLING_TRIAL_REQUIRES_CARD`). */
+  trialRequiresCard: boolean
   /** The current time; tests pass a fixed one. */
   now: () => Date
 }
@@ -62,9 +64,8 @@ export function createBillingCheckoutHandler(
 ): CommandHandler<BillingCheckoutCommand> {
   return async ({ data }) => {
     const provider = await authorize(dependencies, data.groupId, data.actor.userId)
-    if (!PAID_PLANS.some((plan) => plan.id === data.planId)) {
-      throw new BillingError("UNKNOWN_PLAN", "No such plan")
-    }
+    const plan = PAID_PLANS.find((candidate) => candidate.id === data.planId)
+    if (!plan) throw new BillingError("UNKNOWN_PLAN", "No such plan")
     // A second checkout would start a second subscription and charge twice; the portal changes the
     // plan of the one the group has. Any subscription that is not cancelled counts, even a paused,
     // incomplete or unknown-price one that shows as the free plan.
@@ -78,7 +79,9 @@ export function createBillingCheckoutHandler(
       successUrl: appUrl(dependencies, `/groups/${data.groupId}`),
       cancelUrl: appUrl(dependencies, `/groups/${data.groupId}/pricing`),
       reference: data.groupId,
-      ...(customerId ? { customerId } : {}),
+      // Only a group's first checkout starts with a trial: a group that ever paid, or tried, has a
+      // customer already.
+      ...(customerId ? { customerId } : trialOf(plan.trialDays, dependencies.trialRequiresCard)),
       // The client's key is scoped to the group and the person, so one person's key can never
       // replay a checkout the provider made for another group or person.
       ...(data.idempotencyKey
@@ -91,6 +94,15 @@ export function createBillingCheckoutHandler(
     }
     return { url: result.value.url }
   }
+}
+
+/** The checkout's trial fields: none for a plan without trial days. */
+function trialOf(
+  trialDays: number,
+  requiresCard: boolean,
+): { trialDays?: number; trialWithoutPaymentMethod?: boolean } {
+  if (trialDays <= 0) return {}
+  return requiresCard ? { trialDays } : { trialDays, trialWithoutPaymentMethod: true }
 }
 
 export function createBillingPortalHandler(

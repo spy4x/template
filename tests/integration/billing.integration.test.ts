@@ -7,9 +7,21 @@ import {
   type SubscriptionEvent,
   SubscriptionStatus,
 } from "@spy4x/billing"
-import { BILLING_EVENTS, effectivePlanId, FREE_PLAN_ID, PRO_PLAN_ID } from "@domain/billing"
+import {
+  BILLING_EVENTS,
+  BillingNoticeKind,
+  effectivePlanId,
+  FREE_PLAN_ID,
+  PRO_PLAN_ID,
+} from "@domain/billing"
 import { GroupError, GroupRole } from "@domain/groups"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
+import { BILLING_NOTICE_JOBS } from "@server/billing/billing-notices.ts"
+import { JOB_AGGREGATE } from "@server/jobs/jobs.ts"
+import { createOutboxProcessor } from "@server/jobs/wiring.ts"
+import type { EmailMessage } from "@spy4x/email/message"
+import type { EmailSender } from "@spy4x/email/sender"
+import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { requireDbConnection } from "./db-connection.ts"
 
@@ -69,6 +81,8 @@ function event(
     customerId?: string
     status?: SubscriptionStatus
     currentPeriodEnd?: Date
+    cancelAtPeriodEnd?: boolean
+    trialEnd?: Date | null
   },
 ): SubscriptionEvent {
   return {
@@ -82,8 +96,8 @@ function event(
       planId: PRO_PLAN_ID,
       priceId: "price_pro",
       currentPeriodEnd: input.currentPeriodEnd ?? new Date("2026-11-01T10:00:00Z"),
-      cancelAtPeriodEnd: false,
-      trialEnd: null,
+      cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,
+      trialEnd: input.trialEnd ?? null,
       reference: input.reference === undefined ? null : input.reference,
     },
   }
@@ -489,7 +503,7 @@ Deno.test("billing events against Postgres", async (t) => {
     )
 
     await t.step(
-      "a new subscription that replaces a past-due one does not inherit its grace start",
+      "a new subscription that follows a past-due one does not inherit its grace start",
       async () => {
         const { groupId } = await seedGroup(sql)
         await billing.applyEvent(
@@ -498,6 +512,16 @@ Deno.test("billing events against Postgres", async (t) => {
             reference: groupId,
             customerId: "cus_n",
             status: SubscriptionStatus.PastDue,
+          }),
+        )
+        await billing.applyEvent(
+          event({
+            id: "evt_n1b",
+            reference: groupId,
+            customerId: "cus_n",
+            type: BillingEventType.SubscriptionCanceled,
+            status: SubscriptionStatus.Canceled,
+            at: new Date(T0.getTime() + 24 * 60 * 60_000),
           }),
         )
         const later = new Date(T0.getTime() + 5 * 24 * 60 * 60_000)
@@ -521,6 +545,210 @@ Deno.test("billing events against Postgres", async (t) => {
     )
 
     await t.step(
+      "a late failed payment of an old subscription never replaces the newer one that pays",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const at = (minutes: number) => new Date(T0.getTime() + minutes * 60_000)
+        const apply = (
+          id: string,
+          subscriptionId: string,
+          status: SubscriptionStatus,
+          when: Date,
+        ) =>
+          billing.applyEvent(
+            event({
+              id,
+              reference: groupId,
+              customerId: "cus_p",
+              subscriptionId,
+              type: BillingEventType.SubscriptionUpdated,
+              status,
+              at: when,
+            }),
+          )
+
+        await apply("evt_p1", "sub_a", SubscriptionStatus.PastDue, at(1))
+        const paid = await apply("evt_p2", "sub_b", SubscriptionStatus.Active, at(2))
+        const late = await apply("evt_p3", "sub_a", SubscriptionStatus.PastDue, at(3))
+
+        expect([paid, late]).toEqual(["applied", "stale"])
+        const held = await billing.get(groupId)
+        expect(held).toMatchObject({
+          providerSubscriptionId: "sub_b",
+          status: SubscriptionStatus.Active,
+          pastDueSince: null,
+        })
+        expect(effectivePlanId(held, at(60 * 24 * 30), 7)).toBe(PRO_PLAN_ID)
+      },
+    )
+
+    await t.step(
+      "a new subscription that pays replaces an active one, and the old one's end changes nothing",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const at = (minutes: number) => new Date(T0.getTime() + minutes * 60_000)
+        const apply = (
+          id: string,
+          subscriptionId: string,
+          type: SubscriptionEvent["type"],
+          status: SubscriptionStatus,
+          when: Date,
+        ) =>
+          billing.applyEvent(
+            event({
+              id,
+              reference: groupId,
+              customerId: "cus_x",
+              subscriptionId,
+              type,
+              status,
+              at: when,
+            }),
+          )
+
+        await apply(
+          "evt_x1",
+          "sub_a",
+          BillingEventType.SubscriptionCreated,
+          SubscriptionStatus.Active,
+          at(1),
+        )
+        const replaced = await apply(
+          "evt_x2",
+          "sub_b",
+          BillingEventType.SubscriptionCreated,
+          SubscriptionStatus.Active,
+          at(2),
+        )
+        const oldEnd = await apply(
+          "evt_x3",
+          "sub_a",
+          BillingEventType.SubscriptionCanceled,
+          SubscriptionStatus.Canceled,
+          at(3),
+        )
+
+        expect([replaced, oldEnd]).toEqual(["applied", "stale"])
+        const held = await billing.get(groupId)
+        expect(held).toMatchObject({
+          providerSubscriptionId: "sub_b",
+          status: SubscriptionStatus.Active,
+        })
+        expect(effectivePlanId(held, at(60), 7)).toBe(PRO_PLAN_ID)
+      },
+    )
+
+    await t.step(
+      "a trial keeps its plan until the end it was stored with, then gives the free plan",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const trialEnd = new Date("2026-10-15T10:00:00Z")
+        await billing.applyEvent(
+          event({
+            id: "evt_q1",
+            reference: groupId,
+            customerId: "cus_q",
+            status: SubscriptionStatus.Trialing,
+            trialEnd,
+          }),
+        )
+        const held = await billing.get(groupId)
+
+        expect(held?.trialEnd).toEqual(trialEnd)
+        expect(effectivePlanId(held, new Date(trialEnd.getTime() - 1), 7)).toBe(PRO_PLAN_ID)
+        expect(effectivePlanId(held, trialEnd, 7)).toBe(FREE_PLAN_ID)
+      },
+    )
+
+    await t.step(
+      "a cancellation keeps the plan until the period ends, and undoing it keeps the plan after",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const periodEnd = new Date("2026-11-01T10:00:00Z")
+        const update = (id: string, cancelAtPeriodEnd: boolean, minutes: number) =>
+          billing.applyEvent(
+            event({
+              id,
+              reference: groupId,
+              customerId: "cus_r",
+              type: BillingEventType.SubscriptionUpdated,
+              cancelAtPeriodEnd,
+              currentPeriodEnd: periodEnd,
+              at: new Date(T0.getTime() + minutes * 60_000),
+            }),
+          )
+        await update("evt_r1", false, 0)
+
+        await update("evt_r2", true, 1)
+        const cancelled = await billing.get(groupId)
+        await update("evt_r3", false, 2)
+        const renewed = await billing.get(groupId)
+
+        expect(effectivePlanId(cancelled, new Date(periodEnd.getTime() - 1), 7)).toBe(PRO_PLAN_ID)
+        expect(effectivePlanId(cancelled, periodEnd, 7)).toBe(FREE_PLAN_ID)
+        expect(effectivePlanId(renewed, periodEnd, 7)).toBe(PRO_PLAN_ID)
+      },
+    )
+
+    await t.step(
+      "queues each owner's mail once: a failed payment, a cancellation, and each end of a trial",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const trialEnd = new Date("2026-10-15T10:00:00Z")
+        const extendedEnd = new Date("2026-10-16T10:00:00Z")
+        const apply = (
+          id: string,
+          minutes: number,
+          changes: { status?: SubscriptionStatus; cancelAtPeriodEnd?: boolean; trialEnd?: Date },
+        ) =>
+          billing.applyEvent(
+            event({
+              id,
+              reference: groupId,
+              customerId: "cus_s",
+              type: BillingEventType.SubscriptionUpdated,
+              at: new Date(T0.getTime() + minutes * 60_000),
+              ...changes,
+            }),
+          )
+
+        await apply("evt_s1", 0, { status: SubscriptionStatus.Trialing, trialEnd })
+        await apply("evt_s2", 1, { status: SubscriptionStatus.Trialing, trialEnd })
+        // The trial is extended by a day, then set back: its first end is queued once.
+        await apply("evt_s3", 2, { status: SubscriptionStatus.Trialing, trialEnd: extendedEnd })
+        await apply("evt_s4", 3, { status: SubscriptionStatus.Trialing, trialEnd })
+        await apply("evt_s5", 4, { status: SubscriptionStatus.PastDue })
+        await apply("evt_s6", 5, { status: SubscriptionStatus.PastDue })
+        await apply("evt_s7", 6, { cancelAtPeriodEnd: true })
+        await apply("evt_s8", 7, { cancelAtPeriodEnd: true })
+
+        const jobs = await sql<{ eventKind: string; availableAt: Date }[]>`
+          SELECT event_kind, available_at FROM outbox_events
+          WHERE aggregate_id = ${groupId} AND aggregate_type = ${JOB_AGGREGATE}
+          ORDER BY available_at
+        `
+        expect(jobs).toEqual([
+          {
+            eventKind: BILLING_NOTICE_JOBS[BillingNoticeKind.PaymentFailed],
+            availableAt: new Date(T0.getTime() + 4 * 60_000),
+          },
+          {
+            eventKind: BILLING_NOTICE_JOBS[BillingNoticeKind.PlanEnding],
+            availableAt: new Date(T0.getTime() + 6 * 60_000),
+          },
+          {
+            eventKind: BILLING_NOTICE_JOBS[BillingNoticeKind.TrialEnding],
+            availableAt: new Date("2026-10-12T10:00:00Z"),
+          },
+          {
+            eventKind: BILLING_NOTICE_JOBS[BillingNoticeKind.TrialEnding],
+            availableAt: new Date("2026-10-13T10:00:00Z"),
+          },
+        ])
+      },
+    )
+
+    await t.step(
       "the database refuses a past-due subscription without a grace start, and a start on any other",
       async () => {
         const { groupId } = await seedGroup(sql)
@@ -539,3 +767,121 @@ Deno.test("billing events against Postgres", async (t) => {
     )
   })
 })
+
+/** A new user who signs in with `email`, proven unless `proven` is false, and the group they own. */
+async function seedOwnerWithAddress(
+  sql: postgres.Sql,
+  email: string,
+  proven = true,
+): Promise<{ groupId: string; owner: number }> {
+  const seeded = await seedGroup(sql)
+  if (proven) {
+    await sql`INSERT INTO auth_email_owners (email, user_id) VALUES (${email}, ${seeded.owner})`
+  }
+  await sql`
+    INSERT INTO auth_keys (user_id, method, subject, email, secret, proven_at)
+    VALUES (${seeded.owner}, 'password', ${email}, ${email}, 'hash', ${proven ? new Date() : null})
+  `
+  return seeded
+}
+
+/** A sender that keeps what it is given. */
+function recordingSender(): EmailSender & { sent: EmailMessage[] } {
+  const sent: EmailMessage[] = []
+  return {
+    sent,
+    send(message: EmailMessage) {
+      sent.push(message)
+      return Promise.resolve({ ok: true as const, id: String(sent.length) })
+    },
+  } as unknown as EmailSender & { sent: EmailMessage[] }
+}
+
+Deno.test("billing notices reach the owner through the worker's queue", async (t) => {
+  await withSchema(async (sql) => {
+    const billing = new PostgresBillingRepository(sql)
+    const DAY = 24 * 60 * 60_000
+    const start = new Date()
+    let tick = 0
+    /** One webhook event for the group, a millisecond after the one before. */
+    const apply = (
+      groupId: string,
+      changes: {
+        status?: SubscriptionStatus
+        cancelAtPeriodEnd?: boolean
+        trialEnd?: Date
+        currentPeriodEnd?: Date
+      },
+    ) =>
+      billing.applyEvent(
+        event({
+          id: `evt_mail_${++tick}`,
+          reference: groupId,
+          customerId: `cus_${groupId}`,
+          type: BillingEventType.SubscriptionUpdated,
+          at: new Date(start.getTime() + tick),
+          currentPeriodEnd: new Date(start.getTime() + 20 * DAY),
+          ...changes,
+        }),
+      )
+
+    await t.step(
+      "sends each notice still in force when its job runs, and nothing for one that no longer is or for a deleted group",
+      async () => {
+        const trial = await seedOwnerWithAddress(sql, "trial@example.com")
+        const ending = await seedOwnerWithAddress(sql, "ending@example.com")
+        const failed = await seedOwnerWithAddress(sql, "failed@example.com")
+        const undone = await seedOwnerWithAddress(sql, "undone@example.com")
+        const moved = await seedOwnerWithAddress(sql, "moved@example.com")
+        const silent = await seedOwnerWithAddress(sql, "silent@example.com", false)
+        const gone = await seedOwnerWithAddress(sql, "gone@example.com")
+        const trialEnd = new Date(start.getTime() + 10 * DAY)
+        await apply(trial.groupId, { status: SubscriptionStatus.Trialing, trialEnd })
+        await apply(ending.groupId, { cancelAtPeriodEnd: true })
+        await apply(failed.groupId, { status: SubscriptionStatus.PastDue })
+        await apply(undone.groupId, { cancelAtPeriodEnd: true })
+        await apply(undone.groupId, { cancelAtPeriodEnd: false })
+        // The trial is cut short by a day: both jobs are due, and only the one for the new end mails.
+        const movedEnd = new Date(start.getTime() + 9 * DAY)
+        await apply(moved.groupId, { status: SubscriptionStatus.Trialing, trialEnd })
+        await apply(moved.groupId, { status: SubscriptionStatus.Trialing, trialEnd: movedEnd })
+        await apply(silent.groupId, { status: SubscriptionStatus.PastDue })
+        await apply(gone.groupId, { status: SubscriptionStatus.PastDue })
+        // The group is deleted after its payment failed: its owner is told nothing.
+        await sql`UPDATE groups SET deleted_at = now() WHERE id = ${gone.groupId}`
+        // Eight days pass: the trial's notice, due three days before its end, is now claimable.
+        await sql`
+          UPDATE outbox_events SET available_at = available_at - make_interval(days => 8)
+          WHERE aggregate_type = ${JOB_AGGREGATE}
+        `
+        const sender = recordingSender()
+        const logged: string[] = []
+        const processor = createOutboxProcessor(sql, {
+          store: createPostgresAuthStore(sql),
+          sender,
+          brand: { webAppUrl: "http://app.localhost" },
+          log: (line) => logged.push(line),
+        })
+
+        const result = await processor.drainOnce()
+
+        expect(result.failed).toBe(0)
+        expect(sender.sent.map((mail) => [mail.to, mail.subject]).sort()).toEqual([
+          ["ending@example.com", "Your Pro plan ends on " + longDate(start.getTime() + 20 * DAY)],
+          ["failed@example.com", "A payment for Pro failed"],
+          ["moved@example.com", "Your Pro trial ends on " + longDate(movedEnd.getTime())],
+          ["trial@example.com", "Your Pro trial ends on " + longDate(trialEnd.getTime())],
+        ])
+        expect(sender.sent.find((mail) => mail.to === "trial@example.com")?.text)
+          .toContain(`http://app.localhost/groups/${trial.groupId}`)
+        expect(logged).toEqual([
+          "warn: a billing notice was not sent: the group's owner has no proven address",
+        ])
+      },
+    )
+  })
+})
+
+function longDate(ms: number): string {
+  return new Intl.DateTimeFormat("en", { dateStyle: "long", timeZone: "UTC" }).format(new Date(ms))
+}

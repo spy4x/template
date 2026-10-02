@@ -27,8 +27,8 @@ export type FeatureKey =
 /**
  * A count a plan caps. A product adds its own keys the same way as {@link FeatureKey}.
  *
- * - `maxMembers`: members of the group, the owner included. No command adds a member yet; the
- *   invitations (#131) will count against it.
+ * - `maxMembers`: members of the group, the owner included. Creating an invitation and accepting
+ *   one count against it; a pending invitation takes no seat.
  * - `maxNotes`: notes in the group that are not deleted.
  * - `storageBytes`: bytes of attachments. Attachments (#157) are not built yet; only the key ships.
  */
@@ -61,6 +61,8 @@ export interface Plan {
   features: string[]
   /** What the plan allows. The server checks these; `features` above is only the pricing text. */
   entitlements: Entitlements
+  /** Days of free trial a group's first checkout of this plan starts with; `0` for none. */
+  trialDays: number
 }
 
 /** Every plan, free first. The paid ones are the ones a checkout may name. */
@@ -71,12 +73,12 @@ export const PLANS: readonly Plan[] = [
     amount: 0,
     currency: "EUR",
     description: "For trying things out.",
-    // No member count in the text until `maxMembers` is enforced (#131).
-    features: ["Up to 10 notes"],
+    features: ["Up to 10 notes", "Up to 3 members"],
     entitlements: {
       features: { memberRoles: false },
       limits: { maxMembers: 3, maxNotes: 10, storageBytes: 50 * 1024 * 1024 },
     },
+    trialDays: 0,
   },
   {
     id: PRO_PLAN_ID,
@@ -84,11 +86,17 @@ export const PLANS: readonly Plan[] = [
     amount: 900,
     currency: "EUR",
     description: "For a group that relies on it.",
-    features: ["Unlimited notes", "Promote members to editor or admin", "Priority support"],
+    features: [
+      "Unlimited notes",
+      "Up to 50 members",
+      "Promote members to editor or admin",
+      "Priority support",
+    ],
     entitlements: {
       features: { memberRoles: true },
       limits: { maxMembers: 50, maxNotes: null, storageBytes: 10 * 1024 * 1024 * 1024 },
     },
+    trialDays: 14,
   },
 ]
 
@@ -155,6 +163,22 @@ export interface StoredSubscription {
    * event (Stripe's `unpaid` arrives as past due too); `null` whenever the status is not past due.
    */
   pastDueSince: Date | null
+  /** When the trial ends, or `null` when the subscription has none. */
+  trialEnd: Date | null
+}
+
+/**
+ * When a subscription stops paying for its plan by itself, whatever the provider reports later: the
+ * end of a trial, or the end of the period of a subscription cancelled at its end. `null` when it
+ * renews. The provider's webhook normally arrives at that moment; this bounds a late or lost one.
+ */
+export function accessEndsAt(subscription: StoredSubscription): Date | null {
+  const ends = [
+    subscription.status === BillingStatus.Trialing ? subscription.trialEnd : null,
+    subscription.cancelAtPeriodEnd ? subscription.currentPeriodEnd : null,
+  ].filter((date): date is Date => date !== null)
+  if (ends.length === 0) return null
+  return new Date(Math.min(...ends.map((date) => date.getTime())))
 }
 
 /**
@@ -169,9 +193,9 @@ export function graceEndsAt(subscription: StoredSubscription, graceDays: number)
 
 /**
  * The plan a group is on at `now`: the subscription's plan while it is trialing or active, or past
- * due for less than `graceDays`; else the free plan. Nothing is deleted when the grace ends; the
- * group only gets the free plan's entitlements, and a payment that makes it active brings the plan
- * back.
+ * due for less than `graceDays`, and only until {@link accessEndsAt}; else the free plan. Nothing is
+ * deleted when the grace ends; the group only gets the free plan's entitlements, and a payment that
+ * makes it active brings the plan back.
  */
 export function effectivePlanId(
   subscription: StoredSubscription | null,
@@ -183,7 +207,78 @@ export function effectivePlanId(
   const paid = PAID_STATUSES.has(subscription.status) ||
     (graceEnd !== null && now.getTime() < graceEnd.getTime())
   if (!paid) return FREE_PLAN_ID
+  const accessEnd = accessEndsAt(subscription)
+  if (accessEnd !== null && now.getTime() >= accessEnd.getTime()) return FREE_PLAN_ID
   return findPlan(subscription.planId) ? subscription.planId : FREE_PLAN_ID
+}
+
+const BILLING_DATE = new Intl.DateTimeFormat("en", { dateStyle: "long", timeZone: "UTC" })
+
+/**
+ * A date as billing writes it, in the banner and the mail alike: `October 15, 2026`, in UTC, the
+ * same on the server and in the browser, and the same form the plan card uses.
+ */
+export function billingDate(date: Date): string {
+  return BILLING_DATE.format(date)
+}
+
+/** Days before the end of a trial that its owner is told it is ending. */
+export const TRIAL_NOTICE_DAYS = 3
+
+/** What a group's owner is told about its subscription, by e-mail and on the plan section. */
+export enum BillingNoticeKind {
+  /** The trial ends within {@link TRIAL_NOTICE_DAYS} days and the subscription then renews. */
+  TrialEnding = 1,
+  /** A payment failed: the plan is kept for the grace period while the provider retries. */
+  PaymentFailed = 2,
+  /** The subscription was cancelled at the end of its period: the plan ends then. */
+  PlanEnding = 3,
+}
+
+/**
+ * The notice in force for a subscription at `now`, or `null`. A failed payment comes first, then a
+ * plan that ends, then a trial that ends soon; a trial cancelled at its end is a plan that ends.
+ */
+export function billingNoticeKindOf(
+  subscription: StoredSubscription | null,
+  now: Date,
+): BillingNoticeKind | null {
+  if (subscription === null) return null
+  if (subscription.status === BillingStatus.PastDue) return BillingNoticeKind.PaymentFailed
+  if (!PAID_STATUSES.has(subscription.status)) return null
+  const accessEnd = accessEndsAt(subscription)
+  if (accessEnd !== null && now.getTime() >= accessEnd.getTime()) return null
+  if (subscription.cancelAtPeriodEnd) return BillingNoticeKind.PlanEnding
+  if (subscription.status !== BillingStatus.Trialing || accessEnd === null) return null
+  const noticeFrom = accessEnd.getTime() - TRIAL_NOTICE_DAYS * DAY_MS
+  return now.getTime() >= noticeFrom ? BillingNoticeKind.TrialEnding : null
+}
+
+/** A notice as the owner sees it: what happened, and when the plan ends or renews because of it. */
+export interface BillingNotice {
+  kind: BillingNoticeKind
+  /**
+   * When the trial ends, when a cancelled plan ends, or when the grace of a failed payment is over.
+   */
+  at: Date
+  /** Whole days from the read until {@link at}, rounded up; `0` once it has passed. */
+  daysLeft: number
+}
+
+/** The {@link BillingNotice} in force for a subscription at `now`, or `null`. */
+export function billingNoticeOf(
+  subscription: StoredSubscription | null,
+  now: Date,
+  graceDays: number,
+): BillingNotice | null {
+  const kind = billingNoticeKindOf(subscription, now)
+  if (subscription === null || kind === null) return null
+  const at = kind === BillingNoticeKind.PaymentFailed
+    ? graceEndsAt(subscription, graceDays)
+    : accessEndsAt(subscription) ?? subscription.currentPeriodEnd
+  if (at === null) return null
+  const daysLeft = Math.max(0, Math.ceil((at.getTime() - now.getTime()) / DAY_MS))
+  return { kind, at, daysLeft }
 }
 
 /**
@@ -219,6 +314,10 @@ export interface GroupBilling {
   status: BillingStatus | null
   currentPeriodEnd: Date | null
   cancelAtPeriodEnd: boolean
+  /** When the trial ends, or `null` when there is none. */
+  trialEnd: Date | null
+  /** What the owner is told about the subscription; always `null` for anyone else. */
+  notice: BillingNotice | null
   /** Whether the person asking may open checkout or the portal: billing is on and they own it. */
   canManage: boolean
   /** The group has a subscription that is not cancelled, so it cannot check out again. */
@@ -245,9 +344,65 @@ export function toGroupBilling(
     status: enabled ? subscription?.status ?? null : null,
     currentPeriodEnd: enabled ? subscription?.currentPeriodEnd ?? null : null,
     cancelAtPeriodEnd: enabled ? subscription?.cancelAtPeriodEnd ?? false : false,
+    trialEnd: enabled ? subscription?.trialEnd ?? null : null,
+    notice: enabled && canManageBilling(role)
+      ? billingNoticeOf(subscription, now, graceDays)
+      : null,
     canManage: enabled && canManageBilling(role),
     subscribed: enabled && hasLiveSubscription(subscription),
     hasCustomer: enabled && hasCustomer,
+  }
+}
+
+/** A date as JSON carries it, an ISO string, back to a date; `undefined` for anything else. */
+function jsonDate(value: unknown): Date | null | undefined {
+  if (value === null) return null
+  if (typeof value !== "string") return undefined
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
+
+function readNotice(value: unknown): BillingNotice | null | undefined {
+  if (value === null) return null
+  if (typeof value !== "object" || value === undefined) return undefined
+  const { kind, at, daysLeft } = value as Record<string, unknown>
+  const date = jsonDate(at)
+  if (typeof kind !== "number" || !(kind in BillingNoticeKind) || !date) return undefined
+  if (typeof daysLeft !== "number" || !Number.isInteger(daysLeft) || daysLeft < 0) return undefined
+  return { kind, at: date, daysLeft }
+}
+
+/**
+ * Reads a {@link GroupBilling} back from the API's JSON, its dates included; `null` when any field
+ * is missing or of the wrong kind. Both web apps read the billing through it.
+ */
+export function readGroupBilling(value: unknown): GroupBilling | null {
+  if (typeof value !== "object" || value === null) return null
+  const billing = value as Record<string, unknown>
+  const { enabled, planId, status, cancelAtPeriodEnd, canManage, subscribed, hasCustomer } = billing
+  const currentPeriodEnd = jsonDate(billing.currentPeriodEnd)
+  const trialEnd = jsonDate(billing.trialEnd)
+  const notice = readNotice(billing.notice)
+  if (
+    typeof enabled !== "boolean" || typeof planId !== "string" ||
+    typeof cancelAtPeriodEnd !== "boolean" || typeof canManage !== "boolean" ||
+    typeof subscribed !== "boolean" || typeof hasCustomer !== "boolean" ||
+    !(status === null || (typeof status === "number" && status in BillingStatus)) ||
+    currentPeriodEnd === undefined || trialEnd === undefined || notice === undefined
+  ) {
+    return null
+  }
+  return {
+    enabled,
+    planId,
+    status: status as BillingStatus | null,
+    currentPeriodEnd,
+    cancelAtPeriodEnd,
+    trialEnd,
+    notice,
+    canManage,
+    subscribed,
+    hasCustomer,
   }
 }
 

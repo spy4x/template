@@ -1,7 +1,9 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import type { Sql } from "@spy4x/server/db"
+import { BillingNoticeKind } from "@domain/billing"
 import {
+  billingNoticeMail,
   createMailSender,
   emailCodeMail,
   invitationMail,
@@ -185,5 +187,50 @@ describe("invitationMail", () => {
       },
     )
     expect(anonymous.text).toMatch(/^Someone invited you/)
+  })
+})
+
+describe("billingNoticeMail", () => {
+  const brand = { webAppUrl: "https://app.example.com" }
+  const link = "https://app.example.com/groups/7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
+  const mail = (kind: BillingNoticeKind) =>
+    billingNoticeMail(brand, {
+      to: "ann@example.com",
+      kind,
+      groupName: "Tea <club>",
+      planName: "Pro",
+      at: new Date("2026-10-15T23:30:00Z"),
+      link,
+    })
+
+  it("says when a trial ends, in UTC, and that it is charged unless cancelled", () => {
+    const trial = mail(BillingNoticeKind.TrialEnding)
+
+    expect(trial.to).toBe("ann@example.com")
+    expect(trial.subject).toBe("Your Pro trial ends on October 15, 2026")
+    expect(trial.text).toContain("is charged. To stop it, cancel it before then")
+    expect(trial.text).toContain(link)
+  })
+
+  it("says a payment failed and the card needs updating to keep the plan", () => {
+    const failed = mail(BillingNoticeKind.PaymentFailed)
+
+    expect(failed.subject).toBe("A payment for Pro failed")
+    expect(failed.text).toContain("Update the card from the group's page to keep it.")
+  })
+
+  it("says when a cancelled plan ends and that it can still be renewed", () => {
+    const ending = mail(BillingNoticeKind.PlanEnding)
+
+    expect(ending.subject).toBe("Your Pro plan ends on October 15, 2026")
+    expect(ending.text).toContain("Renew it from the group's page before then.")
+  })
+
+  it("escapes the group's name in the HTML and links to the group", () => {
+    const html = mail(BillingNoticeKind.PlanEnding).html!
+
+    expect(html).toContain("Tea &lt;club&gt;")
+    expect(html).not.toContain("<club>")
+    expect(html).toContain(`href="${link}"`)
   })
 })

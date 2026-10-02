@@ -4,8 +4,11 @@ import {
   OutboxProcessor,
   PostgresOutboxRepository,
 } from "@spy4x/server/outbox"
+import { BillingNoticeKind } from "@domain/billing"
+import { BILLING_NOTICE_JOBS } from "../billing/billing-notices.ts"
 import { GroupChangeNotifier } from "../groups/group-change-notify.ts"
 import { purgeDeletedGroups } from "../groups/purge-deleted-groups.ts"
+import { billingNoticeMailJob } from "./billing-notice-mail.ts"
 import {
   EMAIL_CODE_MAIL_JOB,
   emailCodeMailJob,
@@ -20,6 +23,7 @@ import {
 import {
   JOB_AGGREGATE,
   JOB_AGGREGATE_ID,
+  type JobHandler,
   JobPublisher,
   nextUtcHour,
   OUTBOX_CLEANUP_JOB,
@@ -35,8 +39,8 @@ const NIGHTLY_HOUR_UTC = 3
  * The worker's outbox processor: group changes go to the notifier, jobs to their handlers, and the
  * nightly cleanup is one row that writes its next run, a day later, once it has succeeded. The
  * cleanup also drops password reset and e-mail code requests whose mail gave up, and removes for
- * good the groups whose 30 days for restoring are over. Both mail jobs share one sender, store and
- * brand.
+ * good the groups whose 30 days for restoring are over. Every mail job, the owner's billing notices
+ * included, shares one sender and brand.
  */
 export function createOutboxProcessor(
   sql: postgres.Sql,
@@ -62,8 +66,27 @@ export function createOutboxProcessor(
       },
       [PASSWORD_RESET_MAIL_JOB]: passwordResetMailJob({ sql, ...mail }),
       [EMAIL_CODE_MAIL_JOB]: emailCodeMailJob({ sql, ...mail }),
+      ...billingNoticeJobs(sql, mail),
     }, new GroupChangeNotifier(sql)),
     { repeatEveryMs: { [OUTBOX_CLEANUP_JOB]: DAY_MS } },
+  )
+}
+
+/** One mail job per billing notice. */
+function billingNoticeJobs(
+  sql: postgres.Sql,
+  { sender, brand, log }: Omit<PasswordResetMailDeps, "sql">,
+): Record<string, JobHandler> {
+  const kinds = [
+    BillingNoticeKind.TrialEnding,
+    BillingNoticeKind.PaymentFailed,
+    BillingNoticeKind.PlanEnding,
+  ]
+  return Object.fromEntries(
+    kinds.map((kind) => [
+      BILLING_NOTICE_JOBS[kind],
+      billingNoticeMailJob(kind, { sql, sender, brand, log }),
+    ]),
   )
 }
 
