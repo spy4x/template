@@ -231,7 +231,7 @@ describe("billing screens in the browser", () => {
 
     await rerender(<PricingScreen {...props} error="The payment provider is unavailable." />)
 
-    expect(document.activeElement).toBe(find(`[data-e2e="pricing-error"]`))
+    expect(document.activeElement?.getAttribute("data-e2e")).toBe("pricing-error")
     expect(find(`[data-e2e="pricing-error"]`).textContent).toContain("unavailable")
   })
 
@@ -240,6 +240,6 @@ describe("billing screens in the browser", () => {
 
     await rerender(<BillingCard groupId={groupId} billing={PRO_OWNER} error="No subscription." />)
 
-    expect(document.activeElement).toBe(find(`[data-e2e="billing-error"]`))
+    expect(document.activeElement?.getAttribute("data-e2e")).toBe("billing-error")
   })
 })
