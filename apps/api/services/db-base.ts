@@ -5,6 +5,7 @@ import type { SessionStore } from "@spy4x/server/sign-in"
 import type { User, UserBase } from "@domain/identity"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
+import { emailChanges } from "@server/auth/email-verification.ts"
 
 /** A user's authenticator-app enrolment, one row of `user_totp`. */
 export interface UserTotp {
@@ -81,6 +82,11 @@ export class AppDbBase extends DbServiceBase {
     return createPostgresSessionStore(this.sql)
   }
 
+  /** The address change waiting for its code. Built per access, like `group`. */
+  get emailChange(): ReturnType<typeof emailChanges> {
+    return emailChanges(this.sql)
+  }
+
   get user() {
     const cache = this.userCache
     const cached = this.buildMethods<User, UserBase, Partial<UserBase>>(`users`, cache)
@@ -154,6 +160,10 @@ export class AppDbBase extends DbServiceBase {
             AND (last_accepted_step IS NULL OR last_accepted_step < ${step})
           RETURNING user_id
         `).length === 1,
+      /** Removes the enrolment, finished or not. */
+      remove: async (userId: number): Promise<void> => {
+        await sql`DELETE FROM user_totp WHERE user_id = ${userId}`
+      },
       deleteConfirmed: async (userId: number): Promise<boolean> =>
         (await sql`
           DELETE FROM user_totp WHERE user_id = ${userId} AND confirmed_at IS NOT NULL

@@ -19,7 +19,14 @@
  *   id) and the first group are written in one `db.begin()`: the sign-up provider is built over
  *   that transaction's stores.
  * - **Authenticator app.** Secret and last accepted time step live in `user_totp`; `users.mfa`
- *   keeps its three states.
+ *   keeps its three states. An account whose address is not proven cannot turn one on: whoever
+ *   squats someone else's address must not lock its owner out with a second factor (#140).
+ * - **Proving the address (#140).** `verifyEmail` checks a code from
+ *   `@spy4x/server/auth/email-code` and proves the address it was sent to. A reset link proves the
+ *   address too; when it was unproven until then, the reset also removes any second factor, since
+ *   whoever set it up never showed they own the mailbox. A new address waits in `email_changes`
+ *   until its code proves it; only then does the password key move to it, so the account signs in
+ *   with the old address until that moment.
  *
  * Reads no environment and imports no singleton, so the integration tests construct it against
  * their own schema.
@@ -44,7 +51,13 @@ import {
   totpEnrolment,
   verifyTotp,
 } from "@spy4x/server/sign-in"
-import { AuthConflictError, type AuthSessionRecord, normalizeEmail } from "@spy4x/server/auth"
+import {
+  AuthConflictError,
+  type AuthKey,
+  type AuthSessionRecord,
+  normalizeEmail,
+} from "@spy4x/server/auth"
+import { createEmailCodeSignIn, EmailCodeError } from "@spy4x/server/auth/email-code"
 import {
   createPasswordSignIn,
   PASSWORD_METHOD,
@@ -53,9 +66,16 @@ import {
   type PasswordSignInOptions,
 } from "@spy4x/server/auth/password"
 import { GroupError } from "@domain/groups"
-import { type User, UserMFAStatus, UserRole } from "@domain/identity"
+import {
+  type EmailStatus,
+  emailToVerify,
+  type User,
+  UserMFAStatus,
+  UserRole,
+} from "@domain/identity"
 import type { AppDbBase } from "./db-base.ts"
 import { consumePasswordReset } from "@server/auth/password-reset.ts"
+import { passwordKeyOf, readEmailStatus } from "@server/auth/email-verification.ts"
 
 /** Longest username, in characters (code points), after normalisation. */
 export const USERNAME_MAX_LENGTH = 50
@@ -73,6 +93,32 @@ export interface SignedIn {
 export type TotpConnectStart =
   | { error: string; qrcode: null; secret: null }
   | { error: null; qrcode: string; secret: string }
+
+/** Why connecting an authenticator app was refused before it started. */
+export const TOTP_NEEDS_PROVEN_EMAIL = "Verify your e-mail address before you turn on two-factor"
+
+/** What {@link SignIn.requestEmailChange} did. */
+export enum EmailChangeOutcome {
+  /** The new address waits for its code; mail it one. */
+  Requested = 1,
+  /** The address is the one the account already has: any waiting change is dropped. */
+  Kept = 2,
+  /** Not an address `normalizeEmail` accepts. */
+  InvalidEmail = 3,
+  /** The current password is wrong. Nothing changed. */
+  WrongPassword = 4,
+}
+
+/** What {@link SignIn.verifyEmail} did. */
+export enum EmailVerifyOutcome {
+  Verified = 1,
+  /** Wrong, expired, used up or never sent: one answer for all, so a guesser learns nothing. */
+  WrongCode = 2,
+  /** The code was right, but another account owns the address. The change is dropped. */
+  Taken = 3,
+  /** The address is proven and no change waits: no code can prove anything. */
+  NothingToVerify = 4,
+}
 
 /** Options for {@link createSignIn}. */
 export interface SignInOptions {
@@ -143,6 +189,25 @@ export interface SignIn {
    * account signs in with the address.
    */
   resetPassword(email: string, code: string, newPassword: string): Promise<boolean>
+  /** Where the user's address stands. */
+  emailStatus(state: AppAuthState): Promise<EmailStatus>
+  /**
+   * Checks the current password, then records `email` as the address to move to once a code sent
+   * there proves it. The account keeps signing in with its old address until then. The password
+   * is asked so that a stolen session cannot point the account, and its reset links, elsewhere.
+   */
+  requestEmailChange(
+    state: AppAuthState,
+    password: string,
+    email: string,
+  ): Promise<EmailChangeOutcome>
+  /**
+   * Checks a code for the address that needs one (`emailToVerify`) and proves it. For a waiting
+   * change, the password key then moves to the new address: a new session on it gets the cookie,
+   * and every session on the old key ends. A wrong code is counted in the same transaction and
+   * changes nothing else.
+   */
+  verifyEmail(c: Context, state: AppAuthState, code: string): Promise<EmailVerifyOutcome>
   /** Marks every active session that has run out as expired. */
   expireSessions(): Promise<void>
   /**
@@ -333,6 +398,9 @@ export function createSignIn(options: SignInOptions): SignIn {
       }
       const key = await db.authStore.findKeyById(session.keyId)
       if (!key) return { error: "User not found", qrcode: null, secret: null }
+      if (!mayAddSecondFactor(key)) {
+        return { error: TOTP_NEEDS_PROVEN_EMAIL, qrcode: null, secret: null }
+      }
 
       const existing = await db.userTotp.find(user.id)
       let secret: string
@@ -360,6 +428,9 @@ export function createSignIn(options: SignInOptions): SignIn {
     },
 
     async connectTotpFinish({ user, session }, code) {
+      // Checked again here: an enrolment started before this rule existed must not finish either.
+      const key = await db.authStore.findKeyById(session.keyId)
+      if (!key || !mayAddSecondFactor(key)) return false
       const enrolment = await db.userTotp.find(user.id)
       if (!enrolment || enrolment.confirmedAt !== null) return false
       const step = verifyTotp(enrolment.secret, code, {
@@ -452,11 +523,90 @@ export function createSignIn(options: SignInOptions): SignIn {
             if (error instanceof AuthConflictError) return false
             throw error
           }
+          // Whoever turned on a second factor never proved they own this address: it goes with
+          // their claim, so the owner signs in with the new password alone.
+          await tx.userTotp.remove(user.id)
+          await tx.user.updateOne({ id: user.id, data: { mfa: UserMFAStatus.NOT_CONFIGURED } })
         }
         await tx.authStore.updateKeySecret(key.id, secret)
         await sessionsOver(tx.sessionStore).signOutUser(user.id)
         return true
       })
+    },
+
+    async emailStatus({ user }) {
+      return await readEmailStatus(db.emailChange, db.authStore, user.id)
+    },
+
+    async requestEmailChange({ user }, password, rawEmail) {
+      const email = normalizeEmail(rawEmail)
+      if (email === null) return EmailChangeOutcome.InvalidEmail
+      const key = await passwordKeyOf(db.authStore, user.id)
+      if (!key?.secret || !(await hasher.verify(password, key.secret)).valid) {
+        return EmailChangeOutcome.WrongPassword
+      }
+      if (key.email === email) {
+        await db.emailChange.remove(user.id)
+        return EmailChangeOutcome.Kept
+      }
+      await db.emailChange.save(user.id, email)
+      return EmailChangeOutcome.Requested
+    },
+
+    async verifyEmail(c, { user }, code) {
+      const now = new Date()
+      // One transaction, but a wrong code still counts: the refusal returns, it does not throw.
+      const result = await db.begin(async (tx) => {
+        const status = await readEmailStatus(tx.emailChange, tx.authStore, user.id)
+        const target = emailToVerify(status)
+        const key = await passwordKeyOf(tx.authStore, user.id)
+        if (target === null || key === null) return { outcome: EmailVerifyOutcome.NothingToVerify }
+        const txSessions = sessionsOver(tx.sessionStore)
+        let proven: AuthKey[]
+        try {
+          proven = await createEmailCodeSignIn({
+            store: tx.authStore,
+            sessions: txSessions,
+            sendCode: () => Promise.reject(new Error("proving an address sends no mail")),
+          }).proveAddress(user.id, target, code)
+        } catch (error) {
+          if (error instanceof EmailCodeError) return { outcome: EmailVerifyOutcome.WrongCode }
+          // Another user owns the address. The code is spent, and the change cannot happen.
+          if (error instanceof AuthConflictError) {
+            if (status.pending !== null) await tx.emailChange.remove(user.id)
+            return { outcome: EmailVerifyOutcome.Taken }
+          }
+          throw error
+        }
+        if (status.pending === null) return { outcome: EmailVerifyOutcome.Verified }
+
+        // A new address: `proveAddress` gave the user a proven code key for it, which also removed
+        // every other user's unproven claim to it. The password moves onto a key for the new
+        // address, then the code key and the old key go; deleting the old key ends its sessions
+        // and frees the old address.
+        const moved = await tx.authStore.addKey(user.id, {
+          method: PASSWORD_METHOD,
+          subject: target,
+          email: target,
+          secret: key.secret,
+          provenAt: now,
+        })
+        for (const extra of proven) {
+          if (extra.method !== PASSWORD_METHOD) await tx.authStore.deleteKey(user.id, extra.id)
+        }
+        const created = await txSessions.create({
+          userId: user.id,
+          keyId: moved.id,
+          secondFactor: user.mfa === UserMFAStatus.CONFIGURED
+            ? SecondFactorStatus.Completed
+            : SecondFactorStatus.NotRequired,
+        })
+        await tx.authStore.deleteKey(user.id, key.id)
+        await tx.emailChange.remove(user.id)
+        return { outcome: EmailVerifyOutcome.Verified, created }
+      })
+      if (result.created) await cookie.set(c, result.created.session, result.created.cookieValue)
+      return result.outcome
     },
 
     async expireSessions() {
@@ -474,6 +624,14 @@ export function createSignIn(options: SignInOptions): SignIn {
         : null
     },
   }
+}
+
+/**
+ * Whether the key's user may turn on a second factor: not while the address it signs in with is
+ * unproven. A username key carries no address, so there is nothing to prove.
+ */
+function mayAddSecondFactor(key: AuthKey): boolean {
+  return key.email === null || key.provenAt !== null
 }
 
 /** Thrown by sign-in's `secondFactorFor` when the auth user has no `users` row: a refusal. */

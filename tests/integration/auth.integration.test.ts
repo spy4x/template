@@ -512,6 +512,11 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
     const credentials = { login: signUpBody.email, password: signUpBody.password }
     const enrolling = buildApp(signIn)
     expect((await enrolling.request("POST", "/sign-up", signUpBody)).status).toBe(200)
+    // Only a proven address may turn on a second factor (#140).
+    const [key] = await sql<{ id: number }[]>`
+      SELECT id FROM auth_keys WHERE subject = ${signUpBody.email}
+    `
+    await new AppDbBase({ sql }).authStore.proveKey(key.id, new Date())
     let secret = ""
     let enrolmentCode = ""
 
