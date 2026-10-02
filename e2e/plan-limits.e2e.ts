@@ -76,7 +76,7 @@ test.describe("plan limits", () => {
     }
   })
 
-  test("a free group's owner who changes a role is offered an upgrade, and the change works on Pro", async ({ page, request }) => {
+  test("a free group's owner who promotes a member is offered an upgrade, and the promotion works on Pro", async ({ page, request }) => {
     const owner = "e2e_plan_roles_owner@example.com"
     const member = "e2e_plan_roles_member@example.com"
     await cleanup(request, owner)
@@ -99,7 +99,7 @@ test.describe("plan limits", () => {
 
       await gotoApp(page, `/groups/${groupId}`, page.locator("[data-e2e=group-general-name]"))
       const row = page.locator("[data-e2e=group-member]").filter({ hasText: member })
-      await row.getByLabel(`Role of ${member}`).selectOption({ label: "Viewer" })
+      await row.getByLabel(`Role of ${member}`).selectOption({ label: "Admin" })
       await row.getByRole("button", { name: "Change role" }).click()
 
       const refusal = row.locator("[data-e2e=plan-refusal]")
@@ -109,9 +109,9 @@ test.describe("plan limits", () => {
       await expect(row.locator("[data-e2e=group-member-role]")).toHaveText("Editor")
 
       await upgrade(request, groupId)
-      await row.getByLabel(`Role of ${member}`).selectOption({ label: "Viewer" })
+      await row.getByLabel(`Role of ${member}`).selectOption({ label: "Admin" })
       await row.getByRole("button", { name: "Change role" }).click()
-      await expect(row.locator("[data-e2e=group-member-role]")).toHaveText("Viewer")
+      await expect(row.locator("[data-e2e=group-member-role]")).toHaveText("Admin")
       await expect(refusal).toHaveCount(0)
     } finally {
       await cleanup(request, owner, { soft: true })

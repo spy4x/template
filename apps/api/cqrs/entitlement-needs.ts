@@ -1,4 +1,4 @@
-import { canManageMember, canMutateNotes, GroupMemberRoleCommand, GroupRole } from "@domain/groups"
+import { canManageMember, canMutateNotes, GroupMemberRoleCommand } from "@domain/groups"
 import { NoteCreateCommand } from "@domain/notes"
 import { type EntitlementNeeds, needsFeature, needsRoom } from "./entitlement-gate.ts"
 
@@ -7,12 +7,23 @@ import { type EntitlementNeeds, needsFeature, needsRoom } from "./entitlement-ga
  * listed here is never refused for its plan, and no query is.
  */
 export const ENTITLEMENT_NEEDS: EntitlementNeeds = new Map([
-  needsRoom(NoteCreateCommand, "maxNotes", (command) => command.data.groupId, canMutateNotes),
+  needsRoom(
+    NoteCreateCommand,
+    "maxNotes",
+    (command) => command.data.groupId,
+    (actor) => canMutateNotes(actor),
+  ),
   needsFeature(
     GroupMemberRoleCommand,
     "memberRoles",
     (command) => command.data.groupId,
-    // The owner and admins change roles; anyone else is refused by the handler, plan or not.
-    (role) => canManageMember(role, GroupRole.VIEWER),
+    // Only a promotion needs the feature, so a group back on the free plan can still demote an
+    // admin it made on Pro. A change the handler refuses on every plan (a member who has left, a
+    // change the actor may not make) goes on to the handler and gets its own answer.
+    async (actor, command, roleOf) => {
+      const target = await roleOf(command.data.userId)
+      return target !== null && canManageMember(actor, target, command.data.role) &&
+        command.data.role > target
+    },
   ),
 ])

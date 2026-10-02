@@ -939,7 +939,7 @@ describe("GroupSettingsScreen members", () => {
 
     expect(memberItem(html, 3)).toContain(`data-e2e="plan-refusal"`)
     expect(memberItem(html, 3)).toContain(pricing)
-    expect(memberItem(html, 3)).toContain("Changing roles needs a paid plan")
+    expect(memberItem(html, 3)).toContain("Promoting members needs a paid plan")
     expect(memberItem(html, 4)).not.toContain(`data-e2e="plan-refusal"`)
   })
 

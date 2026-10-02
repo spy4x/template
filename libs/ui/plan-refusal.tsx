@@ -26,8 +26,9 @@ const REFUSAL_TEXT: Record<
     message: "Its plan has no room for more files.",
   }),
   memberRoles: () => ({
-    title: "Changing roles needs a paid plan",
-    message: "This group's plan keeps every member in the role they joined with.",
+    title: "Promoting members needs a paid plan",
+    message:
+      "On this group's plan, a member can be given a lower role or removed, but not promoted.",
   }),
 }
 

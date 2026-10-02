@@ -44,7 +44,7 @@ test("without JavaScript, the owner changes a member's role and removes them, an
       const added = await request.post("/api/test/add-member", { data: { login, groupId, role } })
       expect(added.status(), await added.text()).toBe(200)
     }
-    // Changing a role is a paid feature: the free plan refuses it (plan-limits.mpa.ts).
+    // Promoting a member is a paid feature: the free plan refuses it (plan-limits.mpa.ts).
     const upgraded = await request.post(BILLING_WEBHOOK_PATH, await proWebhook(groupId))
     expect(upgraded.status(), await upgraded.text()).toBe(200)
 
