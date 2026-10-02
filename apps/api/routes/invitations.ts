@@ -44,9 +44,10 @@ export interface InvitationsRouteDependencies {
  * revoke is decided by the handlers.
  *
  * - `GET /` lists the pending ones, newest first.
- * - `POST /` creates `{ role, expiresInDays?, maxUses?, email?, sendEmail? }`: 201 with the
- *   invitation and its token, shown this once. No `Idempotency-Key`: the answer carries the token,
- *   which must never be stored.
+ * - `POST /` creates `{ role, expiresInDays?, maxUses?, email?, sendEmail?, acceptSeatPrice? }`:
+ *   201 with the invitation and its token, shown this once. No `Idempotency-Key`: the answer
+ *   carries the token, which must never be stored. A group billed per member needs
+ *   `acceptSeatPrice: true` from its owner or an admin.
  * - `DELETE /:invitationId` revokes one.
  */
 export function createGroupInvitationsRoute(

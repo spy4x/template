@@ -80,6 +80,12 @@ export interface InvitationHandlerDependencies {
    * and every role while billing is off.
    */
   planOf(groupId: string): Promise<InvitationPlan>
+  /**
+   * The group is billed per member and `actorId` may invite to it, so a create must confirm the
+   * price. `false` for anyone who may not invite: the store then refuses them as it always does,
+   * and they learn nothing of the group's plan.
+   */
+  seatPriced(groupId: string, actorId: number): Promise<boolean>
   mail: InvitationMail
   emit(event: GroupSelectedEvent): void
 }
@@ -99,7 +105,7 @@ const ROLE_NAMES: Record<GroupRole, string> = {
  * copies the link instead.
  */
 export function createInvitationCreateHandler(
-  { invitations, planOf, mail }: InvitationHandlerDependencies,
+  { invitations, planOf, seatPriced, mail }: InvitationHandlerDependencies,
 ): CommandHandler<GroupInvitationCreateCommand> {
   return async (command) => {
     const { data, allowance } = command
@@ -112,6 +118,13 @@ export function createInvitationCreateHandler(
     const email = data.email === null ? null : normalizeEmail(data.email)
     if (data.email !== null && email === null) {
       throw new GroupError("INVALID_REQUEST", "The e-mail address is invalid")
+    }
+    // Each person who joins adds a seat to the bill, so the creator confirms the price first.
+    if (!data.acceptSeatPrice && await seatPriced(data.groupId, data.actor.userId)) {
+      throw new InvitationError(
+        "SEAT_PRICE_NOT_ACCEPTED",
+        "Confirm that each person who joins adds a member to the group's bill",
+      )
     }
     const token = newInvitationToken()
     const created = await invitations.create(

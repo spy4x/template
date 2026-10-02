@@ -55,6 +55,7 @@ describe("invitations store", () => {
       maxUses: 1,
       email: "friend@example.com",
       sendEmail: true,
+      acceptSeatPrice: false,
     })
     expect(store.created.value).toEqual({
       link: `https://app.example.com/invite/${token}`,
@@ -86,6 +87,31 @@ describe("invitations store", () => {
     expect(store.createError.value?.message).toBe("Full")
     expect(store.createError.value?.plan).toEqual(plan)
     expect(store.created.value).toBeNull()
+  })
+
+  it("posts the creator's price confirmation, keeps the refusal's code and forgets it when the page closes", async () => {
+    const { store, calls } = harness({
+      "GET /api/groups/g-1/invitations": [200, { invitations: [] }],
+      "POST /api/groups/g-1/invitations": [400, {
+        error: { code: "SEAT_PRICE_NOT_ACCEPTED", message: "Confirm the price" },
+      }],
+    })
+    await store.open("g-1")
+
+    expect(await store.create()).toBe(false)
+    expect(store.createError.value).toEqual({
+      message: "Confirm the price",
+      code: "SEAT_PRICE_NOT_ACCEPTED",
+      plan: null,
+    })
+
+    store.acceptSeatPrice.value = true
+    await store.create()
+    expect(calls.filter((call) => call.method === "POST").map((call) => call.body))
+      .toMatchObject([{ acceptSeatPrice: false }, { acceptSeatPrice: true }])
+
+    store.closeGroup()
+    expect(store.acceptSeatPrice.value).toBe(false)
   })
 
   it("revokes one invitation and drops it from the list, or shows why under its row", async () => {

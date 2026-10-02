@@ -3,7 +3,7 @@ import { useLocation } from "wouter-preact"
 import { GroupSettingsScreen } from "@ui/group-settings-screen.tsx"
 import { GroupInvitationsSection } from "@ui/group-invitations.tsx"
 import { GroupTransferSection } from "@ui/group-transfer.tsx"
-import { canManageInvitations } from "@domain/groups"
+import { canManageInvitations, type InvitationErrorCode } from "@domain/groups"
 import { entitlementsOf } from "@domain/billing"
 import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { groupsStore } from "../state/groups.ts"
@@ -11,6 +11,7 @@ import { membersStore } from "../state/members.ts"
 import { selectionStore } from "../state/selection.ts"
 import { billingStore } from "../state/billing.ts"
 import { invitationsStore } from "../state/invitations.ts"
+import { SeatPriceConfirm } from "@ui/billing-screen.tsx"
 import { GroupBillingCard } from "./BillingViews.tsx"
 
 /**
@@ -50,6 +51,10 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
     if (role !== undefined && canManageInvitations(role)) void invites.open(groupId)
   }, [groupId, role])
   const invitesOurs = invites.groupId.value === groupId
+  const createFailure = invites.createError.value
+  // A create refused for want of the price confirmation shows its message at the confirmation.
+  const seatRefused = createFailure?.code ===
+    ("SEAT_PRICE_NOT_ACCEPTED" satisfies InvitationErrorCode)
   // The billing card reads the group's plan; until it has, the server alone judges the role.
   const billingOurs = billingStore.current.value?.groupId === groupId
     ? billingStore.current.value.billing
@@ -120,9 +125,17 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
           draft={invites.draft.value}
           onDraftChange={(draft) => (invites.draft.value = draft)}
           creating={invites.creating.value}
-          createError={invites.createError.value?.plan ? null : invites.createError.value?.message}
-          createRefusal={invites.createError.value?.plan ?? null}
+          createError={createFailure?.plan || seatRefused ? null : createFailure?.message}
+          createRefusal={createFailure?.plan ?? null}
           onCreate={() => void invites.create()}
+          seatPrice={billingOurs?.seatPrice && (
+            <SeatPriceConfirm
+              seatPrice={billingOurs.seatPrice}
+              checked={invites.acceptSeatPrice.value}
+              onChange={(checked) => (invites.acceptSeatPrice.value = checked)}
+              error={seatRefused ? createFailure.message : null}
+            />
+          )}
           created={invites.created.value}
           revokingId={invites.revokingId.value}
           revokeError={invites.revokeError.value}

@@ -105,6 +105,7 @@ export const API_BODIES = {
     email: field(form, "email"),
     // An unticked checkbox sends nothing.
     sendEmail: field(form, "sendEmail") === "true",
+    acceptSeatPrice: field(form, "acceptSeatPrice") === "true",
   }),
   /** An answer names a link's token, or the id of an invitation sent to the person's address. */
   invitationAnswer: (form: FormData): { token: string } | { invitationId: string } =>

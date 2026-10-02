@@ -14,7 +14,7 @@ import { act } from "preact/test-utils"
 import { UserMFAStatus, type UserPushTokenPublic } from "@domain/identity"
 import { GroupRole } from "@domain/groups"
 import type { PlanRefusal } from "@domain/billing"
-import { BILLING_PATHS } from "./billing-screen.tsx"
+import { BILLING_PATHS, SeatPriceConfirm } from "./billing-screen.tsx"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
 import { GroupSettingsScreen } from "./group-settings-screen.tsx"
@@ -1047,6 +1047,48 @@ describe("GroupInvitationsSection in the browser", () => {
 
     expect(await submit(GROUP_PATHS.invitationRevoke("g-1", "i-1"))).toBe(true)
     expect(revoke.calls).toEqual([["i-1"]])
+  })
+
+  it("reports the price confirmation to the app and posts it with a create the app takes over", async () => {
+    const ticks = spy<[boolean]>()
+    const create = spy<[]>()
+    const seatPrice = { seats: 2, amount: 900, currency: "EUR" }
+    const section = (checked: boolean) => (
+      <GroupInvitationsSection
+        {...defaults}
+        onCreate={create.fn}
+        seatPrice={<SeatPriceConfirm seatPrice={seatPrice} checked={checked} onChange={ticks.fn} />}
+      />
+    )
+    await mount(section(false))
+
+    await click("[data-e2e=seat-price-accept]")
+    expect(ticks.calls).toEqual([[true]])
+    await rerender(section(true))
+
+    expect(await submit(GROUP_PATHS.invitationCreate("g-1"))).toBe(true)
+    expect(create.calls).toHaveLength(1)
+    const form = find<HTMLFormElement>(`form[action="${GROUP_PATHS.invitationCreate("g-1")}"]`)
+    expect(new window.FormData(form as never).get("acceptSeatPrice")).toBe("true")
+  })
+
+  it("moves focus to the price confirmation when a create is refused for it, not to the address", async () => {
+    const seatPrice = { seats: 2, amount: 900, currency: "EUR" }
+    const section = (error: string | null) => (
+      <GroupInvitationsSection
+        {...defaults}
+        seatPrice={<SeatPriceConfirm seatPrice={seatPrice} checked={false} error={error} />}
+      />
+    )
+    await mount(section(null))
+    expect(focused()).not.toBe("seat-price-accept")
+
+    await rerender(section("Confirm the price"))
+
+    expect(focused()).toBe("seat-price-accept")
+    expect(find("[data-e2e=seat-price-accept]").getAttribute("aria-describedby")).toContain(
+      "invitation-seat-price-error",
+    )
   })
 
   it("moves focus to the address field when a create is refused, and to the new link once made", async () => {

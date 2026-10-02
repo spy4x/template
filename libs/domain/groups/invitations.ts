@@ -23,6 +23,11 @@ export type InvitationErrorCode =
   | "INVITATION_REVOKED"
   | "INVITATION_USED_UP"
   | "INVITATION_WRONG_ACCOUNT"
+  /**
+   * The group is billed per member, and the create did not confirm that each person who joins
+   * raises the bill (`acceptSeatPrice`).
+   */
+  | "SEAT_PRICE_NOT_ACCEPTED"
 
 export class InvitationError extends Error {
   constructor(
@@ -82,6 +87,11 @@ export interface InvitationCreateInput {
   email: string | null
   /** Mail the link to `email`. Off unless asked for. */
   sendEmail: boolean
+  /**
+   * The creator saw the per-member price the group pays and accepts that each person who joins
+   * adds a seat. Required while the group is billed per member; off unless sent.
+   */
+  acceptSeatPrice: boolean
 }
 
 export interface GroupInvitationCreatePayload extends InvitationCreateInput {
@@ -263,19 +273,22 @@ export function assertCanInvite(actor: GroupRole | null, role: GroupRole): void 
   }
 }
 
-const CREATE_KEYS = ["email", "expiresInDays", "maxUses", "role", "sendEmail"]
+const CREATE_KEYS = ["acceptSeatPrice", "email", "expiresInDays", "maxUses", "role", "sendEmail"]
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/
 
 /**
  * The body of an invitation create: `role`, and optionally `expiresInDays` (default
- * {@link INVITATION_DEFAULT_DAYS}), `maxUses` (default 1), `email` (default none) and `sendEmail`
- * (default `false`). An empty `email` means none. A mail needs an address, and an invitation tied
- * to an address lets one person in. Shape only: the address itself is checked where it is read.
+ * {@link INVITATION_DEFAULT_DAYS}), `maxUses` (default 1), `email` (default none), `sendEmail`
+ * (default `false`) and `acceptSeatPrice` (default `false`). An empty `email` means none. A mail
+ * needs an address, and an invitation tied to an address lets one person in. Shape only: the
+ * address itself is checked where it is read.
  */
 export function parseInvitationCreateBody(value: unknown): InvitationCreateInput {
   if (!isRecord(value) || !Object.keys(value).every((key) => CREATE_KEYS.includes(key))) {
-    throw invalid("Expected role, and optionally expiresInDays, maxUses, email and sendEmail")
+    throw invalid(
+      "Expected role, and optionally expiresInDays, maxUses, email, sendEmail and acceptSeatPrice",
+    )
   }
   const role = value.role
   if (role !== GroupRole.VIEWER && role !== GroupRole.EDITOR && role !== GroupRole.ADMIN) {
@@ -300,7 +313,9 @@ export function parseInvitationCreateBody(value: unknown): InvitationCreateInput
   if (email !== null && maxUses !== 1) {
     throw invalid("An invitation for one e-mail address lets in one person")
   }
-  return { role, expiresInDays, maxUses, email, sendEmail }
+  const acceptSeatPrice = value.acceptSeatPrice ?? false
+  if (typeof acceptSeatPrice !== "boolean") throw invalid("acceptSeatPrice must be true or false")
+  return { role, expiresInDays, maxUses, email, sendEmail, acceptSeatPrice }
 }
 
 /** An invitation's id from a request: a lowercase UUID v4, or `INVALID_REQUEST`. */

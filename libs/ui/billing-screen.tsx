@@ -3,10 +3,13 @@ import { useEffect, useRef } from "preact/hooks"
 import { BillingInterval, PlanCard, PricingTable, UpgradePrompt } from "@spy4x/preact-ui/billing"
 import { Button } from "@spy4x/preact-ui/button"
 import { Card, CardBody } from "@spy4x/preact-ui/card"
+import { Checkbox } from "@spy4x/preact-ui/checkbox"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
+import { Field } from "@spy4x/preact-ui/field"
 import { Link } from "@spy4x/preact-ui/link"
 import { Stack } from "@spy4x/preact-ui/layout"
+import { formatMoney } from "@spy4x/platform/universal/money"
 import {
   billingDate,
   type BillingNotice,
@@ -16,6 +19,7 @@ import {
   FREE_PLAN_ID,
   type GroupBilling,
   PAID_PLANS,
+  type SeatPrice,
 } from "@domain/billing"
 import { GROUP_PATHS, type Navigate } from "./progressive.tsx"
 
@@ -178,9 +182,10 @@ export function BillingCard(
                         <PlanCard
                           planName={planName(billing.planId)}
                           status={billing.status as 1 | 2 | 3 | 4 | 5}
+                          // A per-member plan shows what the group pays: one seat per member.
                           price={plan
                             ? {
-                              amount: plan.amount,
+                              amount: plan.amount * (billing.seatPrice?.seats ?? 1),
                               currency: plan.currency,
                               interval: BillingInterval.Month,
                             }
@@ -190,6 +195,11 @@ export function BillingCard(
                           manageAction={BILLING_PATHS.portal(groupId)}
                           headingLevel={3}
                         />
+                        {billing.seatPrice && (
+                          <p class="mt-2 text-sm text-muted" data-e2e="billing-seats">
+                            {seatsText(billing.seatPrice)}
+                          </p>
+                        )}
                       </fieldset>
                     )
                     : (
@@ -336,5 +346,62 @@ export function PricingScreen(
         <ErrorState message={error} />
       </div>
     </Stack>
+  )
+}
+
+/** "3 members at €9.00 each a month": what a group billed per member pays for. */
+function seatsText({ seats, amount, currency }: SeatPrice): string {
+  return `${seats} ${seats === 1 ? "member" : "members"} at ${formatMoney(amount, currency)} ` +
+    `each a month, the owner included.`
+}
+
+export interface SeatPriceConfirmProps {
+  /** The group's per-member price and its seats now, from `GroupBilling.seatPrice`. */
+  seatPrice: SeatPrice
+  /** The box is ticked. */
+  checked: boolean
+  onChange?: (checked: boolean) => void
+  /** Why the create was refused for want of the confirmation, or `null`. */
+  error?: string | null
+}
+
+/**
+ * The price confirmation of a new invitation to a group billed per member: what one more member
+ * adds to the bill, and a box the creator ticks to accept it. It belongs inside the invitation form,
+ * so the box posts `acceptSeatPrice=true` with it; the server refuses a create without it. Focus
+ * moves to the box when the create was refused for it.
+ */
+export function SeatPriceConfirm(
+  { seatPrice, checked, onChange, error = null }: SeatPriceConfirmProps,
+): JSX.Element {
+  const box = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (error) box.current?.focus()
+  }, [error])
+  const { seats, amount, currency } = seatPrice
+  const money = (value: number) => formatMoney(value, currency)
+  return (
+    <div data-e2e="seat-price">
+      <Field
+        id="invitation-seat-price"
+        labelFor={false}
+        error={error}
+        hint={`Each person who joins adds ${money(amount)} a month: with one more member the ` +
+          `group pays ${money(amount * (seats + 1))} instead of ${money(amount * seats)}. ` +
+          `The provider bills the difference for the rest of this period on the next invoice.`}
+      >
+        <Checkbox
+          ref={box}
+          name="acceptSeatPrice"
+          value="true"
+          data-e2e="seat-price-accept"
+          checked={checked}
+          aria-invalid={error ? true : undefined}
+          onChange={(e) => onChange?.(e.currentTarget.checked)}
+        >
+          I accept the higher price for each person who joins
+        </Checkbox>
+      </Field>
+    </div>
   )
 }

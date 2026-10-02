@@ -12,6 +12,7 @@ const INVITATION_STATUSES: Record<InvitationErrorCode, ContentfulStatusCode> = {
   INVITATION_REVOKED: 410,
   INVITATION_USED_UP: 410,
   INVITATION_WRONG_ACCOUNT: 403,
+  SEAT_PRICE_NOT_ACCEPTED: 400,
 }
 
 /** Group refusals whose own message says what to change, so it reaches the person as written. */

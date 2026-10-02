@@ -1433,6 +1433,7 @@ describe("invitations", () => {
       canManage: true,
       subscribed: false,
       hasCustomer: false,
+      seatPrice: null,
     })
     const page = async (planId: string) => {
       const { fetch } = owner((path) =>
@@ -1476,7 +1477,54 @@ describe("invitations", () => {
       maxUses: 10,
       email: "",
       sendEmail: false,
+      acceptSeatPrice: false,
     })
+  })
+
+  it("posts the price confirmation of a group billed per member, and shows its refusal at the box", async () => {
+    const billing = {
+      enabled: true,
+      planId: "pro",
+      status: 2,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      trialEnd: null,
+      notice: null,
+      canManage: true,
+      subscribed: true,
+      hasCustomer: true,
+      seatPrice: { seats: 3, amount: 900, currency: "EUR" },
+    }
+    const { calls, fetch } = owner((path, method) =>
+      path === `/api/groups/${groupId}/billing`
+        ? Response.json({ billing })
+        : method === "POST"
+        ? refusal(400, "SEAT_PRICE_NOT_ACCEPTED", "Confirm the higher price")
+        : notesList()
+    )
+    const create = (fields: Record<string, string>) =>
+      appWith(fetch)(
+        formPost(`/groups/${groupId}/invitations`, {
+          role: "2",
+          expiresInDays: "3",
+          maxUses: "1",
+          email: "",
+          ...fields,
+        }),
+        info,
+      )
+
+    const refused = await create({})
+    const html = await refused.text()
+    await create({ acceptSeatPrice: "true" })
+
+    expect(refused.status).toBe(400)
+    expect(html).toContain("pays €36.00 instead of €27.00")
+    expect(html).toContain(`id="invitation-seat-price-error"`)
+    expect(html).toContain("Confirm the higher price")
+    expect(html).not.toContain(`id="invitation-email-error"`)
+    expect(calls.filter((call) => call.method === "POST").map((call) => call.body))
+      .toMatchObject([{ acceptSeatPrice: false }, { acceptSeatPrice: true }])
   })
 
   it("keeps what the person filled in when a create is refused, with the API's message", async () => {

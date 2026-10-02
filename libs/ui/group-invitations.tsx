@@ -1,4 +1,4 @@
-import type { JSX } from "preact"
+import type { ComponentChildren, JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
 import { Badge } from "@spy4x/preact-ui/badge"
 import { Button } from "@spy4x/preact-ui/button"
@@ -97,6 +97,11 @@ export interface GroupInvitationsSectionProps {
   createRefusal?: PlanRefusal | null
   /** Creates an invitation. A form that posts the draft to `GROUP_PATHS.invitationCreate`. */
   onCreate?: () => void
+  /**
+   * Drawn inside the create form, above its button: the price confirmation (`SeatPriceConfirm`)
+   * of a group billed per member, so its box posts with the form.
+   */
+  seatPrice?: ComponentChildren
   /** The invitation just created, or `null`. */
   created?: CreatedInvitation | null
   /** The invitation whose revoke is in flight, or `null`. */
@@ -126,6 +131,7 @@ export function GroupInvitationsSection(
     createError = null,
     createRefusal = null,
     onCreate,
+    seatPrice,
     created = null,
     revokingId = null,
     revokeError = null,
@@ -235,6 +241,7 @@ export function GroupInvitationsSection(
                 >
                   Send the link to this address
                 </Checkbox>
+                {seatPrice}
                 {createRefusal && (
                   <PlanRefusalNotice
                     groupId={groupId}
