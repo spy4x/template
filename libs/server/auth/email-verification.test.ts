@@ -1,11 +1,14 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { MemoryAuthStore } from "@spy4x/server/auth/memory-store"
-import { createEmailCodeSignIn, EmailCodeError } from "@spy4x/server/auth/email-code"
+import { EmailCodeError } from "@spy4x/server/auth/email-code"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
-import type { AuthSessionRecord } from "@spy4x/server/auth"
-import type { SessionManager } from "@spy4x/server/sign-in"
-import { provenAddressOwner, readEmailStatus, sendEmailCode } from "./email-verification.ts"
+import {
+  proveEmailCode,
+  provenAddressOwner,
+  readEmailStatus,
+  sendEmailCode,
+} from "./email-verification.ts"
 
 /** A store with one unproven address account (`ann`), one proven (`bea`) and one username one. */
 async function storeWithAccounts() {
@@ -77,40 +80,46 @@ describe("provenAddressOwner", () => {
   })
 })
 
-describe("sendEmailCode", () => {
-  /** The library's own check of a code, for the signed-in user. */
-  const prove = (store: MemoryAuthStore, userId: number, email: string, code: string) =>
-    createEmailCodeSignIn({
-      store,
-      sessions: {} as SessionManager<AuthSessionRecord>,
-      sendCode: () => Promise.resolve(),
-    }).proveAddress(userId, email, code)
-
+describe("sendEmailCode and proveEmailCode", () => {
   it("hands the sender a code that proves the address once, for the user who has it", async () => {
     const { store, ann } = await storeWithAccounts()
     const sent: { email: string; code: string }[] = []
 
-    await sendEmailCode(store, "Ann@Example.com", (email, code) => {
+    await sendEmailCode(store, ann, "Ann@Example.com", (email, code) => {
       sent.push({ email, code })
       return Promise.resolve()
     })
 
     expect(sent.map(({ email }) => email)).toEqual(["ann@example.com"])
-    await expect(prove(store, ann, "ann@example.com", "wrong-code")).rejects.toThrow(
+    await expect(proveEmailCode(store, ann, "ann@example.com", "wrong-code")).rejects.toThrow(
       EmailCodeError,
     )
-    await prove(store, ann, "ann@example.com", sent[0].code)
+    await proveEmailCode(store, ann, "ann@example.com", sent[0].code)
     expect(await provenAddressOwner(store, "ann@example.com")).toBe(ann)
-    await expect(prove(store, ann, "ann@example.com", sent[0].code)).rejects.toThrow(
+    await expect(proveEmailCode(store, ann, "ann@example.com", sent[0].code)).rejects.toThrow(
       EmailCodeError,
     )
   })
 
+  it("keeps a code to one user, so another user cannot prove the address with it", async () => {
+    const { store, ann, bea } = await storeWithAccounts()
+    let code = ""
+    await sendEmailCode(store, ann, "ann@example.com", (_email, sent) => {
+      code = sent
+      return Promise.resolve()
+    })
+
+    await expect(proveEmailCode(store, bea, "ann@example.com", code)).rejects.toThrow(
+      EmailCodeError,
+    )
+    expect(await provenAddressOwner(store, "ann@example.com")).toBe(null)
+  })
+
   it("passes a failed send on to the caller, so the job is retried", async () => {
-    const { store } = await storeWithAccounts()
+    const { store, ann } = await storeWithAccounts()
 
     await expect(
-      sendEmailCode(store, "ann@example.com", () => Promise.reject(new Error("smtp down"))),
+      sendEmailCode(store, ann, "ann@example.com", () => Promise.reject(new Error("smtp down"))),
     ).rejects.toThrow("smtp down")
   })
 })

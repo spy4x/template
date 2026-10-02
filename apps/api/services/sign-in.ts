@@ -57,7 +57,7 @@ import {
   type AuthSessionRecord,
   normalizeEmail,
 } from "@spy4x/server/auth"
-import { createEmailCodeSignIn, EmailCodeError } from "@spy4x/server/auth/email-code"
+import { EmailCodeError } from "@spy4x/server/auth/email-code"
 import {
   createPasswordSignIn,
   PASSWORD_METHOD,
@@ -75,7 +75,7 @@ import {
 } from "@domain/identity"
 import type { AppDbBase } from "./db-base.ts"
 import { consumePasswordReset } from "@server/auth/password-reset.ts"
-import { passwordKeyOf, readEmailStatus } from "@server/auth/email-verification.ts"
+import { passwordKeyOf, proveEmailCode, readEmailStatus } from "@server/auth/email-verification.ts"
 
 /** Longest username, in characters (code points), after normalisation. */
 export const USERNAME_MAX_LENGTH = 50
@@ -564,11 +564,7 @@ export function createSignIn(options: SignInOptions): SignIn {
         const txSessions = sessionsOver(tx.sessionStore)
         let proven: AuthKey[]
         try {
-          proven = await createEmailCodeSignIn({
-            store: tx.authStore,
-            sessions: txSessions,
-            sendCode: () => Promise.reject(new Error("proving an address sends no mail")),
-          }).proveAddress(user.id, target, code)
+          proven = await proveEmailCode(tx.authStore, user.id, target, code)
         } catch (error) {
           if (error instanceof EmailCodeError) return { outcome: EmailVerifyOutcome.WrongCode }
           // Another user owns the address. The code is spent, and the change cannot happen.

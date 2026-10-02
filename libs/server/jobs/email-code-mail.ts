@@ -64,7 +64,7 @@ export function emailCodeMailJob(deps: EmailCodeMailDeps): JobHandler {
     const status = await readEmailStatus(emailChanges(sql), deps.store, request.userId)
     const sender = deps.sender
     if (sender && emailToVerify(status) === request.email) {
-      await sendEmailCode(deps.store, request.email, async (to, code) => {
+      await sendEmailCode(deps.store, request.userId, request.email, async (to, code) => {
         const result = await sender.send(
           emailCodeMail(deps.brand, { to, code, validMinutes: EMAIL_CODE_TTL_MINUTES }),
         )

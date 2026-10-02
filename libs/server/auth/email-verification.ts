@@ -3,9 +3,11 @@
  * address change that waits for its code, and the one check that later features ask before they
  * trust an address.
  *
- * The codes are `@spy4x/server/auth/email-code`'s: 48 random bits as 8 base64url characters, stored
- * only as a SHA-256 of the address and the code, 5 guesses per code, 10 minutes, deleted when they
- * match. The store compares the hashes with SQL `=`; the time that takes tells a guesser nothing
+ * The codes are `createEmailProof`'s from `@spy4x/server/auth/email-code`: 48 random bits as 8
+ * base64url characters, bound to the user and the address, stored only as a SHA-256 of both and the
+ * code, 5 guesses per code, 10 minutes, deleted when they match. Each user and address pair keeps
+ * its own guess count, so another account asking to prove the same address cannot spend this
+ * account's guesses. The store compares the hashes with SQL `=`; the time that takes tells a guesser nothing
  * about the code, since they would need a preimage of the hash. Asking again replaces the code and
  * keeps its guess count, so asking never buys more guesses.
  *
@@ -15,11 +17,10 @@
  */
 
 import type { Sql } from "@spy4x/server/db"
-import type { AuthKey, AuthSessionRecord, AuthStore } from "@spy4x/server/auth"
+import type { AuthKey, AuthStore } from "@spy4x/server/auth"
 import { normalizeEmail } from "@spy4x/server/auth"
-import { createEmailCodeSignIn, DEFAULT_CODE_TTL_MINUTES } from "@spy4x/server/auth/email-code"
+import { createEmailProof, DEFAULT_CODE_TTL_MINUTES } from "@spy4x/server/auth/email-code"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
-import type { SessionManager } from "@spy4x/server/sign-in"
 import type { EmailStatus } from "@domain/identity"
 
 /** How long a mailed code works. */
@@ -70,16 +71,35 @@ export async function readEmailStatus(
 }
 
 /**
- * Issues a code for `email` and hands it to `send`, which mails it. The raw code exists only in
- * that call. A rejection of `send` reaches the caller; the code is issued by then and simply
- * replaced by the next one.
+ * Issues a code that proves `email` for `userId` and hands it to `send`, which mails it. The raw
+ * code exists only in that call. A rejection of `send` reaches the caller; the code is issued by
+ * then and simply replaced by the next one.
  */
 export async function sendEmailCode(
   store: AuthStore,
+  userId: number,
   email: string,
   send: (email: string, code: string) => Promise<void>,
 ): Promise<void> {
-  await createEmailCodeSignIn({ store, sessions: NO_SESSIONS, sendCode: send }).requestCode(email)
+  await createEmailProof({ store, sendCode: send }).requestCode(userId, email)
+}
+
+/**
+ * Checks `code` for `userId` and `email` and, on a match, proves the address for the user. Returns
+ * the user's keys that now carry it, proven. Throws `EmailCodeError` and `AuthConflictError` as
+ * `createEmailProof().proveAddress` does.
+ */
+export async function proveEmailCode(
+  store: AuthStore,
+  userId: number,
+  email: string,
+  code: string,
+): Promise<AuthKey[]> {
+  const proof = createEmailProof({
+    store,
+    sendCode: () => Promise.reject(new Error("checking a code sends no mail")),
+  })
+  return await proof.proveAddress(userId, email, code)
 }
 
 /**
@@ -91,13 +111,3 @@ export async function provenAddressOwner(store: AuthStore, email: unknown): Prom
   const address = normalizeEmail(email)
   return address === null ? null : await store.findUserIdByProvenEmail(address)
 }
-
-/**
- * `createEmailCodeSignIn` requires a session manager, but `requestCode` never creates a session:
- * the worker, which sends the codes, holds no session pepper. Any use of this one is a bug.
- */
-const NO_SESSIONS = new Proxy({}, {
-  get() {
-    throw new Error("sending an e-mail code must not create a session")
-  },
-}) as SessionManager<AuthSessionRecord>
