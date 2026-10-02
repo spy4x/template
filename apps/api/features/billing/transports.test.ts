@@ -188,7 +188,7 @@ describe("billing over REST", () => {
     expect(recorder.checkouts).toEqual([])
   })
 
-  it("refuses a second checkout while the group pays, so it is never charged twice", async () => {
+  it("refuses a second checkout while the group pays", async () => {
     const { recorder, call } = stack({ subscription: PRO, customer: "cus_1" })
 
     const response = await call(OWNER, "POST", "/checkout", { planId: "pro" })
