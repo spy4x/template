@@ -14,6 +14,10 @@ export interface GroupItem {
   authorizationRevision: string
   changeSequence: string
   updatedAt: string
+  /** How many members the group has; only the list sends it. */
+  memberCount?: number
+  /** The first few members, for the card's avatar stack; only the list sends them. */
+  members?: { name: string }[]
 }
 
 /** A deleted group its owner can still restore; `deletedAt` is an ISO string. */
@@ -204,7 +208,10 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
     if (trimmed.length === 0) return false
     return await change(groupId, "rename", async () => {
       const { group } = await dependencies.rename({ groupId, name: trimmed })
-      groups.value = groups.value.map((existing) => existing.id === group.id ? group : existing)
+      // A rename answers without the members, so the card keeps the ones the list sent.
+      groups.value = groups.value.map((existing) =>
+        existing.id === group.id ? { ...existing, ...group } : existing
+      )
       renameDraft.value = null
     }, "Could not rename the group")
   }

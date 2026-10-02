@@ -10,7 +10,9 @@ const USER = 7
  * A pull over fakes. `groupsAfterRead` is the list the server answers when the groups are read;
  * `calls` records every read in order, so a read of a group that is gone shows up.
  */
-function harness(options: { open: string | null; groupsAfterRead: string[] }) {
+function harness(
+  options: { open: string | null; groupsAfterRead: string[]; settings?: string | null },
+) {
   const calls: string[] = []
   const groups = signal<readonly { id: string }[]>([{ id: "home" }, { id: "team" }])
   const pull = createPull({
@@ -29,6 +31,10 @@ function harness(options: { open: string | null; groupsAfterRead: string[] }) {
     notes: {
       groupId: signal(options.open),
       refresh: () => Promise.resolve(void calls.push("notes")),
+    },
+    members: {
+      groupId: signal(options.settings ?? null),
+      refresh: () => Promise.resolve(void calls.push("members")),
     },
   })
   return { pull, calls }
@@ -76,5 +82,19 @@ describe("the pull after a hint", () => {
     await pull({ groupId: userChangeGroupId(USER) })
 
     expect([...calls].sort()).toEqual(["profile", "selection"])
+  })
+
+  it("reads the members of the open settings page for its group's hint, and never once the person was removed", async () => {
+    const kept = harness({ open: null, settings: "team", groupsAfterRead: ["home", "team"] })
+    await kept.pull({ groupId: "team" })
+    expect(kept.calls).toEqual(["flush", "selection", "groups", "members"])
+
+    const other = harness({ open: null, settings: "team", groupsAfterRead: ["home", "team"] })
+    await other.pull({ groupId: "home" })
+    expect(other.calls).not.toContain("members")
+
+    const removed = harness({ open: null, settings: "team", groupsAfterRead: ["home"] })
+    await removed.pull({ groupId: "team" })
+    expect(removed.calls).not.toContain("members")
   })
 })

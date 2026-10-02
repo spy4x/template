@@ -232,6 +232,25 @@ describe("groups store", () => {
     expect(store.working.value).toBeNull()
   })
 
+  it("keeps the card's members when a rename answers without them", async () => {
+    const listed = { ...item("a", "1", "Old"), memberCount: 3, members: [{ name: "Ann" }] }
+    const { store } = harness({
+      pages: [{ groups: [listed], nextCursor: null }],
+      rename: (input) => Promise.resolve({ group: item(input.groupId, "2", input.name) }),
+    })
+    await store.refresh()
+    store.renameDraft.value = { groupId: "a", name: "New" }
+
+    await store.rename("a")
+
+    expect(store.groups.value[0]).toMatchObject({
+      name: "New",
+      changeSequence: "2",
+      memberCount: 3,
+      members: [{ name: "Ann" }],
+    })
+  })
+
   it("keeps the typed name and shows the server's reason when a rename is refused", async () => {
     const { store } = harness({
       rename: () => Promise.reject(new RealtimeRequestError("forbidden", "Only an admin can")),

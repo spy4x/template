@@ -1,0 +1,138 @@
+import { expect } from "@std/expect"
+import { describe, it } from "@std/testing/bdd"
+import { RealtimeRequestError } from "@spy4x/realtime"
+import { GroupRole } from "@domain/groups"
+import { createMembersStore, type MemberItem, type MembersDependencies } from "./members.ts"
+
+function member(userId: number, role = GroupRole.VIEWER): MemberItem {
+  return {
+    userId,
+    name: `Member ${userId}`,
+    email: null,
+    role,
+    joinedAt: "2026-01-01T00:00:00.000Z",
+    isYou: false,
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => (resolve = r))
+  return { promise, resolve }
+}
+
+const UNUSED: MembersDependencies = {
+  list: () => Promise.resolve({ members: [member(1, GroupRole.OWNER), member(2)] }),
+  setRole: () => Promise.reject(new Error("unused")),
+  removeMember: () => Promise.reject(new Error("unused")),
+  leave: () => Promise.reject(new Error("unused")),
+}
+
+function refused(message: string) {
+  return new RealtimeRequestError("forbidden", message)
+}
+
+describe("members store", () => {
+  it("reads the members of the group it opens, and drops a read answered after the page moved on", async () => {
+    const first = deferred<{ members: MemberItem[] }>()
+    const asked: string[] = []
+    const store = createMembersStore({
+      ...UNUSED,
+      list: ({ groupId }) => {
+        asked.push(groupId)
+        return groupId === "a" ? first.promise : Promise.resolve({ members: [member(9)] })
+      },
+    })
+
+    const late = store.open("a")
+    await store.open("b")
+    first.resolve({ members: [member(1)] })
+    await late
+
+    expect(asked).toEqual(["a", "b"])
+    expect(store.groupId.value).toBe("b")
+    expect(store.members.value?.map((m) => m.userId)).toEqual([9])
+  })
+
+  it("changes a role and shows the member as the server answered", async () => {
+    const sent: unknown[] = []
+    const store = createMembersStore({
+      ...UNUSED,
+      setRole: (input) => {
+        sent.push(input)
+        return Promise.resolve({ member: member(2, GroupRole.EDITOR) })
+      },
+    })
+    await store.open("g")
+
+    expect(await store.changeRole(2, GroupRole.EDITOR)).toBe(true)
+
+    expect(sent).toEqual([{ groupId: "g", userId: 2, role: GroupRole.EDITOR }])
+    expect(store.members.value?.find((m) => m.userId === 2)?.role).toBe(GroupRole.EDITOR)
+    expect(store.pendingUserId.value).toBeNull()
+  })
+
+  it("shows a refused change under its member and refuses a second change while one runs", async () => {
+    const answer = deferred<void>()
+    const roleChanges: number[] = []
+    const store = createMembersStore({
+      ...UNUSED,
+      setRole: ({ userId, role }) => {
+        roleChanges.push(userId)
+        return Promise.resolve({ member: member(userId, role) })
+      },
+      removeMember: async () => {
+        await answer.promise
+        throw refused("Only an admin can remove a member")
+      },
+    })
+    await store.open("g")
+
+    const removing = store.remove(2)
+    expect(store.pendingUserId.value).toBe(2)
+    expect(await store.changeRole(2, GroupRole.EDITOR)).toBe(false)
+    expect(roleChanges).toEqual([])
+    answer.resolve()
+
+    expect(await removing).toBe(false)
+    expect(store.memberError.value).toEqual({
+      userId: 2,
+      message: "Only an admin can remove a member",
+    })
+    expect(store.members.value?.map((m) => m.userId)).toEqual([1, 2])
+  })
+
+  it("drops a removed member from the list", async () => {
+    const store = createMembersStore({
+      ...UNUSED,
+      removeMember: () => Promise.resolve({ removed: true }),
+    })
+    await store.open("g")
+
+    expect(await store.remove(2)).toBe(true)
+
+    expect(store.members.value?.map((m) => m.userId)).toEqual([1])
+  })
+
+  it("leaves the open group, and keeps the reason a leave was refused", async () => {
+    const left: unknown[] = []
+    let refuse = true
+    const store = createMembersStore({
+      ...UNUSED,
+      leave: (input) => {
+        if (refuse) return Promise.reject(refused("You cannot leave your only group"))
+        left.push(input)
+        return Promise.resolve({ left: true })
+      },
+    })
+    await store.open("g")
+
+    expect(await store.leave()).toBe(false)
+    expect(store.leaveError.value).toBe("You cannot leave your only group")
+
+    refuse = false
+    expect(await store.leave()).toBe(true)
+    expect(left).toEqual([{ groupId: "g" }])
+    expect(store.leaveError.value).toBeNull()
+  })
+})
