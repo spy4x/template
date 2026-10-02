@@ -17,8 +17,11 @@ export interface GroupMemberRow {
   userId: number
   /** First and last name; empty when the person has set none. */
   name: string
-  /** The address they sign in with, or `null` for an account without one. */
-  email: string | null
+  /**
+   * The address they sign in with, or `null` for an account without one. The API sends it only to
+   * the owner and admins; for anyone else it is absent and the row shows no address.
+   */
+  email?: string | null
   role: GroupRole
   /** When they joined, as an ISO string. */
   joinedAt: string

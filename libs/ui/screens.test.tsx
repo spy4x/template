@@ -833,6 +833,15 @@ describe("GroupSettingsScreen members", () => {
     expect(memberItem(html, 3)).not.toContain(">You<")
   })
 
+  it("shows no address when the API sent the members without one", () => {
+    const withoutAddresses = membersFor(4).map(({ email: _email, ...member }) => member)
+    const html = renderToString(asMember(GroupRole.VIEWER, 4, { members: withoutAddresses }))
+
+    expect(html).not.toContain("@example.com")
+    expect(memberItem(html, 1)).toContain('data-e2e="group-member-name">Ann Owner<')
+    expect(memberItem(html, 2)).toContain('data-e2e="group-member-name">Unnamed member<')
+  })
+
   for (const role of [GroupRole.VIEWER, GroupRole.EDITOR]) {
     it(`gives a ${GroupRole[role]} no member controls`, () => {
       const surface = noScriptSurface(asMember(role, 4))

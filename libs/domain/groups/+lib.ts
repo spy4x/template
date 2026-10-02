@@ -97,8 +97,11 @@ export interface GroupMemberSummary {
   userId: number
   /** Their first and last name; empty when they set none. */
   name: string
-  /** The address they sign in with, or `null` for an account that has none. */
-  email: string | null
+  /**
+   * The address they sign in with, or `null` for an account that has none. Present only for a
+   * reader who may see addresses ({@link canSeeMemberEmails}).
+   */
+  email?: string | null
   role: GroupRole
   /** When they became a member. */
   joinedAt: Date
@@ -614,6 +617,14 @@ export function canManageMember(
  * Whether `role` may rename the group: an admin or the owner. Every group follows the same rule.
  */
 export function canRename(role: GroupRole): boolean {
+  return isGroupRole(role) && role >= GroupRole.ADMIN
+}
+
+/**
+ * Whether `role` may read the sign-in addresses of the group's members: an admin or the owner,
+ * who manage the members. Viewers and editors see names only.
+ */
+export function canSeeMemberEmails(role: GroupRole): boolean {
   return isGroupRole(role) && role >= GroupRole.ADMIN
 }
 

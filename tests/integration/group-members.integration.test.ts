@@ -96,7 +96,7 @@ Deno.test("members: every member sees the list, with names, roles and which one 
         who,
       ])
     }
-    const members = (await repository.listMembers(groupId, viewer))!
+    const members = (await repository.listMembers(groupId, owner))!
     expect(members[0]).toMatchObject({ name: "Ann Owner", role: GroupRole.OWNER, email: null })
     expect(members[3]).toMatchObject({
       name: "",
@@ -107,6 +107,38 @@ Deno.test("members: every member sees the list, with names, roles and which one 
     expect(await repository.listMembers(groupId, stranger)).toBeNull()
   })
 })
+
+const SEES_ADDRESSES: Record<"owner" | "admin" | "editor" | "viewer", boolean> = {
+  owner: true,
+  admin: true,
+  editor: false,
+  viewer: false,
+}
+
+for (const [reader, sees] of Object.entries(SEES_ADDRESSES)) {
+  Deno.test(
+    `members: ${
+      sees ? `the ${reader} gets every member's address` : `the ${reader} gets no address field`
+    }`,
+    async () => {
+      await withSchema(async (sql) => {
+        const people = await team(sql)
+        const { repository, groupId, editor } = people
+        await sql`
+          INSERT INTO auth_keys (user_id, method, subject, email)
+          VALUES (${editor}, 'email', ${`editor-${editor}`}, 'editor@example.com')
+        `
+
+        const members =
+          (await repository.listMembers(groupId, people[reader as keyof typeof SEES_ADDRESSES]))!
+        const addresses = members.map((member) => ("email" in member ? member.email : "absent"))
+        expect(addresses).toEqual(
+          sees ? [null, null, "editor@example.com", null, null] : Array(5).fill("absent"),
+        )
+      })
+    },
+  )
+}
 
 Deno.test("members: the group list carries a count and the first five names", async () => {
   await withSchema(async (sql) => {

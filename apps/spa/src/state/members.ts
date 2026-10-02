@@ -8,7 +8,8 @@ import { realtimeCommand } from "./realtime.ts"
 export interface MemberItem {
   userId: number
   name: string
-  email: string | null
+  /** Sent only to the owner and admins. */
+  email?: string | null
   role: GroupRole
   joinedAt: string
   isYou: boolean
