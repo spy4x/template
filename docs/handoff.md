@@ -196,10 +196,10 @@ These cost real time to find. Do not rediscover them.
    `users`. An account made before #139 keeps its username as `subject` and
    `email` stays `NULL`; it signs in with the username as before, through the
    same field (`login`): a value `normalizeEmail` accepts is looked up as an
-   address, anything else as a username. An address is attached to a key only at
-   sign-up, so it is nullable, unique when set (`UNIQUE (method, subject)`), and
-   compared after normalising. A username account has no address, so it cannot ask
-   for a reset link; attaching one to it is not built yet.
+   address, anything else as a username. An address is attached to a key at
+   sign-up or by a proven address change (below), so it is nullable, unique when
+   set (`UNIQUE (method, subject)`), and compared after normalising. A username
+   account has no address, so it cannot ask for a reset link until it adds one.
 
    **Password reset.** `POST /api/auth/password/forgot` with `{ email }` answers the
    same body for every valid address and queues the `auth.password-reset-mail` job
@@ -213,19 +213,43 @@ These cost real time to find. Do not rediscover them.
    routes, and 3 requests an hour per address (`ratelimit-reset` in Valkey,
    keyed by a hash of the address, refusing when Valkey is down).
 
-   **Known gap: a squatted address.** Addresses are not verified at sign-up, so
-   anyone can sign up first with someone else's address. A reset gives the
-   owner the account back (new password, address proven, every session signed
-   out), unless the squatter turned on an authenticator app: that stays, and
-   the owner stops at the one-time-code step. Sign-up also answers 401 for a
-   taken address, which tells that an account uses it; avoiding that needs
-   verified addresses too. Both close with
-   [#140](https://github.com/spy4x/template/issues/140) (verify the address
-   with a one-time code).
+   **Proving an address (#140).** Sign-up queues the `auth.email-code-mail` job
+   (request row in `email_code_requests`, never the code). The worker issues an
+   8-character code with `@spy4x/server/auth/email-code` (only a hash is stored,
+   10 minutes, single use, 5 guesses per code) and mails it. Until the code is
+   entered, every signed-in page of both apps shows a banner linking to `/email`.
+   `GET /api/auth/email` answers `{ email, proven, pending }`; `POST
+   /api/auth/email/verify` takes `{ code }`; `POST /api/auth/email/send` asks for
+   a new code (3 mails an hour per address, `ratelimit-email-code` in Valkey);
+   codes come from `createEmailProof` and are bound to the user and the address,
+   so another account proving the same address cannot spend this one's guesses;
+   wrong codes also count against the account in `email_code_failures`
+   (`@spy4x/server/lockout`: 5 in a row lock it for 15 minutes, doubling). A
+   wrong and an expired code get the same answer. An unproven address cannot
+   turn on an authenticator app. `provenAddressOwner`
+   (`libs/server/auth/email-verification.ts`) is the one check invitations
+   (#131) and OAuth linking (#141) must call before trusting an address.
+
+   **Changing the address.** `POST /api/auth/email/change` with `{ email,
+   password }` stores the new address in `email_changes` and mails it a code;
+   the account keeps signing in with the old address until that code is
+   entered. The verify call then moves the password key to the new address,
+   signs out every other session and gives this one a new cookie. A username
+   account adds its first address the same way, and from then on signs in with
+   the address instead of the username. A password reset drops a waiting change.
+   A reset and a move of one account both lock its password key first
+   (`lockPasswordKey`), so neither copies a hash the other is replacing.
+
+   **A squatted address.** Anyone can still sign up first with someone else's
+   address, but it stays unproven and cannot carry a second factor. A reset
+   link proves the mailbox, so it gives the owner the account back: new
+   password, address proven, every session signed out, and any authenticator
+   app removed. Sign-up still answers 401 for a taken address, which tells that
+   an account uses it.
 
    **Mail.** `libs/server/mail` picks the transport: with `ENV=dev` the console
    sender of `@spy4x/email` plus a copy in the `dev_mail` table, which the e2e
-   specs read through `POST /api/test/last-mail`; any other `ENV` uses SMTP when
+   specs read through `POST /api/test/last-mail` (reset links and codes alike); any other `ENV` uses SMTP when
    `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` and `SMTP_FROM` are all set,
    and otherwise sends nothing. The console sender never runs in production: it
    prints the link, and container logs are shipped. The SPA's nginx logs paths
@@ -234,8 +258,9 @@ These cost real time to find. Do not rediscover them.
    **Owner step before reset mails go out in production.** Production has no
    SMTP account yet. Until all five `SMTP_*` keys are in the production env file,
    the API and the worker start, each logs one warning naming the missing keys,
-   `/forgot-password` gives its usual answer and sends nothing, and everything
-   else works. Add the five keys (see `infra/envs/.env.example`) and deploy; the
+   `/forgot-password` gives its usual answer and sends nothing, sign-up works but
+   no code arrives, so the banner stays, and everything else works. No code is
+   ever logged outside `ENV=dev`. Add the five keys (see `infra/envs/.env.example`) and deploy; the
    worker reads them at start-up.
 
 9. **A full-stack e2e spec imports `test` from `e2e/fixtures/stack.ts` and loads pages

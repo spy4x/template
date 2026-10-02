@@ -1,7 +1,9 @@
 import type { ComponentChildren } from "preact"
 import { useLocation } from "wouter-preact"
-import { NOTE_PATHS } from "@ui/progressive.tsx"
+import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { AppFrame, PublicFrame as PublicFrameScreen } from "@ui/frame.tsx"
+import { EmailBanner } from "@ui/email-screen.tsx"
+import { emailStore } from "../state/email.ts"
 import { signOut } from "../state/auth.ts"
 import { groupsStore } from "../state/groups.ts"
 import { selectionStore } from "../state/selection.ts"
@@ -28,6 +30,10 @@ export function AppShell(
         },
       }}
       user={user}
+      // The e-mail page itself asks for the code; the banner would only repeat it there.
+      banner={location === SCREEN_PATHS.email
+        ? undefined
+        : <EmailBanner status={emailStore.status.value} navigate={navigate} />}
       connection={wsStatus}
       currentPath={location}
       navigate={navigate}

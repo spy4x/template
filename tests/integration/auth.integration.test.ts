@@ -33,6 +33,8 @@ import { requireDbConnection } from "./db-connection.ts"
 const AUTH_MIGRATION = "2026_09_24_0001_auth_package_tables.sql"
 /** Drops the group kind, so a group is inserted without it. */
 const KIND_MIGRATION = "2026_10_07_0001_group_kind_removed.sql"
+// A reset also drops a waiting address change, so the reset tests need its table (#140).
+const EMAIL_MIGRATION = "2026_10_08_0002_email_verification.sql"
 const MASTER_MIGRATIONS = [
   "2026_01_26_0001_init.sql",
   "2026_01_26_0002_auth_profiles_audit.sql",
@@ -400,109 +402,122 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
 })
 
 Deno.test("username accounts and the password reset link", async (t) => {
-  await withSchema([...MASTER_MIGRATIONS, AUTH_MIGRATION, KIND_MIGRATION], async (sql) => {
-    const signIn = buildSignIn(sql)
-    const db = new AppDbBase({ sql })
-    const ann = { email: "ann@example.com", password: "Passw0rd!" }
-    expect((await buildApp(signIn).request("POST", "/sign-up", ann)).status).toBe(200)
+  await withSchema(
+    [...MASTER_MIGRATIONS, AUTH_MIGRATION, KIND_MIGRATION, EMAIL_MIGRATION],
+    async (sql) => {
+      const signIn = buildSignIn(sql)
+      const db = new AppDbBase({ sql })
+      const ann = { email: "ann@example.com", password: "Passw0rd!" }
+      expect((await buildApp(signIn).request("POST", "/sign-up", ann)).status).toBe(200)
 
-    await t.step("an account made before addresses still signs in with its username", async () => {
-      const legacy = { email: "legacy@example.com", password: "Passw0rd!" }
-      expect((await buildApp(signIn).request("POST", "/sign-up", legacy)).status).toBe(200)
-      // What a username sign-up wrote: the username as subject, and no address.
-      await sql`
+      await t.step(
+        "an account made before addresses still signs in with its username",
+        async () => {
+          const legacy = { email: "legacy@example.com", password: "Passw0rd!" }
+          expect((await buildApp(signIn).request("POST", "/sign-up", legacy)).status).toBe(200)
+          // What a username sign-up wrote: the username as subject, and no address.
+          await sql`
         UPDATE auth_keys SET subject = 'legacyuser', email = NULL
         WHERE subject = 'legacy@example.com'
       `
 
-      const client = buildApp(signIn)
-      const response = await client.request("POST", "/sign-in", {
-        login: "  LegacyUser ",
-        password: "Passw0rd!",
-      })
-      expect(response.status).toBe(200)
-      expect((await client.request("GET", "/me")).status).toBe(200)
-      // A username account has no address, so no link can be sent for it.
-      expect(await issuePasswordReset(db.authStore, "legacyuser", new Date())).toBe(null)
-    })
+          const client = buildApp(signIn)
+          const response = await client.request("POST", "/sign-in", {
+            login: "  LegacyUser ",
+            password: "Passw0rd!",
+          })
+          expect(response.status).toBe(200)
+          expect((await client.request("GET", "/me")).status).toBe(200)
+          // A username account has no address, so no link can be sent for it.
+          expect(await issuePasswordReset(db.authStore, "legacyuser", new Date())).toBe(null)
+        },
+      )
 
-    await t.step("the link sets the new password and signs out every session", async () => {
-      const first = buildApp(signIn)
-      const second = buildApp(signIn)
-      const login = { login: ann.email, password: ann.password }
-      expect((await first.request("POST", "/sign-in", login)).status).toBe(200)
-      expect((await second.request("POST", "/sign-in", login)).status).toBe(200)
-      const issued = (await issuePasswordReset(db.authStore, " Ann@Example.com", new Date()))!
-      const stored = await sql<{ secretHash: string }[]>`SELECT secret_hash FROM auth_challenges`
-      expect(stored.length).toBe(1)
-      expect(stored[0].secretHash).not.toContain(issued.code)
+      await t.step("the link sets the new password and signs out every session", async () => {
+        const first = buildApp(signIn)
+        const second = buildApp(signIn)
+        const login = { login: ann.email, password: ann.password }
+        expect((await first.request("POST", "/sign-in", login)).status).toBe(200)
+        expect((await second.request("POST", "/sign-in", login)).status).toBe(200)
+        const issued = (await issuePasswordReset(db.authStore, " Ann@Example.com", new Date()))!
+        const stored = await sql<{ secretHash: string }[]>`SELECT secret_hash FROM auth_challenges`
+        expect(stored.length).toBe(1)
+        expect(stored[0].secretHash).not.toContain(issued.code)
 
-      expect(await signIn.resetPassword("ANN@example.com", issued.code, "N3w-Passw0rd")).toBe(true)
+        expect(await signIn.resetPassword("ANN@example.com", issued.code, "N3w-Passw0rd")).toBe(
+          true,
+        )
 
-      expect((await first.request("GET", "/me")).status).toBe(401)
-      expect((await second.request("GET", "/me")).status).toBe(401)
-      const client = buildApp(signIn)
-      expect((await client.request("POST", "/sign-in", login)).status).toBe(401)
-      const renewed = { login: ann.email, password: "N3w-Passw0rd" }
-      expect((await client.request("POST", "/sign-in", renewed)).status).toBe(200)
-      const [key] = await sql<{ provenAt: Date | null }[]>`
+        expect((await first.request("GET", "/me")).status).toBe(401)
+        expect((await second.request("GET", "/me")).status).toBe(401)
+        const client = buildApp(signIn)
+        expect((await client.request("POST", "/sign-in", login)).status).toBe(401)
+        const renewed = { login: ann.email, password: "N3w-Passw0rd" }
+        expect((await client.request("POST", "/sign-in", renewed)).status).toBe(200)
+        const [key] = await sql<{ provenAt: Date | null }[]>`
         SELECT proven_at AS "provenAt" FROM auth_keys WHERE subject = ${ann.email}
       `
-      expect(key.provenAt).not.toBeNull()
-    })
+        expect(key.provenAt).not.toBeNull()
+      })
 
-    await t.step("the same link never works twice", async () => {
-      const issued = (await issuePasswordReset(db.authStore, ann.email, new Date()))!
-      expect(await signIn.resetPassword(ann.email, issued.code, "Once-Passw0rd")).toBe(true)
-      expect(await signIn.resetPassword(ann.email, issued.code, "Twice-Passw0rd")).toBe(false)
-      const client = buildApp(signIn)
-      const twice = { login: ann.email, password: "Twice-Passw0rd" }
-      expect((await client.request("POST", "/sign-in", twice)).status).toBe(401)
-    })
+      await t.step("the same link never works twice", async () => {
+        const issued = (await issuePasswordReset(db.authStore, ann.email, new Date()))!
+        expect(await signIn.resetPassword(ann.email, issued.code, "Once-Passw0rd")).toBe(true)
+        expect(await signIn.resetPassword(ann.email, issued.code, "Twice-Passw0rd")).toBe(false)
+        const client = buildApp(signIn)
+        const twice = { login: ann.email, password: "Twice-Passw0rd" }
+        expect((await client.request("POST", "/sign-in", twice)).status).toBe(401)
+      })
 
-    await t.step("a link past its 30 minutes is refused and changes nothing", async () => {
-      const issued = (await issuePasswordReset(db.authStore, ann.email, new Date()))!
-      await sql`UPDATE auth_challenges SET expires_at = now() - interval '1 second'`
-      expect(await signIn.resetPassword(ann.email, issued.code, "Late-Passw0rd")).toBe(false)
-      const client = buildApp(signIn)
-      const late = { login: ann.email, password: "Late-Passw0rd" }
-      expect((await client.request("POST", "/sign-in", late)).status).toBe(401)
-    })
+      await t.step("a link past its 30 minutes is refused and changes nothing", async () => {
+        const issued = (await issuePasswordReset(db.authStore, ann.email, new Date()))!
+        await sql`UPDATE auth_challenges SET expires_at = now() - interval '1 second'`
+        expect(await signIn.resetPassword(ann.email, issued.code, "Late-Passw0rd")).toBe(false)
+        const client = buildApp(signIn)
+        const late = { login: ann.email, password: "Late-Passw0rd" }
+        expect((await client.request("POST", "/sign-in", late)).status).toBe(401)
+      })
 
-    await t.step("a fresh link works after wrong guesses at the previous one", async () => {
-      // A stranger who knows the address guesses at the live link, more often than any small cap.
-      await issuePasswordReset(db.authStore, ann.email, new Date())
-      for (let guess = 0; guess < 10; guess++) {
-        expect(await consumePasswordReset(db.authStore, ann.email, `wrong-${guess}`)).toBe(false)
-      }
+      await t.step("a fresh link works after wrong guesses at the previous one", async () => {
+        // A stranger who knows the address guesses at the live link, more often than any small cap.
+        await issuePasswordReset(db.authStore, ann.email, new Date())
+        for (let guess = 0; guess < 10; guess++) {
+          expect(await consumePasswordReset(db.authStore, ann.email, `wrong-${guess}`)).toBe(false)
+        }
 
-      // The owner asks again before the first link expires; the new link must still work.
-      const fresh = (await issuePasswordReset(db.authStore, ann.email, new Date()))!
-      expect(await signIn.resetPassword(ann.email, fresh.code, "Fresh-Passw0rd")).toBe(true)
-    })
+        // The owner asks again before the first link expires; the new link must still work.
+        const fresh = (await issuePasswordReset(db.authStore, ann.email, new Date()))!
+        expect(await signIn.resetPassword(ann.email, fresh.code, "Fresh-Passw0rd")).toBe(true)
+      })
 
-    await t.step("a link for a key without an address is refused and changes nothing", async () => {
-      // A username account whose username looks like an address: no link is ever sent for it, so
-      // a challenge under its name must not reset it either.
-      await sql`
+      await t.step(
+        "a link for a key without an address is refused and changes nothing",
+        async () => {
+          // A username account whose username looks like an address: no link is ever sent for it, so
+          // a challenge under its name must not reset it either.
+          await sql`
         UPDATE auth_keys SET subject = 'olduser@example.com', email = NULL
         WHERE subject = 'legacyuser'
       `
-      const code = "code-for-a-key-without-an-address"
-      await db.authStore.issueChallenge({
-        purpose: PASSWORD_RESET_PURPOSE,
-        subject: "olduser@example.com",
-        secretHash: await sha256Hex(code),
-        expiresAt: new Date(Date.now() + 60_000),
-        now: new Date(),
-      })
+          const code = "code-for-a-key-without-an-address"
+          await db.authStore.issueChallenge({
+            purpose: PASSWORD_RESET_PURPOSE,
+            subject: "olduser@example.com",
+            secretHash: await sha256Hex(code),
+            expiresAt: new Date(Date.now() + 60_000),
+            now: new Date(),
+          })
 
-      expect(await signIn.resetPassword("olduser@example.com", code, "Taken-Passw0rd")).toBe(false)
-      const client = buildApp(signIn)
-      const old = { login: "olduser@example.com", password: "Passw0rd!" }
-      expect((await client.request("POST", "/sign-in", old)).status).toBe(200)
-    })
-  })
+          expect(await signIn.resetPassword("olduser@example.com", code, "Taken-Passw0rd")).toBe(
+            false,
+          )
+          const client = buildApp(signIn)
+          const old = { login: "olduser@example.com", password: "Passw0rd!" }
+          expect((await client.request("POST", "/sign-in", old)).status).toBe(200)
+        },
+      )
+    },
+  )
 })
 
 Deno.test("authenticator-app enrolment, second factor and replay", async (t) => {
@@ -512,6 +527,11 @@ Deno.test("authenticator-app enrolment, second factor and replay", async (t) => 
     const credentials = { login: signUpBody.email, password: signUpBody.password }
     const enrolling = buildApp(signIn)
     expect((await enrolling.request("POST", "/sign-up", signUpBody)).status).toBe(200)
+    // Only a proven address may turn on a second factor (#140).
+    const [key] = await sql<{ id: number }[]>`
+      SELECT id FROM auth_keys WHERE subject = ${signUpBody.email}
+    `
+    await new AppDbBase({ sql }).authStore.proveKey(key.id, new Date())
     let secret = ""
     let enrolmentCode = ""
 

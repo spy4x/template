@@ -79,6 +79,11 @@ export const API_BODIES = {
     newPassword: field(form, "newPassword"),
   }),
   totpFinish: (form: FormData) => ({ otp: field(form, "otp") }),
+  emailVerify: (form: FormData) => ({ code: field(form, "code") }),
+  emailChange: (form: FormData) => ({
+    email: field(form, "email"),
+    password: field(form, "password"),
+  }),
   pushRemove: (form: FormData) => ({ deviceId: field(form, "deviceId") }),
   groupCreate: (form: FormData) => ({
     id: field(form, "id"),

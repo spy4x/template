@@ -1,10 +1,12 @@
 import { DbServiceBase, type RowCache, type Sql } from "@spy4x/server/db"
 import type { AuthSessionRecord, AuthStore } from "@spy4x/server/auth"
 import { createPostgresAuthStore, createPostgresSessionStore } from "@spy4x/server/auth/postgres"
+import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import type { SessionStore } from "@spy4x/server/sign-in"
 import type { User, UserBase } from "@domain/identity"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
+import { emailChanges } from "@server/auth/email-verification.ts"
 
 /** A user's authenticator-app enrolment, one row of `user_totp`. */
 export interface UserTotp {
@@ -81,6 +83,32 @@ export class AppDbBase extends DbServiceBase {
     return createPostgresSessionStore(this.sql)
   }
 
+  /**
+   * Locks a password key until the transaction ends: the user's, or the one whose subject is the
+   * address. A password reset and an address move both take this lock first, so one waits for the
+   * other and neither copies a password hash the other is replacing (#140). Inside `begin()` only.
+   */
+  async lockPasswordKey(where: { userId: number } | { subject: string }): Promise<void> {
+    if ("userId" in where) {
+      await this.sql`
+        SELECT 1 FROM auth_keys
+        WHERE method = ${PASSWORD_METHOD} AND user_id = ${where.userId}
+        FOR UPDATE
+      `
+    } else {
+      await this.sql`
+        SELECT 1 FROM auth_keys
+        WHERE method = ${PASSWORD_METHOD} AND subject = ${where.subject}
+        FOR UPDATE
+      `
+    }
+  }
+
+  /** The address change waiting for its code. Built per access, like `group`. */
+  get emailChange(): ReturnType<typeof emailChanges> {
+    return emailChanges(this.sql)
+  }
+
   get user() {
     const cache = this.userCache
     const cached = this.buildMethods<User, UserBase, Partial<UserBase>>(`users`, cache)
@@ -154,6 +182,10 @@ export class AppDbBase extends DbServiceBase {
             AND (last_accepted_step IS NULL OR last_accepted_step < ${step})
           RETURNING user_id
         `).length === 1,
+      /** Removes the enrolment, finished or not. */
+      remove: async (userId: number): Promise<void> => {
+        await sql`DELETE FROM user_totp WHERE user_id = ${userId}`
+      },
       deleteConfirmed: async (userId: number): Promise<boolean> =>
         (await sql`
           DELETE FROM user_totp WHERE user_id = ${userId} AND confirmed_at IS NOT NULL

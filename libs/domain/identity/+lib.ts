@@ -100,6 +100,35 @@ export const authPasswordResetSchema = authEmailSchema.and({
 })
 export type AuthPasswordReset = typeof authPasswordResetSchema.infer
 
+/** The body that proves an address: the code from the mail, as typed. */
+export const authEmailCodeSchema = type({
+  code: "string <= 64",
+})
+export type AuthEmailCode = typeof authEmailCodeSchema.infer
+
+/** The body of an address change: the new address and the current password. */
+export const authEmailChangeSchema = authEmailSchema.and(authPasswordSchema)
+export type AuthEmailChange = typeof authEmailChangeSchema.infer
+
+/** Where the signed-in person's e-mail address stands (`GET /api/auth/email`). */
+export interface EmailStatus {
+  /** The address the account signs in with; `null` for an account made with a username. */
+  email: string | null
+  /** Whether a code proved `email`. */
+  proven: boolean
+  /** A new address waiting for its code; the account keeps `email` until it is proven. */
+  pending: string | null
+}
+
+/**
+ * The address a code proves now: the pending new one, else the current one while it is unproven.
+ * `null` when there is nothing to prove.
+ */
+export function emailToVerify(status: EmailStatus): string | null {
+  if (status.pending !== null) return status.pending
+  return status.email !== null && !status.proven ? status.email : null
+}
+
 export const authPasswordChangeSchema = authPasswordSchema.and({
   newPassword: "8 <= string <= 50",
 })

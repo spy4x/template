@@ -30,6 +30,12 @@ export const FORM_ACTIONS = {
   groupCreate: "/groups",
   /** Selects the group the notes show: `{ groupId }`. */
   groupSelect: "/groups/select",
+  /** Proves the address waiting for a code: `{ code }`. */
+  emailVerify: "/email/verify",
+  /** Sends a new code to the address waiting for one: no fields. */
+  emailSend: "/email/send",
+  /** Moves to a new address once its code proves it: `{ email, password }`. */
+  emailChange: "/email/change",
 } as const
 
 /**
@@ -63,6 +69,8 @@ export const SCREEN_PATHS = {
   forgotPassword: "/forgot-password",
   profile: "/",
   groups: "/groups",
+  /** The e-mail address: its code, a new code, a change. */
+  email: "/email",
 } as const
 
 /** Where a group's own pages live. */

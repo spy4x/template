@@ -21,6 +21,15 @@ export const RESET_MAILS_PER_ADDRESS = 3
 /** The window of {@link RESET_MAILS_PER_ADDRESS}: one hour. */
 export const RESET_ADDRESS_WINDOW_MS = 60 * 60_000
 
+/**
+ * Code mails one address may be sent per {@link EMAIL_CODE_ADDRESS_WINDOW_MS}, from any account or
+ * IP: a new address, or a new code for one.
+ */
+export const EMAIL_CODE_MAILS_PER_ADDRESS = 3
+
+/** The window of {@link EMAIL_CODE_MAILS_PER_ADDRESS}: one hour. */
+export const EMAIL_CODE_ADDRESS_WINDOW_MS = 60 * 60_000
+
 /** The rate limits the auth routes mount. Each one answers 429 with `Retry-After` when spent. */
 export interface AuthRateLimits {
   /**
@@ -44,6 +53,11 @@ export interface AuthRateLimits {
    * flood of mail to someone else's inbox.
    */
   resetByAddress(email: string): Promise<RateLimitDecision>
+  /**
+   * Spends one of the address's {@link EMAIL_CODE_MAILS_PER_ADDRESS} code mails, the same way
+   * `resetByAddress` spends a reset link, and refuses the same way when the store fails.
+   */
+  emailCodeByAddress(email: string): Promise<RateLimitDecision>
 }
 
 /** Limits per window, from `config.rateLimiter`. */
@@ -57,7 +71,8 @@ export interface AuthRateLimitSettings {
   otpLimit: number
   /**
    * Builds the store one limiter keeps its budgets in. `name` is that limiter's own key prefix:
-   * `ratelimit-strict`, `ratelimit-otp`, `ratelimit-reset` or `ratelimit-normal`. Production passes
+   * `ratelimit-strict`, `ratelimit-otp`, `ratelimit-reset`, `ratelimit-email-code` or
+   * `ratelimit-normal`. Production passes
    * `createRedisRateLimitStore` over Valkey; tests pass an in-process store.
    */
   store: (name: string) => RateLimitStore
@@ -93,7 +108,9 @@ export interface AuthRateLimitSettings {
  * spend one strict budget, since each guesses or probes an account. Asking for a reset link also
  * spends the address's own budget (`resetByAddress`), so many IPs together still cannot flood one
  * inbox. `/totp/check` and `/totp/connect/finish` spend one user's one-time-code
- * budget, so switching routes buys no extra guesses. Every other auth route spends one normal
+ * budget, so switching routes buys no extra guesses. The e-mail address routes (asking for a code,
+ * checking one, changing the address) spend the user's strict budget, and every code mail also
+ * spends the address's own budget (`emailCodeByAddress`). Every other auth route spends one normal
  * budget per user, else per IP. Each route mounts its limiter after its cross-site check, so a
  * refused cross-site request spends nobody's budget.
  *
@@ -128,6 +145,11 @@ export function createAuthRateLimits(settings: AuthRateLimitSettings): AuthRateL
   const reset = createStoreLimiter(store("ratelimit-reset"), {
     windowMs: RESET_ADDRESS_WINDOW_MS,
     limit: RESET_MAILS_PER_ADDRESS,
+    clock,
+  })
+  const emailCode = createStoreLimiter(store("ratelimit-email-code"), {
+    windowMs: EMAIL_CODE_ADDRESS_WINDOW_MS,
+    limit: EMAIL_CODE_MAILS_PER_ADDRESS,
     clock,
   })
   const normal = failOpenLimiter(
@@ -166,5 +188,7 @@ export function createAuthRateLimits(settings: AuthRateLimitSettings): AuthRateL
       keyPrefix: "auth:",
     }),
     resetByAddress: async (email) => await reset.check(`auth-reset:${await sha256Hex(email)}`),
+    emailCodeByAddress: async (email) =>
+      await emailCode.check(`auth-email-code:${await sha256Hex(email)}`),
   }
 }

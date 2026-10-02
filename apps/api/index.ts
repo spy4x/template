@@ -20,6 +20,7 @@ import { createGroupsRoute } from "./routes/groups.ts"
 import { createNotesRoute } from "./routes/notes.ts"
 import { createMutationGuards } from "./middlewares/mutation-guards.ts"
 import { createTotpFailures } from "./services/totp-failures.ts"
+import { createEmailCodeFailures } from "./services/email-code-failures.ts"
 import { createAuthRateLimits } from "./middlewares/auth-rate-limits.ts"
 import { commandBus } from "./services/commandBus.ts"
 import { queryBus } from "./services/queryBus.ts"
@@ -31,6 +32,7 @@ import { createHealthRoute } from "./routes/health.ts"
 import { isCacheConnected, kv } from "./services/cache.ts"
 import { createRedisRateLimitStore } from "@spy4x/server/kv"
 import { enqueuePasswordResetMail } from "@server/jobs/password-reset-mail.ts"
+import { enqueueEmailCodeMail } from "@server/jobs/email-code-mail.ts"
 import { mailOffWarning, readMailSetup } from "@server/mail/mail.ts"
 import "./cqrs/+init.ts"
 
@@ -74,6 +76,9 @@ app.route(
     rateLimits,
     totpFailures: createTotpFailures({ sql }),
     requestPasswordReset: (email) => enqueuePasswordResetMail(sql, email),
+    emailCodeFailures: createEmailCodeFailures({ sql }),
+    requestEmailCode: (userId, email) => enqueueEmailCodeMail(sql, userId, email),
+    logError: (message, error) => log(message, error),
   }),
 )
 app.route(

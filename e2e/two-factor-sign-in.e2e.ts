@@ -31,7 +31,8 @@ const currentStep = () => Math.floor(Date.now() / 1000 / STEP_SECONDS)
 
 test.describe("two-factor sign-in", () => {
   test("signs in with a one-time code after the password step", async ({ page, request }) => {
-    const email = "e2e_two_factor_user@example.com"
+    // A fresh address each run, so the code mail read below is this run's.
+    const email = `e2e-two-factor-${crypto.randomUUID().slice(0, 8)}@example.com`
     const password = "Passw0rd!"
     const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 
@@ -51,6 +52,19 @@ test.describe("two-factor sign-in", () => {
         data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
+
+      // Two-factor auth needs a proven address: enter the code sign-up mailed.
+      let code = ""
+      await expect.poll(async () => {
+        const response = await request.post(`${apiBase}/api/test/last-mail`, { data: { email } })
+        if (!response.ok()) return response.status()
+        code = ((await response.json()) as { text: string }).text.split("\n\n")[1].trim()
+        return response.status()
+      }, { timeout: 20_000, message: "the worker mails the code" }).toBe(200)
+      await gotoApp(page, "/email", page.locator("[data-e2e=email-code]"))
+      await page.locator("[data-e2e=email-code]").fill(code)
+      await page.locator("[data-e2e=email-verify]").click()
+      await expect(page.locator("[data-e2e=email-current]")).toContainText("which is verified")
 
       // Turn two-factor auth on through the profile screen and read the secret it shows.
       // Without an authenticator app the page offers Enable only, never Disable next to it.

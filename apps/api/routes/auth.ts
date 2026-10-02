@@ -5,15 +5,18 @@ import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
 import { normalizeEmail } from "@spy4x/server/auth"
 import {
+  authEmailChangeSchema,
+  authEmailCodeSchema,
   authOTPSchema,
   authPasswordChangeSchema,
   authPasswordForgotSchema,
   authPasswordResetSchema,
   authSignInSchema,
   authSignUpSchema,
+  emailToVerify,
   type User,
 } from "@domain/identity"
-import type { SignIn } from "@api/services/sign-in.ts"
+import { EmailChangeOutcome, EmailVerifyOutcome, type SignIn } from "@api/services/sign-in.ts"
 import { UserSignedInEvent, UserSignedOutEvent, UserSignedUpEvent } from "@api/cqrs/events.ts"
 import { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
@@ -34,6 +37,12 @@ export interface AuthRouteDependencies {
    * in with the address, so this call does the same work either way.
    */
   requestPasswordReset(email: string): Promise<void>
+  /** Persistent count of wrong e-mail codes per user, with a growing lock. */
+  emailCodeFailures: Lockout
+  /** Queues a mail with a new code for `email`, the address the user's account must prove. */
+  requestEmailCode(userId: number, email: string): Promise<void>
+  /** Told when the code mail after a sign-up could not be queued; the sign-up still stands. */
+  logError(message: string, error: unknown): void
 }
 
 /** The answer to a reset request that was accepted, whether or not the address has an account. */
@@ -44,6 +53,21 @@ export const PASSWORD_RESET_REQUESTED = {
 
 /** The answer to a reset link that cannot be used. */
 export const PASSWORD_RESET_REFUSED = "This link is invalid, used or expired. Ask for a new one."
+
+/** The answer to an e-mail code that cannot be used: wrong, expired or used up alike. */
+export const EMAIL_CODE_REFUSED = "This code is wrong or has expired. Ask for a new one."
+
+/** The answer when the address is proven and no change waits, so no code is due. */
+export const EMAIL_NOTHING_TO_VERIFY = "Your e-mail address is already verified."
+
+/** The answer when a right code proves an address another account owns. */
+export const EMAIL_TAKEN = "Another account already uses this address."
+
+/** Sets `Retry-After` and answers 429 with `error`. */
+function tooMany(c: Context<APIContext>, retryAfterMs: number, error: string): Response {
+  c.header("Retry-After", String(Math.ceil(retryAfterMs / 1000)))
+  return c.json({ error }, 429)
+}
 
 /**
  * Runs one one-time-code check under the failure counter. While the user is locked the check does
@@ -85,8 +109,17 @@ function signInAnswer(
 }
 
 export function createAuthRoute(
-  { signIn, emit, mutationGuards, rateLimits, totpFailures, requestPasswordReset }:
-    AuthRouteDependencies,
+  {
+    signIn,
+    emit,
+    mutationGuards,
+    rateLimits,
+    totpFailures,
+    requestPasswordReset,
+    emailCodeFailures,
+    requestEmailCode,
+    logError,
+  }: AuthRouteDependencies,
 ): Hono<APIContext> {
   const { isAuthenticated1FA, isAuthenticated2FA } = signIn.auth
   return new Hono<APIContext>()
@@ -156,6 +189,12 @@ export function createAuthRoute(
           request: requestInfoFromContext(c, { trustedProxy: true }),
         }),
       )
+      try {
+        await requestEmailCode(signedUp.user.id, email)
+      } catch (error) {
+        // The account exists and the cookie is set; the banner offers a new code.
+        logError("error: the code mail after a sign-up was not queued", error)
+      }
       return signInAnswer(c, signedUp)
     })
     .post(`/password/forgot`, mutationGuards.anonymous, rateLimits.strictByIp, async (c) => {
@@ -244,6 +283,81 @@ export function createAuthRoute(
         return c.json({ error: "OTP already disabled for your account" }, 400)
       }
       return c.json({ success: true })
+    })
+    .get(`/email`, rateLimits.normal, async (c) => {
+      return c.json(await signIn.emailStatus(c.get("auth")!))
+    })
+    // The normal limit: every mail also spends the address's own hourly budget.
+    .post(`/email/send`, rateLimits.normal, async (c) => {
+      const authData = c.get("auth")!
+      const email = emailToVerify(await signIn.emailStatus(authData))
+      if (email === null) return c.json({ error: EMAIL_NOTHING_TO_VERIFY }, 400)
+      const decision = await rateLimits.emailCodeByAddress(email)
+      if (!decision.allowed) {
+        return tooMany(
+          c,
+          decision.retryAfterMs,
+          "Too many codes for this address, try again later.",
+        )
+      }
+      await requestEmailCode(authData.user.id, email)
+      return c.json({ success: true, message: `A new code is on its way to ${email}.` })
+    })
+    .post(`/email/verify`, rateLimits.strictByUser, async (c) => {
+      const body = await readApiJson(c)
+      const validationResult = validate(authEmailCodeSchema, body)
+      if (validationResult.error) {
+        return c.json({ error: validationResult.error.description }, 400)
+      }
+      const authData = c.get("auth")!
+      const waitMs = await emailCodeFailures.begin(authData.user.id)
+      if (waitMs > 0) return tooMany(c, waitMs, "Too many wrong codes, try again later.")
+      const outcome = await signIn.verifyEmail(c, authData, validationResult.data.code)
+      if (outcome === EmailVerifyOutcome.WrongCode) {
+        await emailCodeFailures.fail(authData.user.id)
+        return c.json({ error: EMAIL_CODE_REFUSED }, 400)
+      }
+      await emailCodeFailures.refund(authData.user.id)
+      if (outcome === EmailVerifyOutcome.Taken) return c.json({ error: EMAIL_TAKEN }, 409)
+      if (outcome === EmailVerifyOutcome.NothingToVerify) {
+        return c.json({ error: EMAIL_NOTHING_TO_VERIFY }, 400)
+      }
+      return c.json({ success: true })
+    })
+    .post(`/email/change`, rateLimits.strictByUser, async (c) => {
+      const body = await readApiJson(c)
+      const validationResult = validate(authEmailChangeSchema, body)
+      if (validationResult.error) {
+        return c.json({ error: validationResult.error.description }, 400)
+      }
+      const authData = c.get("auth")!
+      const { email: rawEmail, password } = validationResult.data
+      const email = normalizeEmail(rawEmail)
+      if (email === null) return c.json({ error: "Enter a valid e-mail address" }, 400)
+      const outcome = await signIn.requestEmailChange(authData, password, email)
+      if (outcome === EmailChangeOutcome.WrongPassword) {
+        return c.json({ error: "Invalid password" }, 400)
+      }
+      if (outcome === EmailChangeOutcome.InvalidEmail) {
+        return c.json({ error: "Enter a valid e-mail address" }, 400)
+      }
+      if (outcome === EmailChangeOutcome.Kept) {
+        return c.json({ success: true, message: "Your address stays as it is." })
+      }
+      // The change waits either way; a refused mail is asked for again later with /email/send.
+      const decision = await rateLimits.emailCodeByAddress(email)
+      if (!decision.allowed) {
+        return tooMany(
+          c,
+          decision.retryAfterMs,
+          "Too many codes for this address, try again later.",
+        )
+      }
+      await requestEmailCode(authData.user.id, email)
+      return c.json({
+        success: true,
+        message: `A code is on its way to ${email}. Your address changes once you enter it.`,
+      })
     })
     .post(`/password/change`, rateLimits.strictByUser, async (c) => {
       const body = await readApiJson(c)

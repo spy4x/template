@@ -17,6 +17,11 @@ import { handler as deleteGroup } from "./routes/groups/[groupId]/delete.ts"
 import { handler as restoreGroup } from "./routes/groups/[groupId]/restore.ts"
 import { handler as oldNotes } from "./routes/groups/[groupId]/notes/index.tsx"
 import { handler as oldNote } from "./routes/groups/[groupId]/notes/[noteId]/index.tsx"
+import { handler as emailPage } from "./routes/email/index.tsx"
+import { handler as emailVerify } from "./routes/email/verify.ts"
+import { handler as emailSend } from "./routes/email/send.ts"
+import { handler as emailChange } from "./routes/email/change.ts"
+import { EMAIL_FAILURES } from "@ui/email-screen.tsx"
 import { pageMiddleware } from "./middleware.ts"
 import type { State } from "./utils.ts"
 
@@ -62,6 +67,10 @@ function appWith(fetch: typeof globalThis.fetch) {
     .post("/forgot-password", forgotPassword.POST!)
     .get("/reset-password", resetPassword.GET!)
     .post("/reset-password", resetPassword.POST!)
+    .get("/email", emailPage.GET!)
+    .post("/email/verify", emailVerify.POST!)
+    .post("/email/send", emailSend.POST!)
+    .post("/email/change", emailChange.POST!)
     .handler()
 }
 
@@ -749,5 +758,113 @@ describe("the groups pages", () => {
 
     expect(response.status).toBe(404)
     expect(await response.text()).toContain("This group does not exist.")
+  })
+})
+
+describe("the e-mail page", () => {
+  const unproven = { email: "ann@example.com", proven: false, pending: null }
+  /** A signed-in person whose address waits for its code; `rest` answers every other path. */
+  const emailApi = (rest: (path: string) => Response = () => Response.json({ success: true })) =>
+    fakeApi((path) => {
+      if (path === "/api/auth/me") return Response.json({ firstName: "Ann", lastName: "", mfa: 1 })
+      if (path === "/api/auth/email") return Response.json(unproven)
+      if (path === "/api/push/devices") return Response.json({ data: [] })
+      return rest(path)
+    })
+
+  it("shows the code banner on the profile page while the address waits for it", async () => {
+    const { fetch } = emailApi()
+
+    const response = await appWith(fetch)(new Request(`${config.webAppOrigin}/`), info)
+    const html = await response.text()
+
+    expect(html).toContain(`data-e2e="email-banner"`)
+    expect(html).toContain(`href="/email"`)
+    expect(html).toContain("ann@example.com")
+  })
+
+  it("shows a message, not a server error, when the address cannot be read", async () => {
+    const { fetch } = fakeApi((path) => {
+      if (path === "/api/auth/me") return Response.json({ firstName: "Ann", lastName: "", mfa: 1 })
+      if (path === "/api/auth/email") return Response.json({ error: "down" }, { status: 503 })
+      return Response.json({ data: [] })
+    })
+
+    const response = await appWith(fetch)(new Request(`${config.webAppOrigin}/email`), info)
+
+    expect(response.status).toBe(502)
+    expect(await response.text()).toContain(EMAIL_FAILURES.load)
+  })
+
+  it("sends a signed-out visitor to sign-in", async () => {
+    const { fetch } = fakeApi(() => Response.json({ error: "User not signed in" }, { status: 401 }))
+
+    const response = await appWith(fetch)(new Request(`${config.webAppOrigin}/email`), info)
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe("/sign-in")
+  })
+
+  it("sends the code with the API's field name and hands the browser a new session cookie", async () => {
+    const { calls, fetch } = emailApi(() =>
+      Response.json({ success: true }, { headers: { "set-cookie": "sessionIdToken=new; Path=/" } })
+    )
+
+    const response = await appWith(fetch)(formPost("/email/verify", { code: "Ab3_x-9Q" }), info)
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe("/email")
+    expect(response.headers.getSetCookie()).toEqual(["sessionIdToken=new; Path=/"])
+    expect(calls.find((call) => call.path === "/api/auth/email/verify")?.body).toEqual({
+      code: "Ab3_x-9Q",
+    })
+  })
+
+  it("shows a refused code with the API's message, status and Retry-After", async () => {
+    const { fetch } = emailApi(() =>
+      Response.json({ error: "Too many wrong codes, try again later." }, {
+        status: 429,
+        headers: { "retry-after": "900" },
+      })
+    )
+
+    const response = await appWith(fetch)(formPost("/email/verify", { code: "nope" }), info)
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get("retry-after")).toBe("900")
+    expect(await response.text()).toContain("Too many wrong codes, try again later.")
+  })
+
+  it("asks for a new code and says it is on its way", async () => {
+    const { calls, fetch } = emailApi(() =>
+      Response.json({ success: true, message: "A new code is on its way to ann@example.com." })
+    )
+
+    const response = await appWith(fetch)(formPost("/email/send", {}), info)
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain("A new code is on its way to ann@example.com.")
+    expect(calls.map((call) => call.path)).toContain("/api/auth/email/send")
+  })
+
+  it("keeps the typed address of a refused change, but never the password", async () => {
+    const { calls, fetch } = emailApi(() =>
+      Response.json({ error: "Invalid password" }, { status: 400 })
+    )
+
+    const response = await appWith(fetch)(
+      formPost("/email/change", { email: "new@example.com", password: "typed-secret-1" }),
+      info,
+    )
+    const html = await response.text()
+
+    expect(response.status).toBe(400)
+    expect(html).toContain("Invalid password")
+    expect(html).toContain(`value="new@example.com"`)
+    expect(html).not.toContain("typed-secret-1")
+    expect(calls.find((call) => call.path === "/api/auth/email/change")?.body).toEqual({
+      email: "new@example.com",
+      password: "typed-secret-1",
+    })
   })
 })

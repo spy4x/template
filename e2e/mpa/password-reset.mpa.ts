@@ -32,9 +32,12 @@ test("a person without JavaScript resets a forgotten password through the mailed
     let text = ""
     await expect.poll(async () => {
       const response = await request.post("/api/test/last-mail", { data: { email } })
-      if (response.ok()) text = ((await response.json()) as { text: string }).text
-      return response.status()
-    }, { timeout: 20_000, message: "the worker mails the reset link" }).toBe(200)
+      if (!response.ok()) return response.status()
+      const mail = (await response.json()) as { subject: string; text: string }
+      text = mail.text
+      // Sign-up mails a code to prove the address first; wait for the reset mail after it.
+      return mail.subject
+    }, { timeout: 20_000, message: "the worker mails the reset link" }).toBe("Reset your password")
     const link = new URL(text.match(/https?:\/\/\S+/)![0])
 
     await page.goto(link.pathname + link.search)

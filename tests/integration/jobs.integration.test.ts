@@ -17,6 +17,8 @@ import {
   enqueuePasswordResetMail,
   removeStalePasswordResetRequests,
 } from "@server/jobs/password-reset-mail.ts"
+import { enqueueEmailCodeMail, removeStaleEmailCodeRequests } from "@server/jobs/email-code-mail.ts"
+import { emailChanges } from "@server/auth/email-verification.ts"
 import type { EmailMessage } from "@spy4x/email/message"
 import type { EmailSender } from "@spy4x/email/sender"
 import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
@@ -168,6 +170,101 @@ Deno.test("password reset mails go through the worker's queue", async (t) => {
 
       expect(await removeStalePasswordResetRequests(sql)).toBe(1)
       const left = await sql<{ email: string }[]>`SELECT email FROM password_reset_requests`
+      expect(left.map((row) => row.email)).toEqual(["new@example.com"])
+    })
+  })
+})
+
+Deno.test("e-mail code mails go through the worker's queue", async (t) => {
+  await withSchema(async (sql) => {
+    const store = createPostgresAuthStore(sql)
+    const { user } = await store.createUserWithKey({
+      method: PASSWORD_METHOD,
+      subject: "ann@example.com",
+      email: "ann@example.com",
+      secret: "hash",
+      provenAt: null,
+    })
+    const count = async (table: string) =>
+      (await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM ${sql(table)}`)[0].count
+
+    await t.step("the address to prove gets a code, and only its hash is stored", async () => {
+      const sender = recordingSender()
+      const processor = createOutboxProcessor(sql, { store, sender, brand: BRAND, log: () => {} })
+      await enqueueEmailCodeMail(sql, user.id, "ann@example.com")
+
+      expect((await processor.drainOnce()).published).toBe(1)
+
+      expect(sender.sent.map((mail) => mail.to)).toEqual(["ann@example.com"])
+      const code = sender.sent[0].text!.split("\n\n")[1]
+      expect(code).toMatch(/^[A-Za-z0-9_-]{8}$/)
+      const dump = JSON.stringify(
+        await sql`
+          SELECT (SELECT json_agg(c) FROM auth_challenges c) AS challenges,
+            (SELECT json_agg(o) FROM outbox_events o) AS outbox
+        `,
+      )
+      expect(dump).not.toContain(code)
+      expect(await count("email_code_requests")).toBe(0)
+    })
+
+    await t.step("a request for an address that no longer needs a code sends nothing", async () => {
+      const sender = recordingSender()
+      const processor = createOutboxProcessor(sql, { store, sender, brand: BRAND, log: () => {} })
+      // The person asked to move to a new address since: the old one is no longer the one to prove.
+      await emailChanges(sql).save(user.id, "new@example.com")
+      await enqueueEmailCodeMail(sql, user.id, "ann@example.com")
+      await enqueueEmailCodeMail(sql, user.id, "new@example.com")
+
+      expect((await processor.drainOnce()).published).toBe(2)
+
+      expect(sender.sent.map((mail) => mail.to)).toEqual(["new@example.com"])
+      expect(await count("email_code_requests")).toBe(0)
+      await emailChanges(sql).remove(user.id)
+    })
+
+    await t.step("a failed send keeps the request, is retried, and logs no address", async () => {
+      const sender = recordingSender()
+      sender.failing = true
+      const logged: string[] = []
+      const processor = createOutboxProcessor(sql, {
+        store,
+        sender,
+        brand: BRAND,
+        log: (line) => logged.push(line),
+      })
+      await enqueueEmailCodeMail(sql, user.id, "ann@example.com")
+
+      expect((await processor.drainOnce()).failed).toBe(1)
+      expect(await count("email_code_requests")).toBe(1)
+      expect(logged.join("\n")).not.toContain("ann@example.com")
+
+      sender.failing = false
+      await advanceClock(sql, 60)
+      expect((await processor.drainOnce()).published).toBe(1)
+      expect(sender.sent.length).toBe(1)
+      expect(await count("email_code_requests")).toBe(0)
+    })
+
+    await t.step("with mail off the request is dropped", async () => {
+      await sql`DELETE FROM auth_challenges`
+      await enqueueEmailCodeMail(sql, user.id, "ann@example.com")
+
+      expect((await createOutboxProcessor(sql, mailOff(sql)).drainOnce()).published).toBe(1)
+
+      expect(await count("auth_challenges")).toBe(0)
+      expect(await count("email_code_requests")).toBe(0)
+    })
+
+    await t.step("a request older than a day is removed by the cleanup", async () => {
+      await sql`
+        INSERT INTO email_code_requests (id, user_id, email, created_at) VALUES
+          (${crypto.randomUUID()}, ${user.id}, 'old@example.com', now() - interval '25 hours'),
+          (${crypto.randomUUID()}, ${user.id}, 'new@example.com', now() - interval '23 hours')
+      `
+
+      expect(await removeStaleEmailCodeRequests(sql)).toBe(1)
+      const left = await sql<{ email: string }[]>`SELECT email FROM email_code_requests`
       expect(left.map((row) => row.email)).toEqual(["new@example.com"])
     })
   })

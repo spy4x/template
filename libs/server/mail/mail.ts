@@ -68,7 +68,7 @@ export function readMailSetup(env: { get(name: string): string | undefined }): M
 /** The start-up warning for a setup that sends nothing: it names the keys, never a value. */
 export function mailOffWarning(setup: MailSetup): string | null {
   if (setup.transport !== MailTransport.Off) return null
-  return `warning: mail is off, so password reset links are not sent. Set ${
+  return `warning: mail is off, so password reset links and e-mail codes are not sent. Set ${
     setup.missing.join(", ")
   } to send them.`
 }
@@ -127,6 +127,34 @@ export function passwordResetMail(
         `<p>${escapeHtml(open)}</p>`,
         `<p><a href="${escapeHtml(link)}">Choose a new password</a></p>`,
         `<p>${escapeHtml(once)}</p>`,
+        `<p>${escapeHtml(ignore)}</p>`,
+      ].join("\n"),
+    ),
+  }
+}
+
+/**
+ * The mail that carries a code proving the address it is sent to. The code is what the person
+ * types; the mail holds no link, so nothing in it signs anybody in.
+ */
+export function emailCodeMail(
+  brand: MailBrand,
+  { to, code, validMinutes }: { to: string; code: string; validMinutes: number },
+): EmailMessage {
+  const host = new URL(brand.webAppUrl).host
+  const asked = `Enter this code at ${host} to confirm this is your e-mail address.`
+  const valid = `It works once, for ${validMinutes} minutes.`
+  const ignore = "If you did not ask for this, ignore this mail: nothing changes."
+  return {
+    to,
+    subject: "Your code to confirm your e-mail address",
+    text: `${asked}\n\n${code}\n\n${valid}\n\n${ignore}\n`,
+    html: mailHtml(
+      brand,
+      [
+        `<p>${escapeHtml(asked)}</p>`,
+        `<p style="font-size:24px;font-weight:600;letter-spacing:2px">${escapeHtml(code)}</p>`,
+        `<p>${escapeHtml(valid)}</p>`,
         `<p>${escapeHtml(ignore)}</p>`,
       ].join("\n"),
     ),

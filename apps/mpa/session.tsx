@@ -1,9 +1,10 @@
 import type { ComponentChildren, JSX } from "preact"
-import type { UserMFAStatus } from "@domain/identity"
+import type { EmailStatus, UserMFAStatus } from "@domain/identity"
 import { AppFrame, PublicFrame } from "@ui/frame.tsx"
+import { EmailBanner } from "@ui/email-screen.tsx"
 import type { GroupPickerData } from "@ui/group-picker.tsx"
 import { SCREEN_PATHS } from "@ui/progressive.tsx"
-import { type Api, isRecord } from "./api.ts"
+import { type Api, isOk, isRecord } from "./api.ts"
 import { readPicker } from "./groups.ts"
 
 /** The signed-in user as the pages show them. */
@@ -20,6 +21,8 @@ export interface Session {
   mfaPending: boolean
   /** The groups and the selected one, for the side menu; `null` without a user or when unread. */
   picker: GroupPickerData | null
+  /** Where the user's address stands, for the banner; `null` without a user or when unread. */
+  email: EmailStatus | null
 }
 
 /**
@@ -29,15 +32,21 @@ export interface Session {
 export async function readSession(api: Api): Promise<Session> {
   const answer = await api.call("GET", "/api/auth/me")
   if (answer.status === 200 && isRecord(answer.body)) {
-    return {
-      user: answer.body as unknown as SessionUser,
-      mfaPending: false,
-      picker: await readPicker(api),
-    }
+    const [picker, email] = await Promise.all([readPicker(api), readEmailStatus(api)])
+    return { user: answer.body as unknown as SessionUser, mfaPending: false, picker, email }
   }
-  if (answer.status === 202) return { user: null, mfaPending: true, picker: null }
-  if (answer.status === 401) return { user: null, mfaPending: false, picker: null }
+  if (answer.status === 202) return { user: null, mfaPending: true, picker: null, email: null }
+  if (answer.status === 401) return { user: null, mfaPending: false, picker: null, email: null }
   throw new Error(`GET /api/auth/me answered ${answer.status}`)
+}
+
+/** Where the user's address stands (`GET /api/auth/email`); `null` when the API did not say. */
+export async function readEmailStatus(api: Api): Promise<EmailStatus | null> {
+  const answer = await api.call("GET", "/api/auth/email")
+  const body = answer.body
+  return isOk(answer) && isRecord(body) && typeof body.proven === "boolean"
+    ? body as unknown as EmailStatus
+    : null
 }
 
 /**
@@ -58,6 +67,8 @@ export function Frame(
         user={session.user}
         currentPath={path}
         groupPicker={session.picker ?? undefined}
+        // The e-mail page itself asks for the code; the banner would only repeat it there.
+        banner={path === SCREEN_PATHS.email ? undefined : <EmailBanner status={session.email} />}
       >
         {children}
       </AppFrame>

@@ -324,3 +324,31 @@ CREATE TABLE dev_mail (
 );
 
 CREATE INDEX dev_mail_to_address_idx ON dev_mail (to_address, id);
+
+-- A new address waiting for its code; the old one stays until it is proven (#140).
+CREATE TABLE email_changes (
+    user_id INT4 PRIMARY KEY REFERENCES auth_users (id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT email_changes_email_check CHECK (length(email) BETWEEN 3 AND 254)
+);
+
+-- Code mails the worker has not sent yet; the code itself is made at send time.
+CREATE TABLE email_code_requests (
+    id UUID PRIMARY KEY,
+    user_id INT4 NOT NULL REFERENCES auth_users (id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT email_code_requests_email_check CHECK (length(email) BETWEEN 3 AND 254)
+);
+
+CREATE INDEX email_code_requests_user_id_idx ON email_code_requests (user_id);
+
+-- Wrong e-mail codes per user, with a lock that grows per failure.
+CREATE TABLE email_code_failures (
+    user_id INT4 PRIMARY KEY REFERENCES auth_users (id) ON DELETE CASCADE,
+    failed_attempts INT4 DEFAULT 0 NOT NULL,
+    locked_until TIMESTAMPTZ,
+    last_failure_at TIMESTAMPTZ,
+    CONSTRAINT email_code_failures_failed_attempts_check CHECK (failed_attempts >= 0)
+);

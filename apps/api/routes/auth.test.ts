@@ -1,7 +1,13 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import type { APIContext } from "../_types.ts"
-import type { SignedIn, SignIn } from "../services/sign-in.ts"
+import {
+  EmailChangeOutcome,
+  EmailVerifyOutcome,
+  type SignedIn,
+  type SignIn,
+} from "../services/sign-in.ts"
+import type { EmailStatus } from "@domain/identity"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { buildAuthData } from "../_testing/fake-auth.ts"
 import {
@@ -18,11 +24,23 @@ import { MALFORMED_JSON, oversizedJson } from "../_testing/json-bodies.ts"
 import {
   type AuthRateLimits,
   createAuthRateLimits,
+  EMAIL_CODE_MAILS_PER_ADDRESS,
   RESET_MAILS_PER_ADDRESS,
 } from "../middlewares/auth-rate-limits.ts"
 import type { Lockout } from "@spy4x/server/lockout"
 import { createKvStore, type RateLimitStore } from "@spy4x/platform/rate-limit"
-import { createAuthRoute, PASSWORD_RESET_REFUSED, PASSWORD_RESET_REQUESTED } from "./auth.ts"
+import {
+  createAuthRoute,
+  EMAIL_CODE_REFUSED,
+  EMAIL_NOTHING_TO_VERIFY,
+  EMAIL_TAKEN,
+  PASSWORD_RESET_REFUSED,
+  PASSWORD_RESET_REQUESTED,
+} from "./auth.ts"
+
+/** An address the user still has to prove, and one already proven. */
+const UNPROVEN: EmailStatus = { email: "alice@example.com", proven: false, pending: null }
+const PROVEN: EmailStatus = { email: "alice@example.com", proven: true, pending: null }
 
 /**
  * A failure counter that records its calls in `calls`, and answers `lockedForMs` to `begin`
@@ -67,6 +85,16 @@ function fakeSignIn(
     disconnectTotp: () => (calls.push("disconnectTotp"), Promise.resolve(true)),
     changePassword: () => (calls.push("changePassword"), Promise.resolve(succeed)),
     resetPassword: () => (calls.push("resetPassword"), Promise.resolve(succeed)),
+    // Without success there is nothing to prove, the code is wrong and the password too.
+    emailStatus: () => (calls.push("emailStatus"), Promise.resolve(succeed ? UNPROVEN : PROVEN)),
+    requestEmailChange: () => (
+      calls.push("requestEmailChange"),
+        Promise.resolve(succeed ? EmailChangeOutcome.Requested : EmailChangeOutcome.WrongPassword)
+    ),
+    verifyEmail: () => (
+      calls.push("verifyEmail"),
+        Promise.resolve(succeed ? EmailVerifyOutcome.Verified : EmailVerifyOutcome.WrongCode)
+    ),
     expireSessions: () => Promise.resolve(),
     entitledSession: () => Promise.resolve(null),
   }
@@ -103,24 +131,41 @@ const generousLimits = {
 
 function buildApp(
   auth: APIContext["Variables"]["auth"] = buildAuthData(),
-  { rateLimits = createAuthRateLimits(generousLimits), succeed = true, secondFactor, lockedForMs }:
-    {
-      rateLimits?: AuthRateLimits
-      /** How long the failure counter says the user is locked; 0 or left out means not locked. */
-      lockedForMs?: number
-      succeed?: boolean
-      /** The second-factor state of the session that `signIn` and `signUp` hand back. */
-      secondFactor?: SecondFactorStatus
-    } = {},
+  {
+    rateLimits = createAuthRateLimits(generousLimits),
+    succeed = true,
+    secondFactor,
+    lockedForMs,
+    codeLockedForMs,
+    signIn: overrides = {},
+    queueFails = false,
+  }: {
+    rateLimits?: AuthRateLimits
+    /** How long the failure counter says the user is locked; 0 or left out means not locked. */
+    lockedForMs?: number
+    /** The same for the e-mail code counter. */
+    codeLockedForMs?: number
+    succeed?: boolean
+    /** The second-factor state of the session that `signIn` and `signUp` hand back. */
+    secondFactor?: SecondFactorStatus
+    /** Replaces operations of the fake sign-in. */
+    signIn?: Partial<SignIn>
+    /** Queueing a code mail fails. */
+    queueFails?: boolean
+  } = {},
 ) {
   const calls: string[] = []
   const failureCalls: string[] = []
+  const codeFailureCalls: string[] = []
+  /** Every address a code mail was queued for, and every error the route logged. */
+  const mailed: string[] = []
+  const logged: string[] = []
   /** Every address a reset link was queued for, as the route passed it. */
   const queued: string[] = []
   /** What the route handed `signUp` and `signIn` as the address or login. */
   const logins: string[] = []
   const route = createAuthRoute({
-    signIn: fakeSignIn(calls, succeed, secondFactor, logins),
+    signIn: { ...fakeSignIn(calls, succeed, secondFactor, logins), ...overrides },
     emit: () => {},
     mutationGuards: testMutationGuards,
     rateLimits,
@@ -128,8 +173,23 @@ function buildApp(
     requestPasswordReset: (email) => (
       calls.push("requestPasswordReset"), queued.push(email), Promise.resolve()
     ),
+    emailCodeFailures: fakeTotpFailures(codeFailureCalls, codeLockedForMs),
+    requestEmailCode: (_userId, email) =>
+      queueFails
+        ? Promise.reject(new Error("outbox down"))
+        : (mailed.push(email), Promise.resolve()),
+    logError: (message) => void logged.push(message),
   })
-  return { app: mountRoute("/auth", route, auth), calls, failureCalls, queued, logins }
+  return {
+    app: mountRoute("/auth", route, auth),
+    calls,
+    failureCalls,
+    codeFailureCalls,
+    queued,
+    logins,
+    mailed,
+    logged,
+  }
 }
 
 /** `body` with its `email` replaced, or `body` itself when it has none. */
@@ -192,6 +252,20 @@ const sessionRoutes: (MutationCase & { operation: string })[] = [
     path: "/auth/password/change",
     body: { password: "correct-horse", newPassword: "battery-staple" },
     operation: "changePassword",
+  },
+  // Reads no body: it sends a code to the address that needs one.
+  { method: "POST", path: "/auth/email/send", body: undefined, operation: "emailStatus" },
+  {
+    method: "POST",
+    path: "/auth/email/verify",
+    body: { code: "Ab3_x-9Q" },
+    operation: "verifyEmail",
+  },
+  {
+    method: "POST",
+    path: "/auth/email/change",
+    body: { email: "new@example.com", password: "correct-horse" },
+    operation: "requestEmailChange",
   },
 ]
 
@@ -422,6 +496,9 @@ describe("auth routes rate-limit", () => {
         rateLimits: createAuthRateLimits(tightLimits),
         totpFailures: fakeTotpFailures([]),
         requestPasswordReset: () => Promise.resolve(),
+        emailCodeFailures: fakeTotpFailures([]),
+        requestEmailCode: () => Promise.resolve(),
+        logError: () => {},
       }),
       buildAuthData(),
     )
@@ -835,5 +912,150 @@ describe("auth routes sign up with an e-mail address", () => {
 
     expect(response.status).toBe(200)
     expect(logins).toEqual(["Ada"])
+  })
+})
+
+describe("auth routes prove an e-mail address with a code", () => {
+  const route = (path: string) => sessionRoutes.find((candidate) => candidate.path === path)!
+  const verify = route("/auth/email/verify")
+  const sendCode = route("/auth/email/send")
+  const change = route("/auth/email/change")
+  const signUp = anonymousRoutes.find((candidate) => candidate.path === "/auth/password/sign-up")!
+
+  it("counts a code check before running it and gives the slot back when the code is right", async () => {
+    const { app, codeFailureCalls } = buildApp()
+    const response = await send(app, verify, sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(codeFailureCalls).toEqual(["begin", "refund"])
+  })
+
+  it("answers a wrong or expired code with one message and records the failure", async () => {
+    const { app, codeFailureCalls } = buildApp(undefined, { succeed: false })
+    const response = await send(app, verify, sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: EMAIL_CODE_REFUSED })
+    expect(codeFailureCalls).toEqual(["begin", "fail"])
+  })
+
+  it("answers 429 with Retry-After while the user is locked, without checking the code", async () => {
+    const { app, calls, codeFailureCalls } = buildApp(undefined, { codeLockedForMs: 60_200 })
+    const response = await send(app, verify, sameOriginHeaders)
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get("retry-after")).toBe("61")
+    expect(codeFailureCalls).toEqual(["begin"])
+    expect(calls).toEqual([])
+  })
+
+  it("answers 409 when a right code proves an address another account owns", async () => {
+    const { app, codeFailureCalls } = buildApp(undefined, {
+      signIn: { verifyEmail: () => Promise.resolve(EmailVerifyOutcome.Taken) },
+    })
+    const response = await send(app, verify, sameOriginHeaders)
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: EMAIL_TAKEN })
+    expect(codeFailureCalls).toEqual(["begin", "refund"])
+  })
+
+  it("queues a new code for the unproven address", async () => {
+    const { app, mailed } = buildApp()
+    const response = await send(app, sendCode, sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(mailed).toEqual(["alice@example.com"])
+  })
+
+  it("queues a new code for the address waiting to replace a proven one", async () => {
+    const { app, mailed } = buildApp(undefined, {
+      signIn: { emailStatus: () => Promise.resolve({ ...PROVEN, pending: "new@example.com" }) },
+    })
+    await send(app, sendCode, sameOriginHeaders)
+
+    expect(mailed).toEqual(["new@example.com"])
+  })
+
+  it("queues no code when the address is proven and no change waits", async () => {
+    const { app, mailed } = buildApp(undefined, { succeed: false })
+    const response = await send(app, sendCode, sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: EMAIL_NOTHING_TO_VERIFY })
+    expect(mailed).toEqual([])
+  })
+
+  it(`answers code mail ${EMAIL_CODE_MAILS_PER_ADDRESS + 1} to one address in an hour with 429`, async () => {
+    const { app, mailed } = buildApp()
+    const statuses = []
+    for (let attempt = 0; attempt <= EMAIL_CODE_MAILS_PER_ADDRESS; attempt++) {
+      statuses.push((await send(app, sendCode, sameOriginHeaders)).status)
+    }
+
+    expect(statuses).toEqual([...Array(EMAIL_CODE_MAILS_PER_ADDRESS).fill(200), 429])
+    expect(mailed).toHaveLength(EMAIL_CODE_MAILS_PER_ADDRESS)
+  })
+
+  it(`answers address change ${EMAIL_CODE_MAILS_PER_ADDRESS + 1} to one address in an hour with 429`, async () => {
+    const { app, mailed } = buildApp()
+    const statuses = []
+    for (let attempt = 0; attempt <= EMAIL_CODE_MAILS_PER_ADDRESS; attempt++) {
+      statuses.push((await send(app, change, sameOriginHeaders)).status)
+    }
+    const refused = await send(app, change, sameOriginHeaders)
+
+    expect(statuses).toEqual([...Array(EMAIL_CODE_MAILS_PER_ADDRESS).fill(200), 429])
+    expect(refused.headers.get("retry-after")).toMatch(/^\d+$/)
+    expect(mailed).toHaveLength(EMAIL_CODE_MAILS_PER_ADDRESS)
+  })
+
+  it("queues a code for the new address as normalizeEmail leaves it", async () => {
+    const { app, mailed } = buildApp()
+    const response = await send(
+      app,
+      { ...change, body: { email: " New@Example.COM ", password: "correct-horse" } },
+      sameOriginHeaders,
+    )
+
+    expect(response.status).toBe(200)
+    expect(mailed).toEqual(["new@example.com"])
+  })
+
+  it("queues nothing when the password for an address change is wrong", async () => {
+    const { app, mailed } = buildApp(undefined, { succeed: false })
+    const response = await send(app, change, sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(mailed).toEqual([])
+  })
+
+  it("queues nothing when the new address is the one the account has", async () => {
+    const { app, mailed } = buildApp(undefined, {
+      signIn: { requestEmailChange: () => Promise.resolve(EmailChangeOutcome.Kept) },
+    })
+    const response = await send(app, change, sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(mailed).toEqual([])
+  })
+
+  it("queues a code for the address a new account signed up with", async () => {
+    const { app, mailed } = buildApp(null)
+    await send(
+      app,
+      { ...signUp, body: { ...signUpBody, email: " Ada@Example.COM" } },
+      sameOriginWithoutCookieHeaders,
+    )
+
+    expect(mailed).toEqual(["ada@example.com"])
+  })
+
+  it("keeps a sign-up and logs the error when its code mail cannot be queued", async () => {
+    const { app, logged } = buildApp(null, { queueFails: true })
+    const response = await send(app, signUp, sameOriginWithoutCookieHeaders)
+
+    expect(response.status).toBe(200)
+    expect(logged).toEqual(["error: the code mail after a sign-up was not queued"])
   })
 })

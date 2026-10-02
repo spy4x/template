@@ -12,10 +12,12 @@ import { selectionStore } from "./state/selection.ts"
 import { connectRealtime, disconnectRealtime } from "./state/realtime.ts"
 import { profileStore } from "./state/profile.ts"
 import { createPull } from "./state/pull.ts"
+import { emailStore } from "./state/email.ts"
 import { flushOutbox, startOffline, stopOffline } from "./offline/index.ts"
 import { forgetUser, recallUser, rememberUser } from "./offline/session-cache.ts"
 import { toasts } from "./state/toasts.ts"
 import { AuthView } from "./views/AuthView.tsx"
+import { EmailView } from "./views/EmailView.tsx"
 import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView.tsx"
 import { GroupsView } from "./views/GroupsView.tsx"
 import { GroupSettingsView } from "./views/GroupSettingsView.tsx"
@@ -56,6 +58,7 @@ function Routes() {
       <Route path="/totp">{() => <AuthView key="one-time-code" screen="one-time-code" />}</Route>
       <Route path="/forgot-password" component={ForgotPasswordView} />
       <Route path="/reset-password" component={ResetPasswordView} />
+      <Route path="/email" component={EmailView} />
       <Route path="/groups" component={GroupsView} />
       <Route path="/groups/:groupId">
         {(params) => <GroupSettingsView groupId={params.groupId} />}
@@ -128,6 +131,7 @@ export function App() {
       notesStore.reset()
       profileStore.reset()
       selectionStore.reset()
+      emailStore.reset()
       return
     }
     // The REST read is the pull: it runs at start-up, after every reconnect and for every push
@@ -143,6 +147,8 @@ export function App() {
     })
     startOffline(userId)
     selectionStore.start(userId)
+    // The banner asks for a code while the address waits for one.
+    void emailStore.refresh()
     void pull().catch(() => {})
     connectRealtime(userId, pull)
     return () => disconnectRealtime()
