@@ -2,7 +2,10 @@ import { expect } from "@std/expect"
 import { afterEach, describe, it } from "@std/testing/bdd"
 import { renderToString } from "preact-render-to-string"
 import { Router } from "wouter-preact"
+import { FREE_PLAN_ID, type GroupBilling, PRO_PLAN_ID } from "@domain/billing"
 import { GroupRole } from "@domain/groups"
+import { VIEWERS_ONLY_HINT } from "@ui/group-invitations.tsx"
+import { billingStore } from "../state/billing.ts"
 import { groupsStore } from "../state/groups.ts"
 import { membersStore } from "../state/members.ts"
 import { GroupSettingsView } from "./GroupSettingsView.tsx"
@@ -29,6 +32,7 @@ describe("GroupSettingsView", () => {
   afterEach(() => {
     groupsStore.reset()
     membersStore.reset()
+    billingStore.reset()
   })
 
   it("says the group does not exist, and shows no other group, for an address that names a group the person is not in", () => {
@@ -75,5 +79,28 @@ describe("GroupSettingsView", () => {
 
     membersStore.groupId.value = known.id
     expect(render(known.id)).toContain("Vera Viewer")
+  })
+
+  it("offers invitations for viewers only while the group's plan lacks roles, and every role until the plan is read", () => {
+    groupsStore.groups.value = [known]
+    const plan = (planId: string): GroupBilling => ({
+      enabled: true,
+      planId,
+      status: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      canManage: false,
+      subscribed: false,
+      hasCustomer: false,
+    })
+    const hint = VIEWERS_ONLY_HINT
+
+    expect(render(known.id)).not.toContain(hint)
+    billingStore.current.value = { groupId: known.id, billing: plan(FREE_PLAN_ID) }
+    expect(render(known.id)).toContain(hint)
+    billingStore.current.value = { groupId: strangerId, billing: plan(FREE_PLAN_ID) }
+    expect(render(known.id)).not.toContain(hint)
+    billingStore.current.value = { groupId: known.id, billing: plan(PRO_PLAN_ID) }
+    expect(render(known.id)).not.toContain(hint)
   })
 })
