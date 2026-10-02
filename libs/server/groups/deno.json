@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "check": "deno check postgres-group-repository.ts purge-deleted-groups.ts group-change-log.ts group-list-cursor.ts group-change-notify.ts",
+    "check": "deno check postgres-group-repository.ts purge-deleted-groups.ts group-change-log.ts group-list-cursor.ts group-change-notify.ts postgres-invitation-repository.ts",
     "test": "deno test group-list-cursor.test.ts group-change-notify.test.ts"
   }
 }
