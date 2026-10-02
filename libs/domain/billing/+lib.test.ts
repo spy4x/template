@@ -4,15 +4,22 @@ import { SubscriptionStatus } from "@spy4x/billing"
 import { GroupRole } from "@domain/groups"
 import {
   assertCanManageBilling,
+  assertFeature,
+  assertRoomFor,
   BillingError,
   BillingStatus,
   effectivePlanId,
+  entitlementsOf,
   FREE_PLAN_ID,
   hasLiveSubscription,
+  PlanError,
   PRO_PLAN_ID,
   providerPageUrl,
+  readPlanRefusal,
   type StoredSubscription,
   toGroupBilling,
+  toPlanRefusal,
+  UNLIMITED,
 } from "./+lib.ts"
 
 const subscription = (status: BillingStatus, planId: string | null = PRO_PLAN_ID) =>
@@ -100,5 +107,64 @@ describe("billing domain", () => {
     expect(() => assertCanManageBilling(null)).toThrow(
       new BillingError("GROUP_NOT_FOUND", "Group not found"),
     )
+  })
+
+  it("gives a group its plan's entitlements, the free plan's for an unknown id", () => {
+    expect(entitlementsOf(PRO_PLAN_ID, true).features.memberRoles).toBe(true)
+    expect(entitlementsOf(FREE_PLAN_ID, true).features.memberRoles).toBe(false)
+    expect(entitlementsOf(FREE_PLAN_ID, true).limits.maxNotes).toBe(10)
+    expect(entitlementsOf("gone", true)).toEqual(entitlementsOf(FREE_PLAN_ID, true))
+  })
+
+  it("allows every feature with no cap while billing is off", () => {
+    expect(entitlementsOf(FREE_PLAN_ID, false)).toBe(UNLIMITED)
+  })
+
+  it("refuses a feature the plan lacks, and tells only the owner they can upgrade", () => {
+    const free = entitlementsOf(FREE_PLAN_ID, true)
+    expect(() => assertFeature(entitlementsOf(PRO_PLAN_ID, true), "memberRoles", GroupRole.ADMIN))
+      .not.toThrow()
+    const refusal = (role: GroupRole) => {
+      try {
+        assertFeature(free, "memberRoles", role)
+      } catch (error) {
+        return error instanceof PlanError ? toPlanRefusal(error) : null
+      }
+      return null
+    }
+    expect(refusal(GroupRole.OWNER)).toEqual({
+      code: "PLAN_FEATURE_MISSING",
+      entitlement: "memberRoles",
+      limit: null,
+      canUpgrade: true,
+    })
+    expect(refusal(GroupRole.ADMIN)?.canUpgrade).toBe(false)
+  })
+
+  it("refuses one more once the count reaches the cap, and never caps a null limit", () => {
+    expect(() => assertRoomFor("maxNotes", 10, 9, GroupRole.EDITOR)).not.toThrow()
+    expect(() => assertRoomFor("maxNotes", null, 1_000_000, GroupRole.EDITOR)).not.toThrow()
+    for (const used of [10, 25]) {
+      expect(() => assertRoomFor("maxNotes", 10, used, GroupRole.EDITOR)).toThrow(PlanError)
+    }
+  })
+
+  it("reads a plan refusal back from an error body and nothing else", () => {
+    const body = {
+      code: "PLAN_LIMIT_REACHED",
+      message: "x",
+      entitlement: "maxNotes",
+      limit: 10,
+      canUpgrade: false,
+    }
+    expect(readPlanRefusal(body)).toEqual({
+      code: "PLAN_LIMIT_REACHED",
+      entitlement: "maxNotes",
+      limit: 10,
+      canUpgrade: false,
+    })
+    expect(readPlanRefusal({ ...body, code: "ROLE_INSUFFICIENT" })).toBeNull()
+    expect(readPlanRefusal({ ...body, canUpgrade: "yes" })).toBeNull()
+    expect(readPlanRefusal(null)).toBeNull()
   })
 })

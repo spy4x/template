@@ -15,6 +15,41 @@ export const FREE_PLAN_ID = "free"
 /** The paid plan. Its provider price comes from the environment (`STRIPE_PRICE_PRO`). */
 export const PRO_PLAN_ID = "pro"
 
+// #region Entitlements
+/**
+ * A feature a plan may include. A product adds its own keys here, and TypeScript then asks for the
+ * key in every plan's `entitlements.features` and in {@link UNLIMITED}.
+ */
+export type FeatureKey =
+  /** Give a member another role after they joined. */
+  "memberRoles"
+
+/**
+ * A count a plan caps. A product adds its own keys the same way as {@link FeatureKey}.
+ *
+ * - `maxMembers`: members of the group, the owner included. No command adds a member yet; the
+ *   invitations (#131) will count against it.
+ * - `maxNotes`: notes in the group that are not deleted.
+ * - `storageBytes`: bytes of attachments. Attachments (#157) are not built yet; only the key ships.
+ */
+export type LimitKey = "maxMembers" | "maxNotes" | "storageBytes"
+
+/** What a plan allows: which features it includes, and how much of each count, `null` for no cap. */
+export interface Entitlements {
+  features: Readonly<Record<FeatureKey, boolean>>
+  limits: Readonly<Record<LimitKey, number | null>>
+}
+
+/** What a deployment that takes no payments allows every group: everything, with no cap. */
+export const UNLIMITED: Entitlements = {
+  features: { memberRoles: true },
+  limits: { maxMembers: null, maxNotes: null, storageBytes: null },
+}
+
+/** What a command needs from the group's plan: a feature it includes, or room under a cap. */
+export type EntitlementNeed = { feature: FeatureKey } | { limit: LimitKey }
+// #endregion Entitlements
+
 /** One plan of the catalog, as the pricing page shows it. */
 export interface Plan {
   id: string
@@ -24,6 +59,8 @@ export interface Plan {
   currency: string
   description: string
   features: string[]
+  /** What the plan allows. The server checks these; `features` above is only the pricing text. */
+  entitlements: Entitlements
 }
 
 /** Every plan, free first. The paid ones are the ones a checkout may name. */
@@ -34,7 +71,11 @@ export const PLANS: readonly Plan[] = [
     amount: 0,
     currency: "EUR",
     description: "For trying things out.",
-    features: ["Notes for the whole group", "Every member and role"],
+    features: ["Up to 10 notes", "Up to 3 members"],
+    entitlements: {
+      features: { memberRoles: false },
+      limits: { maxMembers: 3, maxNotes: 10, storageBytes: 50 * 1024 * 1024 },
+    },
   },
   {
     id: PRO_PLAN_ID,
@@ -42,7 +83,11 @@ export const PLANS: readonly Plan[] = [
     amount: 900,
     currency: "EUR",
     description: "For a group that relies on it.",
-    features: ["Everything in Free", "Priority support"],
+    features: ["Unlimited notes", "Up to 50 members", "Change members' roles", "Priority support"],
+    entitlements: {
+      features: { memberRoles: true },
+      limits: { maxMembers: 50, maxNotes: null, storageBytes: 10 * 1024 * 1024 * 1024 },
+    },
   },
 ]
 
@@ -52,6 +97,15 @@ export const PAID_PLANS: readonly Plan[] = PLANS.filter((plan) => plan.id !== FR
 /** The plan with this id, or `null`. */
 export function findPlan(id: string): Plan | null {
   return PLANS.find((plan) => plan.id === id) ?? null
+}
+
+/**
+ * What a group may do: its plan's entitlements, or {@link UNLIMITED} while billing is off, since
+ * nobody could pay to lift a cap. An id no plan has gets the free plan's.
+ */
+export function entitlementsOf(planId: string, billingEnabled: boolean): Entitlements {
+  if (!billingEnabled) return UNLIMITED
+  return (findPlan(planId) ?? PLANS[0]).entitlements
 }
 
 /** The outbox event kind a plan change is recorded under, on the group's change log. */
@@ -175,6 +229,93 @@ export class BillingError extends Error {
     super(message)
     this.name = "BillingError"
   }
+}
+
+export type PlanErrorCode = "PLAN_FEATURE_MISSING" | "PLAN_LIMIT_REACHED"
+
+/**
+ * A command the group's plan does not allow: a feature it lacks, or a cap it has reached. The API
+ * answers it with 402 Payment Required, so a client tells it apart from a role refusal (403).
+ */
+export class PlanError extends Error {
+  constructor(
+    public readonly code: PlanErrorCode,
+    /** The feature or the cap that refused it. */
+    public readonly entitlement: FeatureKey | LimitKey,
+    /** The cap that was reached, or `null` for a missing feature. */
+    public readonly limit: number | null,
+    /** The person asking may change the plan (the owner); anyone else is told to ask the owner. */
+    public readonly canUpgrade: boolean,
+    message: string,
+  ) {
+    super(message)
+    this.name = "PlanError"
+  }
+}
+
+/** What the API and the socket send with a {@link PlanError}, beside its code. */
+export interface PlanRefusal {
+  code: PlanErrorCode
+  entitlement: FeatureKey | LimitKey
+  limit: number | null
+  canUpgrade: boolean
+}
+
+/** The fields of a {@link PlanError} a client needs to draw the upgrade prompt. */
+export function toPlanRefusal(error: PlanError): PlanRefusal {
+  return {
+    code: error.code,
+    entitlement: error.entitlement,
+    limit: error.limit,
+    canUpgrade: error.canUpgrade,
+  }
+}
+
+/** Reads a {@link PlanRefusal} back from an error body or socket details; `null` for anything else. */
+export function readPlanRefusal(value: unknown): PlanRefusal | null {
+  if (typeof value !== "object" || value === null) return null
+  const { code, entitlement, limit, canUpgrade } = value as Record<string, unknown>
+  if (code !== "PLAN_FEATURE_MISSING" && code !== "PLAN_LIMIT_REACHED") return null
+  if (typeof entitlement !== "string" || typeof canUpgrade !== "boolean") return null
+  if (limit !== null && typeof limit !== "number") return null
+  return { code, entitlement: entitlement as FeatureKey | LimitKey, limit, canUpgrade }
+}
+
+/** Throws {@link PlanError} unless `entitlements` include `feature`. */
+export function assertFeature(
+  entitlements: Entitlements,
+  feature: FeatureKey,
+  role: GroupRole,
+): void {
+  if (entitlements.features[feature]) return
+  throw new PlanError(
+    "PLAN_FEATURE_MISSING",
+    feature,
+    null,
+    canManageBilling(role),
+    "The group's plan does not include this",
+  )
+}
+
+/**
+ * Throws {@link PlanError} unless one more fits under the cap: `used` is the count before the write,
+ * and `max` is the plan's cap (`null` for none). A group already over its cap, after a downgrade,
+ * keeps what it has and is refused anything more.
+ */
+export function assertRoomFor(
+  limit: LimitKey,
+  max: number | null,
+  used: number,
+  role: GroupRole,
+): void {
+  if (max === null || used < max) return
+  throw new PlanError(
+    "PLAN_LIMIT_REACHED",
+    limit,
+    max,
+    canManageBilling(role),
+    "The group has reached its plan's limit",
+  )
 }
 
 // #region Authorization
