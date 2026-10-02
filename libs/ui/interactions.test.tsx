@@ -19,14 +19,19 @@ import { GroupSettingsScreen } from "./group-settings-screen.tsx"
 import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
 import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
-import { FORM_ACTIONS, GROUP_PATHS, NOTE_PATHS } from "./progressive.tsx"
+import { FORM_ACTIONS, GROUP_PATHS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 import {
   ForgotPasswordScreen,
   type ForgotPasswordScreenProps,
   ResetPasswordScreen,
   type ResetPasswordScreenProps,
 } from "./password-reset-screen.tsx"
-import { EmailScreen, type EmailScreenProps } from "./email-screen.tsx"
+import {
+  EMAIL_FAILURES,
+  EmailScreen,
+  type EmailScreenProps,
+  EmailUnavailable,
+} from "./email-screen.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
 const own = { document: globalThis.document, FormData: globalThis.FormData }
@@ -822,5 +827,17 @@ describe("EmailScreen in the browser", () => {
     expect(find("[data-e2e=email-change]").closest("form")?.textContent).toContain(
       "Invalid password",
     )
+  })
+
+  it("retries an unread address through the app's callback, or reloads the page without it", async () => {
+    const retry = spy<[]>()
+    await mount(<EmailUnavailable onRetry={retry.fn} />)
+
+    expect(find("[role=alert]").textContent).toBe(EMAIL_FAILURES.load)
+    await click("[data-e2e=email-retry]")
+    expect(retry.calls).toHaveLength(1)
+
+    await mount(<EmailUnavailable />)
+    expect(find("[data-e2e=email-retry]").getAttribute("href")).toBe(SCREEN_PATHS.email)
   })
 })

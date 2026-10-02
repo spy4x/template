@@ -21,6 +21,7 @@ import { handler as emailPage } from "./routes/email/index.tsx"
 import { handler as emailVerify } from "./routes/email/verify.ts"
 import { handler as emailSend } from "./routes/email/send.ts"
 import { handler as emailChange } from "./routes/email/change.ts"
+import { EMAIL_FAILURES } from "@ui/email-screen.tsx"
 import { pageMiddleware } from "./middleware.ts"
 import type { State } from "./utils.ts"
 
@@ -780,6 +781,19 @@ describe("the e-mail page", () => {
     expect(html).toContain(`data-e2e="email-banner"`)
     expect(html).toContain(`href="/email"`)
     expect(html).toContain("ann@example.com")
+  })
+
+  it("shows a message, not a server error, when the address cannot be read", async () => {
+    const { fetch } = fakeApi((path) => {
+      if (path === "/api/auth/me") return Response.json({ firstName: "Ann", lastName: "", mfa: 1 })
+      if (path === "/api/auth/email") return Response.json({ error: "down" }, { status: 503 })
+      return Response.json({ data: [] })
+    })
+
+    const response = await appWith(fetch)(new Request(`${config.webAppOrigin}/email`), info)
+
+    expect(response.status).toBe(502)
+    expect(await response.text()).toContain(EMAIL_FAILURES.load)
   })
 
   it("sends a signed-out visitor to sign-in", async () => {

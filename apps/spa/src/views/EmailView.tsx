@@ -4,6 +4,7 @@ import {
   EMAIL_FAILURES,
   type EmailMessages,
   EmailScreen,
+  EmailUnavailable,
   type EmailValues,
 } from "@ui/email-screen.tsx"
 import { SCREEN_PATHS } from "@ui/progressive.tsx"
@@ -36,7 +37,12 @@ export function EmailView() {
     else navigate(SCREEN_PATHS.signIn, { replace: true })
   }, [signedIn])
 
-  if (!status) return <LoadingSpinner size="lg" label="Loading..." class="min-h-[50vh]" />
+  if (!status) {
+    if (emailStore.loadFailed.value) {
+      return <EmailUnavailable onRetry={() => void emailStore.refresh()} />
+    }
+    return <LoadingSpinner size="lg" label="Loading..." class="min-h-[50vh]" />
+  }
 
   /** Runs one form's call: clears its messages, marks it busy, then shows what came back. */
   const run = async (

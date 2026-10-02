@@ -15,6 +15,7 @@ export const EMAIL_FAILURES = {
   verify: "Could not check the code",
   send: "Could not send a new code",
   change: "Could not change the address",
+  load: "Your e-mail address could not be read.",
 } as const
 
 /**
@@ -39,6 +40,34 @@ export function EmailBanner(
         </Link>
       </p>
     </section>
+  )
+}
+
+/**
+ * Stands in for the e-mail page when its state could not be read: the message, and a way to try
+ * again. With `onRetry` the app reads the state again; without it, the button is a link that loads
+ * the page again.
+ */
+export function EmailUnavailable(
+  { onRetry, navigate }: { onRetry?: () => void; navigate?: Navigate },
+): JSX.Element {
+  return (
+    <Stack data-e2e="email-unavailable">
+      <ErrorState message={EMAIL_FAILURES.load} />
+      <div class="text-center">
+        {onRetry
+          ? (
+            <Button type="button" data-e2e="email-retry" onClick={onRetry}>
+              Try again
+            </Button>
+          )
+          : (
+            <Button href={SCREEN_PATHS.email} navigate={navigate} data-e2e="email-retry">
+              Try again
+            </Button>
+          )}
+      </div>
+    </Stack>
   )
 }
 

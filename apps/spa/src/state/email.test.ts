@@ -23,6 +23,7 @@ function harness(posts: Record<string, ApiResult<unknown>> = {}) {
     calls,
     setStatus: (next: EmailStatus) => (status = next),
     goOffline: () => (offline = true),
+    goOnline: () => (offline = false),
   }
 }
 
@@ -88,6 +89,20 @@ describe("email store", () => {
     goOffline()
 
     expect(await store.send()).toEqual({ ok: false, error: "" })
+  })
+
+  it("flags a first read that never reached the API, and clears the flag when a retry reads it", async () => {
+    const { store, goOffline, goOnline } = harness()
+    goOffline()
+
+    await store.refresh()
+    expect(store.loadFailed.value).toBe(true)
+    expect(store.status.value).toBe(null)
+
+    goOnline()
+    await store.refresh()
+    expect(store.loadFailed.value).toBe(false)
+    expect(store.status.value).toEqual(UNPROVEN)
   })
 
   it("forgets the status on sign-out", async () => {

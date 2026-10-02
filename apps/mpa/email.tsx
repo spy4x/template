@@ -3,6 +3,7 @@ import {
   EMAIL_FAILURES,
   type EmailMessages,
   EmailScreen,
+  EmailUnavailable,
   type EmailValues,
 } from "@ui/email-screen.tsx"
 import { SCREEN_PATHS } from "@ui/progressive.tsx"
@@ -29,7 +30,14 @@ async function renderEmail(
 ): Promise<Response> {
   const session = await readSession(ctx.state.api)
   if (!session.user) return ctx.redirect(signInPath(session), 303)
-  if (!session.email) throw new Error("GET /api/auth/email did not answer")
+  if (!session.email) {
+    return ctx.render(
+      <Frame session={session} path={SCREEN_PATHS.email}>
+        <EmailUnavailable />
+      </Frame>,
+      { status: 502 },
+    )
+  }
   return ctx.render(
     <Frame session={session} path={SCREEN_PATHS.email}>
       <EmailScreen

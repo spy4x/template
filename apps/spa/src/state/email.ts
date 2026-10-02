@@ -16,14 +16,19 @@ export type EmailFetch = <T>(url: string, init?: RequestInit) => Promise<ApiResu
  */
 export function createEmailStore(fetch: EmailFetch = apiFetch) {
   const status = signal<EmailStatus | null>(null)
+  /** The last read failed. The page shows it, with a retry, while it has no status to show. */
+  const loadFailed = signal(false)
 
   /** Reads the status again. Keeps the last one when the API cannot answer. */
   async function refresh(): Promise<void> {
+    loadFailed.value = false
     try {
       const result = await fetch<EmailStatus>("/api/auth/email")
       if (result.ok) status.value = result.data
+      else loadFailed.value = true
     } catch (_unreachable) {
       // Offline: the banner keeps what it showed.
+      loadFailed.value = true
     }
   }
 
@@ -64,9 +69,10 @@ export function createEmailStore(fetch: EmailFetch = apiFetch) {
 
   function reset(): void {
     status.value = null
+    loadFailed.value = false
   }
 
-  return { status, refresh, verify, send, change, reset }
+  return { status, loadFailed, refresh, verify, send, change, reset }
 }
 
 /** The app's e-mail store. */
