@@ -94,8 +94,9 @@ const ROLE_NAMES: Record<GroupRole, string> = {
 /**
  * Creates an invitation and, when asked, mails its link. The token is made here and handed back
  * once; the store keeps only its hash. Who may invite with which role, whether the plan allows
- * that role, and the group's member cap are checked by the store on locked rows. A mail that is not sent leaves the invitation in place:
- * the answer says `mailSent: false` and the creator copies the link instead.
+ * that role, and the group's member cap are checked by the store on locked rows. A mail that is
+ * not sent leaves the invitation in place: the answer says `mailSent: false` and the creator
+ * copies the link instead.
  */
 export function createInvitationCreateHandler(
   { invitations, planOf, mail }: InvitationHandlerDependencies,
