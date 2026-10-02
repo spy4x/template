@@ -27,11 +27,17 @@ export interface NoteHandlerDependencies {
 export function createNoteCreateHandler(
   { notes, groups }: NoteHandlerDependencies,
 ): CommandHandler<NoteCreateCommand> {
-  return async ({ data }) => {
+  return async (command) => {
+    const { data, allowance } = command
+    // The gate sets it on every create it lets through; without it the cap would go unchecked.
+    if (allowance === undefined) {
+      throw new Error("NoteCreateCommand reached its handler without the entitlement gate")
+    }
     assertCanWriteNotes(await groups.roleOf(data.groupId, data.actor.userId))
     return await notes.create(
       { groupId: data.groupId, id: data.id, title: data.title, body: data.body },
       data.actor.userId,
+      allowance,
     )
   }
 }

@@ -1,5 +1,6 @@
 import { signal } from "@preact/signals"
 import { RealtimeRequestError } from "@spy4x/realtime"
+import { type PlanRefusal, readPlanRefusal } from "@domain/billing"
 import type { GroupRole } from "@domain/groups"
 import { apiFetch } from "./api.ts"
 import { realtimeCommand } from "./realtime.ts"
@@ -43,7 +44,9 @@ export function createMembersStore(dependencies: MembersDependencies) {
   /** The member whose role change or removal is in flight. */
   const pendingUserId = signal<number | null>(null)
   /** Why the last role change or removal was refused, and for which member. */
-  const memberError = signal<{ userId: number; message: string } | null>(null)
+  const memberError = signal<
+    { userId: number; message: string; plan: PlanRefusal | null } | null
+  >(null)
   const leaving = signal(false)
   const leaveError = signal<string | null>(null)
   let reads = 0
@@ -90,7 +93,8 @@ export function createMembersStore(dependencies: MembersDependencies) {
       await run(id)
       return true
     } catch (cause) {
-      memberError.value = { userId, message: describe(cause, fallback) }
+      const plan = cause instanceof RealtimeRequestError ? readPlanRefusal(cause.details) : null
+      memberError.value = { userId, message: describe(cause, fallback), plan }
       return false
     } finally {
       pendingUserId.value = null

@@ -32,6 +32,7 @@ function harness(overrides: {
   update?: () => Promise<{ note: NoteItem }>
   delete?: () => Promise<unknown>
   get?: () => Promise<{ note: NoteItem }>
+  create?: () => Promise<{ note: NoteItem }>
 } = {}) {
   const pages = [...(overrides.pages ?? [])]
   const reads: { groupId: string; cursor: string | null }[] = []
@@ -48,7 +49,8 @@ function harness(overrides: {
     },
     create(input) {
       calls.push({ name: "create", input })
-      return Promise.resolve({ note: { ...item(input.id), title: input.title } })
+      return overrides.create?.() ??
+        Promise.resolve({ note: { ...item(input.id), title: input.title } })
     },
     update(input) {
       calls.push({ name: "update", input })
@@ -138,6 +140,30 @@ describe("notes store", () => {
 
     expect(store.createErrors.value).toEqual({ title: NOTE_MESSAGES.titleRequired, form: null })
     expect(calls).toEqual([])
+  })
+
+  it("hands the screen the plan's refusal when the group is at its note cap", async () => {
+    const refusal = {
+      code: "PLAN_LIMIT_REACHED",
+      entitlement: "maxNotes",
+      limit: 10,
+      canUpgrade: false,
+    }
+    const { store } = harness({
+      create: () =>
+        Promise.reject(new RealtimeRequestError("forbidden", "The note limit is reached", refusal)),
+    })
+    await store.open(groupId, null)
+    store.draft.value = { title: "Eleventh", body: "" }
+
+    expect(await store.create()).toBe(null)
+
+    expect(store.createErrors.value).toEqual({
+      title: null,
+      form: "The note limit is reached",
+      plan: refusal,
+    })
+    expect(store.draft.value.title).toBe("Eleventh")
   })
 
   it("saves the edit with the version it started from", async () => {

@@ -14,7 +14,10 @@ import {
   GroupRestoreCommand,
   GroupRole,
 } from "@domain/groups"
+import { FREE_PLAN_ID, PRO_PLAN_ID } from "@domain/billing"
 import { createSessionGate } from "../../cqrs/session-gate.ts"
+import { createEntitlementGate } from "../../cqrs/entitlement-gate.ts"
+import { ENTITLEMENT_NEEDS } from "../../cqrs/entitlement-needs.ts"
 import { buildAuthData } from "../../_testing/fake-auth.ts"
 import { MemoryGroupRepository } from "../../_testing/memory-groups.ts"
 import type { APIContext } from "../../_types.ts"
@@ -36,6 +39,7 @@ import { createGroupSocketRequests } from "./socket.ts"
  * Rename, delete, restore and the member commands over both transports, on one pair of buses as the API wires them:
  * the REST route and the socket parse, and the handlers decide who may act. Nothing here stubs a
  * handler, so a transport that skipped the buses, or a handler that skipped the role check, fails.
+ * The group is on `plan`, Pro unless a test says otherwise, so the plan allows every member command.
  */
 
 const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
@@ -45,7 +49,7 @@ const ADMIN = 4
 const OWNER = 5
 const STRANGER = 9
 
-function stack() {
+function stack(plan = PRO_PLAN_ID) {
   const groups = new MemoryGroupRepository(groupId, {
     [VIEWER]: GroupRole.VIEWER,
     [EDITOR]: GroupRole.EDITOR,
@@ -54,6 +58,12 @@ function stack() {
   })
   const commands = new CommandBus()
   commands.use(createSessionGate([]))
+  commands.use(createEntitlementGate({
+    billingEnabled: true,
+    planOf: () => Promise.resolve(plan),
+    roleOf: async (_group, user) => (await groups.getForMember(groupId, user))?.role ?? null,
+    usage: { maxNotes: () => Promise.reject(new Error("not part of this test")) },
+  }, ENTITLEMENT_NEEDS))
   commands.register(GroupRenameCommand, createGroupRenameHandler(groups))
   commands.register(GroupDeleteCommand, createGroupDeleteHandler(groups))
   commands.register(GroupRestoreCommand, createGroupRestoreHandler(groups))
@@ -127,7 +137,8 @@ function socket(buses: GroupsRouteDependencies, userId: number) {
     // Only a command carries an idempotency key; the socket refuses one on a query.
     const key = kind === "client.command" ? { idempotencyKey: `key-${name}` } : {}
     ws.receive(JSON.stringify({ kind, id, name, payload, ...key }))
-    await drainMicrotasks()
+    // The entitlement gate reads the target's role before a role change: more turns than default.
+    await drainMicrotasks(64)
     return ws.frames().find((frame) => (frame as { requestId?: string }).requestId === id)
   }
   return {
@@ -639,6 +650,105 @@ describe("the members of a group over REST", () => {
     await rest(buses, ADMIN)("POST", `/${groupId}/leave`)
 
     expect(groups.requestIds).toEqual(["req-groups", "req-groups", "req-groups"])
+  })
+})
+
+describe("a role change on the free plan", () => {
+  it("refuses a promotion over REST with 402 for the owner and an admin, and only the owner may upgrade", async () => {
+    const { groups, buses } = stack(FREE_PLAN_ID)
+
+    for (const [user, canUpgrade] of [[OWNER, true], [ADMIN, false]] as const) {
+      const response = await rest(buses, user)("PATCH", `/${groupId}/members/${VIEWER}`, {
+        role: GroupRole.EDITOR,
+      })
+      expect(response.status).toBe(402)
+      expect((await response.json()).error).toMatchObject({
+        code: "PLAN_FEATURE_MISSING",
+        entitlement: "memberRoles",
+        limit: null,
+        canUpgrade,
+      })
+    }
+    expect(groups.writes).toBe(0)
+  })
+
+  it("lets the owner demote an admin made on Pro, and an admin demote an editor", async () => {
+    const { groups, buses } = stack(FREE_PLAN_ID)
+
+    const admin = await rest(buses, ADMIN)("PATCH", `/${groupId}/members/${EDITOR}`, {
+      role: GroupRole.VIEWER,
+    })
+    const owner = await rest(buses, OWNER)("PATCH", `/${groupId}/members/${ADMIN}`, {
+      role: GroupRole.EDITOR,
+    })
+
+    expect(owner.status, await owner.text()).toBe(200)
+    expect(admin.status, await admin.text()).toBe(200)
+    expect(groups.writes).toBe(2)
+  })
+
+  it("answers a change no plan allows as Pro does: 409 to demote the owner, 403 past the actor's rights, 404 for a member who left", async () => {
+    for (const plan of [FREE_PLAN_ID, PRO_PLAN_ID]) {
+      const { groups, buses } = stack(plan)
+
+      const demoteOwner = await rest(buses, ADMIN)("PATCH", `/${groupId}/members/${OWNER}`, {
+        role: GroupRole.VIEWER,
+      })
+      const pastRights = await rest(buses, ADMIN)("PATCH", `/${groupId}/members/${EDITOR}`, {
+        role: GroupRole.ADMIN,
+      })
+      const promoteGone = await rest(buses, OWNER)("PATCH", `/${groupId}/members/${STRANGER}`, {
+        role: GroupRole.ADMIN,
+      })
+
+      expect([plan, demoteOwner.status, (await demoteOwner.json()).error.code])
+        .toEqual([plan, 409, "LAST_OWNER"])
+      expect([plan, pastRights.status, (await pastRights.json()).error.code])
+        .toEqual([plan, 403, "ROLE_INSUFFICIENT"])
+      expect([plan, promoteGone.status, (await promoteGone.json()).error.code])
+        .toEqual([plan, 404, "MEMBER_NOT_FOUND"])
+      expect(groups.writes).toBe(0)
+    }
+  })
+
+  it("still answers an editor 403 and a stranger 404, as on any plan", async () => {
+    const { buses } = stack(FREE_PLAN_ID)
+    const change = (user: number) =>
+      rest(buses, user)("PATCH", `/${groupId}/members/${VIEWER}`, { role: GroupRole.EDITOR })
+
+    const editor = await change(EDITOR)
+    const stranger = await change(STRANGER)
+
+    expect([editor.status, (await editor.json()).error.code]).toEqual([403, "ROLE_INSUFFICIENT"])
+    expect([stranger.status, (await stranger.json()).error.code]).toEqual([404, "GROUP_NOT_FOUND"])
+  })
+
+  it("refuses a promotion over the socket, naming the feature in the details", async () => {
+    const { groups, buses } = stack(FREE_PLAN_ID)
+    const ws = socket(buses, OWNER)
+
+    const frame = await ws.command("group.setRole", {
+      groupId,
+      userId: VIEWER,
+      role: GroupRole.EDITOR,
+    })
+
+    expect(frame).toMatchObject({
+      kind: "server.error",
+      code: "forbidden",
+      details: { code: "PLAN_FEATURE_MISSING", entitlement: "memberRoles", canUpgrade: true },
+    })
+    expect(groups.writes).toBe(0)
+    ws.shutdown()
+  })
+
+  it("leaves removing a member open", async () => {
+    const { groups, buses } = stack(FREE_PLAN_ID)
+
+    const response = await rest(buses, OWNER)("DELETE", `/${groupId}/members/${VIEWER}`)
+
+    expect(response.status).toBe(200)
+    expect(groups.writes).toBe(1)
   })
 })
 

@@ -1,4 +1,6 @@
 import type postgres from "postgres"
+import { assertRoomFor } from "@domain/billing"
+import type { GroupRole } from "@domain/groups"
 import {
   assertCanWriteNotes,
   type DeletedNote,
@@ -61,9 +63,11 @@ async function assertWriterNow(
   transaction: postgres.TransactionSql,
   groupId: string,
   actorId: number,
-): Promise<void> {
+): Promise<GroupRole> {
   try {
-    assertCanWriteNotes(await lockActorRole(transaction, groupId, actorId))
+    const role = await lockActorRole(transaction, groupId, actorId)
+    assertCanWriteNotes(role)
+    return role as GroupRole
   } catch (error) {
     if (error instanceof GroupNotActiveError) {
       throw new NoteError("GROUP_NOT_FOUND", "Group not found")
@@ -108,6 +112,14 @@ export class PostgresNoteRepository implements NoteRepository {
     }
   }
 
+  /** How many notes the group holds, deleted ones not counted: what `maxNotes` caps. */
+  async count(groupId: string): Promise<number> {
+    const [{ count }] = await this.sql<{ count: number }[]>`
+      SELECT count(*)::int AS count FROM notes WHERE group_id = ${groupId} AND deleted_at IS NULL
+    `
+    return count
+  }
+
   async get(groupId: string, id: string): Promise<Note | null> {
     const row = (
       await this.sql<NoteRow[]>`
@@ -119,10 +131,19 @@ export class PostgresNoteRepository implements NoteRepository {
     return row ? toNote(row) : null
   }
 
-  async create(input: NoteCreateInput, actorId: number): Promise<NoteWriteResult> {
+  /**
+   * The cap is counted after the insert, in the same transaction: the group row that
+   * `assertWriterNow` locks makes a second create of the same group wait for this one to commit,
+   * and then count it. A retry of a create that already landed inserts nothing and is not counted.
+   */
+  async create(
+    input: NoteCreateInput,
+    actorId: number,
+    allowance: number | null,
+  ): Promise<NoteWriteResult> {
     return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
       const repository = new PostgresNoteRepository(transaction)
-      await assertWriterNow(transaction, input.groupId, actorId)
+      const role = await assertWriterNow(transaction, input.groupId, actorId)
       // `change_sequence` is set below, once the change is recorded: recording it before the insert
       // would announce a change for a retry that inserts nothing.
       const inserted = (
@@ -137,6 +158,10 @@ export class PostgresNoteRepository implements NoteRepository {
         `
       )[0]
       if (inserted) {
+        if (allowance !== null) {
+          const used = await repository.count(input.groupId) - 1
+          assertRoomFor("maxNotes", allowance, used, role)
+        }
         const note = await repository.stamp(
           transaction,
           input.groupId,

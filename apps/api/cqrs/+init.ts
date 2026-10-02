@@ -4,6 +4,8 @@ import { subscribe } from "@api/services/eventBus.ts"
 import { sql } from "@api/services/db.ts"
 import { log } from "@api/services/log.ts"
 import { createIdempotencyMiddleware, PostgresIdempotencyStore } from "@spy4x/server/idempotency"
+import { entitlementGate } from "@api/cqrs/entitlements.ts"
+import { useCommandMiddleware } from "@api/cqrs/command-middleware.ts"
 import {
   PushRegisterCommand,
   PushRemoveCommand,
@@ -88,11 +90,15 @@ subscribe(UserProfileUpdatedEvent, realtimeOnUserProfileUpdatedHandler)
 subscribe(PushDevicesUpdatedEvent, realtimeOnPushDevicesUpdatedHandler)
 subscribe(GroupSelectedEvent, realtimeOnGroupSelectedHandler)
 
-// After the session gate (added where the bus is built): a command from a session that may not act
-// never reaches the key store. It needs the database, so it is attached here and not there.
-commandBus.use(
-  createIdempotencyMiddleware({ store: new PostgresIdempotencyStore(sql), onStoreFailure: log }),
-)
+// After the session gate (added where the bus is built), in the order `command-middleware.ts`
+// explains. The idempotency store needs the database, so it is attached here and not there.
+useCommandMiddleware(commandBus, {
+  idempotency: createIdempotencyMiddleware({
+    store: new PostgresIdempotencyStore(sql),
+    onStoreFailure: log,
+  }),
+  entitlements: entitlementGate,
+})
 
 commandBus.register(UserProfileUpdateCommand, userProfileUpdateHandler)
 commandBus.register(PushRegisterCommand, pushRegisterHandler)

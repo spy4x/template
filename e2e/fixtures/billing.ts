@@ -106,3 +106,26 @@ export async function stripeSignature(
   const hex = [...new Uint8Array(mac)].map((byte) => byte.toString(16).padStart(2, "0")).join("")
   return `t=${nowSeconds},v1=${hex}`
 }
+
+/**
+ * The request that puts `groupId` on the Pro plan: a signed `customer.subscription.created` with a
+ * subscription and a customer of its own, so tests that upgrade side by side never share one. Post
+ * it to {@link BILLING_WEBHOOK_PATH}.
+ */
+export async function proWebhook(
+  groupId: string,
+): Promise<{ headers: Record<string, string>; data: string }> {
+  const id = crypto.randomUUID().replace(/-/g, "")
+  const data = subscriptionEvent({
+    reference: groupId,
+    subscriptionId: `sub_${id}`,
+    customerId: `cus_${id}`,
+  })
+  return {
+    headers: {
+      "content-type": "application/json",
+      "stripe-signature": await stripeSignature(data),
+    },
+    data,
+  }
+}

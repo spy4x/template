@@ -16,6 +16,8 @@ import {
   type UserPushTokenPublic,
 } from "@domain/identity"
 import { pushUnsubscribeRequestSchema } from "@spy4x/platform/model"
+import type { PlanRefusal } from "@domain/billing"
+import { BILLING_PATHS } from "./billing-screen.tsx"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
 import {
@@ -920,6 +922,27 @@ describe("GroupSettingsScreen members", () => {
     expect(memberItem(html, 4)).not.toContain("Not allowed")
   })
 
+  it("shows a role change the plan refused under that member, with the owner's upgrade link", () => {
+    const refusal: PlanRefusal = {
+      code: "PLAN_FEATURE_MISSING",
+      entitlement: "memberRoles",
+      limit: null,
+      canUpgrade: true,
+    }
+    const pricing = `href="${BILLING_PATHS.pricing(settingsDefaults.group!.id)}"`
+
+    const html = renderToString(
+      asMember(GroupRole.OWNER, 1, {
+        memberError: { userId: 3, message: "Upgrade", plan: refusal },
+      }),
+    )
+
+    expect(memberItem(html, 3)).toContain(`data-e2e="plan-refusal"`)
+    expect(memberItem(html, 3)).toContain(pricing)
+    expect(memberItem(html, 3)).toContain("Promoting members needs a paid plan")
+    expect(memberItem(html, 4)).not.toContain(`data-e2e="plan-refusal"`)
+  })
+
   it("says the members are loading, or why they could not be read", () => {
     expect(renderToString(asMember(GroupRole.OWNER, 1, { members: null })))
       .toContain("Loading the members...")
@@ -1147,6 +1170,40 @@ describe("NoteEditorScreen without JavaScript", () => {
 })
 
 describe("NoteEditorScreen", () => {
+  const capped = (canUpgrade: boolean): PlanRefusal => ({
+    code: "PLAN_LIMIT_REACHED",
+    entitlement: "maxNotes",
+    limit: 10,
+    canUpgrade,
+  })
+
+  it("shows the owner the note cap with a link to the group's pricing page", () => {
+    const html = renderToString(
+      <NoteEditorScreen
+        {...editorDefaults}
+        errors={{ title: null, form: "Upgrade", plan: capped(true) }}
+      />,
+    )
+
+    expect(html).toContain(`data-e2e="plan-refusal"`)
+    expect(html).toContain("up to 10 notes")
+    expect(html).toContain(`href="${BILLING_PATHS.pricing(groupId)}"`)
+    expect(html).not.toContain("plan-refusal-ask-owner")
+  })
+
+  it("tells a member who cannot upgrade to ask the owner, and gives no pricing link", () => {
+    const html = renderToString(
+      <NoteEditorScreen
+        {...editorDefaults}
+        errors={{ title: null, form: "Upgrade", plan: capped(false) }}
+      />,
+    )
+
+    expect(html).toContain("up to 10 notes")
+    expect(html).toContain("Ask the group's owner to upgrade the plan.")
+    expect(html).not.toContain(BILLING_PATHS.pricing(groupId))
+  })
+
   it("ties the title error to its field and tells a stale edit where the latest version is", () => {
     const html = renderToString(
       <NoteEditorScreen

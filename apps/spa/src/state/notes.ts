@@ -1,5 +1,6 @@
 import { computed, signal } from "@preact/signals"
 import { RealtimeRequestError } from "@spy4x/realtime"
+import { type PlanRefusal, readPlanRefusal } from "@domain/billing"
 import { apiFetch } from "./api.ts"
 import { realtimeCommand, realtimeQuery } from "./realtime.ts"
 import { currentLayer } from "../offline/index.ts"
@@ -51,6 +52,8 @@ interface Draft {
 interface FormErrors {
   title: string | null
   form: string | null
+  /** The group's plan refused the write: the screen shows an upgrade prompt for it. */
+  plan?: PlanRefusal | null
 }
 
 interface Edit extends Draft {
@@ -80,6 +83,11 @@ export const NOTE_MESSAGES = {
 
 function describe(error: unknown, fallback: string): string {
   return error instanceof RealtimeRequestError ? error.message : fallback
+}
+
+/** What the group's plan refused, read from the socket's `forbidden` details, or `null`. */
+function planRefusal(error: unknown): PlanRefusal | null {
+  return error instanceof RealtimeRequestError ? readPlanRefusal(error.details) : null
 }
 
 /** The note code of a refused call (`VERSION_CONFLICT`, `NOTE_NOT_FOUND`), or `null`. */
@@ -245,7 +253,11 @@ export function createNotesStore(dependencies: NotesDependencies) {
       draftId.value = dependencies.newId()
       return note
     } catch (cause) {
-      createErrors.value = { title: null, form: describe(cause, NOTE_MESSAGES.create) }
+      createErrors.value = {
+        title: null,
+        form: describe(cause, NOTE_MESSAGES.create),
+        plan: planRefusal(cause),
+      }
       return null
     } finally {
       creating.value = false

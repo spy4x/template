@@ -19,6 +19,8 @@ import { PostgresGroupRepository } from "@server/groups/postgres-group-repositor
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { createIdempotencyMiddleware, PostgresIdempotencyStore } from "@spy4x/server/idempotency"
 import { createSessionGate } from "../../apps/api/cqrs/session-gate.ts"
+import { createEntitlementGate } from "../../apps/api/cqrs/entitlement-gate.ts"
+import { ENTITLEMENT_NEEDS } from "../../apps/api/cqrs/entitlement-needs.ts"
 import {
   createNoteCreateHandler,
   createNoteDeleteHandler,
@@ -101,6 +103,14 @@ function buses(sql: postgres.Sql) {
   const commands = new CommandBus()
   commands.use(createSessionGate([]))
   commands.use(createIdempotencyMiddleware({ store: new PostgresIdempotencyStore(sql) }))
+  // As the API wires it, with billing off: these steps are about notes, not caps
+  // (plan-limits.integration.test.ts covers those).
+  commands.use(createEntitlementGate({
+    billingEnabled: false,
+    planOf: () => Promise.reject(new Error("billing is off")),
+    roleOf: dependencies.groups.roleOf,
+    usage: { maxNotes: () => Promise.reject(new Error("billing is off")) },
+  }, ENTITLEMENT_NEEDS))
   commands.register(NoteCreateCommand, createNoteCreateHandler(dependencies))
   commands.register(NoteUpdateCommand, createNoteUpdateHandler(dependencies))
   commands.register(NoteDeleteCommand, createNoteDeleteHandler(dependencies))
@@ -521,6 +531,7 @@ Deno.test("notes against Postgres", async (t) => {
         const { note } = await notes.create(
           { groupId, id: crypto.randomUUID(), title, body: "" },
           owner,
+          null,
         )
         ids.push(note.id)
         // updated_at is the transaction's start; keep the three apart.
@@ -546,6 +557,7 @@ Deno.test("notes against Postgres", async (t) => {
           const { note } = await notes.create(
             { groupId, id: crypto.randomUUID(), title, body: "" },
             owner,
+            null,
           )
           ids.push(note.id)
         }

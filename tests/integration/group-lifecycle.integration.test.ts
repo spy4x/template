@@ -513,13 +513,13 @@ Deno.test("notes: a write after the group was deleted is refused and leaves no t
     const { repository, groupId, owner } = await team(sql)
     const notes = new PostgresNoteRepository(sql)
     const existing = crypto.randomUUID()
-    await notes.create({ groupId, id: existing, title: "Before", body: "" }, owner)
+    await notes.create({ groupId, id: existing, title: "Before", body: "" }, owner, null)
     // The handlers check the role, then write. A delete that lands between the two:
     await repository.softDelete(groupId, owner)
     const outboxBefore = (await sql`SELECT 1 FROM outbox_events`).length
 
     const refused = [
-      () => notes.create({ groupId, id: crypto.randomUUID(), title: "New", body: "" }, owner),
+      () => notes.create({ groupId, id: crypto.randomUUID(), title: "New", body: "" }, owner, null),
       () =>
         notes.update(
           { groupId, id: existing, title: "After", body: "", expectedVersion: 1 },

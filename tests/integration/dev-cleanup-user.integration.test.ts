@@ -206,10 +206,12 @@ Deno.test("dev cleanup-user route", async (t) => {
       await app.db.note.create(
         { groupId, id: crypto.randomUUID(), title: "Mine", body: "" },
         writerId,
+        null,
       )
       const kept = await app.db.note.create(
         { groupId, id: crypto.randomUUID(), title: "Owner's", body: "" },
         ownerId,
+        null,
       )
 
       const response = await app.post("/test/cleanup-user", { login: "notes-writer@example.com" })

@@ -207,8 +207,14 @@ export interface NoteWriteResult {
   created: boolean
 }
 
+/** Counts against the plan's `maxNotes` (`docs/billing.md`, "Entitlements"). */
 export class NoteCreateCommand implements Command<NoteCreatePayload, NoteWriteResult> {
   __resultType?: NoteWriteResult
+  /**
+   * The group's cap on notes, set by the entitlement gate on the command bus before the handler
+   * runs (`null` for no cap). The write counts again under it, in its own transaction.
+   */
+  allowance?: number | null
   constructor(public data: NoteCreatePayload) {}
 }
 
@@ -310,8 +316,15 @@ export interface NoteDeleteInput {
 export interface NoteRepository {
   list(groupId: string, page: NoteListPage): Promise<NoteListResult>
   get(groupId: string, id: string): Promise<Note | null>
-  /** Throws `ID_ALREADY_EXISTS` when the id holds a different note. */
-  create(input: NoteCreateInput, actorId: number): Promise<NoteWriteResult>
+  /**
+   * Throws `ID_ALREADY_EXISTS` when the id holds a different note, and a `PlanError` when the group
+   * already holds `allowance` notes (`null` for no cap), counted in the write's own transaction.
+   */
+  create(
+    input: NoteCreateInput,
+    actorId: number,
+    allowance: number | null,
+  ): Promise<NoteWriteResult>
   /** Throws `NOTE_NOT_FOUND`, or {@link NoteVersionConflictError} for a stale version. */
   update(input: NoteUpdateInput, actorId: number): Promise<Note>
   /** Throws `NOTE_NOT_FOUND`, or {@link NoteVersionConflictError} for a stale version. */

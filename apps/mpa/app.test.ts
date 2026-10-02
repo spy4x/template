@@ -653,6 +653,29 @@ describe("creating a note", () => {
     expect(html).toContain("Nothing was added")
     expect(html).toContain("Tent")
   })
+
+  it("shows the plan's upgrade prompt from the API's 402, keeping the draft", async () => {
+    const { fetch } = notesApi(groupId, (_path, method) =>
+      method === "POST"
+        ? Response.json({
+          error: {
+            code: "PLAN_LIMIT_REACHED",
+            message: "This group's plan holds up to 10 notes",
+            entitlement: "maxNotes",
+            limit: 10,
+            canUpgrade: true,
+          },
+        }, { status: 402 })
+        : notesList())
+
+    const response = await create(fetch, groupId)
+
+    expect(response.status).toBe(402)
+    const html = await response.text()
+    expect(html).toContain(`data-e2e="plan-refusal"`)
+    expect(html).toContain(`href="/groups/${groupId}/pricing"`)
+    expect(html).toContain("Tent")
+  })
 })
 
 describe("selecting a group", () => {
@@ -921,6 +944,36 @@ describe("the groups pages", () => {
     expect(response.status).toBe(403)
     const row = html.slice(html.indexOf('data-user-id="7"'))
     expect(row).toContain("Group role is insufficient")
+  })
+
+  it("tells a member the plan refused the role change and to ask the owner, under that row", async () => {
+    const { fetch } = notesApi(
+      groupId,
+      (path, method) =>
+        method === "PATCH"
+          ? Response.json({
+            error: {
+              code: "PLAN_FEATURE_MISSING",
+              message: "This group's plan does not include changing roles",
+              entitlement: "memberRoles",
+              limit: null,
+              canUpgrade: false,
+            },
+          }, { status: 402 })
+          : membersOf(path, method),
+    )
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/members/7/role`, { role: "3" }),
+      info,
+    )
+    const html = await response.text()
+
+    expect(response.status).toBe(402)
+    const row = html.slice(html.indexOf('data-user-id="7"'))
+    expect(row).toContain(`data-e2e="plan-refusal"`)
+    expect(row).toContain("Ask the group's owner to upgrade the plan.")
+    expect(row).not.toContain("/pricing")
   })
 
   it("removes a member through DELETE and returns to the settings page", async () => {

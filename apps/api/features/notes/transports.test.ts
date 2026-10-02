@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd"
 import { Hono } from "hono"
 import { drainMicrotasks, FakeClock, FakeSocket } from "@spy4x/realtime/testing"
 import { CommandBus, QueryBus } from "@spy4x/platform/cqrs"
+import { FREE_PLAN_ID, PRO_PLAN_ID } from "@domain/billing"
 import { GroupRole } from "@domain/groups"
 import {
   NoteCreateCommand,
@@ -12,6 +13,8 @@ import {
   NoteUpdateCommand,
 } from "@domain/notes"
 import { createSessionGate } from "../../cqrs/session-gate.ts"
+import { createEntitlementGate } from "../../cqrs/entitlement-gate.ts"
+import { ENTITLEMENT_NEEDS } from "../../cqrs/entitlement-needs.ts"
 import { buildAuthData } from "../../_testing/fake-auth.ts"
 import { MemoryNoteRepository, roles } from "../../_testing/memory-notes.ts"
 import type { APIContext } from "../../_types.ts"
@@ -28,8 +31,9 @@ import { createNoteSocketRequests } from "./socket.ts"
 
 /**
  * Both transports over one pair of buses, as the API wires them: the REST route and the socket
- * parse, and the handlers on the buses decide who may do what. Nothing here stubs the handlers,
- * so a transport that skipped the buses, or a handler that skipped the check, fails these tests.
+ * parse, and the gates and handlers on the buses decide who may do what. Nothing here stubs the
+ * handlers, so a transport that skipped the buses, or a handler that skipped the check, fails these
+ * tests. The group is on `plan` (the free plan unless a test says otherwise), with billing on.
  */
 
 const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
@@ -37,7 +41,7 @@ const noteId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
 const OWNER = 1
 const VIEWER = 2
 
-function stack() {
+function stack(plan = FREE_PLAN_ID) {
   const notes = new MemoryNoteRepository()
   const dependencies = {
     notes,
@@ -48,6 +52,15 @@ function stack() {
   }
   const commands = new CommandBus()
   commands.use(createSessionGate([]))
+  commands.use(createEntitlementGate({
+    billingEnabled: true,
+    planOf: () => Promise.resolve(plan),
+    roleOf: (group, user) => dependencies.groups.roleOf(group, user),
+    usage: {
+      maxNotes: (group) =>
+        Promise.resolve([...notes.notes.values()].filter((note) => note.groupId === group).length),
+    },
+  }, ENTITLEMENT_NEEDS))
   commands.register(NoteCreateCommand, createNoteCreateHandler(dependencies))
   commands.register(NoteUpdateCommand, createNoteUpdateHandler(dependencies))
   commands.register(NoteDeleteCommand, createNoteDeleteHandler(dependencies))
@@ -70,11 +83,19 @@ function stack() {
 }
 
 async function seedNote(notes: MemoryNoteRepository) {
-  await notes.create({ groupId, id: noteId, title: "Plan", body: "" }, OWNER)
+  await notes.create({ groupId, id: noteId, title: "Plan", body: "" }, OWNER, null)
   await notes.update(
     { groupId, id: noteId, title: "Plan v2", body: "", expectedVersion: 1 },
     OWNER,
   )
+  notes.writes = 0
+}
+
+/** Fills the group up to the free plan's cap of 10 notes. */
+async function fillFreePlan(notes: MemoryNoteRepository) {
+  for (let i = 0; i < 10; i++) {
+    await notes.create({ groupId, id: crypto.randomUUID(), title: `Note ${i}`, body: "" }, 1, null)
+  }
   notes.writes = 0
 }
 
@@ -234,5 +255,73 @@ describe("notes over both transports", () => {
     expect(deleted).toMatchObject({ kind: "server.result", payload: { note: { version: 3 } } })
     expect(notes.writes).toBe(3)
     ws.shutdown()
+  })
+
+  it("refuses a note over the free plan's cap with 402 over REST, and tells the owner to upgrade", async () => {
+    const { notes, buses } = stack()
+    await fillFreePlan(notes)
+
+    const response = await rest(buses, OWNER)("POST", "", {
+      id: crypto.randomUUID(),
+      title: "Eleventh",
+      body: "",
+    })
+
+    expect(response.status).toBe(402)
+    expect((await response.json()).error).toMatchObject({
+      code: "PLAN_LIMIT_REACHED",
+      entitlement: "maxNotes",
+      limit: 10,
+      canUpgrade: true,
+    })
+    expect(notes.writes).toBe(0)
+  })
+
+  it("refuses a note over the free plan's cap over the socket, naming the cap in the details", async () => {
+    const { notes, buses } = stack()
+    await fillFreePlan(notes)
+    const ws = socket(buses, OWNER)
+
+    const frame = await ws.command("note.create", {
+      groupId,
+      id: crypto.randomUUID(),
+      title: "Eleventh",
+      body: "",
+    })
+
+    expect(frame).toMatchObject({
+      kind: "server.error",
+      code: "forbidden",
+      details: { code: "PLAN_LIMIT_REACHED", entitlement: "maxNotes", limit: 10 },
+    })
+    expect(notes.writes).toBe(0)
+    ws.shutdown()
+  })
+
+  it("lets a group on Pro add notes past the free plan's cap", async () => {
+    const { notes, buses } = stack(PRO_PLAN_ID)
+    await fillFreePlan(notes)
+
+    const response = await rest(buses, OWNER)("POST", "", {
+      id: crypto.randomUUID(),
+      title: "Eleventh",
+      body: "",
+    })
+
+    expect(response.status).toBe(201)
+    expect(notes.writes).toBe(1)
+  })
+
+  it("lets a group over its cap read, edit and delete what it has", async () => {
+    const { notes, buses } = stack()
+    await fillFreePlan(notes)
+    await seedNote(notes)
+    const send = rest(buses, OWNER)
+
+    const read = await send("GET", `/${noteId}`, undefined)
+    const edited = await send("PATCH", `/${noteId}`, { title: "Kept", body: "", version: 2 })
+    const deleted = await send("DELETE", `/${noteId}`, { version: 3 })
+
+    expect([read.status, edited.status, deleted.status]).toEqual([200, 200, 200])
   })
 })
