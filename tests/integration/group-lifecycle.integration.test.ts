@@ -3,6 +3,7 @@ import { expect } from "@std/expect"
 import postgres from "postgres"
 import { GroupRole } from "@domain/groups"
 import { NoteError } from "@domain/notes"
+import { GroupNotActiveError, recordGroupChange } from "@server/groups/group-change-log.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { purgeDeletedGroups } from "@server/groups/purge-deleted-groups.ts"
@@ -404,46 +405,31 @@ Deno.test("notes: a write after the group was deleted is refused and leaves no t
   })
 })
 
-Deno.test("delete: a note written while the delete is between its locks finishes with it", async () => {
+Deno.test("delete: an unfinished note insert neither blocks the delete nor deadlocks with it", async () => {
   await withSchema(async (sql) => {
     const { repository, groupId, owner } = await team(sql)
-    const notes = new PostgresNoteRepository(sql)
-    const waiting = async (count: number) => {
-      for (let attempt = 0; attempt < 100; attempt++) {
-        const [{ n }] = await sql<{ n: number }[]>`
-          SELECT count(*)::int AS n FROM pg_stat_activity
-          WHERE wait_event_type = 'Lock' AND datname = current_database()
-        `
-        if (n >= count) return
-        await new Promise((resolve) => setTimeout(resolve, 50))
-      }
-      throw new Error(`fewer than ${count} requests are waiting on a lock`)
-    }
 
-    // A third transaction holds the group row, so the delete stops after locking the people and
-    // before locking the group; the note write then starts, and both are let go together.
-    const hold = await sql.reserve()
-    await hold`BEGIN`
-    await hold`SELECT id FROM groups WHERE id = ${groupId} FOR NO KEY UPDATE`
-    const deleting = repository.softDelete(groupId, owner)
-    await waiting(1)
-    const noteId = crypto.randomUUID()
-    const writing = notes.create({ groupId, id: noteId, title: "Racing", body: "" }, owner)
-    await waiting(2)
-    await hold`COMMIT`
-    hold.release()
+    // A note insert in flight: its foreign keys hold a key-share lock on the group and the person.
+    // A delete that locked those rows harder (FOR UPDATE) would wait for it, and the note's own
+    // write to the group would then wait for the delete: a deadlock.
+    const writing = await sql.reserve()
+    await writing`BEGIN`
+    await writing`
+      INSERT INTO notes (id, group_id, title, body, change_sequence, created_by_user_id, updated_by_user_id)
+      VALUES (${crypto.randomUUID()}, ${groupId}, 'Racing', '', 1, ${owner}, ${owner})
+    `
 
-    const [deleted, written] = await Promise.allSettled([deleting, writing])
+    const finished = await Promise.race([
+      repository.softDelete(groupId, owner).then(() => "deleted"),
+      new Promise((resolve) => setTimeout(() => resolve("blocked"), 5000)),
+    ])
+    expect(finished).toBe("deleted")
 
-    // Neither request deadlocked. Which one reaches the group first is up to the database: the
-    // delete always goes through, and the note is either saved before it or refused after it.
-    expect(deleted.status === "rejected" ? String(deleted.reason) : "fulfilled").toBe("fulfilled")
-    const saved = (await sql`SELECT 1 FROM notes WHERE id = ${noteId}`).length
-    if (written.status === "fulfilled") {
-      expect(saved).toBe(1)
-    } else {
-      expect(written.reason).toMatchObject({ code: "GROUP_NOT_FOUND" })
-      expect(saved).toBe(0)
-    }
+    // The note's write to the group now finds it deleted, and rolls the note back.
+    await expect(recordGroupChange(writing, groupId, owner, "note.created")).rejects
+      .toBeInstanceOf(GroupNotActiveError)
+    await writing`ROLLBACK`
+    writing.release()
+    expect((await sql`SELECT 1 FROM notes WHERE group_id = ${groupId}`).length).toBe(0)
   })
 })
