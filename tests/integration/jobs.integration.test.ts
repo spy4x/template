@@ -246,7 +246,7 @@ Deno.test("e-mail code mails go through the worker's queue", async (t) => {
       expect(await count("email_code_requests")).toBe(0)
     })
 
-    await t.step("with mail off the request is dropped and no code is issued", async () => {
+    await t.step("with mail off the request is dropped", async () => {
       await sql`DELETE FROM auth_challenges`
       await enqueueEmailCodeMail(sql, user.id, "ann@example.com")
 

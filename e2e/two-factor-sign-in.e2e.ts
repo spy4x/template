@@ -64,7 +64,7 @@ test.describe("two-factor sign-in", () => {
       await page.goto("/email")
       await page.locator("[data-e2e=email-code]").fill(code)
       await page.locator("[data-e2e=email-verify]").click()
-      await expect(page.locator("[data-e2e=email-verify-card]")).toHaveCount(0)
+      await expect(page.locator("[data-e2e=email-current]")).toContainText("which is verified")
 
       // Turn two-factor auth on through the profile screen and read the secret it shows.
       // Without an authenticator app the page offers Enable only, never Disable next to it.

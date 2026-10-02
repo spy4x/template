@@ -771,7 +771,7 @@ describe("the e-mail page", () => {
       return rest(path)
     })
 
-  it("asks for the code on every other page while the address waits for it", async () => {
+  it("shows the code banner on the profile page while the address waits for it", async () => {
     const { fetch } = emailApi()
 
     const response = await appWith(fetch)(new Request(`${config.webAppOrigin}/`), info)

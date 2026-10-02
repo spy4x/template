@@ -68,7 +68,7 @@ describe("provenAddressOwner", () => {
     expect(await provenAddressOwner(store, "  BEA@example.com ")).toBe(bea)
   })
 
-  it("names nobody for an unproven claim, an unknown address or a value that is not one", async () => {
+  it("names nobody for an address that is only claimed, not proven", async () => {
     const { store } = await storeWithAccounts()
 
     expect(await provenAddressOwner(store, "ann@example.com")).toBe(null)
