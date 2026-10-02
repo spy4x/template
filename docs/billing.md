@@ -61,9 +61,13 @@ again, which a past-due one blocks (409 `ALREADY_SUBSCRIBED`).
 
 A group's first checkout of a plan with `trialDays` asks Stripe for a trial of that length. A
 group that already has a Stripe customer, because it paid or trialed before, checks out without
-one, so a trial is given once per group. Stripe asks for a card at the trial's checkout for now;
-a trial without a card waits on `@spy4x/billing` 1.36.0
-([spy4x/ts-libs#395](https://github.com/spy4x/ts-libs/pull/395)).
+one, so a trial is given once per group (see "Known limits").
+
+`BILLING_TRIAL_REQUIRES_CARD` decides whether the trial's checkout asks for a card. It is `true`
+by default: a trial with a card converts on its own, and a person who cannot pay does not get one.
+With `false`, Stripe starts the trial without a card (`trialWithoutPaymentMethod` in
+`@spy4x/billing`); if none is added by the trial's end, Stripe cancels the subscription and the
+group goes back to Free.
 
 The webhook stores the trial's end (`subscriptions.trial_end`). The group has the plan while the
 subscription is trialing and the stored end is still ahead, and gets Free from that instant on,
@@ -211,6 +215,9 @@ ones. Any other value of `BILLING_PROVIDER` also stops the start.
 `BILLING_GRACE_DAYS` sets the grace period for failed payments: a whole number of days from 0 to
 90, 7 when unset or empty. Any other value stops the start.
 
+`BILLING_TRIAL_REQUIRES_CARD` is `true` or `false`: whether starting a trial asks for a card
+("Trials" above). Unset or empty means `true`; any other value stops the start.
+
 ## Flow
 
 1. The owner opens **See plans** on the group's settings, then **Choose Pro**. The API asks Stripe
@@ -230,12 +237,10 @@ Delivery rules the webhook keeps:
   `created` second, then by kind (created, updated, deleted). Within one second a later kind wins
   over an earlier one whatever order they arrive in; two events of the same kind in the same second
   keep the one that arrives last. See "Known limits".
-- The end of an old subscription does not end a newer one that replaced it.
-- A subscription that pays (trialing or active) is replaced only by an event of the same
-  subscription, or by another subscription that pays. A late failed payment of an old subscription
-  never replaces the newer one that pays
-  ([#242](https://github.com/spy4x/template/issues/242)). A cancelled subscription is replaced by
-  any other.
+- Another subscription replaces the one held when it pays (trialing or active), whatever the held
+  one's status, or when the held one is cancelled. One that does not pay never replaces a live
+  one: the end or a late failed payment of an old subscription leaves the newer one, and the
+  group's plan, as they are ([#242](https://github.com/spy4x/template/issues/242)).
 - A bad or missing signature gets 400; a body that cannot be read after a valid signature, and
   events this app does not handle, get 200 so Stripe stops sending them; a failure while storing
   gets 500 so Stripe retries.
@@ -310,4 +315,5 @@ provider, so its public secret cannot sign a real event.
   the cut-off holds; an open page shows the old plan until it reads the billing again (a reload, or
   the next change of the group).
 - The notice banner is on the group's settings page only, not on every page of the group.
-- A trial needs a card until the template moves to `@spy4x/billing` 1.36.0 (Trials, above).
+- A trial is given once per group, not once per person: an owner who creates a new group can try
+  the paid plan again there.
