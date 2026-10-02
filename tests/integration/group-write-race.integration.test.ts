@@ -3,7 +3,7 @@ import { expect } from "@std/expect"
 import postgres from "postgres"
 import { GroupRole } from "@domain/groups"
 import { NoteError } from "@domain/notes"
-import { recordAccessChange } from "@server/groups/group-change-log.ts"
+import { lockActorRole, recordAccessChange } from "@server/groups/group-change-log.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { team, withSchema } from "./group-team.ts"
 
@@ -114,3 +114,61 @@ Deno.test("rename: refused when the admin is demoted while the rename waits", as
     expect((await repository.getSummaryForMember(groupId, owner))?.name).toBe("Team")
   })
 })
+
+/**
+ * Holds a transaction after its first statement is answered, until `resume`: the write has taken
+ * its first lock and keeps it while the test starts the member change.
+ */
+function firstStatementGate() {
+  let paused!: () => void
+  const pausedSignal = new Promise<void>((resolve) => paused = resolve)
+  let resume!: () => void
+  const resumed = new Promise<void>((resolve) => resume = resolve)
+  let statements = 0
+  const wrap = (transaction: postgres.TransactionSql) =>
+    new Proxy(transaction, {
+      apply(target, self, args) {
+        const query = Reflect.apply(target, self, args) as Promise<unknown>
+        if (++statements !== 1) return query
+        return query.then(async (rows) => {
+          paused()
+          await resumed
+          return rows
+        })
+      },
+    })
+  return { wrap, paused: pausedSignal, resume }
+}
+
+for (const change of ["removal", "demotion"] as const) {
+  Deno.test(
+    `lock order: a write between its two locks and the real ${change} both commit`,
+    async () => {
+      await withSchema(async (sql) => {
+        const { repository, groupId, owner, editor } = await team(sql)
+        const gate = firstStatementGate()
+        let role: GroupRole | null = null
+
+        const writing = sql.begin(async (transaction: postgres.TransactionSql) => {
+          role = await lockActorRole(gate.wrap(transaction), groupId, editor)
+        })
+        await Promise.race([gate.paused, writing])
+
+        const changing = change === "removal"
+          ? repository.removeMember(groupId, editor, owner)
+          : repository.changeMemberRole(groupId, editor, GroupRole.VIEWER, owner)
+        expect(await stillWaiting(changing)).toBe(true)
+        gate.resume()
+
+        // With the locks the other way round, the two wait for each other and one ends in 40P01.
+        await writing
+        await changing
+        expect(role).toBe(GroupRole.EDITOR)
+        const rows = await sql<{ role: GroupRole }[]>`
+          SELECT role FROM group_members WHERE group_id = ${groupId} AND user_id = ${editor}
+        `
+        expect(rows).toEqual(change === "removal" ? [] : [{ role: GroupRole.VIEWER }])
+      })
+    },
+  )
+}
