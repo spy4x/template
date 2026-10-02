@@ -1,7 +1,7 @@
 import { expect } from "@std/expect"
 import { afterEach, describe, it } from "@std/testing/bdd"
 import type { User } from "@domain/identity"
-import { isRealtimeOpen, sessionGate } from "./realtime.ts"
+import { connectionDisplay, isRealtimeOpen, sessionGate } from "./realtime.ts"
 import { sessionState } from "./session.ts"
 
 const realFetch = globalThis.fetch
@@ -49,5 +49,25 @@ describe("isRealtimeOpen", () => {
   it("is false while the socket is not open", () => {
     sessionState.value = { ...sessionState.value, user: { id: 1 } as User, wsStatus: "closed" }
     expect(isRealtimeOpen(1)).toBe(false)
+  })
+})
+
+describe("connectionDisplay", () => {
+  it("shows the socket's own status when the page did not just return", () => {
+    expect(connectionDisplay({ wsStatus: "closed", wsResume: "none" })).toBe("closed")
+    expect(connectionDisplay({ wsStatus: "open", wsResume: "none" })).toBe("open")
+  })
+
+  it("shows no disconnect while the page has just returned and the socket is not open yet", () => {
+    expect(connectionDisplay({ wsStatus: "closed", wsResume: "quiet" })).toBe("open")
+    expect(connectionDisplay({ wsStatus: "connecting", wsResume: "quiet" })).toBe("open")
+  })
+
+  it("shows Reconnecting once the reconnect took longer than the quiet period", () => {
+    expect(connectionDisplay({ wsStatus: "closed", wsResume: "slow" })).toBe("reconnecting")
+  })
+
+  it("shows open as soon as the socket is open, whatever the resume state", () => {
+    expect(connectionDisplay({ wsStatus: "open", wsResume: "slow" })).toBe("open")
   })
 })

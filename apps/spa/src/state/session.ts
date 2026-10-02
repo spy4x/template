@@ -9,6 +9,12 @@ export type SessionState = {
   user: SessionUser | null
   isMfaRequired: boolean
   wsStatus: "idle" | "connecting" | "open" | "closed"
+  /**
+   * How the page came back to the app while the socket was not open: "quiet" for the first
+   * seconds, when a reconnect is expected and nothing should warn, "slow" once it took longer.
+   * "none" at every other time. Read through `connectionDisplay`.
+   */
+  wsResume: "none" | "quiet" | "slow"
 }
 
 export const sessionState = signal<SessionState>({
@@ -16,6 +22,7 @@ export const sessionState = signal<SessionState>({
   user: null,
   isMfaRequired: false,
   wsStatus: "idle",
+  wsResume: "none",
 })
 
 /**

@@ -1,13 +1,13 @@
 import type { ComponentChildren } from "preact"
 import { useLocation, useSearch } from "wouter-preact"
 import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
-import { AppFrame, PublicFrame as PublicFrameScreen } from "@ui/frame.tsx"
+import { AppFrame, type ConnectionStatus, PublicFrame as PublicFrameScreen } from "@ui/frame.tsx"
 import { EmailBanner } from "@ui/email-screen.tsx"
 import { emailStore } from "../state/email.ts"
 import { signOut } from "../state/auth.ts"
 import { groupsStore } from "../state/groups.ts"
 import { selectionStore } from "../state/selection.ts"
-import type { SessionState, SessionUser } from "../state/session.ts"
+import type { SessionUser } from "../state/session.ts"
 import { signOutRedirect } from "./sign-in-gate.ts"
 
 /**
@@ -29,7 +29,7 @@ function useSignOut(): () => void {
 export function AppShell(
   { user, wsStatus, children }: {
     user: SessionUser
-    wsStatus: SessionState["wsStatus"]
+    wsStatus: ConnectionStatus
     children: ComponentChildren
   },
 ) {

@@ -15,6 +15,7 @@ import {
   totpDisconnect,
 } from "../state/auth.ts"
 import { sessionState } from "../state/session.ts"
+import { connectionDisplay } from "../state/realtime.ts"
 import { apiFetch } from "../state/api.ts"
 import { profileStore } from "../state/profile.ts"
 import { toasts } from "../state/toasts.ts"
@@ -181,7 +182,7 @@ export function ProfileView() {
     <ProfileScreen
       user={session.user}
       isMfaRequired={session.isMfaRequired}
-      connection={session.wsStatus}
+      connection={connectionDisplay(session)}
       values={values}
       onValueChange={setValue}
       errors={{
