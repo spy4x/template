@@ -417,9 +417,13 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
     `ALTER TABLE groups ADD COLUMN kind INT2 NOT NULL DEFAULT 2;`
     `ALTER TABLE groups ADD CONSTRAINT groups_kind_check CHECK (kind IN (1, 2));`
     `CREATE INDEX idx_groups_kind_created_id ON groups (kind, created_at, id);`
-    and, to restore the old one-personal-group rule, set `kind = 1` on each user's oldest group and
-    `CREATE UNIQUE INDEX idx_groups_one_active_personal_per_user ON groups (owner_user_id) WHERE kind = 1 AND deleted_at IS NULL;`.
-    Every group comes back as shared (`2`) until that step.
+    Every group comes back as shared (`2`). To restore the old one-personal-group rule, mark each
+    owner's oldest live group as personal, then build the unique index:
+    `UPDATE groups SET kind = 1 WHERE id IN (SELECT DISTINCT ON (owner_user_id) id FROM groups WHERE deleted_at IS NULL ORDER BY owner_user_id, created_at, id);`
+    `CREATE UNIQUE INDEX idx_groups_one_active_personal_per_user ON groups (owner_user_id) WHERE kind = 1 AND deleted_at IS NULL;`
+    Pick per owner, not per member: a member's oldest group may be one someone else owns, and two
+    personal groups for one owner make the index refuse to build. A group marked personal this way
+    may already have other members, which the old code's personal rule did not allow.
 
 ## Next steps, in dependency order
 

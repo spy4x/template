@@ -354,9 +354,9 @@ export function parseGroupName(value: unknown): string {
 }
 
 export function parseCreateGroupRequest(value: unknown): CreateGroupRequest {
-  // TODO(remove after the first release that ships this change): a page cached before the deploy
-  // still posts `kind: 2`. It is accepted and ignored for one release, so those pages can still
-  // create groups; then delete these two lines and the test that names them.
+  // TODO(spy4x/template#218, remove after the first release that ships this change): a page
+  // cached before the deploy still posts `kind: 2`. It is accepted and ignored for one release, so
+  // those pages can still create groups; then delete these two lines and the test that names them.
   const { kind, ...rest } = isRecord(value) ? value : { kind: undefined }
   const request = kind === 2 ? rest : value
   if (!hasExactKeys(request, CREATE_KEYS)) {
