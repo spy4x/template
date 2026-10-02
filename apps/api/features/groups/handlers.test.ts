@@ -38,6 +38,7 @@ const summary: GroupSummary = {
 
 class FakeGroupRepository implements GroupRepository {
   createActorId: number | null = null
+  createRequestId: string | undefined
   listUserId: number | null = null
 
   listForUser(userId: number) {
@@ -59,6 +60,7 @@ class FakeGroupRepository implements GroupRepository {
 
   create(input: CreateGroupInput, actorId: number) {
     this.createActorId = actorId
+    this.createRequestId = input.requestId
     return Promise.resolve({ group: { ...summary, id: input.id, name: input.name }, created: true })
   }
 
@@ -115,6 +117,20 @@ function actor(userId: number, overrides: Partial<Actor> = {}): Actor {
 }
 
 describe("group CQRS handlers", () => {
+  it("hands the request id of create to the repository for its audit row", async () => {
+    const repository = new FakeGroupRepository()
+    await createGroupCreateHandler(repository)(
+      new GroupCreateCommand({
+        actor: actor(42),
+        id: summary.id,
+        name: "Team",
+        requestId: "req-9",
+      }),
+    )
+
+    expect(repository.createRequestId).toBe("req-9")
+  })
+
   it("scopes create to command user", async () => {
     const repository = new FakeGroupRepository()
     const handler = createGroupCreateHandler(repository)

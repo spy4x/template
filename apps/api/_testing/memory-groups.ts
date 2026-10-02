@@ -24,6 +24,8 @@ const AT = new Date("2026-10-02T10:00:00.000Z")
  */
 export class MemoryGroupRepository implements GroupRepository {
   writes = 0
+  /** The request id each write received, in order, so a test sees it reach the audit trail. */
+  requestIds: (string | undefined)[] = []
   name: string
   deleted = false
   lastGroup = false
@@ -74,15 +76,25 @@ export class MemoryGroupRepository implements GroupRepository {
     return Promise.resolve(this.#access(userId, true))
   }
 
-  rename(_groupId: string, name: string, actorId: number): Promise<GroupSummary | null> {
+  rename(
+    _groupId: string,
+    name: string,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupSummary | null> {
     const access = this.#access(actorId, false)
     if (!access) return Promise.resolve(null)
     this.name = name
     this.writes++
+    this.requestIds.push(requestId)
     return Promise.resolve(this.#summary(access.role))
   }
 
-  softDelete(_groupId: string, actorId: number): Promise<DeletedGroupSummary | null> {
+  softDelete(
+    _groupId: string,
+    actorId: number,
+    requestId?: string,
+  ): Promise<DeletedGroupSummary | null> {
     const access = this.#access(actorId, false)
     if (!access) return Promise.resolve(null)
     if (this.lastGroup) {
@@ -90,14 +102,20 @@ export class MemoryGroupRepository implements GroupRepository {
     }
     this.deleted = true
     this.writes++
+    this.requestIds.push(requestId)
     return Promise.resolve({ ...this.#summary(access.role), deletedAt: AT })
   }
 
-  restore(_groupId: string, actorId: number): Promise<GroupSummary | null> {
+  restore(
+    _groupId: string,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupSummary | null> {
     const access = this.#access(actorId, true)
     if (!access) return Promise.resolve(null)
     this.deleted = false
     this.writes++
+    this.requestIds.push(requestId)
     return Promise.resolve(this.#summary(access.role))
   }
 

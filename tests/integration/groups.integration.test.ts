@@ -158,6 +158,29 @@ Deno.test({
       })
 
       await t.step(
+        "widening the audit request id keeps every row and takes 128 characters",
+        async () => {
+          const userId = await insertUser(sql)
+          await sql`
+          INSERT INTO audit_events (event_kind, actor_user_id, request_id)
+          VALUES ('group.renamed', ${userId}, 'short-id')
+        `
+
+          await applyMigration(sql, "2026_10_09_0001_audit_request_id_128.sql")
+
+          const long = "r".repeat(128)
+          await sql`
+          INSERT INTO audit_events (event_kind, actor_user_id, request_id)
+          VALUES ('group.renamed', ${userId}, ${long})
+        `
+          const rows = await sql<{ requestId: string }[]>`
+          SELECT request_id FROM audit_events WHERE actor_user_id = ${userId} ORDER BY id
+        `
+          expect(rows).toEqual([{ requestId: "short-id" }, { requestId: long }])
+        },
+      )
+
+      await t.step(
         "schema snapshot matches tables, functions, and trigger definitions",
         async () => {
           await snapshotSql.unsafe(await Deno.readTextFile("libs/server/db/schema.sql"))
