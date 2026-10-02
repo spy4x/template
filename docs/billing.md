@@ -26,8 +26,13 @@ back on Free. To add a plan, add it to `PLANS`, add its price variable to `readB
 - Every member sees the group's plan in the group's settings.
 - Only the owner may open a checkout or the Stripe customer portal. Anyone else gets 403
   (`ROLE_INSUFFICIENT`), and a person outside the group gets 404.
-- A group that already pays cannot open a second checkout (409 `ALREADY_SUBSCRIBED`); the owner
-  changes or cancels the plan in the portal.
+- A group with a subscription that is not cancelled cannot open a second checkout (409
+  `ALREADY_SUBSCRIBED`), even when that subscription shows as Free (paused, incomplete, or on a price
+  not in the catalog). The owner changes or cancels it in the portal.
+- The owner sees the portal button whenever the group has a live subscription or a Stripe customer
+  (past invoices, the card on file).
+- A group with a live subscription cannot be deleted (409 `GROUP_SUBSCRIBED`); the owner cancels the
+  subscription in the portal first. The settings page disables the delete button and says why.
 
 ## Configuration
 
@@ -50,7 +55,8 @@ ones. Any other value of `BILLING_PROVIDER` also stops the start.
 2. Stripe takes the payment and returns the browser to the group's settings.
 3. Stripe posts `customer.subscription.created` to `POST /api/webhooks/billing`. The API checks the
    signature first; then, in one transaction, it stores the event id, writes the group's
-   subscription and its customer, and records `group.plan.changed` in the outbox. The worker
+   subscription and its customer, and records `group.plan.changed` in the outbox when the plan or
+   the status changed (a renewal that only moves the period's end records nothing). The worker
    announces the change, and every open page of the group reads the plan again.
 4. Later changes (renewal, a failed payment, a cancellation from the portal) arrive the same way.
 
@@ -58,8 +64,9 @@ Delivery rules the webhook keeps:
 
 - A repeated event id changes nothing, so Stripe's retries are safe.
 - An event older than the one stored never rolls the plan back. Events are ordered by Stripe's
-  `created` second, then by kind (created, updated, deleted). Two updates in the same second keep
-  the one that arrived first; see "Known limits".
+  `created` second, then by kind (created, updated, deleted). Within one second a later kind wins
+  over an earlier one whatever order they arrive in; two events of the same kind in the same second
+  keep the one that arrives last. See "Known limits".
 - The end of an old subscription does not end a newer one that replaced it.
 - A bad or missing signature gets 400; a body that cannot be read after a valid signature, and
   events this app does not handle, get 200 so Stripe stops sending them; a failure while storing
@@ -99,7 +106,9 @@ With `ENV=dev` and no `BILLING_PROVIDER`, the API runs the development provider
   a webhook arrives.
 - The portal sends the browser back to the group's settings.
 - Webhooks are verified exactly as Stripe's are, with the public secret
-  `whsec_template_development_only` and the price `price_fake_pro` for Pro.
+  `whsec_template_development_only` and the price `price_fake_pro` for Pro. Anyone can sign a
+  webhook with it, so a server running with `ENV=dev` and no `BILLING_PROVIDER` accepts webhooks
+  from anyone who can reach it. Never expose such a server to the internet.
 
 The e2e test drives an upgrade this way: it posts a recorded `customer.subscription.created`, signed
 with that secret (`e2e/fixtures/billing.ts`), to the webhook. Production refuses the development
@@ -107,7 +116,12 @@ provider, so its public secret cannot sign a real event.
 
 ## Known limits
 
-- `@spy4x/billing` cannot read a subscription back from Stripe, so two updates in the same second
-  that arrive out of order keep the first. Stripe usually sends them in order; a later event, or a
-  change in the portal, corrects it.
+- `@spy4x/billing` cannot read a subscription back from Stripe yet
+  ([spy4x/ts-libs#380](https://github.com/spy4x/ts-libs/issues/380)), so two events of the same
+  kind in the same second that arrive out of order leave the older one stored. Stripe usually sends
+  them in order; the next event, or a change in the portal, corrects it. Once the library can read
+  the subscription back, the webhook will store what Stripe says now instead.
+- Two checkout sessions opened before either is paid can both be paid, which starts two
+  subscriptions for one group. The 409 above only covers a subscription the webhook has already
+  stored. Refund and cancel the extra one in the Stripe dashboard.
 - Payment events are stored (so repeats are skipped) but change nothing yet.
