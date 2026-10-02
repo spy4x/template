@@ -169,7 +169,7 @@ export const authAuditBaseSchema = type({
     AuthAuditEventType.SIGNED_OUT,
     AuthAuditEventType.PROFILE_UPDATED,
   ),
-  identifier: "string <= 100 | null = null",
+  identifier: "string <= 320 | null = null",
   ip: "string <= 45 | null = null",
   userAgent: "string <= 300 | null = null",
 })

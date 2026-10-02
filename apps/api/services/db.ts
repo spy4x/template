@@ -1,4 +1,3 @@
-import { AuthAudit, AuthAuditBase } from "@domain/identity"
 import postgres from "postgres"
 import { createSqlFromEnv, type Sql } from "@spy4x/server/db"
 import { publicAPICache } from "./cache.ts"
@@ -29,24 +28,6 @@ export const sql: Sql = (() => {
 export class DbService extends AppDbBase {
   constructor() {
     super({ sql, userCache: publicAPICache.user })
-  }
-
-  get authAudit() {
-    return {
-      ...this.buildMethods<AuthAudit, AuthAuditBase, Partial<AuthAuditBase>>(
-        `auth_audits`,
-        publicAPICache.authAudit,
-      ),
-      findMany: async (params: { userId: number; limit?: number }): Promise<AuthAudit[]> => {
-        const limit = params.limit && params.limit > 0 ? params.limit : 50
-        return await this.sql<AuthAudit[]>`
-        SELECT *
-        FROM auth_audits
-        WHERE user_id = ${params.userId}
-        ORDER BY created_at DESC
-        LIMIT ${limit}`
-      },
-    }
   }
 }
 

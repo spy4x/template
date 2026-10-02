@@ -378,7 +378,11 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    (a `createCounter` from `@spy4x/platform/universal/metrics`). Register listeners with `subscribe` (not `eventBus.on`) so the
    name is known, and mark each best-effort or durable in `apps/api/cqrs/+init.ts`. Nothing exports
    the counter yet (`renderPrometheus` prints it); the scrape endpoint and the alert rule are #159. An outbox row has no payload,
-   so a listener that needs the event's data cannot be durable until it has one.
+   so a listener that needs the event's data cannot be durable until it has one. An audit record
+   is therefore never a listener: sign-up, sign-in, sign-out and the profile change write their
+   `auth_audits` row with `tx.authAudit.insert` in the command's transaction, so a failed row
+   undoes the action and a kept action always has its row (#191). A new audited action does the
+   same.
 7. The SPA treats a hint as a reason to read. The read is `GET /api/groups`, the same one it makes
    at start-up and after every reconnect, so a lost frame costs one read.
 8. The selected group is per person, not per group: a `user_settings` row holds `selected_group_id`

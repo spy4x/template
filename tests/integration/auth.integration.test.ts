@@ -10,9 +10,12 @@ import {
   SecondFactorStatus,
   SessionStatus,
 } from "@spy4x/server/sign-in"
-import { UserMFAStatus } from "@domain/identity"
+import { AuthAuditEventType, UserMFAStatus } from "@domain/identity"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
+import { createUserProfileUpdateHandler } from "../../apps/api/features/profile/handlers.ts"
+import { UserProfileUpdateCommand } from "../../apps/api/cqrs/commands.ts"
+import type { UserProfileUpdatedEvent } from "../../apps/api/cqrs/events.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
 import {
   consumePasswordReset,
@@ -35,6 +38,8 @@ const AUTH_MIGRATION = "2026_09_24_0001_auth_package_tables.sql"
 const KIND_MIGRATION = "2026_10_07_0001_group_kind_removed.sql"
 // A reset also drops a waiting address change, so the reset tests need its table (#140).
 const EMAIL_MIGRATION = "2026_10_08_0002_email_verification.sql"
+/** Widens the audit row's address to the longest one a form accepts (#191). */
+const AUDIT_IDENTIFIER_MIGRATION = "2026_10_10_0001_auth_audit_identifier_320.sql"
 const MASTER_MIGRATIONS = [
   "2026_01_26_0001_init.sql",
   "2026_01_26_0002_auth_profiles_audit.sql",
@@ -127,8 +132,13 @@ function buildApp(signIn: SignIn) {
   })
 
   let cookies = new Map<string, string>()
-  const request = async (method: string, path: string, body?: unknown): Promise<Response> => {
-    const headers = new Headers({ "content-type": "application/json" })
+  const request = async (
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders: Record<string, string> = {},
+  ): Promise<Response> => {
+    const headers = new Headers({ "content-type": "application/json", ...extraHeaders })
     if (cookies.size) {
       headers.set("cookie", [...cookies].map(([name, value]) => `${name}=${value}`).join("; "))
     }
@@ -744,5 +754,177 @@ Deno.test("the auth migration applies on top of the previous schema", async () =
     })
     expect(signedUp.status).toBe(200)
     expect((await signedUp.json()).id).toBeGreaterThan(old.id)
+  })
+})
+
+/** The sender of every request in the audit tests, as the proxy in front of the API reports it. */
+const CLIENT = { "x-forwarded-for": "192.0.2.10", "user-agent": "audit-test-agent" }
+
+/** Every `auth_audits` row of `userId`, oldest first. */
+async function auditRows(sql: postgres.Sql, userId: number) {
+  return await sql<
+    { eventType: number; identifier: string | null; ip: string | null; userAgent: string | null }[]
+  >`
+    SELECT event_type, identifier, ip, user_agent FROM auth_audits
+    WHERE user_id = ${userId} ORDER BY id
+  `
+}
+
+/** Makes every insert into `auth_audits` fail until the returned function is called. */
+async function refuseAuditRows(sql: postgres.Sql): Promise<() => Promise<void>> {
+  await sql.unsafe(`
+    CREATE OR REPLACE FUNCTION refuse_audit_row() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN RAISE EXCEPTION 'audit row refused by the test'; END $$;
+    CREATE TRIGGER refuse_audit_row BEFORE INSERT ON auth_audits
+      FOR EACH ROW EXECUTE FUNCTION refuse_audit_row();
+  `)
+  return async () => {
+    await sql`DROP TRIGGER refuse_audit_row ON auth_audits`
+  }
+}
+
+/** The profile command over this schema; `events` collects what it emits. */
+function profileUpdate(sql: postgres.Sql) {
+  const events: UserProfileUpdatedEvent[] = []
+  const handler = createUserProfileUpdateHandler({
+    db: new AppDbBase({ sql }),
+    emit: (event) => events.push(event),
+  })
+  const update = (userId: number, firstName: string) =>
+    handler(
+      new UserProfileUpdateCommand({
+        actor: {
+          userId,
+          userMfa: UserMFAStatus.NOT_CONFIGURED,
+          sessionSecondFactor: SecondFactorStatus.NotRequired,
+        },
+        firstName,
+        lastName: "Audit",
+        request: { ip: CLIENT["x-forwarded-for"], userAgent: CLIENT["user-agent"] },
+      }),
+    )
+  return { update, events }
+}
+
+Deno.test("auth audit rows are written with the action they record", async (t) => {
+  const migrations = [...MASTER_MIGRATIONS, AUTH_MIGRATION, KIND_MIGRATION]
+  await withSchema([...migrations, AUDIT_IDENTIFIER_MIGRATION], async (sql) => {
+    const signIn = buildSignIn(sql)
+    const client = buildApp(signIn)
+    const credentials = { login: "audited@example.com", password: "Passw0rd!" }
+    const signedUp = await client.request("POST", "/sign-up", {
+      email: " Audited@Example.com ",
+      password: credentials.password,
+    }, CLIENT)
+    expect(signedUp.status).toBe(200)
+    const userId = (await signedUp.json()).id as number
+    await client.request("POST", "/sign-out", undefined, CLIENT)
+    expect((await client.request("POST", "/sign-in", credentials, CLIENT)).status).toBe(200)
+    await profileUpdate(sql).update(userId, "Ann")
+
+    await t.step("sign-up, sign-out, sign-in and a profile change each write one row", async () => {
+      const row = (eventType: AuthAuditEventType, identifier: string | null = null) => ({
+        eventType,
+        identifier,
+        ip: CLIENT["x-forwarded-for"],
+        userAgent: CLIENT["user-agent"],
+      })
+      expect(await auditRows(sql, userId)).toEqual([
+        row(AuthAuditEventType.SIGNED_UP, "audited@example.com"),
+        row(AuthAuditEventType.SIGNED_OUT),
+        row(AuthAuditEventType.SIGNED_IN),
+        row(AuthAuditEventType.PROFILE_UPDATED),
+      ])
+    })
+
+    await t.step(
+      "a 254-character address and a 400-character user agent sign up, out and in with rows",
+      async () => {
+        // The longest address a mail server delivers: a 64-character local part and a
+        // 189-character domain.
+        const email = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(57)}.com`
+        expect(email.length).toBe(254)
+        const longClient = { ...CLIENT, "user-agent": "u".repeat(400) }
+        const long = buildApp(signIn)
+        const longSignUp = await long.request("POST", "/sign-up", {
+          email,
+          password: credentials.password,
+        }, longClient)
+        expect(longSignUp.status).toBe(200)
+        const longUserId = (await longSignUp.json()).id as number
+        expect((await long.request("POST", "/sign-out", undefined, longClient)).status).toBe(200)
+        const signedIn = await long.request("POST", "/sign-in", {
+          login: email,
+          password: credentials.password,
+        }, longClient)
+        expect(signedIn.status).toBe(200)
+        const row = (eventType: AuthAuditEventType, identifier: string | null = null) => ({
+          eventType,
+          identifier,
+          ip: CLIENT["x-forwarded-for"],
+          userAgent: "u".repeat(300),
+        })
+        expect(await auditRows(sql, longUserId)).toEqual([
+          row(AuthAuditEventType.SIGNED_UP, email),
+          row(AuthAuditEventType.SIGNED_OUT),
+          row(AuthAuditEventType.SIGNED_IN),
+        ])
+      },
+    )
+
+    const allowAuditRows = await refuseAuditRows(sql)
+
+    await t.step("a sign-up whose audit row fails leaves no account and no cookie", async () => {
+      const rowsBefore = await signUpRowCounts(sql)
+      const refused = buildApp(signIn)
+      const response = await refused.request("POST", "/sign-up", {
+        email: "unaudited@example.com",
+        password: "Passw0rd!",
+      }, CLIENT)
+      expect(response.status).toBe(500)
+      expect(await signUpRowCounts(sql)).toEqual(rowsBefore)
+      expect(refused.saveCookies().has("sessionIdToken")).toBe(false)
+    })
+
+    await t.step("a sign-in whose audit row fails starts no session", async () => {
+      const [userBefore] = await sql<{ lastLoginAt: Date }[]>`
+        SELECT last_login_at FROM users WHERE id = ${userId}
+      `
+      const sessionsBefore = await sql<CountRow[]>`SELECT COUNT(*)::int AS count FROM auth_sessions`
+      const refused = buildApp(signIn)
+      expect((await refused.request("POST", "/sign-in", credentials, CLIENT)).status).toBe(500)
+      expect(refused.saveCookies().has("sessionIdToken")).toBe(false)
+      const sessionsAfter = await sql<CountRow[]>`SELECT COUNT(*)::int AS count FROM auth_sessions`
+      expect(sessionsAfter[0].count).toBe(sessionsBefore[0].count)
+      const [userAfter] = await sql<{ lastLoginAt: Date }[]>`
+        SELECT last_login_at FROM users WHERE id = ${userId}
+      `
+      expect(userAfter.lastLoginAt).toEqual(userBefore.lastLoginAt)
+    })
+
+    await t.step("a sign-out whose audit row fails keeps the session signed in", async () => {
+      const sessionId = sessionIdOf(client.saveCookies())
+      expect((await client.request("POST", "/sign-out", undefined, CLIENT)).status).toBe(500)
+      expect((await client.request("GET", "/me")).status).toBe(200)
+      const [session] = await sql<{ status: number }[]>`
+        SELECT status FROM auth_sessions WHERE id = ${sessionId}
+      `
+      expect(session.status).toBe(SessionStatus.Active)
+    })
+
+    await t.step(
+      "a profile change whose audit row fails keeps the old name and emits nothing",
+      async () => {
+        const { update, events } = profileUpdate(sql)
+        await expect(update(userId, "Changed")).rejects.toThrow("audit row refused by the test")
+        const [user] = await sql<{ firstName: string }[]>`
+        SELECT first_name FROM users WHERE id = ${userId}
+      `
+        expect(user.firstName).toBe("Ann")
+        expect(events).toEqual([])
+      },
+    )
+
+    await allowAuditRows()
   })
 })
