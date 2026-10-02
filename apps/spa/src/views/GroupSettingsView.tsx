@@ -52,13 +52,14 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
   }, [groupId, role])
   const invitesOurs = invites.groupId.value === groupId
   const createFailure = invites.createError.value
-  // A create refused for want of the price confirmation shows its message at the confirmation.
-  const seatRefused = createFailure?.code ===
-    ("SEAT_PRICE_NOT_ACCEPTED" satisfies InvitationErrorCode)
   // The billing card reads the group's plan; until it has, the server alone judges the role.
   const billingOurs = billingStore.current.value?.groupId === groupId
     ? billingStore.current.value.billing
     : null
+  // A create refused for want of the price confirmation shows its message at the confirmation, when
+  // the confirmation is on screen; until the billing is read, it shows under the form.
+  const seatRefused = !!billingOurs?.seatPrice &&
+    createFailure?.code === ("SEAT_PRICE_NOT_ACCEPTED" satisfies InvitationErrorCode)
   // Until the store has switched to this group, it holds another group's members.
   const ours = team.groupId.value === groupId
   const group = store.groups.value.find((candidate) => candidate.id === groupId) ?? null

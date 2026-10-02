@@ -1525,10 +1525,33 @@ describe("invitations", () => {
     expect(box(ticked)).toMatch(/\schecked/)
     expect(html).toContain("pays €36.00 instead of €27.00")
     expect(html).toContain(`id="invitation-seat-price-error"`)
-    expect(html).toContain("Confirm the higher price")
+    expect(html.match(/Confirm the higher price/g)).toHaveLength(1)
     expect(html).not.toContain(`id="invitation-email-error"`)
     expect(calls.filter((call) => call.method === "POST").map((call) => call.body))
       .toMatchObject([{ acceptSeatPrice: false }, { acceptSeatPrice: true }])
+  })
+
+  it("shows a refusal for the price under the form when the group's billing could not be read", async () => {
+    const { fetch } = owner((path, method) =>
+      path === `/api/groups/${groupId}/billing`
+        ? Response.json({ error: { message: "Down" } }, { status: 503 })
+        : method === "POST"
+        ? refusal(400, "SEAT_PRICE_NOT_ACCEPTED", "Confirm the higher price")
+        : notesList()
+    )
+
+    const html = await (await appWith(fetch)(
+      formPost(`/groups/${groupId}/invitations`, {
+        role: "2",
+        expiresInDays: "3",
+        maxUses: "1",
+        email: "",
+      }),
+      info,
+    )).text()
+
+    expect(html).not.toContain(`name="acceptSeatPrice"`)
+    expect(html).toContain("Confirm the higher price")
   })
 
   it("keeps what the person filled in when a create is refused, with the API's message", async () => {

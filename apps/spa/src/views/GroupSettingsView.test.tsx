@@ -219,6 +219,21 @@ describe("GroupSettingsView", () => {
     expect(other).toContain("That address is not valid")
     expect(other).not.toContain(`id="invitation-seat-price-error"`)
   })
+
+  it("shows a refusal for the price under the form while the group's billing is not read", () => {
+    groupsStore.groups.value = [{ ...known, role: GroupRole.OWNER }]
+    billingStore.reset()
+    invitationsStore.createError.value = {
+      message: "Confirm the higher price",
+      code: "SEAT_PRICE_NOT_ACCEPTED",
+      plan: null,
+    }
+
+    const html = render(known.id)
+
+    expect(html).not.toContain(`name="acceptSeatPrice"`)
+    expect(html).toContain("Confirm the higher price")
+  })
 })
 
 describe("transferAndRefresh", () => {

@@ -108,7 +108,9 @@ export async function renderGroupSettings(
             invitations={invitations.invitations}
             error={invitations.error}
             draft={invitationDraft}
-            createError={createError}
+            // The route shows a refusal for the price at the confirmation; without the billing,
+            // the confirmation is not drawn and the refusal shows under the form.
+            createError={createError ?? (billing?.seatPrice ? null : seatPriceError)}
             createRefusal={createRefusal}
             seatPrice={billing?.seatPrice && (
               <SeatPriceConfirm
