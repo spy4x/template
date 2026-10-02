@@ -1,6 +1,7 @@
 import { DbServiceBase, type RowCache, type Sql } from "@spy4x/server/db"
 import type { AuthSessionRecord, AuthStore } from "@spy4x/server/auth"
 import { createPostgresAuthStore, createPostgresSessionStore } from "@spy4x/server/auth/postgres"
+import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import type { SessionStore } from "@spy4x/server/sign-in"
 import type { User, UserBase } from "@domain/identity"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
@@ -80,6 +81,27 @@ export class AppDbBase extends DbServiceBase {
   /** The `@spy4x/server` session store over `auth_sessions`. Built per access, like `group`. */
   get sessionStore(): SessionStore<AuthSessionRecord> {
     return createPostgresSessionStore(this.sql)
+  }
+
+  /**
+   * Locks a password key until the transaction ends: the user's, or the one whose subject is the
+   * address. A password reset and an address move both take this lock first, so one waits for the
+   * other and neither copies a password hash the other is replacing (#140). Inside `begin()` only.
+   */
+  async lockPasswordKey(where: { userId: number } | { subject: string }): Promise<void> {
+    if ("userId" in where) {
+      await this.sql`
+        SELECT 1 FROM auth_keys
+        WHERE method = ${PASSWORD_METHOD} AND user_id = ${where.userId}
+        FOR UPDATE
+      `
+    } else {
+      await this.sql`
+        SELECT 1 FROM auth_keys
+        WHERE method = ${PASSWORD_METHOD} AND subject = ${where.subject}
+        FOR UPDATE
+      `
+    }
   }
 
   /** The address change waiting for its code. Built per access, like `group`. */

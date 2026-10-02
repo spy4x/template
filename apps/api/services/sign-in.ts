@@ -509,6 +509,8 @@ export function createSignIn(options: SignInOptions): SignIn {
       const now = new Date()
       // One transaction, but a wrong code still counts: the refusal returns, it does not throw.
       return await db.begin(async (tx) => {
+        // Taken first: an address move of this account waits, or this reset waits for it.
+        await tx.lockPasswordKey({ subject: email })
         if (!(await consumePasswordReset(tx.authStore, email, code, now))) return false
         const key = await tx.authStore.findKey(PASSWORD_METHOD, email)
         if (!key || key.email === null) return false
@@ -529,6 +531,8 @@ export function createSignIn(options: SignInOptions): SignIn {
           await tx.user.updateOne({ id: user.id, data: { mfa: UserMFAStatus.NOT_CONFIGURED } })
         }
         await tx.authStore.updateKeySecret(key.id, secret)
+        // The mailbox owner is back in control: an address change someone else asked for goes.
+        await tx.emailChange.remove(user.id)
         await sessionsOver(tx.sessionStore).signOutUser(user.id)
         return true
       })
@@ -557,6 +561,9 @@ export function createSignIn(options: SignInOptions): SignIn {
       const now = new Date()
       // One transaction, but a wrong code still counts: the refusal returns, it does not throw.
       const result = await db.begin(async (tx) => {
+        // Taken before the password hash is read, so a reset in flight lands first and its new
+        // hash is the one that moves, or waits until the move is done.
+        await tx.lockPasswordKey({ userId: user.id })
         const status = await readEmailStatus(tx.emailChange, tx.authStore, user.id)
         const target = emailToVerify(status)
         const key = await passwordKeyOf(tx.authStore, user.id)
