@@ -2,14 +2,12 @@
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import { OutboxProcessor, PostgresOutboxRepository } from "@spy4x/server/outbox"
+import { NotifyStatus } from "@spy4x/realtime"
 import { drainMicrotasks, FakeClock, FakeSocket } from "@spy4x/realtime/testing"
-import {
-  GroupChangeNotifier,
-  listenForGroupAccessLoss,
-  listenForGroupChanges,
-} from "@server/groups/group-change-notify.ts"
+import { GroupChangeNotifier, listenForGroupChanges } from "@server/groups/group-change-notify.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { Realtime } from "../../apps/api/services/realtime.ts"
+import { type GroupNewsTarget, listenForGroupNews } from "../../apps/api/services/group-news.ts"
 import { buildAuthData } from "../../apps/api/_testing/fake-auth.ts"
 import { requireDbConnection } from "./db-connection.ts"
 
@@ -22,6 +20,31 @@ const SETTLE_MS = 5_000
 // NOTIFY is database-wide, not schema-wide. On Woodpecker the e2e-mpa step runs a worker against
 // the same database while this suite runs, so a listener also hears other processes' changes.
 // Every listener here keeps only the groups this test created.
+
+/**
+ * Passes the news of one group on to `realtime`, the way `listenForGroupNews` hands it to the
+ * API's socket service, and records each sequence once it was handled. Another group's news is
+ * dropped: it may come from another process on the same database, whose user ids can match.
+ */
+function onlyGroup(realtime: Realtime, groupId: string) {
+  const announced: number[] = []
+  const lost: number[] = []
+  const target: GroupNewsTarget = {
+    async notifyGroupChange(id, sequence) {
+      if (id !== groupId) return NotifyStatus.NoRecipients
+      const status = await realtime.notifyGroupChange(id, sequence)
+      announced.push(sequence)
+      return status
+    },
+    notifyAccessLoss(id, sequence, userIds) {
+      if (id !== groupId) return 0
+      const reached = realtime.notifyAccessLoss(id, sequence, userIds)
+      lost.push(sequence)
+      return reached
+    },
+  }
+  return { target, announced, lost }
+}
 
 /** Runs `body` on a fresh schema built from schema.sql. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
@@ -149,15 +172,12 @@ Deno.test("a committed group change reaches its members' sockets as a hint", asy
         realtime.attach(socket, buildAuthData({ user: { id: userId } }))
       }
       const groupId = crypto.randomUUID()
-      const heard = next<{ groupId: string; sequence: number }>()
-      const stop = await listenForGroupChanges(sql, (change) => {
-        if (change.groupId !== groupId) return
-        realtime.notifyGroupChange(change.groupId, change.sequence).then(() => heard.push(change))
-      })
+      const news = onlyGroup(realtime, groupId)
+      const stop = await listenForGroupNews(sql, news.target, () => {})
       try {
         await repository.create({ id: groupId, name: "Members only" }, owner)
         await processor.drainOnce()
-        await heard.promise
+        await until(() => news.announced.includes(1), "the hint of the creation")
         await drainMicrotasks()
 
         expect(ownerSocket.frames()).toEqual([
@@ -202,19 +222,9 @@ Deno.test("a member who loses a group keeps the socket and gets no hint for it a
     const memberSocket = new FakeSocket("wss://app.example.com/api/ws")
     memberSocket.openFromPeer()
     realtime.attach(memberSocket, buildAuthData({ user: { id: member } }))
-    // The API's two listeners, as apps/api/index.ts wires them, kept to this test's group.
-    const announced: number[] = []
-    const stopChanges = await listenForGroupChanges(sql, (change) => {
-      if (change.groupId !== groupId) return
-      realtime.notifyGroupChange(change.groupId, change.sequence)
-        .then(() => announced.push(change.sequence))
-    })
-    const lost: number[] = []
-    const stopLoss = await listenForGroupAccessLoss(sql, (loss) => {
-      if (loss.groupId !== groupId) return
-      realtime.notifyAccessLoss(loss.groupId, loss.sequence, loss.userIds)
-      lost.push(loss.sequence)
-    })
+    // The API's listeners, as apps/api/index.ts starts them, kept to this test's group.
+    const { target, announced, lost } = onlyGroup(realtime, groupId)
+    const stop = await listenForGroupNews(sql, target, () => {})
     const hint = (sequence: number) => ({
       kind: "change.hint",
       groupId,
@@ -249,8 +259,7 @@ Deno.test("a member who loses a group keeps the socket and gets no hint for it a
 
       expect(memberSocket.frames()).toEqual([hint(deletedAt), hint(restoredAt)])
     } finally {
-      await stopChanges()
-      await stopLoss()
+      await stop()
       realtime.shutdown()
     }
   })
