@@ -9,7 +9,7 @@ import { bootstrapSession, settleOwedSignOut } from "./state/auth.ts"
 import { groupsStore } from "./state/groups.ts"
 import { notesStore } from "./state/notes.ts"
 import { selectionStore } from "./state/selection.ts"
-import { connectRealtime, disconnectRealtime } from "./state/realtime.ts"
+import { connectionDisplay, connectRealtime, disconnectRealtime } from "./state/realtime.ts"
 import { profileStore } from "./state/profile.ts"
 import { membersStore } from "./state/members.ts"
 import { createPull } from "./state/pull.ts"
@@ -106,7 +106,7 @@ function Frame() {
   const session = sessionState.value
   if (session.user && !session.isMfaRequired) {
     return (
-      <AppShell user={session.user} wsStatus={session.wsStatus}>
+      <AppShell user={session.user} wsStatus={connectionDisplay(session)}>
         <Routes />
       </AppShell>
     )

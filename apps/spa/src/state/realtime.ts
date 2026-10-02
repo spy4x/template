@@ -8,9 +8,10 @@ import {
   PersistentCursorStore,
   TransportStatus,
 } from "@spy4x/realtime"
+import { watchPageResume } from "@spy4x/realtime/page-lifecycle"
 import { apiFetch } from "./api.ts"
 import { type CallPort, type RetryOptions, sendCommand, sendQuery } from "./realtime-call.ts"
-import { sessionState } from "./session.ts"
+import { type SessionState, sessionState } from "./session.ts"
 
 type ConnectionStatus = "idle" | "connecting" | "open" | "closed"
 
@@ -20,6 +21,24 @@ const STATUS_TEXT: Record<TransportStatus, ConnectionStatus> = {
   [TransportStatus.Open]: "open",
   [TransportStatus.Reconnecting]: "closed",
   [TransportStatus.Stopped]: "closed",
+}
+
+/** How long after the app returns a reconnect is expected without a word to the person. */
+export const RESUME_QUIET_MS = 2_000
+
+/**
+ * What the connection indicator shows. The socket's own status says "closed" for a moment every
+ * time the phone puts the app in the background, which is expected and not worth a warning: while
+ * the page has just returned, a socket that is not open yet shows as it was ("Online"), and only
+ * a reconnect that takes longer than {@link RESUME_QUIET_MS} shows "Reconnecting…".
+ */
+export function connectionDisplay(
+  state: Pick<SessionState, "wsStatus" | "wsResume">,
+): "idle" | "connecting" | "open" | "closed" | "reconnecting" {
+  if (state.wsStatus === "open" || state.wsStatus === "idle") return state.wsStatus
+  if (state.wsResume === "quiet") return "open"
+  if (state.wsResume === "slow") return "reconnecting"
+  return state.wsStatus
 }
 
 /** `localStorage`, or a store that forgets when the browser blocks it. */
@@ -78,6 +97,9 @@ interface Connection {
   transport: ClientTransport
   cursors: PersistentCursorStore
   stopStatus: () => void
+  stopWatching: () => void
+  /** The timer that ends the quiet period after the page returned. */
+  quietTimer: ReturnType<typeof setTimeout> | null
 }
 
 let current: Connection | null = null
@@ -114,9 +136,39 @@ export function connectRealtime(userId: number, pull: (gap: GapReport) => void |
     gate: sessionGate(userId),
   })
   const stopStatus = transport.onStatus((snapshot) => {
-    sessionState.value = { ...sessionState.value, wsStatus: STATUS_TEXT[snapshot.status] }
+    const wsStatus = STATUS_TEXT[snapshot.status]
+    if (wsStatus === "open") clearResumeNotice()
+    sessionState.value = { ...sessionState.value, wsStatus }
   })
-  current = { userId, transport, cursors, stopStatus }
+  // The app came back (shown again, back online, restored from the back-forward cache): do not
+  // wait for the next reconnect timer. Only a page that was hidden stays quiet about the gap for a
+  // moment, because a socket lost in the background is expected; a network that just returned is
+  // not news the person should be told is fine.
+  let wasHidden = document.visibilityState === "hidden"
+  const trackHidden = () => {
+    if (document.visibilityState === "hidden") wasHidden = true
+  }
+  document.addEventListener("visibilitychange", trackHidden)
+  const stopResume = watchPageResume(() => {
+    transport.resume()
+    const returned = wasHidden
+    if (document.visibilityState === "visible") wasHidden = false
+    if (!returned || sessionState.value.wsStatus === "open" || !current) return
+    // Visibility, online and pageshow often fire together: one quiet period, not three.
+    if (current.quietTimer) return
+    sessionState.value = { ...sessionState.value, wsResume: "quiet" }
+    current.quietTimer = setTimeout(() => {
+      if (current) current.quietTimer = null
+      if (sessionState.value.wsStatus !== "open") {
+        sessionState.value = { ...sessionState.value, wsResume: "slow" }
+      }
+    }, RESUME_QUIET_MS)
+  })
+  const stopWatching = () => {
+    stopResume()
+    document.removeEventListener("visibilitychange", trackHidden)
+  }
+  current = { userId, transport, cursors, stopStatus, stopWatching, quietTimer: null }
   sessionState.value = { ...sessionState.value, wsStatus: "connecting" }
   transport.connect()
 }
@@ -124,12 +176,23 @@ export function connectRealtime(userId: number, pull: (gap: GapReport) => void |
 /** Closes the socket. `forget` also drops the cursors, as signing out must. */
 export function disconnectRealtime({ forget = false } = {}): void {
   if (!current) return
-  const { transport, cursors, stopStatus } = current
+  const { transport, cursors, stopStatus, stopWatching } = current
+  clearResumeNotice()
   current = null
   stopStatus()
+  stopWatching()
   transport.stop()
   if (forget) cursors.clear()
-  sessionState.value = { ...sessionState.value, wsStatus: "idle" }
+  sessionState.value = { ...sessionState.value, wsStatus: "idle", wsResume: "none" }
+}
+
+/** Ends the quiet period and its timer, as an open socket or a disconnect does. */
+function clearResumeNotice(): void {
+  if (current?.quietTimer) clearTimeout(current.quietTimer)
+  if (current) current.quietTimer = null
+  if (sessionState.value.wsResume !== "none") {
+    sessionState.value = { ...sessionState.value, wsResume: "none" }
+  }
 }
 
 /** Records that the page now holds a group up to `sequence`, so a later hint for it is a repeat. */

@@ -20,13 +20,14 @@ const NAV_ITEMS: readonly ShellNavItem[] = [
 ]
 
 /** Where the live connection to the API stands. */
-export type ConnectionStatus = "idle" | "connecting" | "open" | "closed"
+export type ConnectionStatus = "idle" | "connecting" | "open" | "closed" | "reconnecting"
 
 const CONNECTION_TEXT: Record<ConnectionStatus, string> = {
   idle: "Offline",
   connecting: "Connecting…",
   open: "Online",
   closed: "Offline",
+  reconnecting: "Reconnecting…",
 }
 
 /** The name the user menu shows. */
