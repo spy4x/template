@@ -26,6 +26,11 @@ import { handler as emailPage } from "./routes/email/index.tsx"
 import { handler as emailVerify } from "./routes/email/verify.ts"
 import { handler as emailSend } from "./routes/email/send.ts"
 import { handler as emailChange } from "./routes/email/change.ts"
+import { handler as invitePage } from "./routes/invite/[token].tsx"
+import { handler as inviteAccept } from "./routes/invite/accept.ts"
+import { handler as inviteDecline } from "./routes/invite/decline.ts"
+import { handler as invitationCreate } from "./routes/groups/[groupId]/invitations/index.ts"
+import { handler as invitationRevoke } from "./routes/groups/[groupId]/invitations/[invitationId]/revoke.ts"
 import { EMAIL_FAILURES } from "@ui/email-screen.tsx"
 import { pageMiddleware } from "./middleware.ts"
 import type { State } from "./utils.ts"
@@ -84,6 +89,11 @@ function appWith(fetch: typeof globalThis.fetch) {
     .post("/email/verify", emailVerify.POST!)
     .post("/email/send", emailSend.POST!)
     .post("/email/change", emailChange.POST!)
+    .post("/invite/accept", inviteAccept.POST!)
+    .post("/invite/decline", inviteDecline.POST!)
+    .get("/invite/:token", invitePage.GET!)
+    .post("/groups/:groupId/invitations", invitationCreate.POST!)
+    .post("/groups/:groupId/invitations/:invitationId/revoke", invitationRevoke.POST!)
     .handler()
 }
 
@@ -1181,5 +1191,207 @@ describe("the e-mail page", () => {
       email: "new@example.com",
       password: "typed-secret-1",
     })
+  })
+})
+
+describe("invitations", () => {
+  const token = "A".repeat(43)
+  const invitationId = "9c1e4f5a-2b3c-4d5e-8f90-a1b2c3d4e5f6"
+  const get = (fetch: typeof globalThis.fetch, path: string) =>
+    appWith(fetch)(new Request(`${config.webAppOrigin}${path}`), info)
+  const preview = {
+    id: invitationId,
+    groupId: otherGroupId,
+    groupName: "Work",
+    inviterName: "Ann",
+    role: 2,
+    addressed: false,
+    forYou: true,
+    expiresAt: "2026-10-09T10:00:00.000Z",
+  }
+  const refusal = (status: number, code: string, message: string) =>
+    Response.json({ error: { code, message } }, { status })
+
+  it("sends a signed-out visitor to sign-in with the invitation as next", async () => {
+    const { calls, fetch } = fakeApi(() =>
+      Response.json({ error: "User not signed in" }, { status: 401 })
+    )
+
+    const response = await get(fetch, `/invite/${token}`)
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location"))
+      .toBe(`/sign-in?${new URLSearchParams({ next: `/invite/${token}` })}`)
+    expect(calls.map((call) => call.path)).not.toContain("/api/invitations/preview")
+  })
+
+  it("shows the group, the inviter and the role, and sends no referrer from the page", async () => {
+    const { calls, fetch } = notesApi(groupId, () => Response.json({ invitation: preview }))
+
+    const response = await get(fetch, `/invite/${token}`)
+    const html = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer")
+    expect(html).toContain('data-e2e="invitation-group">Work<')
+    expect(html).toContain('action="/invite/accept"')
+    expect(calls.find((call) => call.path === "/api/invitations/preview")?.body).toEqual({ token })
+  })
+
+  it("says why a link no longer works, with the API's status", async () => {
+    const { fetch } = notesApi(
+      groupId,
+      () => refusal(410, "INVITATION_EXPIRED", "This invitation has expired"),
+    )
+
+    const response = await get(fetch, `/invite/${token}`)
+
+    expect(response.status).toBe(410)
+    expect(await response.text()).toContain("This invitation has expired")
+  })
+
+  it("accepts by the token and opens the notes of the group the API selected", async () => {
+    const { calls, fetch } = notesApi(groupId, () => Response.json({ groupId: otherGroupId }))
+
+    const response = await appWith(fetch)(formPost("/invite/accept", { token }), info)
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe("/notes")
+    expect(calls.find((call) => call.path === "/api/invitations/accept")?.body).toEqual({ token })
+  })
+
+  it("shows a refused accept on the invitation page, and one from the list on the groups page", async () => {
+    const refused = (path: string) =>
+      path === "/api/invitations/accept"
+        ? refusal(410, "INVITATION_USED_UP", "This invitation has been used up")
+        : path === "/api/invitations/preview"
+        ? Response.json({ invitation: preview })
+        : path === "/api/invitations/mine"
+        ? Response.json({ invitations: [preview] })
+        : notesList()
+    const { fetch } = notesApi(groupId, refused)
+
+    const byLink = await appWith(fetch)(formPost("/invite/accept", { token }), info)
+    const byList = await appWith(fetch)(formPost("/invite/accept", { invitationId }), info)
+
+    expect(byLink.status).toBe(410)
+    expect(await byLink.text()).toContain("This invitation has been used up")
+    const listed = await byList.text()
+    expect(listed).toContain('data-e2e="my-invitations"')
+    expect(listed).toContain("This invitation has been used up")
+  })
+
+  it("declines and shows the groups page", async () => {
+    const { calls, fetch } = notesApi(groupId, () => Response.json({ declined: true }))
+
+    const response = await appWith(fetch)(formPost("/invite/decline", { invitationId }), info)
+
+    expect(response.headers.get("location")).toBe("/groups")
+    expect(calls.find((call) => call.path === "/api/invitations/decline")?.body)
+      .toEqual({ invitationId })
+  })
+
+  const owner = (rest: (path: string, method: string) => Response) =>
+    notesApi(groupId, (path, method) => {
+      if (path === `/api/groups/${groupId}` && method === "GET") {
+        return Response.json({ group: { id: groupId, name: "Trip", role: 4 } })
+      }
+      if (path === `/api/groups/${groupId}/invitations` && method === "GET") {
+        return Response.json({ invitations: [] })
+      }
+      return rest(path, method)
+    })
+
+  it("offers a viewer only in the create form when the group is on the free plan", async () => {
+    const billing = (planId: string) => ({
+      enabled: true,
+      planId,
+      status: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      canManage: true,
+      subscribed: false,
+      hasCustomer: false,
+    })
+    const page = async (planId: string) => {
+      const { fetch } = owner((path) =>
+        path === `/api/groups/${groupId}/billing`
+          ? Response.json({ billing: billing(planId) })
+          : notesList()
+      )
+      const html = await (await get(fetch, `/groups/${groupId}`)).text()
+      const start = html.indexOf('data-e2e="invitation-role"')
+      const select = html.slice(start, html.indexOf("</select>", start))
+      return [...select.matchAll(/<option[^>]*value="(\d)"/g)].map((m) => m[1])
+    }
+
+    expect(await page("free")).toEqual(["1"])
+    expect(await page("pro")).toEqual(["1", "2", "3"])
+  })
+
+  it("creates with the form's values and draws the new link once, on the app's own origin", async () => {
+    const { calls, fetch } = owner((path, method) =>
+      path === `/api/groups/${groupId}/invitations` && method === "POST"
+        ? Response.json({ invitation: {}, token, mailSent: false }, { status: 201 })
+        : notesList()
+    )
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/invitations`, {
+        role: "2",
+        expiresInDays: "3",
+        maxUses: "10",
+        email: "",
+      }),
+      info,
+    )
+    const html = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(html).toContain(`${config.webAppOrigin}/invite/${token}`)
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({
+      role: 2,
+      expiresInDays: 3,
+      maxUses: 10,
+      email: "",
+      sendEmail: false,
+    })
+  })
+
+  it("keeps what the person filled in when a create is refused, with the API's message", async () => {
+    const { fetch } = owner((_path, method) =>
+      method === "POST"
+        ? refusal(403, "ROLE_INSUFFICIENT", "An admin can invite viewers and editors only")
+        : notesList()
+    )
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/invitations`, {
+        role: "3",
+        expiresInDays: "3",
+        maxUses: "1",
+        email: "friend@example.com",
+      }),
+      info,
+    )
+    const html = await response.text()
+
+    expect(response.status).toBe(403)
+    expect(html).toContain("An admin can invite viewers and editors only")
+    expect(html).toContain('value="friend@example.com"')
+    expect(html).not.toContain("invitation-created")
+  })
+
+  it("revokes through DELETE and returns to the settings page", async () => {
+    const { calls, fetch } = owner(() => Response.json({ revoked: true }))
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/invitations/${invitationId}/revoke`, {}),
+      info,
+    )
+
+    expect(response.headers.get("location")).toBe(`/groups/${groupId}`)
+    expect(calls.find((call) => call.method === "DELETE")?.path)
+      .toBe(`/api/groups/${groupId}/invitations/${invitationId}`)
   })
 })

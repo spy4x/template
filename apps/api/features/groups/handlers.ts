@@ -139,9 +139,9 @@ export function createGroupMembersHandler(
   repository: GroupRepository,
 ): QueryHandler<GroupMembersQuery> {
   return async ({ data }) => {
-    const members = await repository.listMembers(data.groupId, data.actor.userId)
-    if (!members) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
-    return { members }
+    const read = await repository.listMembers(data.groupId, data.actor.userId)
+    if (!read) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+    return read
   }
 }
 

@@ -72,7 +72,7 @@ async function listenForMembershipLoss(sql: postgres.Sql, groupId: string) {
   return { wait, stop }
 }
 
-Deno.test("members: every member sees the list, with names, roles and which one is them", async () => {
+Deno.test("members: every member sees the list, with names, roles, which one is them and the count", async () => {
   await withSchema(async (sql) => {
     const { repository, groupId, owner, admin, editor, viewer, onlyHere, stranger } = await team(
       sql,
@@ -84,7 +84,7 @@ Deno.test("members: every member sees the list, with names, roles and which one 
     `
 
     for (const who of [owner, admin, editor, viewer]) {
-      const members = await repository.listMembers(groupId, who)
+      const members = (await repository.listMembers(groupId, who))?.members
       expect(members?.map((member) => member.userId)).toEqual([
         owner,
         admin,
@@ -96,7 +96,10 @@ Deno.test("members: every member sees the list, with names, roles and which one 
         who,
       ])
     }
-    const members = (await repository.listMembers(groupId, owner))!
+    const read = (await repository.listMembers(groupId, owner))!
+    // The count is read apart from the list, so a list cut off at its cap still has it.
+    expect(read.memberCount).toBe(5)
+    const members = read.members
     expect(members[0]).toMatchObject({ name: "Ann Owner", role: GroupRole.OWNER, email: null })
     expect(members[3]).toMatchObject({
       name: "",
@@ -129,7 +132,7 @@ for (const [reader, sees] of Object.entries(SEES_ADDRESSES)) {
           VALUES (${editor}, 'email', ${`editor-${editor}`}, 'editor@example.com')
         `
 
-        const members =
+        const { members } =
           (await repository.listMembers(groupId, people[reader as keyof typeof SEES_ADDRESSES]))!
         const addresses = members.map((member) => ("email" in member ? member.email : "absent"))
         expect(addresses).toEqual(

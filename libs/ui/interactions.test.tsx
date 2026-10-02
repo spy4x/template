@@ -18,6 +18,15 @@ import { BILLING_PATHS } from "./billing-screen.tsx"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
 import { GroupSettingsScreen } from "./group-settings-screen.tsx"
+import {
+  EMPTY_INVITATION_DRAFT,
+  GroupInvitationsSection,
+  type GroupInvitationsSectionProps,
+  type InvitationDraft,
+  type InvitationPreviewRow,
+  InvitationScreen,
+  MyInvitationsSection,
+} from "./group-invitations.tsx"
 import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
 import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
@@ -973,5 +982,160 @@ describe("EmailScreen in the browser", () => {
 
     await mount(<EmailUnavailable />)
     expect(find("[data-e2e=email-retry]").getAttribute("href")).toBe(SCREEN_PATHS.email)
+  })
+})
+
+describe("GroupInvitationsSection in the browser", () => {
+  const defaults: GroupInvitationsSectionProps = {
+    groupId: "g-1",
+    actorRole: GroupRole.OWNER,
+    invitations: [{
+      id: "i-1",
+      role: GroupRole.EDITOR,
+      email: null,
+      maxUses: 3,
+      uses: 0,
+      expiresAt: "2026-10-09T10:00:00.000Z",
+      createdBy: { name: "Ann" },
+    }],
+    draft: EMPTY_INVITATION_DRAFT,
+  }
+
+  it("reports each typed field as a new draft and creates through the app's callback", async () => {
+    const drafts = spy<[InvitationDraft]>()
+    const create = spy<[]>()
+    await mount(
+      <GroupInvitationsSection {...defaults} onDraftChange={drafts.fn} onCreate={create.fn} />,
+    )
+
+    await type("[data-e2e=invitation-uses]", "5")
+    await type("[data-e2e=invitation-email]", "friend@example.com")
+
+    expect(drafts.calls.map(([draft]) => draft)).toEqual([
+      { ...EMPTY_INVITATION_DRAFT, maxUses: 5 },
+      { ...EMPTY_INVITATION_DRAFT, email: "friend@example.com" },
+    ])
+    expect(await submit(GROUP_PATHS.invitationCreate("g-1"))).toBe(true)
+    expect(create.calls).toHaveLength(1)
+  })
+
+  it("turns an editor draft into a viewer on a plan without member roles", async () => {
+    const drafts = spy<[InvitationDraft]>()
+    await mount(
+      <GroupInvitationsSection {...defaults} memberRoles={false} onDraftChange={drafts.fn} />,
+    )
+
+    expect(drafts.calls).toEqual([[{ ...EMPTY_INVITATION_DRAFT, role: GroupRole.VIEWER }]])
+  })
+
+  it("posts the create and the revoke natively when the app takes nothing over", async () => {
+    await mount(<GroupInvitationsSection {...defaults} />)
+
+    expect(await submit(GROUP_PATHS.invitationCreate("g-1"))).toBe(false)
+    expect(await submit(GROUP_PATHS.invitationRevoke("g-1", "i-1"))).toBe(false)
+  })
+
+  it("revokes through the app's callback with that invitation's id", async () => {
+    const revoke = spy<[string]>()
+    await mount(<GroupInvitationsSection {...defaults} onRevoke={revoke.fn} />)
+
+    expect(await submit(GROUP_PATHS.invitationRevoke("g-1", "i-1"))).toBe(true)
+    expect(revoke.calls).toEqual([["i-1"]])
+  })
+
+  it("moves focus to the address field when a create is refused, and to the new link once made", async () => {
+    await mount(<GroupInvitationsSection {...defaults} />)
+    expect(focused()).not.toBe("invitation-email")
+
+    await rerender(<GroupInvitationsSection {...defaults} createError="Enter a valid address" />)
+    expect(focused()).toBe("invitation-email")
+    expect(find("[data-e2e=invitation-email]").getAttribute("aria-describedby")).toContain(
+      "invitation-email",
+    )
+
+    await rerender(
+      <GroupInvitationsSection
+        {...defaults}
+        created={{ link: "https://app.example.com/invite/x", mailAsked: false, mailSent: false }}
+      />,
+    )
+    expect(focused()).toBe("invitation-created")
+  })
+
+  it("moves focus to the message under the row when a revoke is refused", async () => {
+    await mount(<GroupInvitationsSection {...defaults} />)
+    await rerender(
+      <GroupInvitationsSection
+        {...defaults}
+        revokeError={{ invitationId: "i-1", message: "Already used" }}
+      />,
+    )
+
+    expect(focused()).toBe("invitation-error")
+    expect(find("[data-e2e=invitation-error]").textContent).toContain("Already used")
+  })
+})
+
+describe("invitation answers in the browser", () => {
+  const invitation: InvitationPreviewRow = {
+    id: "i-1",
+    groupId: "g-1",
+    groupName: "Team",
+    inviterName: "Ann",
+    role: GroupRole.EDITOR,
+    addressed: true,
+    forYou: true,
+    expiresAt: "2026-10-09T10:00:00.000Z",
+  }
+
+  it("accepts and declines a link through the app's callbacks, and posts natively without them", async () => {
+    const accept = spy<[]>()
+    const decline = spy<[]>()
+    await mount(
+      <InvitationScreen
+        token="t"
+        invitation={invitation}
+        loading={false}
+        onAccept={accept.fn}
+        onDecline={decline.fn}
+      />,
+    )
+
+    expect(await submit(FORM_ACTIONS.invitationAccept)).toBe(true)
+    expect(await submit(FORM_ACTIONS.invitationDecline)).toBe(true)
+    expect([accept.calls.length, decline.calls.length]).toEqual([1, 1])
+
+    await rerender(<InvitationScreen token="t" invitation={invitation} loading={false} />)
+    expect(await submit(FORM_ACTIONS.invitationAccept)).toBe(false)
+  })
+
+  it("moves focus to the message when an accept is refused", async () => {
+    await mount(<InvitationScreen token="t" invitation={invitation} loading={false} />)
+    await rerender(
+      <InvitationScreen
+        token="t"
+        invitation={invitation}
+        loading={false}
+        answerError="This invitation has been used up"
+      />,
+    )
+
+    expect(focused()).toBe("invitation-answer-error")
+  })
+
+  it("answers an invitation in the list through the app's callbacks with its id", async () => {
+    const accept = spy<[string]>()
+    const decline = spy<[string]>()
+    await mount(
+      <MyInvitationsSection
+        invitations={[invitation]}
+        onAccept={accept.fn}
+        onDecline={decline.fn}
+      />,
+    )
+
+    expect(await submit(FORM_ACTIONS.invitationAccept)).toBe(true)
+    expect(await submit(FORM_ACTIONS.invitationDecline)).toBe(true)
+    expect([accept.calls, decline.calls]).toEqual([[["i-1"]], [["i-1"]]])
   })
 })

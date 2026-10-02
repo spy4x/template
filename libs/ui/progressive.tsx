@@ -37,7 +37,16 @@ export const FORM_ACTIONS = {
   emailSend: "/email/send",
   /** Moves to a new address once its code proves it: `{ email, password }`. */
   emailChange: "/email/change",
+  /** Accepts an invitation: `{ token }` from its link, or `{ invitationId }` for one sent to you. */
+  invitationAccept: "/invite/accept",
+  /** Declines an invitation: `{ token }` or `{ invitationId }`, like the accept. */
+  invitationDecline: "/invite/decline",
 } as const
+
+/** The page an invitation's link opens: the group, the inviter and the role, to accept or decline. */
+export function invitationPagePath(token: string): string {
+  return `/invite/${encodeURIComponent(token)}`
+}
 
 /**
  * The routes the notes of the selected group post to and live at. A form's field names match the
@@ -129,6 +138,11 @@ export const GROUP_PATHS = {
     `/groups/${encodeURIComponent(groupId)}/members/${userId}/remove`,
   /** `POST` leaves the group. Takes no fields. */
   leave: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/leave`,
+  /** `POST` creates an invitation: `{ role, expiresInDays, maxUses, email, sendEmail }`. */
+  invitationCreate: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/invitations`,
+  /** `POST` revokes an invitation. Takes no fields. */
+  invitationRevoke: (groupId: string, invitationId: string) =>
+    `/groups/${encodeURIComponent(groupId)}/invitations/${encodeURIComponent(invitationId)}/revoke`,
 } as const
 
 /** `EnhancedForm` announces nothing itself: each screen shows its own busy button and error. */

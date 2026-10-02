@@ -160,3 +160,44 @@ export function emailCodeMail(
     ),
   }
 }
+
+/**
+ * The mail that carries a group invitation's link: the same link its creator sees. Opening it asks
+ * the person to sign in or sign up, then to accept or decline.
+ */
+export function invitationMail(
+  brand: MailBrand,
+  { to, link, groupName, inviterName, roleName, validDays }: {
+    to: string
+    link: string
+    groupName: string
+    /** Empty when the inviter set no name. */
+    inviterName: string
+    /** The role the person gets, such as "editor". */
+    roleName: string
+    validDays: number
+  },
+): EmailMessage {
+  const host = new URL(brand.webAppUrl).host
+  const who = inviterName.trim() || "Someone"
+  const invited = `${who} invited you to join "${groupName}" at ${host} as ${roleName}.`
+  const open = `Open this link within ${validDays} days to accept or decline.`
+  const account =
+    "The invitation is for this e-mail address: accept it with the account that uses it."
+  const ignore = "If you do not want to join, ignore this mail."
+  return {
+    to,
+    subject: `Invitation to join "${groupName}"`,
+    text: `${invited}\n\n${open}\n\n${link}\n\n${account}\n\n${ignore}\n`,
+    html: mailHtml(
+      brand,
+      [
+        `<p>${escapeHtml(invited)}</p>`,
+        `<p>${escapeHtml(open)}</p>`,
+        `<p><a href="${escapeHtml(link)}">Open the invitation</a></p>`,
+        `<p>${escapeHtml(account)}</p>`,
+        `<p>${escapeHtml(ignore)}</p>`,
+      ].join("\n"),
+    ),
+  }
+}

@@ -22,7 +22,7 @@ function deferred<T>() {
 }
 
 const UNUSED: MembersDependencies = {
-  list: () => Promise.resolve({ members: [member(1, GroupRole.OWNER), member(2)] }),
+  list: () => Promise.resolve({ members: [member(1, GroupRole.OWNER), member(2)], memberCount: 2 }),
   setRole: () => Promise.reject(new Error("unused")),
   removeMember: () => Promise.reject(new Error("unused")),
   leave: () => Promise.reject(new Error("unused")),
@@ -34,24 +34,43 @@ function refused(message: string) {
 
 describe("members store", () => {
   it("reads the members of the group it opens, and drops a read answered after the page moved on", async () => {
-    const first = deferred<{ members: MemberItem[] }>()
+    const first = deferred<{ members: MemberItem[]; memberCount: number }>()
     const asked: string[] = []
     const store = createMembersStore({
       ...UNUSED,
       list: ({ groupId }) => {
         asked.push(groupId)
-        return groupId === "a" ? first.promise : Promise.resolve({ members: [member(9)] })
+        return groupId === "a"
+          ? first.promise
+          : Promise.resolve({ members: [member(9)], memberCount: 1 })
       },
     })
 
     const late = store.open("a")
     await store.open("b")
-    first.resolve({ members: [member(1)] })
+    first.resolve({ members: [member(1)], memberCount: 1 })
     await late
 
     expect(asked).toEqual(["a", "b"])
     expect(store.groupId.value).toBe("b")
     expect(store.members.value?.map((m) => m.userId)).toEqual([9])
+  })
+
+  it("keeps the group's true member count past the listed rows, one less after a removal", async () => {
+    const store = createMembersStore({
+      ...UNUSED,
+      list: () =>
+        Promise.resolve({ members: [member(1, GroupRole.OWNER), member(2)], memberCount: 1500 }),
+      removeMember: () => Promise.resolve({ removed: true }),
+    })
+    await store.open("g")
+    expect(store.memberCount.value).toBe(1500)
+
+    expect(await store.remove(2)).toBe(true)
+
+    expect(store.memberCount.value).toBe(1499)
+    store.reset()
+    expect(store.memberCount.value).toBeNull()
   })
 
   it("changes a role and shows the member as the server answered", async () => {

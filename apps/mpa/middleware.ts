@@ -30,6 +30,7 @@ export function pageMiddleware(
       return withPageHeaders(new Response("Cross-site request refused", { status: 403 }), [])
     }
     const setCookies: string[] = []
+    ctx.state.webAppOrigin = config.webAppOrigin
     ctx.state.api = createApi({
       apiUrl: config.apiUrl,
       request: ctx.req,

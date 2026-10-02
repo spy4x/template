@@ -16,6 +16,7 @@ import {
   GroupError,
   GroupListPage,
   GroupListResult,
+  GroupMembersResult,
   GroupMemberSummary,
   GroupRepository,
   GroupRole,
@@ -29,6 +30,7 @@ import {
   recordAccessChange,
   recordGroupChange,
 } from "./group-change-log.ts"
+import { revokeInvitationsOf } from "./invitation-revocation.ts"
 
 interface GroupRow extends postgres.Row {
   id: string
@@ -109,8 +111,9 @@ const MEMBER_REMOVED_EVENT = "group.member_removed"
 const MEMBER_LEFT_EVENT = "group.member_left"
 
 /**
- * Most members one members read returns. Members join by invitation (#131), so a group this large
- * is not expected; the list then shows its oldest members and stops, instead of reading without end.
+ * Most members one members read returns. Members join by invitation, and a plan caps them far
+ * below this, so a group this large is not expected; the list then shows its oldest members and
+ * stops, instead of reading without end, and the read's `memberCount` says how many there are.
  */
 const MEMBER_LIST_LIMIT = 1000
 
@@ -305,33 +308,9 @@ export class PostgresGroupRepository implements GroupRepository {
     return rows.length > 0
   }
 
-  /**
-   * Stores the selection and, when it changed, moves the version. Selecting the group already
-   * selected changes nothing. It announces nothing: the handler emits `GroupSelectedEvent`. Runs in
-   * the caller's transaction.
-   */
+  /** See {@link storeSelection}. */
   private async storeSelection(userId: number, groupId: string): Promise<SelectedGroup> {
-    const changed = (
-      await this.sql<SelectionRow[]>`
-        INSERT INTO user_settings (user_id, selected_group_id)
-        VALUES (${userId}, ${groupId})
-        ON CONFLICT (user_id) DO UPDATE
-        SET selected_group_id = EXCLUDED.selected_group_id,
-            version = user_settings.version + 1,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE user_settings.selected_group_id IS DISTINCT FROM EXCLUDED.selected_group_id
-        RETURNING selected_group_id, version
-      `
-    )[0]
-    if (changed) {
-      return { groupId, version: changed.version }
-    }
-    const current = (
-      await this.sql<SelectionRow[]>`
-        SELECT selected_group_id, version FROM user_settings WHERE user_id = ${userId}
-      `
-    )[0]
-    return { groupId, version: current.version }
+    return await storeSelection(this.sql, userId, groupId)
   }
 
   async create(input: CreateGroupInput, actorId: number): Promise<CreatedGroup> {
@@ -671,10 +650,19 @@ export class PostgresGroupRepository implements GroupRepository {
     return row ? { group: toGroup(row), role: row.role } : null
   }
 
-  async listMembers(groupId: string, actorId: number): Promise<GroupMemberSummary[] | null> {
+  async listMembers(groupId: string, actorId: number): Promise<GroupMembersResult | null> {
     const actor = await this.getSummaryForMember(groupId, actorId)
     if (!actor) return null
-    return await this.readMembers(groupId, actorId, { emails: canSeeMemberEmails(actor.role) })
+    const [members, [count]] = await Promise.all([
+      this.readMembers(groupId, actorId, { emails: canSeeMemberEmails(actor.role) }),
+      this.sql<{ memberCount: number }[]>`
+        SELECT count(*)::int AS member_count
+        FROM group_members
+        INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+        WHERE group_members.group_id = ${groupId}
+      `,
+    ])
+    return { members, memberCount: count.memberCount }
   }
 
   /**
@@ -738,6 +726,8 @@ export class PostgresGroupRepository implements GroupRepository {
           WHERE group_id = ${groupId} AND user_id = ${userId}
         `
         await repository.audit(groupId, actorId, MEMBER_ROLE_CHANGED_EVENT, requestId)
+        // A demoted member's links must not let anyone in above what they may now invite with.
+        await revokeInvitationsOf(transaction, groupId, userId, role, actorId, requestId)
         // A demoted member can still read the group, so nobody loses access: the raised revision
         // and the group's hint are what take a write away from their open pages.
         await recordAccessChange(transaction, groupId, actorId, MEMBER_ROLE_CHANGED_EVENT, [])
@@ -763,6 +753,8 @@ export class PostgresGroupRepository implements GroupRepository {
       assertCanRemoveMember(roles.get(actorId) ?? null, roles.get(userId) ?? null)
       await repository.dropMember(groupId, userId)
       await repository.audit(groupId, actorId, MEMBER_REMOVED_EVENT, requestId)
+      // Their own links would let them back in.
+      await revokeInvitationsOf(transaction, groupId, userId, null, actorId, requestId)
       await recordAccessChange(transaction, groupId, actorId, MEMBER_REMOVED_EVENT, [userId])
       return true
     })
@@ -783,6 +775,7 @@ export class PostgresGroupRepository implements GroupRepository {
       }
       await repository.dropMember(groupId, actorId)
       await repository.audit(groupId, actorId, MEMBER_LEFT_EVENT, requestId)
+      await revokeInvitationsOf(transaction, groupId, actorId, null, actorId, requestId)
       await recordAccessChange(transaction, groupId, actorId, MEMBER_LEFT_EVENT, [actorId])
       return true
     })
@@ -975,4 +968,37 @@ function toSummary(
 /** Whether `sql` is a transaction's handle; only those have `savepoint`. */
 function isTransaction(sql: postgres.Sql): sql is postgres.TransactionSql {
   return "savepoint" in sql
+}
+
+/**
+ * Stores the selection and, when it changed, moves the version. Selecting the group already
+ * selected changes nothing. It announces nothing: the handler emits `GroupSelectedEvent`. Runs in
+ * the caller's transaction: an accepted invitation selects its group this way too.
+ */
+export async function storeSelection(
+  sql: postgres.Sql,
+  userId: number,
+  groupId: string,
+): Promise<SelectedGroup> {
+  const changed = (
+    await sql<SelectionRow[]>`
+      INSERT INTO user_settings (user_id, selected_group_id)
+      VALUES (${userId}, ${groupId})
+      ON CONFLICT (user_id) DO UPDATE
+      SET selected_group_id = EXCLUDED.selected_group_id,
+          version = user_settings.version + 1,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE user_settings.selected_group_id IS DISTINCT FROM EXCLUDED.selected_group_id
+      RETURNING selected_group_id, version
+    `
+  )[0]
+  if (changed) {
+    return { groupId, version: changed.version }
+  }
+  const current = (
+    await sql<SelectionRow[]>`
+      SELECT selected_group_id, version FROM user_settings WHERE user_id = ${userId}
+    `
+  )[0]
+  return { groupId, version: current.version }
 }

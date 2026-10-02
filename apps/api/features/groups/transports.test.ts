@@ -62,7 +62,10 @@ function stack(plan = PRO_PLAN_ID) {
     billingEnabled: true,
     planOf: () => Promise.resolve(plan),
     roleOf: async (_group, user) => (await groups.getForMember(groupId, user))?.role ?? null,
-    usage: { maxNotes: () => Promise.reject(new Error("not part of this test")) },
+    usage: {
+      maxNotes: () => Promise.reject(new Error("not part of this test")),
+      maxMembers: () => Promise.reject(new Error("not part of this test")),
+    },
   }, ENTITLEMENT_NEEDS))
   commands.register(GroupRenameCommand, createGroupRenameHandler(groups))
   commands.register(GroupDeleteCommand, createGroupDeleteHandler(groups))

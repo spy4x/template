@@ -17,6 +17,11 @@ import {
   GroupDeleteCommand,
   GroupDeletedListQuery,
   GroupGetQuery,
+  GroupInvitationAcceptCommand,
+  GroupInvitationCreateCommand,
+  GroupInvitationDeclineCommand,
+  GroupInvitationRevokeCommand,
+  GroupInvitationsQuery,
   GroupLeaveCommand,
   GroupListQuery,
   GroupMemberRemoveCommand,
@@ -26,7 +31,19 @@ import {
   GroupRestoreCommand,
   GroupSelectCommand,
   GroupSelectedQuery,
+  InvitationPreviewQuery,
+  MyInvitationsQuery,
 } from "@domain/groups"
+import {
+  createInvitationAcceptHandler,
+  createInvitationCreateHandler,
+  createInvitationDeclineHandler,
+  createInvitationListHandler,
+  createInvitationPreviewHandler,
+  createInvitationRevokeHandler,
+  createMyInvitationsHandler,
+} from "../features/groups/invitations.ts"
+import { invitationDependencies } from "./invitation-dependencies.ts"
 import { userProfileUpdateHandler } from "@api/cqrs/command-handlers/user-profile-update.ts"
 import { userProfileGetHandler } from "@api/cqrs/query-handlers/user-profile-get.ts"
 import { pushRegisterHandler } from "@api/cqrs/command-handlers/push-register.ts"
@@ -111,6 +128,22 @@ commandBus.register(GroupRestoreCommand, groupRestoreHandler)
 commandBus.register(GroupMemberRoleCommand, groupMemberRoleHandler)
 commandBus.register(GroupMemberRemoveCommand, groupMemberRemoveHandler)
 commandBus.register(GroupLeaveCommand, groupLeaveHandler)
+commandBus.register(
+  GroupInvitationCreateCommand,
+  createInvitationCreateHandler(invitationDependencies),
+)
+commandBus.register(
+  GroupInvitationRevokeCommand,
+  createInvitationRevokeHandler(invitationDependencies),
+)
+commandBus.register(
+  GroupInvitationAcceptCommand,
+  createInvitationAcceptHandler(invitationDependencies),
+)
+commandBus.register(
+  GroupInvitationDeclineCommand,
+  createInvitationDeclineHandler(invitationDependencies),
+)
 commandBus.register(NoteCreateCommand, noteCreateHandler)
 commandBus.register(NoteUpdateCommand, noteUpdateHandler)
 commandBus.register(NoteDeleteCommand, noteDeleteHandler)
@@ -123,6 +156,9 @@ queryBus.register(GroupGetQuery, groupGetHandler)
 queryBus.register(GroupSelectedQuery, groupSelectedHandler)
 queryBus.register(GroupDeletedListQuery, groupDeletedListHandler)
 queryBus.register(GroupMembersQuery, groupMembersHandler)
+queryBus.register(GroupInvitationsQuery, createInvitationListHandler(invitationDependencies))
+queryBus.register(InvitationPreviewQuery, createInvitationPreviewHandler(invitationDependencies))
+queryBus.register(MyInvitationsQuery, createMyInvitationsHandler(invitationDependencies))
 queryBus.register(NoteListQuery, noteListHandler)
 queryBus.register(NoteGetQuery, noteGetHandler)
 queryBus.register(BillingGetQuery, billingGetHandler)

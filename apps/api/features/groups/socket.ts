@@ -23,6 +23,7 @@ import type {
   DeletedGroupSummary,
   GroupCreateResult,
   GroupGetResult,
+  GroupMembersResult,
   GroupMemberSummary,
   GroupSummary,
   SelectedGroup,
@@ -40,7 +41,7 @@ export interface GroupSocketDependencies extends GroupListDependencies {
   delete(command: GroupDeleteCommand): Promise<{ group: DeletedGroupSummary }>
   restore(command: GroupRestoreCommand): Promise<{ group: GroupSummary }>
   deleted(query: GroupDeletedListQuery): Promise<{ groups: DeletedGroupSummary[] }>
-  members(query: GroupMembersQuery): Promise<{ members: GroupMemberSummary[] }>
+  members(query: GroupMembersQuery): Promise<GroupMembersResult>
   setRole(command: GroupMemberRoleCommand): Promise<{ member: GroupMemberSummary }>
   removeMember(command: GroupMemberRemoveCommand): Promise<{ removed: true }>
   leave(command: GroupLeaveCommand): Promise<{ left: true }>

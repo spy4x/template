@@ -3,6 +3,7 @@ import { GroupsScreen } from "@ui/groups-screen.tsx"
 import { NOTE_PATHS } from "@ui/progressive.tsx"
 import { groupsStore } from "../state/groups.ts"
 import { selectionStore } from "../state/selection.ts"
+import { MyInvitationsView } from "./InvitationView.tsx"
 
 /** Wires the groups screen to the groups store: reads and creates go through the store. */
 export function GroupsView() {
@@ -26,6 +27,7 @@ export function GroupsView() {
       restoreError={failure?.action === "restore" ? failure.message : null}
       restoringId={working?.action === "restore" ? working.groupId : null}
       onRestore={(groupId) => void store.restore(groupId)}
+      invitations={<MyInvitationsView />}
       onOpen={(groupId) => {
         void selectionStore.select(groupId)
         navigate(NOTE_PATHS.list)

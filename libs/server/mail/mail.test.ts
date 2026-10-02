@@ -4,6 +4,7 @@ import type { Sql } from "@spy4x/server/db"
 import {
   createMailSender,
   emailCodeMail,
+  invitationMail,
   mailOffWarning,
   MailTransport,
   passwordResetMail,
@@ -139,5 +140,50 @@ describe("emailCodeMail", () => {
     expect(mail.html).toContain("a&lt;b-C9_z")
     expect(mail.html).not.toContain("a<b-C9_z")
     expect(mail.text).not.toMatch(/https?:\/\//)
+  })
+})
+
+describe("invitationMail", () => {
+  const link = "https://app.example.com/invite/abc_DEF-123"
+  const mail = invitationMail(
+    { webAppUrl: "https://app.example.com" },
+    {
+      to: "bo@example.com",
+      link,
+      groupName: `<b>Team</b> "A"`,
+      inviterName: "Ann",
+      roleName: "editor",
+      validDays: 7,
+    },
+  )
+
+  it("carries the link, the group, the inviter, the role and how long it works", () => {
+    expect(mail.to).toBe("bo@example.com")
+    expect(mail.subject).toBe(`Invitation to join "<b>Team</b> "A""`)
+    expect(mail.text).toContain(link)
+    expect(mail.text).toContain(`Ann invited you to join "<b>Team</b> "A"" at app.example.com`)
+    expect(mail.text).toContain("as editor")
+    expect(mail.text).toContain("7 days")
+    expect(mail.html).toContain(`href="${link}"`)
+  })
+
+  it("escapes the group's name in the HTML", () => {
+    expect(mail.html).not.toContain("<b>Team</b>")
+    expect(mail.html).toContain("&lt;b&gt;Team&lt;/b&gt;")
+  })
+
+  it("names nobody when the inviter set no name", () => {
+    const anonymous = invitationMail(
+      { webAppUrl: "https://app.example.com" },
+      {
+        to: "bo@example.com",
+        link,
+        groupName: "Team",
+        inviterName: " ",
+        roleName: "viewer",
+        validDays: 1,
+      },
+    )
+    expect(anonymous.text).toMatch(/^Someone invited you/)
   })
 })

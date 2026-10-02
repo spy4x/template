@@ -1,11 +1,15 @@
 import { useEffect } from "preact/hooks"
 import { useLocation } from "wouter-preact"
 import { GroupSettingsScreen } from "@ui/group-settings-screen.tsx"
+import { GroupInvitationsSection } from "@ui/group-invitations.tsx"
+import { canManageInvitations } from "@domain/groups"
+import { entitlementsOf } from "@domain/billing"
 import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { groupsStore } from "../state/groups.ts"
 import { membersStore } from "../state/members.ts"
 import { selectionStore } from "../state/selection.ts"
 import { billingStore } from "../state/billing.ts"
+import { invitationsStore } from "../state/invitations.ts"
 import { GroupBillingCard } from "./BillingViews.tsx"
 
 /**
@@ -16,11 +20,26 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
   const [, navigate] = useLocation()
   const store = groupsStore
   const team = membersStore
-  // Closing the page forgets the members, so a later pull does not read them for nobody.
+  const invites = invitationsStore
+  // Closing the page forgets the members, so a later pull does not read them for nobody. It
+  // forgets a new invitation's link too: the link is shown once.
   useEffect(() => {
     void team.open(groupId)
-    return () => team.reset()
+    return () => {
+      team.reset()
+      invites.closeGroup()
+    }
   }, [groupId])
+  const role = store.groups.value.find((candidate) => candidate.id === groupId)?.role
+  // Only the owner and admins may read the invitations; the API refuses everyone else.
+  useEffect(() => {
+    if (role !== undefined && canManageInvitations(role)) void invites.open(groupId)
+  }, [groupId, role])
+  const invitesOurs = invites.groupId.value === groupId
+  // The billing card reads the group's plan; until it has, the server alone judges the role.
+  const billingOurs = billingStore.current.value?.groupId === groupId
+    ? billingStore.current.value.billing
+    : null
   // Until the store has switched to this group, it holds another group's members.
   const ours = team.groupId.value === groupId
   const group = store.groups.value.find((candidate) => candidate.id === groupId) ?? null
@@ -49,6 +68,7 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
       hasSubscription={billingStore.current.value?.groupId === groupId &&
         billingStore.current.value.billing.subscribed}
       members={ours ? team.members.value : null}
+      memberCount={ours ? team.memberCount.value ?? undefined : undefined}
       membersError={ours ? team.loadError.value : null}
       memberPendingId={ours ? team.pendingUserId.value : null}
       memberError={ours ? team.memberError.value : null}
@@ -75,6 +95,28 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
           navigate(SCREEN_PATHS.groups)
         })}
       billing={group && <GroupBillingCard groupId={groupId} />}
+      invitations={group && (
+        <GroupInvitationsSection
+          groupId={groupId}
+          actorRole={group.role}
+          memberRoles={billingOurs
+            ? entitlementsOf(billingOurs.planId, billingOurs.enabled).features.memberRoles
+            : true}
+          invitations={invitesOurs ? invites.invitations.value : null}
+          error={invitesOurs ? invites.loadError.value : null}
+          draft={invites.draft.value}
+          onDraftChange={(draft) => (invites.draft.value = draft)}
+          creating={invites.creating.value}
+          createError={invites.createError.value?.plan ? null : invites.createError.value?.message}
+          createRefusal={invites.createError.value?.plan ?? null}
+          onCreate={() => void invites.create()}
+          created={invites.created.value}
+          revokingId={invites.revokingId.value}
+          revokeError={invites.revokeError.value}
+          onRevoke={(invitationId) => void invites.revoke(invitationId)}
+          navigate={navigate}
+        />
+      )}
     />
   )
 }

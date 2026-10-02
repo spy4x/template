@@ -5,6 +5,7 @@ import {
   GroupError,
   type GroupListPage,
   type GroupListResult,
+  type GroupMembersResult,
   type GroupMemberSummary,
   type GroupRepository,
   GroupRole,
@@ -150,11 +151,10 @@ export class MemoryGroupRepository implements GroupRepository {
     }
   }
 
-  listMembers(_groupId: string, actorId: number): Promise<GroupMemberSummary[] | null> {
+  listMembers(_groupId: string, actorId: number): Promise<GroupMembersResult | null> {
     if (!this.#access(actorId, false)) return Promise.resolve(null)
-    return Promise.resolve(
-      Object.keys(this.roles).map((userId) => this.#member(Number(userId), actorId)),
-    )
+    const members = Object.keys(this.roles).map((userId) => this.#member(Number(userId), actorId))
+    return Promise.resolve({ members, memberCount: members.length })
   }
 
   changeMemberRole(

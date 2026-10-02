@@ -109,7 +109,10 @@ function buses(sql: postgres.Sql) {
     billingEnabled: false,
     planOf: () => Promise.reject(new Error("billing is off")),
     roleOf: dependencies.groups.roleOf,
-    usage: { maxNotes: () => Promise.reject(new Error("billing is off")) },
+    usage: {
+      maxNotes: () => Promise.reject(new Error("billing is off")),
+      maxMembers: () => Promise.reject(new Error("billing is off")),
+    },
   }, ENTITLEMENT_NEEDS))
   commands.register(NoteCreateCommand, createNoteCreateHandler(dependencies))
   commands.register(NoteUpdateCommand, createNoteUpdateHandler(dependencies))

@@ -1,4 +1,4 @@
-import type { JSX } from "preact"
+import type { ComponentChildren, JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
 import { Button } from "@spy4x/preact-ui/button"
 import { Badge } from "@spy4x/preact-ui/badge"
@@ -68,6 +68,8 @@ export interface GroupsScreenProps {
    * to `FORM_ACTIONS.groupSelect`; with this callback the app takes the submit over.
    */
   onOpen?: (groupId: string) => void
+  /** The invitations sent to the person, drawn under the heading; the app fills the slot. */
+  invitations?: ComponentChildren
 }
 
 /** What a role is called on screen. */
@@ -103,6 +105,7 @@ export function GroupsScreen(
     restoreError = null,
     onRestore,
     restoringId = null,
+    invitations,
   }: GroupsScreenProps,
 ): JSX.Element {
   // A refused restore has no field to fix, so focus lands on the message above the list.
@@ -113,6 +116,7 @@ export function GroupsScreen(
   return (
     <Stack gap="lg">
       <h1 class="text-xl font-semibold">Groups</h1>
+      {invitations}
       <Card>
         <CardHeader title="New group" headingLevel={2} />
         <CardBody>

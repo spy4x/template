@@ -64,6 +64,7 @@ Deno.test({
       await applyMigration(sql, "2026_10_08_0002_email_verification.sql")
       await applyMigration(sql, "2026_10_11_0001_billing.sql")
       await applyMigration(sql, "2026_10_12_0001_billing_grace_period.sql")
+      await applyMigration(sql, "2026_10_12_0002_group_invitations.sql")
 
       await t.step("backfill is rerunnable and covers only active users", async () => {
         await applyMigration(sql, "2026_08_18_0002_personal_group_backfill.sql")
@@ -509,6 +510,8 @@ const SNAPSHOT_TABLES = [
   "billing_customers",
   "subscriptions",
   "billing_events",
+  "group_invitations",
+  "group_invitation_acceptances",
 ]
 
 /**

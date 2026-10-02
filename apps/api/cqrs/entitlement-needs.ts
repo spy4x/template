@@ -1,4 +1,10 @@
-import { canManageMember, canMutateNotes, GroupMemberRoleCommand } from "@domain/groups"
+import {
+  canManageMember,
+  canMutateNotes,
+  GroupInvitationCreateCommand,
+  GroupMemberRoleCommand,
+  invitableRoles,
+} from "@domain/groups"
 import { NoteCreateCommand } from "@domain/notes"
 import { type EntitlementNeeds, needsFeature, needsRoom } from "./entitlement-gate.ts"
 
@@ -12,6 +18,13 @@ export const ENTITLEMENT_NEEDS: EntitlementNeeds = new Map([
     "maxNotes",
     (command) => command.data.groupId,
     (actor) => canMutateNotes(actor),
+  ),
+  // Pending invitations take no seat: the cap counts members, here and again when one accepts.
+  needsRoom(
+    GroupInvitationCreateCommand,
+    "maxMembers",
+    (command) => command.data.groupId,
+    (actor, command) => invitableRoles(actor).includes(command.data.role),
   ),
   needsFeature(
     GroupMemberRoleCommand,
