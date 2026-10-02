@@ -8,6 +8,7 @@ import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Link } from "@spy4x/preact-ui/link"
 import { Stack } from "@spy4x/preact-ui/layout"
 import {
+  billingDate,
   type BillingNotice,
   BillingNoticeKind,
   BillingStatus,
@@ -46,18 +47,13 @@ function planName(planId: string): string {
   return findPlan(planId)?.name ?? planId
 }
 
-/** A date as the plan card writes it: `October 15, 2026`, in UTC, the same on server and browser. */
-function noticeDate(date: Date): string {
-  return new Intl.DateTimeFormat("en", { dateStyle: "long", timeZone: "UTC" }).format(date)
-}
-
 function days(count: number): string {
   return count === 1 ? "1 day" : `${count} days`
 }
 
 /** What the owner reads for a notice: what happened, when, and what to do in the portal. */
 export function billingNoticeText(notice: BillingNotice, planName: string): string {
-  const date = noticeDate(notice.at)
+  const date = billingDate(notice.at)
   const left = days(notice.daysLeft)
   switch (notice.kind) {
     case BillingNoticeKind.TrialEnding:

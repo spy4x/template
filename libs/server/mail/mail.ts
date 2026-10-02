@@ -20,7 +20,7 @@ import { createSmtpSender, type SmtpOptions } from "@spy4x/email/smtp"
 import { escapeHtml, htmlWrap } from "@spy4x/email/html"
 import type { EmailMessage } from "@spy4x/email/message"
 import type { Sql } from "@spy4x/server/db"
-import { BillingNoticeKind } from "@domain/billing"
+import { billingDate, BillingNoticeKind } from "@domain/billing"
 
 /** The variables SMTP needs. All five must be set for production to send mail. */
 export const SMTP_KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"] as const
@@ -215,11 +215,6 @@ export interface BillingNoticeMailInput {
   link: string
 }
 
-/** A date as the plan card writes it: `October 15, 2026`, in UTC. */
-function mailDate(date: Date): string {
-  return new Intl.DateTimeFormat("en", { dateStyle: "long", timeZone: "UTC" }).format(date)
-}
-
 /**
  * The mail that tells a group's owner its trial ends soon, a payment failed, or its cancelled plan
  * ends. Each one says what happens next and where to change it: the provider's portal, reached from
@@ -230,7 +225,7 @@ export function billingNoticeMail(
   { to, kind, groupName, planName, at, link }: BillingNoticeMailInput,
 ): EmailMessage {
   const group = `"${groupName}"`
-  const date = mailDate(at)
+  const date = billingDate(at)
   const [subject, what, next] = {
     [BillingNoticeKind.TrialEnding]: [
       `Your ${planName} trial ends on ${date}`,
