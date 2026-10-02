@@ -149,6 +149,7 @@ COMMENT ON COLUMN group_members.role IS '1=viewer, 2=editor, 3=admin, 4=owner';
 CREATE INDEX idx_group_members_user_group_role
     ON group_members (user_id, group_id) INCLUDE (role);
 CREATE INDEX idx_group_members_group_role ON group_members (group_id, role);
+CREATE UNIQUE INDEX group_members_one_owner_key ON group_members (group_id) WHERE role = 4;
 
 CREATE TABLE user_totp (
     user_id INT4 PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
