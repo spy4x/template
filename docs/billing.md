@@ -34,6 +34,71 @@ back on Free. To add a plan, add it to `PLANS`, add its price variable to `readB
 - A group with a live subscription cannot be deleted (409 `GROUP_SUBSCRIBED`); the owner cancels the
   subscription in the portal first. The settings page disables the delete button and says why.
 
+## Entitlements
+
+What a plan allows lives in the plan itself: `entitlements` on each entry of `PLANS`, with feature
+flags and numeric limits. No handler names a plan; a command says what it needs, and the plan
+answers.
+
+| Key            | Kind    | Free    | Pro     | Enforced                                                     |
+| -------------- | ------- | ------- | ------- | ------------------------------------------------------------ |
+| `memberRoles`  | feature | no      | yes     | Changing a member's role (`GroupMemberRoleCommand`)          |
+| `maxNotes`     | limit   | 10      | no cap  | Creating a note (`NoteCreateCommand`)                        |
+| `maxMembers`   | limit   | 3       | 50      | Not yet: no command adds a member until invitations (#131)   |
+| `storageBytes` | limit   | 50 MiB  | 10 GiB  | Not yet: the key ships for attachments (#157)                |
+
+A limit of `null` means no cap.
+
+**One check, on the command bus.** `apps/api/cqrs/entitlement-gate.ts` runs after the idempotency
+middleware, so a retry still gets its stored answer. `ENTITLEMENT_NEEDS`
+(`apps/api/cqrs/entitlement-needs.ts`) lists each command that needs something from its group's
+plan. The gate reads the group's plan and refuses such a command before its handler runs. Queries
+pass untouched, and so does every command that is not listed. The gate judges only an actor whose
+role could run the command at all. A stranger still gets 404 and a viewer still gets 403 from the
+handler, so neither learns anything about the group's plan.
+
+**The refusal.** The API answers **402 Payment Required**, so a client can tell a plan refusal from
+a role refusal (403):
+
+```json
+{
+  "error": {
+    "code": "PLAN_LIMIT_REACHED",
+    "message": "The group has reached its plan's limit",
+    "entitlement": "maxNotes",
+    "limit": 10,
+    "canUpgrade": true
+  }
+}
+```
+
+`code` is `PLAN_FEATURE_MISSING` or `PLAN_LIMIT_REACHED`. `canUpgrade` is true only for the owner,
+the one person who can change the plan. The socket's error codes are a closed set, so over the
+socket the refusal is `forbidden`, with the same fields in `details`. `readPlanRefusal` reads either
+one back. Both apps then show `UpgradePrompt`: the owner gets a link to the group's pricing page,
+and anyone else is told to ask the owner. The MPA draws it from the 402 body, with no script.
+
+**Counted in the write's transaction.** The gate counts before the handler runs, outside any
+transaction, so two requests can both pass it for the last free slot. The gate therefore passes
+the cap to the handler (`allowance` on the command). The note repository counts again after its
+insert, in the same transaction, under the group row lock that every note write already takes. The
+second request waits for the first to commit, counts it, and is refused.
+`tests/integration/plan-limits.integration.test.ts` races two creates for the last slot to prove
+it. A handler that gets no `allowance` throws, so a bus without the gate fails closed.
+
+**Downgrade.** Nothing is deleted when a group drops to a smaller plan. Everything over a cap stays
+readable, editable and deletable; only a write that adds to the count is refused, until the group
+is back under the cap or upgrades. A feature the new plan lacks is refused from then on.
+
+**Billing off.** With `BILLING_PROVIDER=off` nobody can pay to lift a cap, so every group gets
+every feature with no cap (`UNLIMITED`). The settings page still shows the group as Free.
+
+**Adding a key.** Add it to `FeatureKey` or `LimitKey`; TypeScript then asks for it in every plan
+and in `UNLIMITED`. Add its wording to `REFUSAL_TEXT` in `libs/ui/plan-refusal.tsx`. List the
+command in `ENTITLEMENT_NEEDS` with `needsFeature` or `needsRoom`. A limit also needs a usage count
+in `apps/api/cqrs/entitlements.ts` (the gate refuses to start without one), and the write must count
+again inside its transaction, as the note repository does.
+
 ## Configuration
 
 `BILLING_PROVIDER` picks the provider:
@@ -41,7 +106,7 @@ back on Free. To add a plan, add it to `PLANS`, add its price variable to `readB
 | Value      | What runs                                                                       |
 | ---------- | ------------------------------------------------------------------------------- |
 | unset      | `off` in production, `fake` with `ENV=dev`                                      |
-| `off`      | No billing: every group is on Free, checkout and the webhook answer 404         |
+| `off`      | No billing: every group shows as Free with no caps; checkout and the webhook answer 404        |
 | `stripe`   | Stripe. Needs `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `STRIPE_PRICE_PRO` |
 | `fake`     | The development provider, below. Refused in production                         |
 
