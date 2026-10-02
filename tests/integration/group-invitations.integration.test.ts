@@ -278,6 +278,24 @@ Deno.test("invitations: declining one tied to an address stops it; a member cann
   })
 })
 
+Deno.test("invitations: a removed member cannot rejoin through the team link they joined with", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner, stranger } = await team(sql)
+    const invitations = new PostgresInvitationRepository(sql)
+    const late = await insertUser(sql)
+    const { lookup } = await invite(invitations, groupId, owner, { maxUses: 5 })
+
+    await invitations.accept(lookup, stranger, NO_LIMITS)
+    await repository.removeMember(groupId, stranger, owner)
+
+    expect(await refusal(invitations.accept(lookup, stranger, NO_LIMITS)))
+      .toBe("INVITATION_ALREADY_USED")
+    expect(await memberRole(sql, groupId, stranger)).toBe(null)
+    // Anyone else still joins through it.
+    expect(await invitations.accept(lookup, late, NO_LIMITS)).toMatchObject({ groupId })
+  })
+})
+
 Deno.test("invitations: a plan without member roles lets an invitation add viewers only", async () => {
   await withSchema(async (sql) => {
     const { groupId, owner, stranger } = await team(sql)

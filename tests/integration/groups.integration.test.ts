@@ -511,6 +511,7 @@ const SNAPSHOT_TABLES = [
   "subscriptions",
   "billing_events",
   "group_invitations",
+  "group_invitation_acceptances",
 ]
 
 /**

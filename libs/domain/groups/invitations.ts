@@ -17,6 +17,7 @@ export const INVITATION_TOKEN_BYTES = 32
 /** Why an invitation was refused. */
 export type InvitationErrorCode =
   | "ALREADY_MEMBER"
+  | "INVITATION_ALREADY_USED"
   | "INVITATION_EXPIRED"
   | "INVITATION_NOT_FOUND"
   | "INVITATION_REVOKED"

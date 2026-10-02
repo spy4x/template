@@ -6,6 +6,7 @@ import { groupErrorResponse } from "./errors.ts"
 
 const INVITATION_STATUSES: Record<InvitationErrorCode, ContentfulStatusCode> = {
   ALREADY_MEMBER: 409,
+  INVITATION_ALREADY_USED: 409,
   INVITATION_EXPIRED: 410,
   INVITATION_NOT_FOUND: 404,
   INVITATION_REVOKED: 410,

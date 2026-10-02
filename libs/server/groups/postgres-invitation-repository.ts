@@ -278,10 +278,11 @@ export class PostgresInvitationRepository {
 
   /**
    * Accepts an invitation, in one transaction: on locked rows it checks that the invitation still
-   * works, that an address-bound one belongs to `userId`, that they are not a member yet, that the
+   * works, that an address-bound one belongs to `userId`, that they are not a member yet, that
+   * they never accepted it before (a removed member cannot rejoin through the same link), that the
    * plan allows its role and that the group has room. It adds the membership with the invitation's
-   * role, counts the use, writes the audit row, records the group's change and makes the group the
-   * person's selected one.
+   * role, records who accepted, counts the use, writes the audit row, records the group's change
+   * and makes the group the person's selected one.
    */
   async accept(
     ref: InvitationLookup,
@@ -309,6 +310,16 @@ export class PostgresInvitationRepository {
       if (invitation.email !== null && !await ownsAddress(tx, invitation.email, userId)) {
         throw wrongAccount()
       }
+      const [acceptedBefore] = await tx`
+        SELECT 1 FROM group_invitation_acceptances
+        WHERE invitation_id = ${invitation.id} AND user_id = ${userId}
+      `
+      if (acceptedBefore) {
+        throw new InvitationError(
+          "INVITATION_ALREADY_USED",
+          "You have already joined through this invitation. Ask for a new one to join again.",
+        )
+      }
       // Not a member, so they cannot change the plan: the refusal tells them to ask the owner.
       assertRoleOnPlan(plan, invitation.role, GroupRole.VIEWER)
       if (plan.maxMembers !== null) {
@@ -322,6 +333,10 @@ export class PostgresInvitationRepository {
       await tx`
         INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
         VALUES (${invitation.groupId}, ${userId}, ${invitation.role}, ${invitation.createdByUserId})
+      `
+      await tx`
+        INSERT INTO group_invitation_acceptances (invitation_id, user_id)
+        VALUES (${invitation.id}, ${userId})
       `
       await tx`UPDATE group_invitations SET uses = uses + 1 WHERE id = ${invitation.id}`
       await audit(tx, invitation.groupId, userId, INVITATION_EVENTS.accepted, requestId)
