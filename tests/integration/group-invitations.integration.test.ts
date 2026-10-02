@@ -376,3 +376,36 @@ Deno.test("invitations: a plan without member roles lets an invitation add viewe
     expect(await memberRole(sql, groupId, late)).toBe(GroupRole.VIEWER)
   })
 })
+
+Deno.test("invitations: two accepts at once for the last free seat let exactly one in", async () => {
+  await withSchema(async (sql) => {
+    // Five members and room for six. Each joiner uses their own link, so only the group's lock
+    // can make the second accept wait and count the first one's member.
+    const { groupId, owner, stranger } = await team(sql)
+    const invitations = new PostgresInvitationRepository(sql)
+    const late = await insertUser(sql)
+    const first = await invite(invitations, groupId, owner)
+    const second = await invite(invitations, groupId, owner)
+    // Each membership insert waits, so the two accepts overlap however fast the machine is.
+    await sql.unsafe(`
+      CREATE FUNCTION slow_member_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN PERFORM pg_sleep(0.3); RETURN NEW; END $$;
+      CREATE TRIGGER slow_member_insert BEFORE INSERT ON group_members
+        FOR EACH ROW EXECUTE FUNCTION slow_member_insert();
+    `)
+
+    const results = await Promise.allSettled([
+      invitations.accept(first.lookup, stranger, capped(6)),
+      invitations.accept(second.lookup, late, capped(6)),
+    ])
+
+    expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"])
+    const failed = results.find((result) => result.status === "rejected") as PromiseRejectedResult
+    expect(failed.reason).toBeInstanceOf(PlanError)
+    expect(failed.reason.code).toBe("PLAN_LIMIT_REACHED")
+    const [{ count }] = await sql<{ count: number }[]>`
+      SELECT count(*)::int AS count FROM group_members WHERE group_id = ${groupId}
+    `
+    expect(count).toBe(6)
+  })
+})

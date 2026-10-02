@@ -52,20 +52,42 @@ function buildApp(
   })
   app.route("/groups/:groupId/invitations", createGroupInvitationsRoute(dependencies))
   app.route("/invitations", createInvitationsRoute(dependencies))
-  return (path: string, body: unknown) =>
+  return (path: string, body: unknown, init: { method?: string; crossSite?: boolean } = {}) =>
     app.request(`http://local${path}`, {
-      method: "POST",
+      method: init.method ?? "POST",
       headers: {
         "content-type": "application/json",
         cookie: "sessionIdToken=1:token",
-        origin: "http://local",
-        "sec-fetch-site": "same-origin",
+        origin: init.crossSite ? "https://attacker.example" : "http://local",
+        "sec-fetch-site": init.crossSite ? "cross-site" : "same-origin",
       },
       body: JSON.stringify(body),
     })
 }
 
 describe("invitation routes", () => {
+  it("refuses a cross-site accept, create and revoke with 403 before they run", async () => {
+    const ran: string[] = []
+    const post = buildApp({
+      accept: () => Promise.resolve(void ran.push("accept") as never),
+      create: () => Promise.resolve(void ran.push("create") as never),
+      revoke: () => Promise.resolve(void ran.push("revoke") as never),
+    })
+
+    const accept = await post("/invitations/accept", { token }, { crossSite: true })
+    const create = await post(`/groups/${groupId}/invitations`, { role: GroupRole.VIEWER }, {
+      crossSite: true,
+    })
+    const revoke = await post(`/groups/${groupId}/invitations/${groupId}`, null, {
+      method: "DELETE",
+      crossSite: true,
+    })
+
+    expect([accept.status, create.status, revoke.status]).toEqual([403, 403, 403])
+    expect((await accept.json()).error.code).toBe("REQUEST_ORIGIN_INVALID")
+    expect(ran).toEqual([])
+  })
+
   it("answers an expired invitation with 410 and says it expired", async () => {
     const post = buildApp({
       accept: () =>
