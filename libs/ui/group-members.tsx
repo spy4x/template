@@ -50,6 +50,11 @@ export interface GroupMembersSectionProps {
   actorRole: GroupRole
   /** The members, oldest first; `null` while they are read. */
   members: readonly GroupMemberRow[] | null
+  /**
+   * How many members the group has. The list stops at 1,000, so this can be more than `members`;
+   * the header shows it, and a line under the list says it is cut off. Left out, the rows count.
+   */
+  memberCount?: number | null
   /** Why the members could not be read, or `null`. */
   error?: string | null
   /** The member whose role change or removal is in flight, or `null`. */
@@ -76,6 +81,7 @@ export function GroupMembersSection(
     groupId,
     actorRole,
     members,
+    memberCount = null,
     error = null,
     pendingUserId = null,
     memberError = null,
@@ -84,13 +90,14 @@ export function GroupMembersSection(
     navigate,
   }: GroupMembersSectionProps,
 ): JSX.Element {
+  const total = members ? Math.max(memberCount ?? 0, members.length) : null
   return (
     <section aria-labelledby="group-members" data-e2e="group-section-members">
       <Card>
         <CardBody>
           <Stack>
             <h2 id="group-members" class="text-base font-semibold">
-              Members{members ? ` (${members.length})` : ""}
+              Members{total === null ? "" : ` (${total})`}
             </h2>
             {error
               ? <ErrorState message={error} />
@@ -120,6 +127,11 @@ export function GroupMembersSection(
                   ))}
                 </ul>
               )}
+            {members && total !== null && total > members.length && (
+              <p class="text-sm text-muted" data-e2e="group-members-cut-off">
+                Showing the first {members.length} of {total} members.
+              </p>
+            )}
           </Stack>
         </CardBody>
       </Card>

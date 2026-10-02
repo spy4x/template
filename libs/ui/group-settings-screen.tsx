@@ -73,6 +73,8 @@ export interface GroupSettingsScreenProps {
   onDelete?: () => void
   /** The members, oldest first; `null` while they are read. */
   members?: readonly GroupMemberRow[] | null
+  /** How many members the group has; see `GroupMembersSectionProps.memberCount`. */
+  memberCount?: number | null
   /** Why the members could not be read, or `null`. */
   membersError?: string | null
   /** The member whose role change or removal is in flight, or `null`. */
@@ -91,15 +93,20 @@ export interface GroupSettingsScreenProps {
   onLeave?: () => void
   /** The plan section (`BillingCard`), drawn above Leave; left out, there is none. */
   billing?: ComponentChildren
+  /**
+   * The Invitations section (`GroupInvitationsSection`), drawn under the members; left out, there
+   * is none.
+   */
+  invitations?: ComponentChildren
 }
 
 /**
  * The page of one group's settings, in sections that each carry their own heading. A section shows
  * only what the person's role allows: General is read by every member, and an admin or the owner
  * can rename the group there. Every member reads the members; the owner and an admin manage those
- * below them. Every member but the owner can leave, and the delete section is the owner's alone.
- * Invitations, ownership and moving data add their sections here, each guarded by the role that
- * may use it.
+ * below them, and invite new ones in the Invitations section. Every member but the owner can
+ * leave, and the delete section is the owner's alone. Ownership and moving data add their sections
+ * here, each guarded by the role that may use it.
  */
 export function GroupSettingsScreen(
   {
@@ -120,6 +127,7 @@ export function GroupSettingsScreen(
     deleteError = null,
     onDelete,
     members = null,
+    memberCount = null,
     membersError = null,
     memberPendingId = null,
     memberError = null,
@@ -129,6 +137,7 @@ export function GroupSettingsScreen(
     leaveError = null,
     onLeave,
     billing,
+    invitations,
   }: GroupSettingsScreenProps,
 ): JSX.Element {
   const nameInput = useRef<HTMLInputElement>(null)
@@ -241,6 +250,7 @@ export function GroupSettingsScreen(
         groupId={group.id}
         actorRole={group.role}
         members={members}
+        memberCount={memberCount}
         error={membersError}
         pendingUserId={memberPendingId}
         memberError={memberError}
@@ -248,6 +258,8 @@ export function GroupSettingsScreen(
         onRemove={onRemoveMember}
         navigate={navigate}
       />
+
+      {invitations}
 
       {billing}
 

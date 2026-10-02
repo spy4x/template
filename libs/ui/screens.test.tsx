@@ -33,6 +33,7 @@ import { GroupSettingsScreen, type GroupSettingsScreenProps } from "./group-sett
 import { GroupsScreen, type GroupsScreenProps, ROLE_TEXT } from "./groups-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
 import { FORM_ACTIONS, GROUP_PATHS, NEXT_PARAM, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
+import { parseInvitationCreateBody, parseInvitationRef } from "@domain/groups"
 import {
   noteCreateRequestSchema,
   noteDeleteRequestSchema,
@@ -42,6 +43,14 @@ import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-scre
 import { NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
 import { ForgotPasswordScreen, ResetPasswordScreen } from "./password-reset-screen.tsx"
 import { EmailBanner, EmailScreen, type EmailScreenProps } from "./email-screen.tsx"
+import {
+  EMPTY_INVITATION_DRAFT,
+  GroupInvitationsSection,
+  type GroupInvitationsSectionProps,
+  type InvitationPreviewRow,
+  InvitationScreen,
+  MyInvitationsSection,
+} from "./group-invitations.tsx"
 
 /** One `<form>` in rendered HTML: its attributes and the names of the fields it submits. */
 interface RenderedForm {
@@ -1311,5 +1320,197 @@ describe("EmailBanner without JavaScript", () => {
     const proven = { email: "ann@example.com", proven: true, pending: null }
     expect(renderToString(<EmailBanner status={proven} />)).toBe("")
     expect(renderToString(<EmailBanner status={null} />)).toBe("")
+  })
+})
+
+describe("GroupSettingsScreen member count", () => {
+  it("counts every member in the header and says the list is cut off when it is", () => {
+    const html = renderToString(
+      <GroupSettingsScreen {...settingsDefaults} members={membersFor(1)} memberCount={1200} />,
+    )
+
+    expect(html).toContain("Members (1200)")
+    expect(html).toContain("Showing the first 4 of 1200 members.")
+    const whole = renderToString(
+      <GroupSettingsScreen {...settingsDefaults} members={membersFor(1)} memberCount={4} />,
+    )
+    expect(whole).toContain("Members (4)")
+    expect(whole).not.toContain("group-members-cut-off")
+  })
+})
+
+const invitationsDefaults: GroupInvitationsSectionProps = {
+  groupId: "g-1",
+  actorRole: GroupRole.OWNER,
+  invitations: [
+    {
+      id: "i-link",
+      role: GroupRole.EDITOR,
+      email: null,
+      maxUses: 5,
+      uses: 2,
+      expiresAt: "2026-10-09T10:00:00.000Z",
+      createdBy: { name: "Ann Owner" },
+    },
+    {
+      id: "i-admin",
+      role: GroupRole.ADMIN,
+      email: "friend@example.com",
+      maxUses: 1,
+      uses: 0,
+      expiresAt: "2026-10-09T10:00:00.000Z",
+      createdBy: { name: "" },
+    },
+  ],
+  draft: EMPTY_INVITATION_DRAFT,
+}
+
+describe("GroupInvitationsSection without JavaScript", () => {
+  it("posts a create with exactly the fields the API's create body takes", () => {
+    const surface = noScriptSurface(<GroupInvitationsSection {...invitationsDefaults} />)
+    const form = formAt(surface, GROUP_PATHS.invitationCreate("g-1"))
+
+    expect(form.method).toBe("post")
+    expect(form.fields).toEqual(["email", "expiresInDays", "maxUses", "role", "sendEmail"])
+    // The API refuses unknown keys, so a body with exactly these names proves they match it.
+    const sample: Record<string, unknown> = {
+      email: "friend@example.com",
+      expiresInDays: 7,
+      maxUses: 1,
+      role: GroupRole.EDITOR,
+      sendEmail: true,
+    }
+    expect(
+      parseInvitationCreateBody(
+        Object.fromEntries(form.fields.map((key) => [key, sample[key]])),
+      ).sendEmail,
+    ).toBe(true)
+  })
+
+  it("lets an admin pick viewer or editor only, and the owner admin too", () => {
+    const owner = renderToString(<GroupInvitationsSection {...invitationsDefaults} />)
+    const admin = renderToString(
+      <GroupInvitationsSection {...invitationsDefaults} actorRole={GroupRole.ADMIN} />,
+    )
+
+    const offered = (html: string) =>
+      [...html.matchAll(/<option[^>]*value="(\d)"/g)].map((m) => m[1])
+    expect(offered(owner)).toEqual(["1", "2", "3"])
+    expect(offered(admin)).toEqual(["1", "2"])
+  })
+
+  it("gives each pending invitation a revoke form, but an admin none for an admin's", () => {
+    const owner = noScriptSurface(<GroupInvitationsSection {...invitationsDefaults} />)
+    const admin = noScriptSurface(
+      <GroupInvitationsSection {...invitationsDefaults} actorRole={GroupRole.ADMIN} />,
+    )
+
+    expect(formAt(owner, GROUP_PATHS.invitationRevoke("g-1", "i-link")).fields).toEqual([])
+    formAt(owner, GROUP_PATHS.invitationRevoke("g-1", "i-admin"))
+    formAt(admin, GROUP_PATHS.invitationRevoke("g-1", "i-link"))
+    expect(admin.forms.map((form) => form.action)).not.toContain(
+      GROUP_PATHS.invitationRevoke("g-1", "i-admin"),
+    )
+  })
+
+  it("is drawn for nobody below admin", () => {
+    for (const role of [GroupRole.VIEWER, GroupRole.EDITOR]) {
+      expect(renderToString(<GroupInvitationsSection {...invitationsDefaults} actorRole={role} />))
+        .toBe("")
+    }
+  })
+
+  it("shows the new link as text to copy, and says when its mail failed", () => {
+    const link = "https://app.example.com/invite/" + "A".repeat(43)
+    const html = renderToString(
+      <GroupInvitationsSection
+        {...invitationsDefaults}
+        created={{ link, mailAsked: true, mailSent: false }}
+      />,
+    )
+
+    expect(html).toContain(`>${link}</code>`)
+    expect(html).toContain("The e-mail could not be sent")
+  })
+
+  it("is drawn on the settings page in the slot after the members", () => {
+    const html = renderToString(
+      <GroupSettingsScreen
+        {...settingsDefaults}
+        members={membersFor(1)}
+        invitations={<GroupInvitationsSection {...invitationsDefaults} />}
+      />,
+    )
+
+    expect(html.indexOf("group-section-members")).toBeLessThan(
+      html.indexOf("group-section-invitations"),
+    )
+  })
+})
+
+const preview: InvitationPreviewRow = {
+  id: "i-1",
+  groupId: "g-1",
+  groupName: "Team",
+  inviterName: "Ann Owner",
+  role: GroupRole.EDITOR,
+  addressed: false,
+  forYou: true,
+  expiresAt: "2026-10-09T10:00:00.000Z",
+}
+
+describe("InvitationScreen without JavaScript", () => {
+  const token = "A".repeat(43)
+
+  it("shows the group, the inviter and the role, and posts the token to accept or decline", () => {
+    const element = <InvitationScreen token={token} invitation={preview} loading={false} />
+    const html = renderToString(element)
+    const surface = noScriptSurface(element)
+
+    expect(html).toContain('data-e2e="invitation-group">Team<')
+    expect(html).toContain('data-e2e="invitation-inviter">Ann Owner<')
+    expect(html).toContain("Editor")
+    for (const action of [FORM_ACTIONS.invitationAccept, FORM_ACTIONS.invitationDecline]) {
+      expect(formAt(surface, action).fields).toEqual(["token"])
+    }
+    expect(parseInvitationRef({ token })).toEqual({ token })
+  })
+
+  it("offers no accept to an account the invitation is not for, and says why", () => {
+    const element = (
+      <InvitationScreen
+        token={token}
+        invitation={{ ...preview, addressed: true, forYou: false }}
+        loading={false}
+      />
+    )
+
+    expect(noScriptSurface(element).forms).toEqual([])
+    expect(renderToString(element)).toContain("invitation-not-for-you")
+  })
+
+  it("says why an invitation cannot be used, and links to the groups", () => {
+    const element = (
+      <InvitationScreen
+        token={token}
+        invitation={null}
+        loading={false}
+        error="This invitation has expired"
+      />
+    )
+
+    expect(renderToString(element)).toContain("This invitation has expired")
+    expect(noScriptSurface(element).links).toContain(SCREEN_PATHS.groups)
+  })
+})
+
+describe("MyInvitationsSection without JavaScript", () => {
+  it("posts each invitation's id to accept or decline, and draws nothing with none", () => {
+    const surface = noScriptSurface(<MyInvitationsSection invitations={[preview]} />)
+
+    for (const action of [FORM_ACTIONS.invitationAccept, FORM_ACTIONS.invitationDecline]) {
+      expect(formAt(surface, action).fields).toEqual(["invitationId"])
+    }
+    expect(renderToString(<MyInvitationsSection invitations={[]} />)).toBe("")
   })
 })
