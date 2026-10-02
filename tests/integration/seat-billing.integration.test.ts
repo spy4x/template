@@ -17,7 +17,8 @@ import {
   newInvitationToken,
   PostgresInvitationRepository,
 } from "@server/groups/postgres-invitation-repository.ts"
-import { createOutboxProcessor } from "@server/jobs/wiring.ts"
+import { OUTBOX_CLEANUP_JOB } from "@server/jobs/jobs.ts"
+import { createOutboxProcessor, scheduleNightlyJobs } from "@server/jobs/wiring.ts"
 import { insertUser, team, withSchema } from "./group-team.ts"
 
 /**
@@ -230,14 +231,36 @@ Deno.test("seats of a group billed per member follow its members", async (t) => 
       expect(await storedQuantity(sql, groupId)).toBe(5)
     })
 
-    await t.step("the nightly check queues a seat change for each drifted group", async () => {
+    await t.step(
+      "two seat changes that ask for the same count each reach the provider under their own key",
+      async () => {
+        calls.length = 0
+        const person = await join(sql, groupId, owner)
+        await drain(processor)
+        await repository.removeMember(groupId, person, owner)
+        await drain(processor)
+        await join(sql, groupId, owner)
+        await drain(processor)
+
+        expect(calls.map((call) => call.quantity)).toEqual([6, 5, 6])
+        expect(new Set(calls.map((call) => call.idempotencyKey)).size).toBe(3)
+        expect(await storedQuantity(sql, groupId)).toBe(6)
+      },
+    )
+
+    await t.step("the nightly job queues a seat change for each drifted group", async () => {
       calls.length = 0
       const other = await team(sql)
       await subscribe(sql, other.groupId, 5)
       // A member's account is deleted: the count moves without a group change.
       await sql`UPDATE users SET deleted_at = now() WHERE id = ${other.editor}`
 
-      expect(await queueSeatDrift(sql)).toBe(1)
+      // The nightly job, due now.
+      await scheduleNightlyJobs(sql)
+      await sql`
+        UPDATE outbox_events SET available_at = now() - interval '1 second'
+        WHERE event_kind = ${OUTBOX_CLEANUP_JOB} AND processed_at IS NULL
+      `
       await drain(processor)
 
       expect(calls.map((call) => [call.subscriptionId, call.quantity])).toEqual([
@@ -249,7 +272,9 @@ Deno.test("seats of a group billed per member follow its members", async (t) => 
     await t.step("a group whose subscription is canceled is not billed per member", async () => {
       calls.length = 0
       const other = await team(sql)
-      await subscribe(sql, other.groupId, 5, SubscriptionStatus.Canceled)
+      // A webhook for a canceled subscription that bills another count queues no seat change.
+      await subscribe(sql, other.groupId, 2, SubscriptionStatus.Canceled)
+      expect(await queuedSyncs(sql, other.groupId)).toBe(0)
 
       await join(sql, other.groupId, other.owner)
       await drain(processor)
