@@ -34,7 +34,7 @@ const AUTH_MIGRATION = "2026_09_24_0001_auth_package_tables.sql"
 /** Drops the group kind, so a group is inserted without it. */
 const KIND_MIGRATION = "2026_10_07_0001_group_kind_removed.sql"
 // A reset also drops a waiting address change, so the reset tests need its table (#140).
-const EMAIL_MIGRATION = "2026_10_08_0001_email_verification.sql"
+const EMAIL_MIGRATION = "2026_10_08_0002_email_verification.sql"
 const MASTER_MIGRATIONS = [
   "2026_01_26_0001_init.sql",
   "2026_01_26_0002_auth_profiles_audit.sql",
