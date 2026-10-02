@@ -997,6 +997,19 @@ describe("auth routes prove an e-mail address with a code", () => {
     expect(mailed).toHaveLength(EMAIL_CODE_MAILS_PER_ADDRESS)
   })
 
+  it(`answers address change ${EMAIL_CODE_MAILS_PER_ADDRESS + 1} to one address in an hour with 429`, async () => {
+    const { app, mailed } = buildApp()
+    const statuses = []
+    for (let attempt = 0; attempt <= EMAIL_CODE_MAILS_PER_ADDRESS; attempt++) {
+      statuses.push((await send(app, change, sameOriginHeaders)).status)
+    }
+    const refused = await send(app, change, sameOriginHeaders)
+
+    expect(statuses).toEqual([...Array(EMAIL_CODE_MAILS_PER_ADDRESS).fill(200), 429])
+    expect(refused.headers.get("retry-after")).toMatch(/^\d+$/)
+    expect(mailed).toHaveLength(EMAIL_CODE_MAILS_PER_ADDRESS)
+  })
+
   it("queues a code for the new address as normalizeEmail leaves it", async () => {
     const { app, mailed } = buildApp()
     const response = await send(

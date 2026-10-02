@@ -122,10 +122,16 @@ function buildSignIn(sql: postgres.Sql): SignIn {
   })
 }
 
-/** Issues a code for `email` as the worker does, and returns it instead of mailing it. */
-async function mailedCode(sql: postgres.Sql, email: string): Promise<string> {
+/**
+ * Issues a code for `email` as the worker does, and returns it instead of mailing it. The code is
+ * for the account that signs in with `account`, which defaults to `email` itself.
+ */
+async function mailedCode(sql: postgres.Sql, email: string, account = email): Promise<string> {
+  const [key] = await sql<{ userId: number }[]>`
+    SELECT user_id AS "userId" FROM auth_keys WHERE subject = ${account}
+  `
   let code = ""
-  await sendEmailCode(new AppDbBase({ sql }).authStore, email, (_to, sent) => {
+  await sendEmailCode(new AppDbBase({ sql }).authStore, key.userId, email, (_to, sent) => {
     code = sent
     return Promise.resolve()
   })
@@ -254,7 +260,7 @@ Deno.test("changing the address waits for the new one's code", async (t) => {
     })
 
     await t.step("the new address's code moves the account onto it", async () => {
-      const code = await mailedCode(sql, "ann@new.example")
+      const code = await mailedCode(sql, "ann@new.example", "ann@example.com")
 
       expect((await ann("POST", "/email/verify", { code })).body).toEqual({
         outcome: EmailVerifyOutcome.Verified,
@@ -282,7 +288,7 @@ Deno.test("changing the address waits for the new one's code", async (t) => {
         bea("POST", "/email/verify", { code: await mailedCode(sql, "bea@example.com") })
       )
       await ann("POST", "/email/change", { email: "bea@example.com", password: PASSWORD })
-      const code = await mailedCode(sql, "bea@example.com")
+      const code = await mailedCode(sql, "bea@example.com", "ann@new.example")
 
       expect((await ann("POST", "/email/verify", { code })).body).toEqual({
         outcome: EmailVerifyOutcome.Taken,
@@ -298,7 +304,7 @@ Deno.test("changing the address waits for the new one's code", async (t) => {
     await t.step("a proven new address takes over an unproven claim to it", async () => {
       await signedUp(signIn, "cat@example.com")
       await ann("POST", "/email/change", { email: "cat@example.com", password: PASSWORD })
-      const code = await mailedCode(sql, "cat@example.com")
+      const code = await mailedCode(sql, "cat@example.com", "ann@new.example")
 
       expect((await ann("POST", "/email/verify", { code })).body.outcome).toBe(
         EmailVerifyOutcome.Verified,
@@ -372,5 +378,193 @@ Deno.test("a reset link takes a squatted address back from its second factor", a
       expect(answer.body.secondFactor).toBe(SecondFactorStatus.Pending)
       expect(await sql`SELECT 1 FROM user_totp`).toHaveLength(1)
     })
+  })
+})
+
+Deno.test("another account cannot spend this account's code", async (t) => {
+  await withSchema(async (sql) => {
+    const signIn = buildSignIn(sql)
+    const ann = await signedUp(signIn, "ann@example.com")
+    const bea = await signedUp(signIn, "bea@example.com")
+
+    await t.step(
+      "a change to the same address and five wrong guesses leave Ann's code working",
+      async () => {
+        const annCode = await mailedCode(sql, "ann@example.com")
+        expect(
+          (await bea("POST", "/email/change", {
+            email: "ann@example.com",
+            password: PASSWORD,
+          })).body,
+        ).toEqual({ outcome: EmailChangeOutcome.Requested })
+        const beaCode = await mailedCode(sql, "ann@example.com", "bea@example.com")
+        for (let guess = 0; guess < 5; guess++) {
+          expect((await bea("POST", "/email/verify", { code: `wrong-${guess}` })).body)
+            .toEqual({ outcome: EmailVerifyOutcome.WrongCode })
+        }
+
+        expect((await ann("POST", "/email/verify", { code: annCode })).body).toEqual({
+          outcome: EmailVerifyOutcome.Verified,
+        })
+        expect((await bea("POST", "/email/verify", { code: beaCode })).body.outcome).toBe(
+          EmailVerifyOutcome.WrongCode,
+        )
+      },
+    )
+  })
+})
+
+Deno.test("a username account and its second factor", async (t) => {
+  await withSchema(async (sql) => {
+    const signIn = buildSignIn(sql)
+    await signedUp(signIn, "legacy@example.com")
+    // What a username sign-up wrote before #139: the username as subject, and no address.
+    await sql`
+      UPDATE auth_keys SET subject = 'legacyuser', email = NULL WHERE subject = 'legacy@example.com'
+    `
+    const legacy = client(signIn)
+    expect((await legacy("POST", "/sign-in", { login: "legacyuser", password: PASSWORD })).status)
+      .toBe(200)
+
+    await t.step("a username account may turn on an authenticator app", async () => {
+      expect((await legacy("POST", "/totp/start")).body.qrcode).toContain("<svg")
+      await sql`DELETE FROM user_totp`
+    })
+
+    await t.step("adding an address moves sign-in from the username to the address", async () => {
+      await legacy("POST", "/email/change", { email: "legacy@new.example", password: PASSWORD })
+      const code = await mailedCode(sql, "legacy@new.example", "legacyuser")
+
+      expect((await legacy("POST", "/email/verify", { code })).body.outcome).toBe(
+        EmailVerifyOutcome.Verified,
+      )
+      const signInAs = (login: string) =>
+        client(signIn)("POST", "/sign-in", { login, password: PASSWORD })
+      expect((await signInAs("legacy@new.example")).status).toBe(200)
+      expect((await signInAs("legacyuser")).status).toBe(401)
+    })
+  })
+})
+
+Deno.test("a move keeps the second factor the session already gave", async (t) => {
+  await withSchema(async (sql) => {
+    const signIn = buildSignIn(sql)
+    const ann = await signedUp(signIn, "ann@example.com")
+    await ann("POST", "/email/verify", { code: await mailedCode(sql, "ann@example.com") })
+    const { secret } = (await ann("POST", "/totp/start")).body
+    const otp = new OTPAuth.TOTP({ secret: OTPAuth.Secret.fromBase32(secret) }).generate()
+    expect((await ann("POST", "/totp/finish", { otp })).body).toEqual({ ok: true })
+
+    await t.step("the device that moved the address stays past the second factor", async () => {
+      await ann("POST", "/email/change", { email: "ann@new.example", password: PASSWORD })
+      const code = await mailedCode(sql, "ann@new.example", "ann@example.com")
+
+      expect((await ann("POST", "/email/verify", { code })).body.outcome).toBe(
+        EmailVerifyOutcome.Verified,
+      )
+      expect((await ann("GET", "/me")).status).toBe(200)
+      const sessions = await sql<{ secondFactor: number }[]>`
+        SELECT second_factor AS "secondFactor" FROM auth_sessions
+      `
+      expect(sessions.map((row) => row.secondFactor)).toEqual([SecondFactorStatus.Completed])
+    })
+  })
+})
+
+Deno.test("a password reset and an address move of one account", async (t) => {
+  await withSchema(async (sql) => {
+    const signIn = buildSignIn(sql)
+    const db = new AppDbBase({ sql })
+    const NEW_PASSWORD = "N3w-Passw0rd"
+    const signInAs = (login: string, password: string) =>
+      client(signIn)("POST", "/sign-in", { login, password })
+
+    /** A proven account for `email`, a change to `next` waiting, its code and a reset link. */
+    async function moving(email: string, next: string) {
+      const account = await signedUp(signIn, email)
+      await account("POST", "/email/verify", { code: await mailedCode(sql, email) })
+      await account("POST", "/email/change", { email: next, password: PASSWORD })
+      const code = await mailedCode(sql, next, email)
+      const link = (await issuePasswordReset(db.authStore, email, new Date()))!.code
+      return { account, code, link }
+    }
+
+    /** How many statements of this database wait for a lock. */
+    const waiting = async () =>
+      (await sql<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock' AND datname = current_database()
+      `)[0].n
+    const untilWaiting = async (n: number) => {
+      for (let poll = 0; poll < 100 && (await waiting()) < n; poll++) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      expect(await waiting()).toBe(n)
+    }
+
+    /**
+     * Holds the password key of `email` while `first` and then `second` start, so both wait on it
+     * in that order, then lets them go. Returns what each answered.
+     */
+    async function inFlight<A, B>(
+      email: string,
+      first: () => Promise<A>,
+      second: () => Promise<B>,
+    ): Promise<[A, B]> {
+      let started: [Promise<A>, Promise<B>] | null = null
+      await sql.begin(async (hold) => {
+        await hold`SELECT 1 FROM auth_keys WHERE subject = ${email} FOR UPDATE`
+        const a = first()
+        await untilWaiting(1)
+        const b = second()
+        await untilWaiting(2)
+        started = [a, b]
+      })
+      const [a, b] = started!
+      return [await a, await b]
+    }
+
+    await t.step("a reset drops the address change waiting for its code", async () => {
+      const { account, link } = await moving("ann@example.com", "ann@new.example")
+
+      expect(await signIn.resetPassword("ann@example.com", link, NEW_PASSWORD)).toBe(true)
+
+      expect(await sql`SELECT 1 FROM email_changes`).toHaveLength(0)
+      expect((await account("GET", "/me")).status).toBe(401)
+      expect((await signInAs("ann@example.com", NEW_PASSWORD)).status).toBe(200)
+    })
+
+    await t.step("a reset that runs first keeps its password and refuses the move", async () => {
+      const { account, code, link } = await moving("bea@example.com", "bea@new.example")
+
+      const [reset, moved] = await inFlight(
+        "bea@example.com",
+        () => signIn.resetPassword("bea@example.com", link, NEW_PASSWORD),
+        () => account("POST", "/email/verify", { code }),
+      )
+
+      expect(reset).toBe(true)
+      expect(moved.body.outcome).toBe(EmailVerifyOutcome.NothingToVerify)
+      expect((await signInAs("bea@example.com", NEW_PASSWORD)).status).toBe(200)
+      expect((await signInAs("bea@new.example", PASSWORD)).status).toBe(401)
+    })
+
+    await t.step(
+      "a move that runs first wins, and the reset for the old address is refused",
+      async () => {
+        const { account, code, link } = await moving("cat@example.com", "cat@new.example")
+
+        const [moved, reset] = await inFlight(
+          "cat@example.com",
+          () => account("POST", "/email/verify", { code }),
+          () => signIn.resetPassword("cat@example.com", link, NEW_PASSWORD),
+        )
+
+        expect(moved.body.outcome).toBe(EmailVerifyOutcome.Verified)
+        expect(reset).toBe(false)
+        expect((await signInAs("cat@new.example", PASSWORD)).status).toBe(200)
+        expect((await signInAs("cat@example.com", NEW_PASSWORD)).status).toBe(401)
+      },
+    )
   })
 })
