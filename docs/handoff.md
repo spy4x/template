@@ -334,8 +334,7 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 - The password and two-factor calls are still REST: they change the session the socket is bound
   to. The MPA has no socket, so the profile and push REST routes stay for it.
 - Invitations (#131) are the only way into a group through the product; tests may still seed a
-  member with `POST /api/test/add-member`. An invitation stays valid after its creator leaves or
-  is demoted, and expired invitation rows are never deleted.
+  member with `POST /api/test/add-member`. Expired invitation rows are never deleted.
 - No local projection in the SPA, no offline outbox, no conflict UI. The page keeps its cursors in
   `localStorage` and rereads the whole group list to catch up.
 - The worker publishes a group change with `pg_notify`, which reaches only API instances that are
@@ -494,6 +493,11 @@ under the group row's lock (`PostgresInvitationRepository.accept`). An address-b
 accepted only by an account that proved that address (`provenAddressOwner`). Create, accept and
 revoke write their audit rows in their own transaction. Creates are capped per user per hour,
 mails per address per hour, and previews and answers per IP (`invitation-rate-limits.ts`).
+A member who is removed or leaves loses every pending invitation they made, and one who is
+demoted loses those above what they may now invite with, in the same transaction
+(`revokeInvitationsOf`). `group_invitation_acceptances` records who accepted each invitation, so
+a removed member cannot rejoin through the team link they used. On a plan without `memberRoles`
+an invitation adds a viewer only, on create and on accept; the role picker says so.
 
 Extraction from the sibling Financy project is tracked separately in
 [docs/financy-extraction-inventory.md](financy-extraction-inventory.md);
