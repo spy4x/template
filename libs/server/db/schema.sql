@@ -360,6 +360,9 @@ CREATE TABLE billing_customers (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
+CREATE UNIQUE INDEX idx_billing_customers_provider_customer_id
+    ON billing_customers (provider_customer_id);
+
 -- A group's subscription as the newest applied event left it. `provider_event_at` and
 -- `provider_event_rank` (1 created, 2 updated, 3 canceled) order the events: one that sorts before
 -- them is older and changes nothing, so a late delivery never rolls the plan back.

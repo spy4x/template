@@ -8,7 +8,7 @@ import {
   SubscriptionStatus,
 } from "@spy4x/billing"
 import { BILLING_EVENTS, PRO_PLAN_ID } from "@domain/billing"
-import { GroupRole } from "@domain/groups"
+import { GroupError, GroupRole } from "@domain/groups"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { requireDbConnection } from "./db-connection.ts"
@@ -68,6 +68,7 @@ function event(
     subscriptionId?: string
     customerId?: string
     status?: SubscriptionStatus
+    currentPeriodEnd?: Date
   },
 ): SubscriptionEvent {
   return {
@@ -80,7 +81,7 @@ function event(
       status: input.status ?? SubscriptionStatus.Active,
       planId: PRO_PLAN_ID,
       priceId: "price_pro",
-      currentPeriodEnd: new Date("2026-11-01T10:00:00Z"),
+      currentPeriodEnd: input.currentPeriodEnd ?? new Date("2026-11-01T10:00:00Z"),
       cancelAtPeriodEnd: false,
       trialEnd: null,
       reference: input.reference === undefined ? null : input.reference,
@@ -327,6 +328,119 @@ Deno.test("billing events against Postgres", async (t) => {
 
         expect(before).toEqual([GroupRole.OWNER, GroupRole.EDITOR])
         expect([removed, deleted]).toEqual([null, null])
+      },
+    )
+
+    await t.step(
+      "within one second, two updates of the same kind: the one that arrives last wins",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const update = (id: string, status: SubscriptionStatus) =>
+          event({
+            id,
+            reference: groupId,
+            customerId: "cus_i",
+            type: BillingEventType.SubscriptionUpdated,
+            status,
+          })
+        await billing.applyEvent(update("evt_i1", SubscriptionStatus.Active))
+
+        const last = await billing.applyEvent(update("evt_i2", SubscriptionStatus.PastDue))
+
+        expect(last).toBe("applied")
+        expect((await billing.get(groupId))?.status).toBe(SubscriptionStatus.PastDue)
+      },
+    )
+
+    await t.step(
+      "a renewal that changes neither plan nor status writes no plan-changed event",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        await billing.applyEvent(event({ id: "evt_j1", reference: groupId, customerId: "cus_j" }))
+        const sequence = await nextSequence(sql, groupId)
+
+        const renewed = await billing.applyEvent(
+          event({
+            id: "evt_j2",
+            reference: groupId,
+            customerId: "cus_j",
+            type: BillingEventType.SubscriptionUpdated,
+            at: new Date(T0.getTime() + 60_000),
+            currentPeriodEnd: new Date("2026-12-01T10:00:00Z"),
+          }),
+        )
+        const afterRenewal = [await planChanges(sql, groupId), await nextSequence(sql, groupId)]
+        await billing.applyEvent(
+          event({
+            id: "evt_j3",
+            reference: groupId,
+            customerId: "cus_j",
+            type: BillingEventType.SubscriptionUpdated,
+            at: new Date(T0.getTime() + 120_000),
+            status: SubscriptionStatus.PastDue,
+          }),
+        )
+
+        expect(renewed).toBe("applied")
+        expect(afterRenewal).toEqual([[expect.anything()], sequence])
+        expect(await planChanges(sql, groupId)).toHaveLength(2)
+      },
+    )
+
+    await t.step(
+      "a customer another group holds stays with it, and the event still applies",
+      async () => {
+        const first = await seedGroup(sql)
+        const second = await seedGroup(sql)
+        await billing.applyEvent(
+          event({ id: "evt_k1", reference: first.groupId, customerId: "cus_k" }),
+        )
+
+        const outcome = await billing.applyEvent(
+          event({
+            id: "evt_k2",
+            reference: second.groupId,
+            customerId: "cus_k",
+            subscriptionId: "sub_k2",
+          }),
+        )
+
+        expect(outcome).toBe("applied")
+        expect(await billing.customerOf(first.groupId)).toBe("cus_k")
+        expect(await billing.customerOf(second.groupId)).toBeNull()
+        await expect(
+          sql`
+            INSERT INTO billing_customers (group_id, provider_customer_id)
+            VALUES (${second.groupId}, 'cus_k')
+          `,
+        ).rejects.toThrow("idx_billing_customers_provider_customer_id")
+      },
+    )
+
+    await t.step(
+      "a group with a live subscription cannot be deleted until the subscription is cancelled",
+      async () => {
+        const { groupId, owner } = await seedGroup(sql)
+        const groups = new PostgresGroupRepository(sql)
+        await groups.create({ id: crypto.randomUUID(), name: "Other" }, owner)
+        await billing.applyEvent(event({ id: "evt_l1", reference: groupId, customerId: "cus_l" }))
+
+        const refused = await groups.softDelete(groupId, owner).catch((error) => error)
+        await billing.applyEvent(
+          event({
+            id: "evt_l2",
+            reference: groupId,
+            customerId: "cus_l",
+            type: BillingEventType.SubscriptionCanceled,
+            status: SubscriptionStatus.Canceled,
+            at: new Date(T0.getTime() + 60_000),
+          }),
+        )
+        const deleted = await groups.softDelete(groupId, owner)
+
+        expect(refused).toBeInstanceOf(GroupError)
+        expect(refused.code).toBe("GROUP_SUBSCRIBED")
+        expect(deleted?.id).toBe(groupId)
       },
     )
   })

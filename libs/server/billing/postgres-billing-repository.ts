@@ -128,6 +128,11 @@ export class PostgresBillingRepository implements BillingRepository {
       // A different subscription than the one held takes over only while it is alive: the end of an
       // old subscription must not end the new one that replaced it.
       const replaces = subscription.status !== SubscriptionStatus.Canceled
+      const before = (
+        await transaction<{ planId: string | null; status: number }[]>`
+          SELECT plan_id, status FROM subscriptions WHERE group_id = ${group.id} FOR UPDATE
+        `
+      )[0]
       const written = await transaction`
         INSERT INTO subscriptions (
           group_id,
@@ -165,13 +170,23 @@ export class PostgresBillingRepository implements BillingRepository {
       `
       if (written.length === 0) return "stale"
 
+      // One customer pays for one group. A customer another group already holds stays with it, so
+      // an event naming it is still applied instead of failing on the unique index forever.
       await transaction`
         INSERT INTO billing_customers (group_id, provider_customer_id)
-        VALUES (${group.id}, ${subscription.customerId})
+        SELECT ${group.id}, ${subscription.customerId}
+        WHERE NOT EXISTS (
+          SELECT 1 FROM billing_customers
+          WHERE provider_customer_id = ${subscription.customerId} AND group_id <> ${group.id}
+        )
         ON CONFLICT (group_id) DO UPDATE SET provider_customer_id = EXCLUDED.provider_customer_id
       `
-      // The owner pays, so the change is theirs; a deleted group still records it, so a restore
-      // shows the plan the provider reported meanwhile.
+      // Only a new plan or status is news to the group's pages; a renewal that moves the period's end
+      // is not. The owner pays, so the change is theirs; a deleted group still records it, so a
+      // restore shows the plan the provider reported meanwhile.
+      const changed = before === undefined || before.planId !== subscription.planId ||
+        before.status !== subscription.status
+      if (!changed) return "applied"
       await recordGroupChange(
         transaction,
         group.id,
