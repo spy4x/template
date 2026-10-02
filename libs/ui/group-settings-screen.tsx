@@ -9,9 +9,15 @@ import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
 import { Link } from "@spy4x/preact-ui/link"
 import { Stack } from "@spy4x/preact-ui/layout"
-import { canDelete, canRename, GROUP_RESTORE_DAYS } from "@domain/groups"
+import { canDelete, canRename, GROUP_RESTORE_DAYS, type GroupRole } from "@domain/groups"
 import { ROLE_TEXT } from "./groups-screen.tsx"
 import type { GroupRow } from "./groups-screen.tsx"
+import {
+  GroupLeaveSection,
+  type GroupMemberRow,
+  GroupMembersSection,
+  type MemberError,
+} from "./group-members.tsx"
 import {
   FORM_ACTIONS,
   GROUP_PATHS,
@@ -59,14 +65,33 @@ export interface GroupSettingsScreenProps {
   deleteError?: string | null
   /** Deletes the group. A form that posts nothing to `GROUP_PATHS.delete`. */
   onDelete?: () => void
+  /** The members, oldest first; `null` while they are read. */
+  members?: readonly GroupMemberRow[] | null
+  /** Why the members could not be read, or `null`. */
+  membersError?: string | null
+  /** The member whose role change or removal is in flight, or `null`. */
+  memberPendingId?: number | null
+  /** The last refused member change, shown under that member, or `null`. */
+  memberError?: MemberError | null
+  /** Gives a member a new role. A form that posts `{ role }` to `GROUP_PATHS.memberRole`. */
+  onRoleChange?: (userId: number, role: GroupRole) => void
+  /** Removes a member. A form that posts nothing to `GROUP_PATHS.memberRemove`. */
+  onRemoveMember?: (userId: number) => void
+  /** A leave is in flight. */
+  leaving?: boolean
+  /** Why the leave was refused, or `null`. */
+  leaveError?: string | null
+  /** Leaves the group. A form that posts nothing to `GROUP_PATHS.leave`. */
+  onLeave?: () => void
 }
 
 /**
  * The page of one group's settings, in sections that each carry their own heading. A section shows
  * only what the person's role allows: General is read by every member, and an admin or the owner
- * can rename the group there; the delete section is the owner's alone. Members, invitations,
- * ownership, moving data and leaving add their sections here, each guarded by the role that may
- * use it.
+ * can rename the group there. Every member reads the members; the owner and an admin manage those
+ * below them. Every member but the owner can leave, and the delete section is the owner's alone.
+ * Invitations, ownership and moving data add their sections here, each guarded by the role that
+ * may use it.
  */
 export function GroupSettingsScreen(
   {
@@ -85,6 +110,15 @@ export function GroupSettingsScreen(
     deleting = false,
     deleteError = null,
     onDelete,
+    members = null,
+    membersError = null,
+    memberPendingId = null,
+    memberError = null,
+    onRoleChange,
+    onRemoveMember,
+    leaving = false,
+    leaveError = null,
+    onLeave,
   }: GroupSettingsScreenProps,
 ): JSX.Element {
   const nameInput = useRef<HTMLInputElement>(null)
@@ -186,6 +220,27 @@ export function GroupSettingsScreen(
           </CardBody>
         </Card>
       </section>
+
+      <GroupMembersSection
+        groupId={group.id}
+        actorRole={group.role}
+        members={members}
+        error={membersError}
+        pendingUserId={memberPendingId}
+        memberError={memberError}
+        onRoleChange={onRoleChange}
+        onRemove={onRemoveMember}
+      />
+
+      <GroupLeaveSection
+        groupId={group.id}
+        groupName={group.name}
+        role={group.role}
+        isLastGroup={isLastGroup}
+        leaving={leaving}
+        error={leaveError}
+        onLeave={onLeave}
+      />
 
       {canDelete(group.role) && (
         <section aria-labelledby="group-danger" data-e2e="group-section-danger">

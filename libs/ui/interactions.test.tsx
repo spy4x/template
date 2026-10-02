@@ -737,6 +737,98 @@ describe("GroupSettingsScreen in the browser", () => {
   })
 })
 
+describe("GroupSettingsScreen members and leave in the browser", () => {
+  const group = { id: "g-1", name: "Home", role: GroupRole.ADMIN }
+  const members = [
+    {
+      userId: 1,
+      name: "Olga Owner",
+      email: "olga@example.com",
+      role: GroupRole.OWNER,
+      joinedAt: "2026-01-01T00:00:00.000Z",
+      isYou: false,
+    },
+    {
+      userId: 7,
+      name: "Vic Viewer",
+      email: "vic@example.com",
+      role: GroupRole.VIEWER,
+      joinedAt: "2026-02-01T00:00:00.000Z",
+      isYou: false,
+    },
+  ]
+  const screen = (props: Partial<Parameters<typeof GroupSettingsScreen>[0]> = {}) => (
+    <GroupSettingsScreen
+      group={group}
+      selected={false}
+      loading={false}
+      members={members}
+      {...props}
+    />
+  )
+
+  it("changes a role to the one chosen through the app's callback, and posts natively without it", async () => {
+    const roles = spy<[number, GroupRole]>()
+    await mount(screen({ onRoleChange: roles.fn }))
+
+    const select = find<HTMLSelectElement>("[data-e2e=group-member-role-select]")
+    select.value = String(GroupRole.EDITOR)
+    await act(() => {
+      select.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event)
+    })
+    expect(await submit(GROUP_PATHS.memberRole("g-1", 7))).toBe(true)
+    expect(roles.calls).toEqual([[7, GroupRole.EDITOR]])
+
+    await rerender(screen())
+    expect(await submit(GROUP_PATHS.memberRole("g-1", 7))).toBe(false)
+  })
+
+  it("removes a member through the app's callback, refuses a second submit while pending, and posts natively without it", async () => {
+    const remove = spy<[number]>()
+    await mount(screen({ onRemoveMember: remove.fn }))
+    expect(await submit(GROUP_PATHS.memberRemove("g-1", 7))).toBe(true)
+    expect(remove.calls).toEqual([[7]])
+
+    await rerender(screen({ onRemoveMember: remove.fn, memberPendingId: 7 }))
+    expect(await submit(GROUP_PATHS.memberRemove("g-1", 7))).toBe(true)
+    expect(remove.calls).toHaveLength(1)
+
+    await rerender(screen())
+    expect(await submit(GROUP_PATHS.memberRemove("g-1", 7))).toBe(false)
+  })
+
+  it("moves focus to the message under the member whose change was refused", async () => {
+    await mount(screen({ memberError: null }))
+    expect(focused()).not.toBe("group-member-error")
+
+    await rerender(screen({ memberError: { userId: 7, message: "Only an admin can" } }))
+
+    expect(focused()).toBe("group-member-error")
+    expect(document.activeElement?.closest("[data-e2e=group-member]")?.getAttribute("data-user-id"))
+      .toBe("7")
+  })
+
+  it("leaves through the app's callback, and posts natively without it", async () => {
+    const leave = spy<[]>()
+    await mount(screen({ onLeave: leave.fn }))
+    expect(await submit(GROUP_PATHS.leave("g-1"))).toBe(true)
+    expect(leave.calls).toHaveLength(1)
+
+    await rerender(screen())
+    expect(await submit(GROUP_PATHS.leave("g-1"))).toBe(false)
+  })
+
+  it("opens the confirmation and moves focus to the message when a leave is refused", async () => {
+    await mount(screen({ leaveError: null }))
+    expect(focused()).not.toBe("group-leave-error")
+
+    await rerender(screen({ leaveError: "You cannot leave your only group" }))
+
+    expect(find<HTMLDetailsElement>("[data-e2e=group-leave-details]").open).toBe(true)
+    expect(focused()).toBe("group-leave-error")
+  })
+})
+
 const emailDefaults: EmailScreenProps = {
   status: { email: "ann@example.com", proven: false, pending: null },
   values: { code: "", email: "", password: "" },
