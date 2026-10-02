@@ -8,6 +8,7 @@ import {
 import {
   BILLING_EVENTS,
   type BillingApplyOutcome,
+  BillingNoticeKind,
   type BillingRepository,
   type StoredSubscription,
 } from "@domain/billing"
@@ -17,11 +18,20 @@ import {
   lockActorRole,
   recordGroupChange,
 } from "@server/groups/group-change-log.ts"
+import { scheduleBillingNotice, trialNoticeAt } from "./billing-notices.ts"
 
 interface SubscriptionRow extends postgres.Row, StoredSubscription {}
 
 interface CustomerRow extends postgres.Row {
   providerCustomerId: string
+}
+
+/** What the group held before an event, as far as deciding what changed needs. */
+interface HeldRow extends postgres.Row {
+  planId: string | null
+  status: number
+  cancelAtPeriodEnd: boolean
+  trialEnd: Date | null
 }
 
 interface GroupOwnerRow extends postgres.Row {
@@ -42,6 +52,12 @@ const EVENT_RANK: Record<SubscriptionEvent["type"], number> = {
   [BillingEventType.SubscriptionCanceled]: 3,
 }
 
+/** The statuses of a subscription that pays for its plan: a trial, or an active one. */
+const PAYING_STATUSES: readonly SubscriptionStatus[] = [
+  SubscriptionStatus.Trialing,
+  SubscriptionStatus.Active,
+]
+
 /**
  * Billing in Postgres: each group's subscription and customer, and every webhook event already
  * handled. It checks no role; the handlers decide who may call it, and the webhook is trusted only
@@ -60,7 +76,8 @@ export class PostgresBillingRepository implements BillingRepository {
           status,
           current_period_end,
           cancel_at_period_end,
-          past_due_since
+          past_due_since,
+          trial_end
         FROM subscriptions
         WHERE group_id = ${groupId}
       `
@@ -74,6 +91,7 @@ export class PostgresBillingRepository implements BillingRepository {
         currentPeriodEnd: row.currentPeriodEnd,
         cancelAtPeriodEnd: row.cancelAtPeriodEnd,
         pastDueSince: row.pastDueSince,
+        trialEnd: row.trialEnd,
       }
       : null
   }
@@ -127,16 +145,18 @@ export class PostgresBillingRepository implements BillingRepository {
 
       const subscription = event.subscription
       const rank = EVENT_RANK[event.type]
-      // A different subscription than the one held takes over only while it is alive: the end of an
-      // old subscription must not end the new one that replaced it.
-      const replaces = subscription.status !== SubscriptionStatus.Canceled
+      // A different subscription than the one held takes over only when the held one has ended, or
+      // when it pays and the held one does not. The end, or a late failed charge, of an old
+      // subscription must never take the plan of the newer one that pays (#242).
+      const paying = PAYING_STATUSES.includes(subscription.status)
       // The grace period counts from the first past-due event of this subscription: a later one
       // (Stripe's `unpaid` arrives as past due too) keeps the stored start, and any other status
       // clears it.
       const pastDue = subscription.status === SubscriptionStatus.PastDue
       const before = (
-        await transaction<{ planId: string | null; status: number }[]>`
-          SELECT plan_id, status FROM subscriptions WHERE group_id = ${group.id} FOR UPDATE
+        await transaction<HeldRow[]>`
+          SELECT plan_id, status, cancel_at_period_end, trial_end
+          FROM subscriptions WHERE group_id = ${group.id} FOR UPDATE
         `
       )[0]
       const written = await transaction`
@@ -149,7 +169,8 @@ export class PostgresBillingRepository implements BillingRepository {
           cancel_at_period_end,
           provider_event_at,
           provider_event_rank,
-          past_due_since
+          past_due_since,
+          trial_end
         ) VALUES (
           ${group.id},
           ${subscription.id},
@@ -159,7 +180,8 @@ export class PostgresBillingRepository implements BillingRepository {
           ${subscription.cancelAtPeriodEnd},
           ${event.occurredAt},
           ${rank},
-          ${pastDue ? event.occurredAt : null}
+          ${pastDue ? event.occurredAt : null},
+          ${subscription.trialEnd}
         )
         ON CONFLICT (group_id) DO UPDATE SET
           provider_subscription_id = EXCLUDED.provider_subscription_id,
@@ -175,11 +197,13 @@ export class PostgresBillingRepository implements BillingRepository {
               THEN COALESCE(subscriptions.past_due_since, EXCLUDED.past_due_since)
             ELSE EXCLUDED.past_due_since
           END,
+          trial_end = EXCLUDED.trial_end,
           updated_at = CURRENT_TIMESTAMP
         WHERE (subscriptions.provider_event_at, subscriptions.provider_event_rank)
             <= (EXCLUDED.provider_event_at, EXCLUDED.provider_event_rank)
           AND (subscriptions.provider_subscription_id = EXCLUDED.provider_subscription_id
-            OR ${replaces})
+            OR subscriptions.status = ${SubscriptionStatus.Canceled}
+            OR (${paying} AND subscriptions.status <> ALL(${PAYING_STATUSES}::smallint[])))
         RETURNING group_id
       `
       if (written.length === 0) return "stale"
@@ -195,6 +219,7 @@ export class PostgresBillingRepository implements BillingRepository {
         )
         ON CONFLICT (group_id) DO UPDATE SET provider_customer_id = EXCLUDED.provider_customer_id
       `
+      await scheduleNotices(transaction, group.id, event.occurredAt, before, subscription)
       // Only a new plan or status is news to the group's pages; a renewal that moves the period's end
       // is not. The owner pays, so the change is theirs; a deleted group still records it, so a
       // restore shows the plan the provider reported meanwhile.
@@ -212,6 +237,40 @@ export class PostgresBillingRepository implements BillingRepository {
       )
       return "applied"
     })
+  }
+}
+
+/**
+ * Queues the owner's mails this change calls for: a payment that just failed, a cancellation just
+ * made, and, for a trial whose end is new, the notice {@link trialNoticeAt} before that end. Each
+ * job checks again when it runs that its notice still holds.
+ */
+async function scheduleNotices(
+  sql: postgres.Sql,
+  groupId: string,
+  occurredAt: Date,
+  before: HeldRow | undefined,
+  after: SubscriptionEvent["subscription"],
+): Promise<void> {
+  const live = after.status !== SubscriptionStatus.Canceled
+  if (
+    after.status === SubscriptionStatus.PastDue && before?.status !== SubscriptionStatus.PastDue
+  ) {
+    await scheduleBillingNotice(sql, BillingNoticeKind.PaymentFailed, groupId, occurredAt)
+  }
+  if (live && after.cancelAtPeriodEnd && !before?.cancelAtPeriodEnd) {
+    await scheduleBillingNotice(sql, BillingNoticeKind.PlanEnding, groupId, occurredAt)
+  }
+  if (
+    after.status === SubscriptionStatus.Trialing && after.trialEnd !== null &&
+    before?.trialEnd?.getTime() !== after.trialEnd.getTime()
+  ) {
+    await scheduleBillingNotice(
+      sql,
+      BillingNoticeKind.TrialEnding,
+      groupId,
+      trialNoticeAt(after.trialEnd),
+    )
   }
 }
 

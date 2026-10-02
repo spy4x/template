@@ -20,6 +20,7 @@ import { createSmtpSender, type SmtpOptions } from "@spy4x/email/smtp"
 import { escapeHtml, htmlWrap } from "@spy4x/email/html"
 import type { EmailMessage } from "@spy4x/email/message"
 import type { Sql } from "@spy4x/server/db"
+import { BillingNoticeKind } from "@domain/billing"
 
 /** The variables SMTP needs. All five must be set for production to send mail. */
 export const SMTP_KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"] as const
@@ -197,6 +198,66 @@ export function invitationMail(
         `<p><a href="${escapeHtml(link)}">Open the invitation</a></p>`,
         `<p>${escapeHtml(account)}</p>`,
         `<p>${escapeHtml(ignore)}</p>`,
+      ].join("\n"),
+    ),
+  }
+}
+
+/** What a billing notice mail names. */
+export interface BillingNoticeMailInput {
+  to: string
+  kind: BillingNoticeKind
+  groupName: string
+  planName: string
+  /** When the trial or the cancelled plan ends; unused for a failed payment. */
+  at: Date
+  /** The group's page, where the owner opens the provider's portal. */
+  link: string
+}
+
+/** A date as the plan card writes it: `October 15, 2026`, in UTC. */
+function mailDate(date: Date): string {
+  return new Intl.DateTimeFormat("en", { dateStyle: "long", timeZone: "UTC" }).format(date)
+}
+
+/**
+ * The mail that tells a group's owner its trial ends soon, a payment failed, or its cancelled plan
+ * ends. Each one says what happens next and where to change it: the provider's portal, reached from
+ * the group's page.
+ */
+export function billingNoticeMail(
+  brand: MailBrand,
+  { to, kind, groupName, planName, at, link }: BillingNoticeMailInput,
+): EmailMessage {
+  const group = `"${groupName}"`
+  const date = mailDate(at)
+  const [subject, what, next] = {
+    [BillingNoticeKind.TrialEnding]: [
+      `Your ${planName} trial ends on ${date}`,
+      `The ${planName} trial of ${group} ends on ${date}.`,
+      `The subscription then starts and is charged. To stop it, cancel it before then from the group's page.`,
+    ],
+    [BillingNoticeKind.PaymentFailed]: [
+      `A payment for ${planName} failed`,
+      `A payment for the ${planName} plan of ${group} failed.`,
+      `The plan is kept for a few days while the payment is retried. Update the card from the group's page to keep it.`,
+    ],
+    [BillingNoticeKind.PlanEnding]: [
+      `Your ${planName} plan ends on ${date}`,
+      `The ${planName} plan of ${group} was cancelled and ends on ${date}; the group then moves to the free plan.`,
+      `Changed your mind? Renew it from the group's page before then.`,
+    ],
+  }[kind]
+  return {
+    to,
+    subject,
+    text: `${what}\n\n${next}\n\n${link}\n`,
+    html: mailHtml(
+      brand,
+      [
+        `<p>${escapeHtml(what)}</p>`,
+        `<p>${escapeHtml(next)}</p>`,
+        `<p><a href="${escapeHtml(link)}">Open the group</a></p>`,
       ].join("\n"),
     ),
   }
