@@ -636,10 +636,11 @@ Deno.test("billing events against Postgres", async (t) => {
     )
 
     await t.step(
-      "queues each owner's mail once: a failed payment, a cancellation, and a trial's end",
+      "queues each owner's mail once: a failed payment, a cancellation, and each end of a trial",
       async () => {
         const { groupId } = await seedGroup(sql)
         const trialEnd = new Date("2026-10-15T10:00:00Z")
+        const extendedEnd = new Date("2026-10-16T10:00:00Z")
         const apply = (
           id: string,
           minutes: number,
@@ -658,10 +659,13 @@ Deno.test("billing events against Postgres", async (t) => {
 
         await apply("evt_s1", 0, { status: SubscriptionStatus.Trialing, trialEnd })
         await apply("evt_s2", 1, { status: SubscriptionStatus.Trialing, trialEnd })
-        await apply("evt_s3", 2, { status: SubscriptionStatus.PastDue })
-        await apply("evt_s4", 3, { status: SubscriptionStatus.PastDue })
-        await apply("evt_s5", 4, { cancelAtPeriodEnd: true })
-        await apply("evt_s6", 5, { cancelAtPeriodEnd: true })
+        // The trial is extended by a day, then set back: its first end is queued once.
+        await apply("evt_s3", 2, { status: SubscriptionStatus.Trialing, trialEnd: extendedEnd })
+        await apply("evt_s4", 3, { status: SubscriptionStatus.Trialing, trialEnd })
+        await apply("evt_s5", 4, { status: SubscriptionStatus.PastDue })
+        await apply("evt_s6", 5, { status: SubscriptionStatus.PastDue })
+        await apply("evt_s7", 6, { cancelAtPeriodEnd: true })
+        await apply("evt_s8", 7, { cancelAtPeriodEnd: true })
 
         const jobs = await sql<{ eventKind: string; availableAt: Date }[]>`
           SELECT event_kind, available_at FROM outbox_events
@@ -671,15 +675,19 @@ Deno.test("billing events against Postgres", async (t) => {
         expect(jobs).toEqual([
           {
             eventKind: BILLING_NOTICE_JOBS[BillingNoticeKind.PaymentFailed],
-            availableAt: new Date(T0.getTime() + 2 * 60_000),
+            availableAt: new Date(T0.getTime() + 4 * 60_000),
           },
           {
             eventKind: BILLING_NOTICE_JOBS[BillingNoticeKind.PlanEnding],
-            availableAt: new Date(T0.getTime() + 4 * 60_000),
+            availableAt: new Date(T0.getTime() + 6 * 60_000),
           },
           {
             eventKind: BILLING_NOTICE_JOBS[BillingNoticeKind.TrialEnding],
             availableAt: new Date("2026-10-12T10:00:00Z"),
+          },
+          {
+            eventKind: BILLING_NOTICE_JOBS[BillingNoticeKind.TrialEnding],
+            availableAt: new Date("2026-10-13T10:00:00Z"),
           },
         ])
       },
@@ -777,11 +785,10 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
         await apply(failed.groupId, { status: SubscriptionStatus.PastDue })
         await apply(undone.groupId, { cancelAtPeriodEnd: true })
         await apply(undone.groupId, { cancelAtPeriodEnd: false })
+        // The trial is cut short by a day: both jobs are due, and only the one for the new end mails.
+        const movedEnd = new Date(start.getTime() + 9 * DAY)
         await apply(moved.groupId, { status: SubscriptionStatus.Trialing, trialEnd })
-        await apply(moved.groupId, {
-          status: SubscriptionStatus.Trialing,
-          trialEnd: new Date(start.getTime() + 30 * DAY),
-        })
+        await apply(moved.groupId, { status: SubscriptionStatus.Trialing, trialEnd: movedEnd })
         await apply(silent.groupId, { status: SubscriptionStatus.PastDue })
         // Eight days pass: the trial's notice, due three days before its end, is now claimable.
         await sql`
@@ -803,6 +810,7 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
         expect(sender.sent.map((mail) => [mail.to, mail.subject]).sort()).toEqual([
           ["ending@example.com", "Your Pro plan ends on " + longDate(start.getTime() + 20 * DAY)],
           ["failed@example.com", "A payment for Pro failed"],
+          ["moved@example.com", "Your Pro trial ends on " + longDate(movedEnd.getTime())],
           ["trial@example.com", "Your Pro trial ends on " + longDate(trialEnd.getTime())],
         ])
         expect(sender.sent.find((mail) => mail.to === "trial@example.com")?.text)
