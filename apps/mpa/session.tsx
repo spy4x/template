@@ -3,7 +3,7 @@ import type { EmailStatus, UserMFAStatus } from "@domain/identity"
 import { AppFrame, PublicFrame } from "@ui/frame.tsx"
 import { EmailBanner } from "@ui/email-screen.tsx"
 import type { GroupPickerData } from "@ui/group-picker.tsx"
-import { SCREEN_PATHS } from "@ui/progressive.tsx"
+import { SCREEN_PATHS, withNext } from "@ui/progressive.tsx"
 import { type Api, isOk, isRecord } from "./api.ts"
 import { readPicker } from "./groups.ts"
 
@@ -51,10 +51,13 @@ export async function readEmailStatus(api: Api): Promise<EmailStatus | null> {
 
 /**
  * Where a page for signed-in users sends a session that is not one: to the one-time code when the
- * password step is done, to sign-in otherwise.
+ * password step is done, to sign-in otherwise. A `GET` carries its own address as `next`, so
+ * sign-in returns there; a post does not, since its address is an action, not a page.
  */
-export function signInPath(session: Session): string {
-  return session.mfaPending ? SCREEN_PATHS.oneTimeCode : SCREEN_PATHS.signIn
+export function signInPath(session: Session, request: Request): string {
+  const url = new URL(request.url)
+  const next = request.method === "GET" ? `${url.pathname}${url.search}` : null
+  return withNext(session.mfaPending ? SCREEN_PATHS.oneTimeCode : SCREEN_PATHS.signIn, next)
 }
 
 /** The frame of a page: the signed-in frame for a user, the public one otherwise. */

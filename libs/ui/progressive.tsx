@@ -1,5 +1,6 @@
 import type { ComponentChildren, JSX } from "preact"
 import { EnhancedForm, type EnhancedFormLabels } from "@spy4x/preact-ui/enhanced-form"
+import { safeRedirectPath } from "@spy4x/net/redirect-path"
 
 /**
  * Follows an in-app link without a page load. The SPA passes its router's `navigate`; a server
@@ -72,6 +73,43 @@ export const SCREEN_PATHS = {
   /** The e-mail address: its code, a new code, a change. */
   email: "/email",
 } as const
+
+/**
+ * The query parameter, and the hidden field of each auth form, that carries the page a signed-out
+ * person asked for through sign-in, so sign-in can return there.
+ */
+export const NEXT_PARAM = "next"
+
+/**
+ * The checked `next` value: `value` when it is a page of this app, the notes list otherwise. The
+ * rules are `safeRedirectPath`'s (one leading `/`, no `//`, backslash, scheme or control
+ * character, encoded or not), and every `/api` path is refused.
+ *
+ * Every hop that carries `next` checks it again here, since a person can edit each one: the
+ * sign-in and sign-up pages, their posts, the one-time-code page and its post. OAuth sign-in
+ * (spy4x/template#141) plugs in here too: its start route checks `next` with this, keeps the
+ * result in the flow state (`OAuthPendingFlow`) and redirects to that stored value after the
+ * callback, never to a value read from the callback's query.
+ */
+export function checkedNext(value: string): string {
+  return safeRedirectPath(value, { fallback: NOTE_PATHS.list, refuse: ["/api"] })
+}
+
+/** The checked `next` of a query or a form, or `null` when it carries none. */
+export function readNext(source: { get(name: string): unknown }): string | null {
+  const value = source.get(NEXT_PARAM)
+  return typeof value === "string" && value !== "" ? checkedNext(value) : null
+}
+
+/** `path` with `next` as its query, or `path` alone without one. */
+export function withNext(path: string, next: string | null): string {
+  return next ? `${path}?${new URLSearchParams({ [NEXT_PARAM]: next })}` : path
+}
+
+/** Where a finished sign-in goes: the checked `next`, or the profile without one. */
+export function afterSignIn(next: string | null): string {
+  return next ?? SCREEN_PATHS.profile
+}
 
 /** Where a group's own pages live. */
 export const GROUP_PATHS = {

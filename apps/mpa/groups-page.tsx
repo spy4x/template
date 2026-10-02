@@ -20,7 +20,7 @@ export async function renderGroups(
   } = {},
 ): Promise<Response> {
   const session = await readSession(ctx.state.api)
-  if (!session.user) return ctx.redirect(signInPath(session), 303)
+  if (!session.user) return ctx.redirect(signInPath(session, ctx.req), 303)
   const [page, deleted] = await Promise.all([listGroups(ctx.state.api), readDeleted(ctx.state.api)])
   return ctx.render(
     <Frame session={session} path={ctx.url.pathname}>

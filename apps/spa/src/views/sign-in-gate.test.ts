@@ -1,0 +1,41 @@
+import { expect } from "@std/expect"
+import { describe, it } from "@std/testing/bdd"
+import { signInRedirect } from "./sign-in-gate.ts"
+
+const signedOut = { user: null, isMfaRequired: false }
+const codeOwed = { user: null, isMfaRequired: true }
+const signedIn = {
+  user: { id: 1, firstName: "Ada", lastName: "", mfa: 1 },
+  isMfaRequired: false,
+} as unknown as Parameters<typeof signInRedirect>[2]
+
+describe("where a visit goes before sign-in is finished", () => {
+  it("sends a signed-out visit to a note to sign-in, with the note as next", () => {
+    expect(signInRedirect("/notes/abc", "", signedOut)).toBe("/sign-in?next=%2Fnotes%2Fabc")
+  })
+
+  it("keeps the page's query in next", () => {
+    expect(signInRedirect("/notes", "cursor=x", signedOut))
+      .toBe("/sign-in?next=%2Fnotes%3Fcursor%3Dx")
+  })
+
+  it("sends the groups and the e-mail pages to sign-in too", () => {
+    expect(signInRedirect("/groups", "", signedOut)).toBe("/sign-in?next=%2Fgroups")
+    expect(signInRedirect("/groups/g1", "", signedOut)).toBe("/sign-in?next=%2Fgroups%2Fg1")
+    expect(signInRedirect("/email", "", signedOut)).toBe("/sign-in?next=%2Femail")
+  })
+
+  it("sends a session that owes its code to the code page, with the page as next", () => {
+    expect(signInRedirect("/notes/abc", "", codeOwed)).toBe("/totp?next=%2Fnotes%2Fabc")
+  })
+
+  it("leaves the pages open to anyone where they are", () => {
+    for (const path of ["/", "/sign-in", "/sign-up", "/totp", "/forgot-password", "/notesy"]) {
+      expect(signInRedirect(path, "", signedOut)).toBe(null)
+    }
+  })
+
+  it("leaves a signed-in person where they are", () => {
+    expect(signInRedirect("/notes/abc", "", signedIn)).toBe(null)
+  })
+})

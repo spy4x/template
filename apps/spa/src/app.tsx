@@ -3,7 +3,7 @@ import { useEffect, useState } from "preact/hooks"
 import { SWUpdater } from "@spy4x/preact-system/sw-updater"
 import { LoadingSpinner } from "@spy4x/preact-ui/loading-spinner"
 import { Toastr } from "@spy4x/preact-ui/toastr"
-import { Route, Switch, useLocation } from "wouter-preact"
+import { Route, Switch, useLocation, useSearch } from "wouter-preact"
 import { canSignOut, sessionState } from "./state/session.ts"
 import { bootstrapSession, settleOwedSignOut } from "./state/auth.ts"
 import { groupsStore } from "./state/groups.ts"
@@ -25,6 +25,7 @@ import { NoteEditorView } from "./views/NoteEditorView.tsx"
 import { NotesView } from "./views/NotesView.tsx"
 import { ProfileView } from "./views/ProfileView.tsx"
 import { AppShell, PublicFrame } from "./views/AppShell.tsx"
+import { signInRedirect } from "./views/sign-in-gate.ts"
 import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 
 /**
@@ -79,6 +80,21 @@ function Routes() {
   )
 }
 
+/**
+ * Sends a visit to a page for signed-in people to sign-in while the session is not signed in, and
+ * sign-in returns there afterwards. It runs again when the person signs out in another tab.
+ */
+function SignInGate() {
+  const [location, navigate] = useLocation()
+  const search = useSearch()
+  const { user, isMfaRequired } = sessionState.value
+  useEffect(() => {
+    const target = signInRedirect(location, search, { user, isMfaRequired })
+    if (target) navigate(target, { replace: true })
+  }, [location, search, user, isMfaRequired])
+  return null
+}
+
 /** A fully signed-in user gets the library `Shell`; everyone else the plain public frame. */
 function Frame() {
   const session = sessionState.value
@@ -91,6 +107,7 @@ function Frame() {
   }
   return (
     <PublicFrame canSignOut={canSignOut(session)}>
+      <SignInGate />
       <Routes />
     </PublicFrame>
   )

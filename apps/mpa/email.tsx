@@ -29,7 +29,7 @@ async function renderEmail(
   } = {},
 ): Promise<Response> {
   const session = await readSession(ctx.state.api)
-  if (!session.user) return ctx.redirect(signInPath(session), 303)
+  if (!session.user) return ctx.redirect(signInPath(session, ctx.req), 303)
   if (!session.email) {
     return ctx.render(
       <Frame session={session} path={SCREEN_PATHS.email}>

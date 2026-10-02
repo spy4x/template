@@ -3,6 +3,8 @@ import { describe, it } from "@std/testing/bdd"
 import { App } from "fresh"
 import { handler as signIn } from "./routes/sign-in.ts"
 import { handler as signOut } from "./routes/sign-out.ts"
+import { handler as signUp } from "./routes/sign-up.ts"
+import { handler as totp } from "./routes/totp.ts"
 import { handler as forgotPassword } from "./routes/forgot-password.ts"
 import { handler as resetPassword } from "./routes/reset-password.ts"
 import { handler as home } from "./routes/index.tsx"
@@ -51,10 +53,15 @@ function appWith(fetch: typeof globalThis.fetch) {
     .get("/page", (ctx) => ctx.html("<p>page</p>"))
     .get("/", home.GET!)
     .post("/profile/password", password.POST!)
+    .get("/sign-in", signIn.GET!)
     .post("/sign-in", signIn.POST!)
+    .get("/sign-up", signUp.GET!)
+    .get("/totp", totp.GET!)
+    .post("/totp", totp.POST!)
     .post("/sign-out", signOut.POST!)
     .get("/notes", notes.GET!)
     .post("/notes", notes.POST!)
+    .get("/notes/:noteId", note.GET!)
     .post("/notes/:noteId", note.POST!)
     .post("/groups/select", selectGroup.POST!)
     .get("/groups", groupsPage.GET!)
@@ -173,6 +180,152 @@ describe("the sign-in page", () => {
     )
 
     expect(response.headers.get("location")).toBe("/totp")
+  })
+})
+
+describe("returning to the requested page after sign-in", () => {
+  const signedOut = () => Response.json({ error: "User not signed in" }, { status: 401 })
+  const get = (fetch: typeof globalThis.fetch, path: string) =>
+    appWith(fetch)(new Request(`${config.webAppOrigin}${path}`), info)
+  /** The value of the hidden `next` field in a page, or `null` when the form has none. */
+  const hiddenNext = (html: string) =>
+    html.match(/<input type="hidden" name="next" value="([^"]*)"/)?.[1] ?? null
+  const UNSAFE = ["//evil.example", "https://evil.example", "/\\evil.example", "/api/auth/me"]
+
+  it("sends a signed-out visit to a note to sign-in, with the note and its query as next", async () => {
+    const { fetch } = fakeApi(signedOut)
+
+    const response = await get(fetch, `/notes/${noteId}?from=link`)
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location"))
+      .toBe(`/sign-in?${new URLSearchParams({ next: `/notes/${noteId}?from=link` })}`)
+  })
+
+  it("sends a visit whose session owes its code to the code page, with the page as next", async () => {
+    const { fetch } = fakeApi(() => Response.json({ secondFactor: "Pending" }, { status: 202 }))
+
+    const response = await get(fetch, "/groups")
+
+    expect(response.headers.get("location")).toBe("/totp?next=%2Fgroups")
+  })
+
+  it("sends a signed-out post to sign-in without next, since its address is no page", async () => {
+    const { fetch } = fakeApi(signedOut)
+
+    const response = await appWith(fetch)(formPost("/email/verify", { code: "Ab3_x-9Q" }), info)
+
+    expect(response.headers.get("location")).toBe("/sign-in")
+  })
+
+  it("puts next into the sign-in form and into its link to sign-up", async () => {
+    const { fetch } = fakeApi(signedOut)
+
+    const html = await (await get(fetch, "/sign-in?next=%2Fnotes%2Fabc")).text()
+
+    expect(hiddenNext(html)).toBe("/notes/abc")
+    expect(html).toContain(`href="/sign-up?next=%2Fnotes%2Fabc"`)
+  })
+
+  it("keeps next on the sign-up page's link back to sign-in", async () => {
+    const { fetch } = fakeApi(signedOut)
+
+    const html = await (await get(fetch, "/sign-up?next=%2Fnotes%2Fabc")).text()
+
+    expect(hiddenNext(html)).toBe("/notes/abc")
+    expect(html).toContain(`href="/sign-in?next=%2Fnotes%2Fabc"`)
+  })
+
+  it("draws no next field when the page carries none", async () => {
+    const { fetch } = fakeApi(signedOut)
+
+    const html = await (await get(fetch, "/sign-in")).text()
+
+    expect(html).not.toContain(`name="next"`)
+    expect(html).toContain(`href="/sign-up"`)
+  })
+
+  it("puts the notes list into the form in place of an unsafe next", async () => {
+    for (const next of UNSAFE) {
+      const { fetch } = fakeApi(signedOut)
+
+      const html = await (await get(fetch, `/sign-in?${new URLSearchParams({ next })}`)).text()
+
+      expect(hiddenNext(html)).toBe("/notes")
+    }
+  })
+
+  it("goes to next after the password when no code is owed", async () => {
+    const { fetch } = fakeApi(() => Response.json({ id: 1 }))
+
+    const response = await appWith(fetch)(
+      formPost("/sign-in", {
+        login: "ada@example.com",
+        password: "long-enough",
+        next: "/notes/abc",
+      }),
+      info,
+    )
+
+    expect(response.headers.get("location")).toBe("/notes/abc")
+  })
+
+  it("carries next on to the code page when a code is owed", async () => {
+    const { fetch } = fakeApi(() => Response.json({ secondFactor: "Pending" }, { status: 202 }))
+
+    const response = await appWith(fetch)(
+      formPost("/sign-in", {
+        login: "ada@example.com",
+        password: "long-enough",
+        next: "/notes/abc",
+      }),
+      info,
+    )
+
+    expect(response.headers.get("location")).toBe("/totp?next=%2Fnotes%2Fabc")
+  })
+
+  it("puts next into the code form", async () => {
+    const { fetch } = fakeApi(() => Response.json({ secondFactor: "Pending" }, { status: 202 }))
+
+    const html = await (await get(fetch, "/totp?next=%2Fnotes%2Fabc")).text()
+
+    expect(hiddenNext(html)).toBe("/notes/abc")
+    expect(html).toContain(`href="/sign-in?next=%2Fnotes%2Fabc"`)
+  })
+
+  it("goes to next after the code", async () => {
+    const { fetch } = fakeApi(() => Response.json({ id: 1 }))
+
+    const response = await appWith(fetch)(
+      formPost("/totp", { otp: "123456", next: "/notes/abc" }),
+      info,
+    )
+
+    expect(response.headers.get("location")).toBe("/notes/abc")
+  })
+
+  it("goes to the notes list in place of an unsafe next after the password", async () => {
+    for (const next of UNSAFE) {
+      const { fetch } = fakeApi(() => Response.json({ id: 1 }))
+
+      const response = await appWith(fetch)(
+        formPost("/sign-in", { login: "ada@example.com", password: "long-enough", next }),
+        info,
+      )
+
+      expect(response.headers.get("location")).toBe("/notes")
+    }
+  })
+
+  it("checks next again after the code, where the person may have changed it", async () => {
+    for (const next of UNSAFE) {
+      const { fetch } = fakeApi(() => Response.json({ id: 1 }))
+
+      const response = await appWith(fetch)(formPost("/totp", { otp: "123456", next }), info)
+
+      expect(response.headers.get("location")).toBe("/notes")
+    }
   })
 })
 
@@ -796,13 +949,13 @@ describe("the e-mail page", () => {
     expect(await response.text()).toContain(EMAIL_FAILURES.load)
   })
 
-  it("sends a signed-out visitor to sign-in", async () => {
+  it("sends a signed-out visitor to sign-in, which returns to the e-mail page", async () => {
     const { fetch } = fakeApi(() => Response.json({ error: "User not signed in" }, { status: 401 }))
 
     const response = await appWith(fetch)(new Request(`${config.webAppOrigin}/email`), info)
 
     expect(response.status).toBe(303)
-    expect(response.headers.get("location")).toBe("/sign-in")
+    expect(response.headers.get("location")).toBe("/sign-in?next=%2Femail")
   })
 
   it("sends the code with the API's field name and hands the browser a new session cookie", async () => {

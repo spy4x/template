@@ -18,7 +18,7 @@ export async function renderGroupSettings(
   } = {},
 ): Promise<Response> {
   const session = await readSession(ctx.state.api)
-  if (!session.user) return ctx.redirect(signInPath(session), 303)
+  if (!session.user) return ctx.redirect(signInPath(session, ctx.req), 303)
   const { groupId } = ctx.params
   const group = await readGroup(ctx.state.api, groupId)
   return ctx.render(

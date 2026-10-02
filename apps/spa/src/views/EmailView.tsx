@@ -7,7 +7,6 @@ import {
   EmailUnavailable,
   type EmailValues,
 } from "@ui/email-screen.tsx"
-import { SCREEN_PATHS } from "@ui/progressive.tsx"
 import { LoadingSpinner } from "@spy4x/preact-ui/loading-spinner"
 import { emailStore } from "../state/email.ts"
 import { sessionState } from "../state/session.ts"
@@ -30,11 +29,9 @@ export function EmailView() {
   const session = sessionState.value
   const signedIn = session.user !== null && !session.isMfaRequired
 
-  // Signed out, here or in another tab: the page has nothing to show, so sign-in takes over, as
-  // the MPA's page does.
+  // Signed out, here or in another tab, the app's sign-in gate takes over and returns here after.
   useEffect(() => {
     if (signedIn) void emailStore.refresh()
-    else navigate(SCREEN_PATHS.signIn, { replace: true })
   }, [signedIn])
 
   if (!status) {

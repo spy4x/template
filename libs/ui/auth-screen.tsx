@@ -2,7 +2,7 @@ import type { JSX } from "preact"
 import { type AuthCredentials, AuthForm, type AuthMode } from "@spy4x/preact-system/auth-form"
 import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
 import { Link } from "@spy4x/preact-ui/link"
-import { FORM_ACTIONS, type Navigate, SCREEN_PATHS } from "./progressive.tsx"
+import { FORM_ACTIONS, type Navigate, NEXT_PARAM, SCREEN_PATHS, withNext } from "./progressive.tsx"
 
 /** The three screens `AuthScreen` draws: the two credential modes, and the second factor. */
 export type AuthScreenKind = AuthMode | "one-time-code"
@@ -36,9 +36,6 @@ const LOGIN_LABELS: Record<AuthScreenKind, string> = {
   "sign-up": "E-mail",
   "one-time-code": "E-mail or username",
 }
-
-/** The mode switch is a link to the other page, so it works before any script runs. */
-const MODE_HREFS = { "sign-in": SCREEN_PATHS.signIn, "sign-up": SCREEN_PATHS.signUp }
 
 const COPY: Record<AuthScreenKind, { title: string; description: string; failure: string }> = {
   "sign-in": {
@@ -76,6 +73,11 @@ export interface AuthScreenProps {
   onSignUp?: (credentials: AuthCredentials) => void
   onOneTimeCode?: (code: string) => void
   navigate?: Navigate
+  /**
+   * The page to return to after sign-in, already checked by the app (`checkedNext`). The form
+   * posts it as the hidden `next` field, and the links to the other auth pages keep it.
+   */
+  next?: string | null
 }
 
 /** A card with a heading, a sentence and one link onward. */
@@ -118,9 +120,26 @@ export function AuthScreen(
     onSignUp,
     onOneTimeCode,
     navigate,
+    next = null,
   }: AuthScreenProps,
 ): JSX.Element {
   const copy = COPY[screen]
+  const footerLink = screen === "one-time-code"
+    ? (
+      <p class="text-sm">
+        Need help?{" "}
+        <Link href={withNext(SCREEN_PATHS.signIn, next)} navigate={navigate} class="pc-link">
+          Back to sign in
+        </Link>
+      </p>
+    )
+    : screen === "sign-in" && (
+      <p class="text-sm">
+        <Link href={SCREEN_PATHS.forgotPassword} navigate={navigate} class="pc-link">
+          Forgot your password?
+        </Link>
+      </p>
+    )
 
   if (screen === "one-time-code" && !isMfaRequired) {
     return (
@@ -163,30 +182,22 @@ export function AuthScreen(
           }}
           names={FIELD_NAMES[screen]}
           onModeChange={onModeChange}
-          modeHrefs={MODE_HREFS}
+          // The mode switch is a link to the other page, so it works before any script runs.
+          modeHrefs={{
+            "sign-in": withNext(SCREEN_PATHS.signIn, next),
+            "sign-up": withNext(SCREEN_PATHS.signUp, next),
+          }}
           onSignIn={onSignIn}
           onSignUp={onSignUp}
           onOneTimeCode={onOneTimeCode}
-          footer={screen === "one-time-code"
+          footer={next || footerLink
             ? (
-              <p class="text-sm">
-                Need help?{" "}
-                <Link href={SCREEN_PATHS.signIn} navigate={navigate} class="pc-link">
-                  Back to sign in
-                </Link>
-              </p>
+              <>
+                {next && <input type="hidden" name={NEXT_PARAM} value={next} />}
+                {footerLink}
+              </>
             )
-            : screen === "sign-in" && (
-              <p class="text-sm">
-                <Link
-                  href={SCREEN_PATHS.forgotPassword}
-                  navigate={navigate}
-                  class="pc-link"
-                >
-                  Forgot your password?
-                </Link>
-              </p>
-            )}
+            : undefined}
         />
       </CardBody>
     </Card>
