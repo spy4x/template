@@ -1,6 +1,7 @@
 import { type APIRequestContext, type Page } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
 import { gotoApp, signIn } from "./fixtures/app.ts"
+import { BILLING_WEBHOOK_PATH, proWebhook } from "./fixtures/billing.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -47,6 +48,12 @@ test.describe("group invitations", () => {
         data: { login: admin, groupId, role: 3 },
       })
       expect(added.status(), await added.text()).toBe(200)
+      // Inviting an editor is a paid feature: on the free plan an invitation adds viewers only.
+      const upgraded = await request.post(
+        `${apiBase}${BILLING_WEBHOOK_PATH}`,
+        await proWebhook(groupId),
+      )
+      expect(upgraded.status(), await upgraded.text()).toBe(200)
 
       await signIn(page, admin, password)
       await gotoApp(page, `/groups/${groupId}`, settingsReady(page))

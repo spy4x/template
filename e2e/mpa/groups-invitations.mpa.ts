@@ -1,4 +1,5 @@
 import { type APIRequestContext, type Browser, expect, type Page, test } from "@playwright/test"
+import { BILLING_WEBHOOK_PATH, proWebhook } from "../fixtures/billing.ts"
 
 const password = "Passw0rd!"
 
@@ -43,6 +44,10 @@ test("without JavaScript, the owner creates a link that a signed-out person foll
     await ownerPage.locator("[data-e2e=group-create]").click()
     const groups = await (await ownerPage.request.get("/api/groups")).json()
     const groupId = groups.groups.find((group: { name: string }) => group.name === "Crew").id
+
+    // Inviting an editor is a paid feature: on the free plan an invitation adds viewers only.
+    const upgraded = await request.post(BILLING_WEBHOOK_PATH, await proWebhook(groupId))
+    expect(upgraded.status(), await upgraded.text()).toBe(200)
 
     await ownerPage.goto(`/groups/${groupId}`)
     const section = ownerPage.locator("[data-e2e=group-section-invitations]")
