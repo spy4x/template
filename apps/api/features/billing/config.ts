@@ -1,6 +1,11 @@
 import type { EnvReader } from "@spy4x/server/config"
 import { type BillingProvider, createStripeBilling, type PlanRef } from "@spy4x/billing"
-import { DEFAULT_GRACE_DAYS, PRO_PLAN_ID } from "@domain/billing"
+import {
+  type BillingRepository,
+  DEFAULT_GRACE_DAYS,
+  effectivePlanId,
+  PRO_PLAN_ID,
+} from "@domain/billing"
 
 /**
  * The webhook signing secret of the development provider. It is public on purpose: the e2e tests
@@ -99,6 +104,29 @@ export function readBillingSetup(
     default:
       throw new BillingConfigError("BILLING_PROVIDER must be stripe, fake or off")
   }
+}
+
+/** What the API decides a group's plan with: the setup's grace period and the system clock. */
+export interface PlanClock {
+  graceDays: number
+  now: () => Date
+}
+
+/**
+ * The {@link PlanClock} of a running API. The billing read and the command bus's plan check both
+ * take it from here, so neither can drift to another clock or grace period.
+ */
+export function planClockOf(setup: Pick<BillingSetup, "graceDays">): PlanClock {
+  return { graceDays: setup.graceDays, now: () => new Date() }
+}
+
+/** The plan a group is on at this moment, for the command bus's plan check. */
+export function createPlanOf(
+  billing: Pick<BillingRepository, "get">,
+  setup: Pick<BillingSetup, "graceDays">,
+): (groupId: string) => Promise<string> {
+  const { graceDays, now } = planClockOf(setup)
+  return async (groupId) => effectivePlanId(await billing.get(groupId), now(), graceDays)
 }
 
 function readGraceDays(value: string | undefined): number {

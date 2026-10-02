@@ -1,15 +1,24 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { createEnvReader } from "@spy4x/server/config"
-import { DEFAULT_GRACE_DAYS } from "@domain/billing"
+import { GroupRole } from "@domain/groups"
+import {
+  BillingGetQuery,
+  BillingStatus,
+  DEFAULT_GRACE_DAYS,
+  type StoredSubscription,
+} from "@domain/billing"
 import { DEV_PRO_PRICE_ID, DEV_WEBHOOK_SECRET } from "../../../../e2e/fixtures/billing.ts"
 import {
   BillingConfigError,
   BillingMode,
+  createPlanOf,
   FAKE_PRO_PRICE_ID,
   FAKE_WEBHOOK_SECRET,
+  planClockOf,
   readBillingSetup,
 } from "./config.ts"
+import { createBillingGetHandler } from "./handlers.ts"
 
 const STRIPE_KEYS = {
   STRIPE_SECRET_KEY: "sk_test_x",
@@ -94,6 +103,61 @@ describe("billing configuration", () => {
         new BillingConfigError("BILLING_GRACE_DAYS must be a whole number of days from 0 to 90"),
       )
     }
+  })
+
+  describe("the API's plan clock, as the command bus and the billing read are wired", () => {
+    const DAY = 24 * 60 * 60 * 1000
+    const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
+    /** A Pro subscription whose first payment failed `days` days before the system clock's now. */
+    const pastDue = (days: number) => ({
+      get: () =>
+        Promise.resolve<StoredSubscription>({
+          groupId,
+          providerSubscriptionId: "sub_1",
+          planId: "pro",
+          status: BillingStatus.PastDue,
+          currentPeriodEnd: null,
+          cancelAtPeriodEnd: false,
+          pastDueSince: new Date(Date.now() - days * DAY),
+        }),
+    })
+    const setup = (graceDays?: string) =>
+      readBillingSetup(
+        createEnvReader(graceDays === undefined ? {} : { BILLING_GRACE_DAYS: graceDays }),
+        "dev",
+      )
+    const billingRead = async (days: number, graceDays?: string) => {
+      const configured = setup(graceDays)
+      const handler = createBillingGetHandler({
+        billing: {
+          ...pastDue(days),
+          lockedRoleOf: () => Promise.resolve(null),
+          customerOf: () => Promise.resolve("cus_1"),
+        },
+        groups: { roleOf: () => Promise.resolve(GroupRole.OWNER) },
+        provider: configured.provider,
+        webAppUrl: "https://app.example.com",
+        log: () => {},
+        ...planClockOf(configured),
+      })
+      const actor = { userId: 1 } as BillingGetQuery["data"]["actor"]
+      return (await handler(new BillingGetQuery({ actor, groupId }))).billing.planId
+    }
+
+    it("gives the plan check the free plan for a group past due for eight days", async () => {
+      expect(await createPlanOf(pastDue(8), setup())(groupId)).toBe("free")
+      expect(await createPlanOf(pastDue(1), setup())(groupId)).toBe("pro")
+    })
+
+    it("gives the plan check the grace period the setup read", async () => {
+      expect(await createPlanOf(pastDue(8), setup("10"))(groupId)).toBe("pro")
+    })
+
+    it("shows the billing read the free plan for a group past due for eight days", async () => {
+      expect(await billingRead(8)).toBe("free")
+      expect(await billingRead(1)).toBe("pro")
+      expect(await billingRead(8, "10")).toBe("pro")
+    })
   })
 
   it("shares its webhook secret and Pro price with the e2e fixture that signs events", () => {

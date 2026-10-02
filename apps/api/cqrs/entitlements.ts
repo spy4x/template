@@ -1,4 +1,4 @@
-import { effectivePlanId } from "@domain/billing"
+import { createPlanOf } from "../features/billing/config.ts"
 import { billingSetup } from "../services/billing.ts"
 import { db } from "../services/db.ts"
 import { createEntitlementGate } from "./entitlement-gate.ts"
@@ -11,8 +11,7 @@ import { ENTITLEMENT_NEEDS } from "./entitlement-needs.ts"
 export const entitlementGate = createEntitlementGate(
   {
     billingEnabled: billingSetup.provider !== null,
-    planOf: async (groupId) =>
-      effectivePlanId(await db.billing.get(groupId), new Date(), billingSetup.graceDays),
+    planOf: createPlanOf(db.billing, billingSetup),
     roleOf: async (groupId, userId) => (await db.group.getForMember(groupId, userId))?.role ?? null,
     usage: { maxNotes: (groupId) => db.note.count(groupId) },
   },
