@@ -7,6 +7,7 @@ import { GroupRole } from "@domain/groups"
 import { VIEWERS_ONLY_HINT } from "@ui/group-invitations.tsx"
 import { billingStore } from "../state/billing.ts"
 import { groupsStore } from "../state/groups.ts"
+import { invitationsStore } from "../state/invitations.ts"
 import { membersStore } from "../state/members.ts"
 import { GroupSettingsView, transferAndRefresh } from "./GroupSettingsView.tsx"
 
@@ -33,6 +34,7 @@ describe("GroupSettingsView", () => {
     groupsStore.reset()
     membersStore.reset()
     billingStore.reset()
+    invitationsStore.reset()
   })
 
   it("says the group does not exist, and shows no other group, for an address that names a group the person is not in", () => {
@@ -94,6 +96,7 @@ describe("GroupSettingsView", () => {
       hasCustomer: false,
       trialEnd: null,
       notice: null,
+      seatPrice: null,
     })
     const hint = VIEWERS_ONLY_HINT
 
@@ -166,6 +169,7 @@ describe("GroupSettingsView", () => {
       hasCustomer: true,
       trialEnd: null,
       notice: null,
+      seatPrice: null,
     }
     const sentence = "stays on your card"
 
@@ -174,6 +178,46 @@ describe("GroupSettingsView", () => {
     expect(render(known.id)).not.toContain(sentence)
     billingStore.current.value = { groupId: known.id, billing: subscribed }
     expect(render(known.id)).toContain(sentence)
+  })
+
+  it("shows a create refused for the price at the price box, and any other refusal under the form", () => {
+    groupsStore.groups.value = [{ ...known, role: GroupRole.OWNER }]
+    billingStore.current.value = {
+      groupId: known.id,
+      billing: {
+        enabled: true,
+        planId: PRO_PLAN_ID,
+        status: 2,
+        currentPeriodEnd: null,
+        cancelAtPeriodEnd: false,
+        canManage: true,
+        subscribed: true,
+        hasCustomer: true,
+        trialEnd: null,
+        notice: null,
+        seatPrice: { seats: 2, amount: 900, currency: "EUR" },
+      },
+    }
+    const box = (html: string) => html.match(/<input[^>]*name="acceptSeatPrice"[^>]*>/)?.[0] ?? ""
+
+    invitationsStore.createError.value = {
+      message: "Confirm the higher price",
+      code: "SEAT_PRICE_NOT_ACCEPTED",
+      plan: null,
+    }
+    const refused = render(known.id)
+    expect(refused).toContain(`id="invitation-seat-price-error"`)
+    expect(box(refused)).toContain("invitation-seat-price-error")
+    expect(refused.match(/Confirm the higher price/g)).toHaveLength(1)
+
+    invitationsStore.createError.value = {
+      message: "That address is not valid",
+      code: "INVALID_REQUEST",
+      plan: null,
+    }
+    const other = render(known.id)
+    expect(other).toContain("That address is not valid")
+    expect(other).not.toContain(`id="invitation-seat-price-error"`)
   })
 })
 

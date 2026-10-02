@@ -1110,6 +1110,7 @@ describe("the groups pages", () => {
       canManage: true,
       subscribed,
       hasCustomer: subscribed,
+      seatPrice: null,
     })
     const explanation = async (subscribed: boolean) => {
       const { fetch } = notesApi(groupId, (path, method) => {
