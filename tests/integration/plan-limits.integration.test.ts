@@ -45,7 +45,10 @@ function noteBus(sql: postgres.Sql, usage?: EntitlementGateDependencies["usage"]
     planOf: async (groupId) =>
       effectivePlanId(await billing.get(groupId), new Date(), DEFAULT_GRACE_DAYS),
     roleOf: groups.roleOf,
-    usage: usage ?? { maxNotes: (groupId) => notes.count(groupId) },
+    usage: usage ?? {
+      maxNotes: (groupId) => notes.count(groupId),
+      maxMembers: () => Promise.reject(new Error("not part of this test")),
+    },
   }, ENTITLEMENT_NEEDS))
   bus.register(NoteCreateCommand, createNoteCreateHandler({ notes, groups }))
   bus.register(NoteUpdateCommand, createNoteUpdateHandler({ notes, groups }))
@@ -110,6 +113,7 @@ Deno.test("the free plan's note cap on Postgres", async (t) => {
             await counted
             return used
           },
+          maxMembers: () => Promise.reject(new Error("not part of this test")),
         })
 
         const outcomes = await Promise.allSettled([
