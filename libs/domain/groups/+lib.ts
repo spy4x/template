@@ -1,6 +1,8 @@
 import type { Command, Query } from "@spy4x/platform/cqrs"
 import type { Actor } from "@domain/identity"
 
+export * from "./invitations.ts"
+
 /**
  * The aggregate a group's changes are recorded and announced under: the `aggregate_type` of its
  * outbox rows (whose `aggregate_version` is the change's sequence) and the `aggregate` of its
@@ -247,10 +249,18 @@ export interface GroupMembersPayload {
  * The members of a group, in the order they joined. Any member may read them; a non-member is told
  * `GROUP_NOT_FOUND`.
  */
-export class GroupMembersQuery
-  implements Query<GroupMembersPayload, { members: GroupMemberSummary[] }> {
-  __resultType?: { members: GroupMemberSummary[] }
+export class GroupMembersQuery implements Query<GroupMembersPayload, GroupMembersResult> {
+  __resultType?: GroupMembersResult
   constructor(public data: GroupMembersPayload) {}
+}
+
+/**
+ * The members a read returns and how many the group has. A read stops at a cap the store sets, so
+ * `memberCount` can be larger than `members.length`: the page then says the list is cut off.
+ */
+export interface GroupMembersResult {
+  members: GroupMemberSummary[]
+  memberCount: number
 }
 
 export interface GroupMemberRolePayload {
@@ -438,7 +448,7 @@ export interface GroupRepository {
    * The members of an active group, in the order they joined, as `actorId` sees them (`isYou`).
    * `null` when the group is missing or deleted, or `actorId` is not a member.
    */
-  listMembers(groupId: string, actorId: number): Promise<GroupMemberSummary[] | null>
+  listMembers(groupId: string, actorId: number): Promise<GroupMembersResult | null>
   /**
    * Gives a member a new role and announces the change, in one transaction that checks
    * {@link assertCanChangeRole} again on locked rows. `null` when the group is missing or deleted.
