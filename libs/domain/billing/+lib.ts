@@ -71,7 +71,8 @@ export const PLANS: readonly Plan[] = [
     amount: 0,
     currency: "EUR",
     description: "For trying things out.",
-    features: ["Up to 10 notes", "Up to 3 members"],
+    // No member count in the text until `maxMembers` is enforced (#131).
+    features: ["Up to 10 notes"],
     entitlements: {
       features: { memberRoles: false },
       limits: { maxMembers: 3, maxNotes: 10, storageBytes: 50 * 1024 * 1024 },
@@ -83,7 +84,7 @@ export const PLANS: readonly Plan[] = [
     amount: 900,
     currency: "EUR",
     description: "For a group that relies on it.",
-    features: ["Unlimited notes", "Up to 50 members", "Change members' roles", "Priority support"],
+    features: ["Unlimited notes", "Promote members to editor or admin", "Priority support"],
     entitlements: {
       features: { memberRoles: true },
       limits: { maxMembers: 50, maxNotes: null, storageBytes: 10 * 1024 * 1024 * 1024 },
