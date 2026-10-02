@@ -16,7 +16,7 @@ gh repo create my-product --template spy4x/template --private --clone
 
 [Architecture](docs/architecture.md) · [ADR 001](docs/decisions/001-deno-platform-template.md) ·
 [ADR 002](docs/decisions/002-realtime-transport-and-sync.md) · [Stack](docs/stack.md) ·
-[Deno policy](docs/deno-policy.md) · [Adding an aggregate](docs/aggregates.md) ·
+[Deno policy](docs/deno-policy.md) · [Adding an aggregate](docs/aggregates.md) · [Billing](docs/billing.md) ·
 [Handoff](docs/handoff.md)
 
 </div>
