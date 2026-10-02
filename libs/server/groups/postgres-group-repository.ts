@@ -30,6 +30,7 @@ import {
   recordAccessChange,
   recordGroupChange,
 } from "./group-change-log.ts"
+import { revokeInvitationsOf } from "./invitation-revocation.ts"
 
 interface GroupRow extends postgres.Row {
   id: string
@@ -725,6 +726,8 @@ export class PostgresGroupRepository implements GroupRepository {
           WHERE group_id = ${groupId} AND user_id = ${userId}
         `
         await repository.audit(groupId, actorId, MEMBER_ROLE_CHANGED_EVENT, requestId)
+        // A demoted member's links must not let anyone in above what they may now invite with.
+        await revokeInvitationsOf(transaction, groupId, userId, role, actorId, requestId)
         // A demoted member can still read the group, so nobody loses access: the raised revision
         // and the group's hint are what take a write away from their open pages.
         await recordAccessChange(transaction, groupId, actorId, MEMBER_ROLE_CHANGED_EVENT, [])
@@ -750,6 +753,8 @@ export class PostgresGroupRepository implements GroupRepository {
       assertCanRemoveMember(roles.get(actorId) ?? null, roles.get(userId) ?? null)
       await repository.dropMember(groupId, userId)
       await repository.audit(groupId, actorId, MEMBER_REMOVED_EVENT, requestId)
+      // Their own links would let them back in.
+      await revokeInvitationsOf(transaction, groupId, userId, null, actorId, requestId)
       await recordAccessChange(transaction, groupId, actorId, MEMBER_REMOVED_EVENT, [userId])
       return true
     })
@@ -770,6 +775,7 @@ export class PostgresGroupRepository implements GroupRepository {
       }
       await repository.dropMember(groupId, actorId)
       await repository.audit(groupId, actorId, MEMBER_LEFT_EVENT, requestId)
+      await revokeInvitationsOf(transaction, groupId, actorId, null, actorId, requestId)
       await recordAccessChange(transaction, groupId, actorId, MEMBER_LEFT_EVENT, [actorId])
       return true
     })

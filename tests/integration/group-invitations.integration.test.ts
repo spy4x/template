@@ -278,6 +278,57 @@ Deno.test("invitations: declining one tied to an address stops it; a member cann
   })
 })
 
+Deno.test("invitations: a removed admin cannot rejoin through a link they made", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner, admin } = await team(sql)
+    const invitations = new PostgresInvitationRepository(sql)
+    const own = await invite(invitations, groupId, admin, { maxUses: 5 })
+    const owners = await invite(invitations, groupId, owner, { maxUses: 5 })
+
+    await repository.removeMember(groupId, admin, owner, "request-remove")
+
+    expect(await refusal(invitations.accept(own.lookup, admin, NO_LIMITS)))
+      .toBe("INVITATION_REVOKED")
+    expect(await memberRole(sql, groupId, admin)).toBe(null)
+    // Only the removed member's links stop: the owner's still works.
+    expect((await invitations.listPending(groupId, owner))!.map((row) => row.id))
+      .toEqual([owners.invitation.id])
+    expect(await auditKinds(sql, groupId)).toEqual([
+      "group.invitation_created",
+      "group.invitation_created",
+      "group.invitation_revoked",
+    ])
+  })
+})
+
+Deno.test("invitations: an admin demoted to viewer who leaves cannot come back as an editor", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner, admin } = await team(sql)
+    const invitations = new PostgresInvitationRepository(sql)
+    const editorLink = await invite(invitations, groupId, admin, { role: GroupRole.EDITOR })
+
+    await repository.changeMemberRole(groupId, admin, GroupRole.VIEWER, owner)
+    await repository.leave(groupId, admin)
+
+    expect(await refusal(invitations.accept(editorLink.lookup, admin, NO_LIMITS)))
+      .toBe("INVITATION_REVOKED")
+    expect(await memberRole(sql, groupId, admin)).toBe(null)
+  })
+})
+
+Deno.test("invitations: a member who leaves stops the links they made", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, admin, stranger } = await team(sql)
+    const invitations = new PostgresInvitationRepository(sql)
+    const { lookup } = await invite(invitations, groupId, admin, { maxUses: 5 })
+
+    await repository.leave(groupId, admin)
+
+    expect(await refusal(invitations.accept(lookup, stranger, NO_LIMITS)))
+      .toBe("INVITATION_REVOKED")
+  })
+})
+
 Deno.test("invitations: a removed member cannot rejoin through the team link they joined with", async () => {
   await withSchema(async (sql) => {
     const { repository, groupId, owner, stranger } = await team(sql)

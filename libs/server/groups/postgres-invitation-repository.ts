@@ -17,17 +17,10 @@ import {
   type InvitationState,
 } from "@domain/groups"
 import { recordAccessChange } from "./group-change-log.ts"
+import { INVITATION_EVENTS } from "./invitation-revocation.ts"
 import { storeSelection } from "./postgres-group-repository.ts"
 
-/** The audit and change kinds an invitation writes. */
-export const INVITATION_EVENTS = {
-  created: "group.invitation_created",
-  accepted: "group.invitation_accepted",
-  revoked: "group.invitation_revoked",
-  declined: "group.invitation_declined",
-  /** The group's change when someone joins: their membership is new access. */
-  memberJoined: "group.member_joined",
-} as const
+export { INVITATION_EVENTS } from "./invitation-revocation.ts"
 
 /** Most pending invitations the Invitations section lists, and most a person sees for themselves. */
 const INVITATION_LIST_LIMIT = 100
