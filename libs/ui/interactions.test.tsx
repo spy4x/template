@@ -1019,6 +1019,15 @@ describe("GroupInvitationsSection in the browser", () => {
     expect(create.calls).toHaveLength(1)
   })
 
+  it("turns an editor draft into a viewer on a plan without member roles", async () => {
+    const drafts = spy<[InvitationDraft]>()
+    await mount(
+      <GroupInvitationsSection {...defaults} memberRoles={false} onDraftChange={drafts.fn} />,
+    )
+
+    expect(drafts.calls).toEqual([[{ ...EMPTY_INVITATION_DRAFT, role: GroupRole.VIEWER }]])
+  })
+
   it("posts the create and the revoke natively when the app takes nothing over", async () => {
     await mount(<GroupInvitationsSection {...defaults} />)
 

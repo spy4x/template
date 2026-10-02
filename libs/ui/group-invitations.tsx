@@ -16,6 +16,7 @@ import {
   canManageInvitations,
   GroupRole,
   invitableRoles,
+  invitableRolesOnPlan,
   INVITATION_DEFAULT_DAYS,
   INVITATION_MAX_DAYS,
   INVITATION_MAX_USES,
@@ -29,6 +30,10 @@ import {
   SCREEN_PATHS,
   ScreenForm,
 } from "./progressive.tsx"
+
+/** Why the role picker offers a viewer only, on a plan without `memberRoles`. */
+export const VIEWERS_ONLY_HINT =
+  "This group's plan lets an invitation add viewers only. A paid plan lets you invite editors and admins too."
 
 /** A pending invitation as the group's Invitations section lists it. */
 export interface InvitationRow {
@@ -73,6 +78,11 @@ export interface GroupInvitationsSectionProps {
   groupId: string
   /** The role of the person looking. Only the owner and an admin see this section. */
   actorRole: GroupRole
+  /**
+   * The group's plan includes `memberRoles`. Without it an invitation adds a viewer only, and the
+   * role picker says why. Defaults to `true`: the server refuses what the plan does not allow.
+   */
+  memberRoles?: boolean
   /** The pending invitations, newest first; `null` while they are read. */
   invitations: readonly InvitationRow[] | null
   /** Why the invitations could not be read, or `null`. */
@@ -107,6 +117,7 @@ export function GroupInvitationsSection(
   {
     groupId,
     actorRole,
+    memberRoles = true,
     invitations,
     error = null,
     draft,
@@ -132,9 +143,16 @@ export function GroupInvitationsSection(
     if (created) createdBox.current?.focus()
   }, [created])
 
+  const roles = invitableRolesOnPlan(actorRole, memberRoles)
+  // A draft role the plan does not allow (the default editor on a free plan) becomes the first one
+  // it does, so the picker, the posted form and the app's draft agree.
+  const role = roles.includes(draft.role) ? draft.role : roles[0]
+  useEffect(() => {
+    if (role !== undefined && role !== draft.role) onDraftChange?.({ ...draft, role })
+  }, [role, draft.role])
+
   if (!canManageInvitations(actorRole)) return null
   const change = (patch: Partial<InvitationDraft>) => onDraftChange?.({ ...draft, ...patch })
-  const roles = invitableRoles(actorRole)
 
   return (
     <section aria-labelledby="group-invitations" data-e2e="group-section-invitations">
@@ -153,11 +171,15 @@ export function GroupInvitationsSection(
             >
               <Stack>
                 <div class="grid gap-3 sm:grid-cols-3">
-                  <Field id="invitation-role" label="Role">
+                  <Field
+                    id="invitation-role"
+                    label="Role"
+                    hint={memberRoles ? undefined : VIEWERS_ONLY_HINT}
+                  >
                     <Select
                       name="role"
                       data-e2e="invitation-role"
-                      value={String(draft.role)}
+                      value={String(role)}
                       options={roles.map((value) => ({ value, label: ROLE_TEXT[value] }))}
                       onChange={(e) => change({ role: Number(e.currentTarget.value) as GroupRole })}
                     />
@@ -272,7 +294,8 @@ export function GroupInvitationsSection(
                       key={invitation.id}
                       groupId={groupId}
                       invitation={invitation}
-                      canRevoke={roles.includes(invitation.role)}
+                      // Revoking is not a plan feature: whoever could give the role may withdraw it.
+                      canRevoke={invitableRoles(actorRole).includes(invitation.role)}
                       pending={revokingId === invitation.id}
                       error={revokeError?.invitationId === invitation.id
                         ? revokeError.message

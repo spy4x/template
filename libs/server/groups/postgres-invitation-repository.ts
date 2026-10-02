@@ -1,8 +1,9 @@
 import type postgres from "postgres"
 import { randomBase64Url, sha256Hex } from "@spy4x/platform/tokens"
-import { assertRoomFor } from "@domain/billing"
+import { assertRoomFor, PlanError } from "@domain/billing"
 import {
   assertCanInvite,
+  canManageBilling,
   canManageInvitations,
   GroupError,
   type GroupInvitation,
@@ -48,6 +49,15 @@ export interface InvitationCreateRecord {
  * to an address. The raw token never reaches this layer.
  */
 export type InvitationLookup = { tokenHash: string } | { invitationId: string }
+
+/**
+ * What the group's plan allows an invitation, read outside the write the way the entitlement gate
+ * reads it: the member cap (`null` for none) and whether it may carry a role above viewer.
+ */
+export interface InvitationPlan {
+  maxMembers: number | null
+  memberRoles: boolean
+}
 
 /** A new link's token: random, shown to its creator once, and stored only as its hash. */
 export function newInvitationToken(): string {
@@ -115,23 +125,29 @@ export class PostgresInvitationRepository {
   }
 
   /**
-   * Creates an invitation, checking on locked rows that the actor may invite with its role and
-   * that the group has room for one more member (`allowance`, `null` for no cap). Pending
+   * Creates an invitation, checking on locked rows that the actor may invite with its role, that
+   * the plan allows that role and that the group has room for one more member. Pending
    * invitations do not count as members. Answers the group's name too, for the mail. `null` when
    * the group is missing or deleted.
    */
   async create(
     record: InvitationCreateRecord,
     actorId: number,
-    allowance: number | null,
+    plan: InvitationPlan,
   ): Promise<{ invitation: GroupInvitation; groupName: string } | null> {
     return await this.sql.begin(async (tx: postgres.TransactionSql) => {
       const groupName = await lockActiveGroup(tx, record.groupId)
       if (groupName === null) return null
       const actorRole = await lockRole(tx, record.groupId, actorId)
       assertCanInvite(actorRole, record.role)
-      if (allowance !== null) {
-        assertRoomFor("maxMembers", allowance, await countMembers(tx, record.groupId), actorRole!)
+      assertRoleOnPlan(plan, record.role, actorRole!)
+      if (plan.maxMembers !== null) {
+        assertRoomFor(
+          "maxMembers",
+          plan.maxMembers,
+          await countMembers(tx, record.groupId),
+          actorRole!,
+        )
       }
       const id = crypto.randomUUID()
       await tx`
@@ -262,15 +278,15 @@ export class PostgresInvitationRepository {
 
   /**
    * Accepts an invitation, in one transaction: on locked rows it checks that the invitation still
-   * works, that an address-bound one belongs to `userId`, that they are not a member yet and that
-   * the group has room (`allowance`, `null` for no cap). It adds the membership with the
-   * invitation's role, counts the use, writes the audit row, records the group's change and makes
-   * the group the person's selected one.
+   * works, that an address-bound one belongs to `userId`, that they are not a member yet, that the
+   * plan allows its role and that the group has room. It adds the membership with the invitation's
+   * role, counts the use, writes the audit row, records the group's change and makes the group the
+   * person's selected one.
    */
   async accept(
     ref: InvitationLookup,
     userId: number,
-    allowance: number | null,
+    plan: InvitationPlan,
     requestId?: string,
   ): Promise<GroupInvitationAcceptResult> {
     return await this.sql.begin(async (tx: postgres.TransactionSql) => {
@@ -293,10 +309,12 @@ export class PostgresInvitationRepository {
       if (invitation.email !== null && !await ownsAddress(tx, invitation.email, userId)) {
         throw wrongAccount()
       }
-      if (allowance !== null) {
+      // Not a member, so they cannot change the plan: the refusal tells them to ask the owner.
+      assertRoleOnPlan(plan, invitation.role, GroupRole.VIEWER)
+      if (plan.maxMembers !== null) {
         assertRoomFor(
           "maxMembers",
-          allowance,
+          plan.maxMembers,
           await countMembers(tx, invitation.groupId),
           invitation.role,
         )
@@ -341,6 +359,21 @@ function refFilter(sql: postgres.Sql, ref: InvitationLookup) {
   return "tokenHash" in ref
     ? sql`group_invitations.token_hash = ${ref.tokenHash}`
     : sql`group_invitations.id = ${ref.invitationId} AND group_invitations.email IS NOT NULL`
+}
+
+/**
+ * Refuses a role above viewer on a plan without `memberRoles`, with the plan's refusal; `actorRole`
+ * says whether the person asking may change the plan.
+ */
+function assertRoleOnPlan(plan: InvitationPlan, role: GroupRole, actorRole: GroupRole): void {
+  if (plan.memberRoles || role === GroupRole.VIEWER) return
+  throw new PlanError(
+    "PLAN_FEATURE_MISSING",
+    "memberRoles",
+    null,
+    canManageBilling(actorRole),
+    "The group's plan lets an invitation add viewers only",
+  )
 }
 
 function notFound(): InvitationError {

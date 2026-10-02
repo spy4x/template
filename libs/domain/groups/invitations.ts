@@ -230,6 +230,15 @@ export function invitableRoles(actor: GroupRole): GroupRole[] {
   )
 }
 
+/**
+ * The roles `actor` may invite with on a plan: {@link invitableRoles}, or only a viewer when the
+ * plan lacks `memberRoles`, since joining as an editor or admin is what that feature sells.
+ */
+export function invitableRolesOnPlan(actor: GroupRole, memberRoles: boolean): GroupRole[] {
+  const roles = invitableRoles(actor)
+  return memberRoles ? roles : roles.filter((role) => role === GroupRole.VIEWER)
+}
+
 /** Whether `actor` may see and manage the group's invitations: the owner and admins. */
 export function canManageInvitations(actor: GroupRole): boolean {
   return invitableRoles(actor).length > 0

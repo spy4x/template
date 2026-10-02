@@ -3,6 +3,7 @@ import { useLocation } from "wouter-preact"
 import { GroupSettingsScreen } from "@ui/group-settings-screen.tsx"
 import { GroupInvitationsSection } from "@ui/group-invitations.tsx"
 import { canManageInvitations } from "@domain/groups"
+import { entitlementsOf } from "@domain/billing"
 import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { groupsStore } from "../state/groups.ts"
 import { membersStore } from "../state/members.ts"
@@ -35,6 +36,10 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
     if (role !== undefined && canManageInvitations(role)) void invites.open(groupId)
   }, [groupId, role])
   const invitesOurs = invites.groupId.value === groupId
+  // The billing card reads the group's plan; until it has, the server alone judges the role.
+  const billingOurs = billingStore.current.value?.groupId === groupId
+    ? billingStore.current.value.billing
+    : null
   // Until the store has switched to this group, it holds another group's members.
   const ours = team.groupId.value === groupId
   const group = store.groups.value.find((candidate) => candidate.id === groupId) ?? null
@@ -94,6 +99,9 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
         <GroupInvitationsSection
           groupId={groupId}
           actorRole={group.role}
+          memberRoles={billingOurs
+            ? entitlementsOf(billingOurs.planId, billingOurs.enabled).features.memberRoles
+            : true}
           invitations={invitesOurs ? invites.invitations.value : null}
           error={invitesOurs ? invites.loadError.value : null}
           draft={invites.draft.value}

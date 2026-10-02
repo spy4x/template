@@ -4,6 +4,7 @@ import { GroupError, GroupRole } from "./+lib.ts"
 import {
   assertCanInvite,
   invitableRoles,
+  invitableRolesOnPlan,
   INVITATION_DEFAULT_DAYS,
   invitationRefusal,
   parseInvitationCreateBody,
@@ -37,6 +38,12 @@ describe("invitation rules", () => {
       "ROLE_INSUFFICIENT",
     )
     expect(codeOf(() => assertCanInvite(null, GroupRole.VIEWER))).toBe("GROUP_NOT_FOUND")
+  })
+
+  it("lets an invitation add viewers only on a plan without member roles", () => {
+    expect(invitableRolesOnPlan(GroupRole.OWNER, false)).toEqual([GroupRole.VIEWER])
+    expect(invitableRolesOnPlan(GroupRole.OWNER, true)).toEqual(invitableRoles(GroupRole.OWNER))
+    expect(invitableRolesOnPlan(GroupRole.EDITOR, false)).toEqual([])
   })
 
   it("says why an invitation no longer works: withdrawn first, then used up, then expired", () => {

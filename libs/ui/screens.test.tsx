@@ -50,6 +50,7 @@ import {
   type InvitationPreviewRow,
   InvitationScreen,
   MyInvitationsSection,
+  VIEWERS_ONLY_HINT,
 } from "./group-invitations.tsx"
 
 /** One `<form>` in rendered HTML: its attributes and the names of the fields it submits. */
@@ -1397,6 +1398,24 @@ describe("GroupInvitationsSection without JavaScript", () => {
       [...html.matchAll(/<option[^>]*value="(\d)"/g)].map((m) => m[1])
     expect(offered(owner)).toEqual(["1", "2", "3"])
     expect(offered(admin)).toEqual(["1", "2"])
+  })
+
+  it("offers a viewer only on a plan without member roles, says why, and still revokes any", () => {
+    const html = renderToString(
+      <GroupInvitationsSection {...invitationsDefaults} memberRoles={false} />,
+    )
+    const surface = noScriptSurface(
+      <GroupInvitationsSection {...invitationsDefaults} memberRoles={false} />,
+    )
+
+    expect([...html.matchAll(/<option[^>]*value="(\d)"/g)].map((m) => m[1])).toEqual(["1"])
+    expect(html).toContain(`<option selected value="1">`)
+    expect(html).toContain(`aria-describedby="invitation-role-hint"`)
+    expect(html).toContain(VIEWERS_ONLY_HINT)
+    expect(formAt(surface, GROUP_PATHS.invitationCreate("g-1")).fields).toContain("role")
+    // Withdrawing a link is not a plan feature: the owner still revokes the editor's and admin's.
+    formAt(surface, GROUP_PATHS.invitationRevoke("g-1", "i-link"))
+    formAt(surface, GROUP_PATHS.invitationRevoke("g-1", "i-admin"))
   })
 
   it("gives each pending invitation a revoke form, but an admin none for an admin's", () => {

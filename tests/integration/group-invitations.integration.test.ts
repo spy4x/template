@@ -7,6 +7,7 @@ import { GroupError, GroupRole, InvitationError } from "@domain/groups"
 import {
   type InvitationCreateRecord,
   invitationLookup,
+  type InvitationPlan,
   newInvitationToken,
   PostgresInvitationRepository,
 } from "@server/groups/postgres-invitation-repository.ts"
@@ -17,6 +18,14 @@ import { insertUser, team, withSchema } from "./group-team.ts"
  * invite with which role, accepting, and every reason an invitation is refused. Needs "DB_HOST",
  * "DB_USER", "DB_PASS" and "DB_NAME" (recipe in docs/handoff.md); it fails when they are missing.
  */
+
+/** A plan with no member cap that allows every role: billing off. */
+const NO_LIMITS: InvitationPlan = { maxMembers: null, memberRoles: true }
+
+/** A plan with room for `maxMembers` that allows every role. */
+function capped(maxMembers: number): InvitationPlan {
+  return { maxMembers, memberRoles: true }
+}
 
 async function refusal(write: Promise<unknown>): Promise<string> {
   try {
@@ -37,10 +46,10 @@ async function invite(
   invitations: PostgresInvitationRepository,
   groupId: string,
   actorId: number,
-  options: Partial<InvitationCreateRecord> & { allowance?: number | null } = {},
+  options: Partial<InvitationCreateRecord> & { plan?: InvitationPlan } = {},
 ) {
   const token = newInvitationToken()
-  const { allowance = null, ...record } = options
+  const { plan = NO_LIMITS, ...record } = options
   const created = await invitations.create(
     {
       groupId,
@@ -52,7 +61,7 @@ async function invite(
       ...record,
     },
     actorId,
-    allowance,
+    plan,
   )
   if (!created) throw new Error("The invitation was not created")
   return { ...created, token, lookup: await invitationLookup({ token }) }
@@ -99,7 +108,7 @@ Deno.test("invitations: another user accepts a link with its role, and the group
     const invitations = new PostgresInvitationRepository(sql)
     const { lookup } = await invite(invitations, groupId, admin, { role: GroupRole.VIEWER })
 
-    const result = await invitations.accept(lookup, stranger, null, "request-1")
+    const result = await invitations.accept(lookup, stranger, NO_LIMITS, "request-1")
 
     expect(result.groupId).toBe(groupId)
     expect(result.role).toBe(GroupRole.VIEWER)
@@ -145,19 +154,21 @@ Deno.test("invitations: an expired, revoked or used-up invitation is refused", a
       UPDATE group_invitations SET expires_at = now() - interval '1 second'
       WHERE id = ${expired.invitation.id}
     `
-    expect(await refusal(invitations.accept(expired.lookup, stranger, null)))
+    expect(await refusal(invitations.accept(expired.lookup, stranger, NO_LIMITS)))
       .toBe("INVITATION_EXPIRED")
 
     const revoked = await invite(invitations, groupId, owner)
     expect(await invitations.revoke(groupId, revoked.invitation.id, admin)).toBe(true)
-    expect(await refusal(invitations.accept(revoked.lookup, stranger, null)))
+    expect(await refusal(invitations.accept(revoked.lookup, stranger, NO_LIMITS)))
       .toBe("INVITATION_REVOKED")
 
     const once = await invite(invitations, groupId, owner, { maxUses: 1 })
-    await invitations.accept(once.lookup, stranger, null)
-    expect(await refusal(invitations.accept(once.lookup, late, null))).toBe("INVITATION_USED_UP")
+    await invitations.accept(once.lookup, stranger, NO_LIMITS)
+    expect(await refusal(invitations.accept(once.lookup, late, NO_LIMITS))).toBe(
+      "INVITATION_USED_UP",
+    )
 
-    expect(await refusal(invitations.accept({ tokenHash: "0".repeat(64) }, late, null)))
+    expect(await refusal(invitations.accept({ tokenHash: "0".repeat(64) }, late, NO_LIMITS)))
       .toBe("INVITATION_NOT_FOUND")
     expect(await memberRole(sql, groupId, late)).toBe(null)
     // An editor may not revoke.
@@ -174,7 +185,7 @@ Deno.test("invitations: the pending list drops revoked, expired and used-up invi
     const used = await invite(invitations, groupId, owner)
     const revoked = await invite(invitations, groupId, owner)
     const expired = await invite(invitations, groupId, owner)
-    await invitations.accept(used.lookup, stranger, null)
+    await invitations.accept(used.lookup, stranger, NO_LIMITS)
     await invitations.revoke(groupId, revoked.invitation.id, owner)
     await sql`
       UPDATE group_invitations SET expires_at = now() - interval '1 second'
@@ -196,15 +207,17 @@ Deno.test("invitations: a full group refuses a create and an accept, and pending
     const invitations = new PostgresInvitationRepository(sql)
     const late = await insertUser(sql)
 
-    expect(await refusal(invite(invitations, groupId, owner, { allowance: 5 })))
+    expect(await refusal(invite(invitations, groupId, owner, { plan: capped(5) })))
       .toBe("PLAN_LIMIT_REACHED")
-    const first = await invite(invitations, groupId, owner, { allowance: 6 })
-    const second = await invite(invitations, groupId, owner, { allowance: 6 })
+    const first = await invite(invitations, groupId, owner, { plan: capped(6) })
+    const second = await invite(invitations, groupId, owner, { plan: capped(6) })
 
-    await invitations.accept(first.lookup, stranger, 6)
-    expect(await refusal(invitations.accept(second.lookup, late, 6))).toBe("PLAN_LIMIT_REACHED")
+    await invitations.accept(first.lookup, stranger, capped(6))
+    expect(await refusal(invitations.accept(second.lookup, late, capped(6)))).toBe(
+      "PLAN_LIMIT_REACHED",
+    )
     expect(await memberRole(sql, groupId, late)).toBe(null)
-    expect(await invitations.accept(second.lookup, late, null)).toMatchObject({ groupId })
+    expect(await invitations.accept(second.lookup, late, NO_LIMITS)).toMatchObject({ groupId })
   })
 })
 
@@ -218,14 +231,14 @@ Deno.test("invitations: one tied to an address is for the account that proved it
       email: "invited@example.com",
     })
 
-    expect(await refusal(invitations.accept(lookup, stranger, null)))
+    expect(await refusal(invitations.accept(lookup, stranger, NO_LIMITS)))
       .toBe("INVITATION_WRONG_ACCOUNT")
     expect((await invitations.preview(lookup, stranger)).forYou).toBe(false)
     expect(await invitations.listForUser(stranger)).toEqual([])
     const mine = await invitations.listForUser(invited)
     expect(mine.map((preview) => [preview.id, preview.forYou])).toEqual([[invitation.id, true]])
 
-    await invitations.accept({ invitationId: invitation.id }, invited, null)
+    await invitations.accept({ invitationId: invitation.id }, invited, NO_LIMITS)
     expect(await memberRole(sql, groupId, invited)).toBe(GroupRole.EDITOR)
   })
 })
@@ -236,7 +249,7 @@ Deno.test("invitations: knowing a link invitation's id lets nobody in", async ()
     const invitations = new PostgresInvitationRepository(sql)
     const { invitation } = await invite(invitations, groupId, owner)
 
-    expect(await refusal(invitations.accept({ invitationId: invitation.id }, stranger, null)))
+    expect(await refusal(invitations.accept({ invitationId: invitation.id }, stranger, NO_LIMITS)))
       .toBe("INVITATION_NOT_FOUND")
     expect(await memberRole(sql, groupId, stranger)).toBe(null)
   })
@@ -251,16 +264,46 @@ Deno.test("invitations: declining one tied to an address stops it; a member cann
     const addressed = await invite(invitations, groupId, owner, { email: "invited@example.com" })
 
     await invitations.decline(addressed.lookup, invited)
-    expect(await refusal(invitations.accept(addressed.lookup, invited, null)))
+    expect(await refusal(invitations.accept(addressed.lookup, invited, NO_LIMITS)))
       .toBe("INVITATION_REVOKED")
     expect(await invitations.listForUser(invited)).toEqual([])
 
     const link = await invite(invitations, groupId, owner)
-    expect(await refusal(invitations.accept(link.lookup, editor, null))).toBe("ALREADY_MEMBER")
+    expect(await refusal(invitations.accept(link.lookup, editor, NO_LIMITS))).toBe("ALREADY_MEMBER")
     expect(await auditKinds(sql, groupId)).toEqual([
       "group.invitation_created",
       "group.invitation_declined",
       "group.invitation_created",
     ])
+  })
+})
+
+Deno.test("invitations: a plan without member roles lets an invitation add viewers only", async () => {
+  await withSchema(async (sql) => {
+    const { groupId, owner, stranger } = await team(sql)
+    const invitations = new PostgresInvitationRepository(sql)
+    const late = await insertUser(sql)
+    const free: InvitationPlan = { maxMembers: null, memberRoles: false }
+
+    expect(
+      await refusal(invite(invitations, groupId, owner, { role: GroupRole.EDITOR, plan: free })),
+    )
+      .toBe("PLAN_FEATURE_MISSING")
+    expect(
+      await refusal(invite(invitations, groupId, owner, { role: GroupRole.ADMIN, plan: free })),
+    )
+      .toBe("PLAN_FEATURE_MISSING")
+    const viewerLink = await invite(invitations, groupId, owner, {
+      role: GroupRole.VIEWER,
+      plan: free,
+    })
+    // Made on a paid plan, accepted after the group went back to free.
+    const editorLink = await invite(invitations, groupId, owner, { role: GroupRole.EDITOR })
+
+    expect(await refusal(invitations.accept(editorLink.lookup, stranger, free)))
+      .toBe("PLAN_FEATURE_MISSING")
+    expect(await memberRole(sql, groupId, stranger)).toBe(null)
+    await invitations.accept(viewerLink.lookup, late, free)
+    expect(await memberRole(sql, groupId, late)).toBe(GroupRole.VIEWER)
   })
 })

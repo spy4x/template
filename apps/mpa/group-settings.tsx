@@ -8,7 +8,7 @@ import {
   GroupInvitationsSection,
   type InvitationDraft,
 } from "@ui/group-invitations.tsx"
-import type { PlanRefusal } from "@domain/billing"
+import { entitlementsOf, type PlanRefusal } from "@domain/billing"
 import { readGroupInvitations } from "./invitations.tsx"
 import { readBilling } from "./billing.tsx"
 import { readGroup, readMembers } from "./groups.ts"
@@ -81,6 +81,9 @@ export async function renderGroupSettings(
           <GroupInvitationsSection
             groupId={groupId}
             actorRole={group.role}
+            memberRoles={billing
+              ? entitlementsOf(billing.planId, billing.enabled).features.memberRoles
+              : true}
             invitations={invitations.invitations}
             error={invitations.error}
             draft={invitationDraft}

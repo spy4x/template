@@ -14,6 +14,7 @@ import {
 import type {
   InvitationCreateRecord,
   InvitationLookup,
+  InvitationPlan,
 } from "@server/groups/postgres-invitation-repository.ts"
 import type { GroupSelectedEvent } from "../../cqrs/events.ts"
 import {
@@ -52,11 +53,13 @@ function actor(userId: number): Actor {
 function fakeStore(target: { email: string | null } = { email: null }) {
   const calls = {
     created: [] as InvitationCreateRecord[],
-    accepted: [] as { lookup: InvitationLookup; userId: number; allowance: number | null }[],
+    createdPlans: [] as InvitationPlan[],
+    accepted: [] as { lookup: InvitationLookup; userId: number; plan: InvitationPlan }[],
   }
   const store: InvitationStore = {
-    create: (record) => {
+    create: (record, _actorId, plan) => {
       calls.created.push(record)
+      calls.createdPlans.push(plan)
       return Promise.resolve({ invitation, groupName: "Team" })
     },
     listPending: () => Promise.resolve([]),
@@ -64,8 +67,8 @@ function fakeStore(target: { email: string | null } = { email: null }) {
     preview: () => Promise.reject(new Error("unused")),
     listForUser: () => Promise.resolve([]),
     find: () => Promise.resolve({ id: invitationId, groupId, email: target.email }),
-    accept: (lookup, userId, allowance) => {
-      calls.accepted.push({ lookup, userId, allowance })
+    accept: (lookup, userId, plan) => {
+      calls.accepted.push({ lookup, userId, plan })
       return Promise.resolve({
         groupId,
         role: GroupRole.EDITOR,
@@ -92,7 +95,7 @@ function dependencies(
   const deps: InvitationHandlerDependencies = {
     invitations: store,
     ownerOf: () => Promise.resolve(null),
-    allowanceOf: () => Promise.resolve(null),
+    planOf: () => Promise.resolve({ maxMembers: null, memberRoles: true }),
     mail: {
       sender,
       brand: { webAppUrl: "https://app.example.com" },
@@ -189,13 +192,33 @@ describe("invitation handlers", () => {
     expect(events).toEqual([])
   })
 
-  it("accepts with the cap of the invitation's group and tells the person's tabs", async () => {
+  it("creates with the gate's member cap and the plan's word on roles", async () => {
+    const { store, calls } = fakeStore()
+    const asked: string[] = []
+    const create = createInvitationCreateHandler(
+      dependencies(store, {
+        planOf: (id) => {
+          asked.push(id)
+          return Promise.resolve({ maxMembers: 50, memberRoles: false })
+        },
+      }).deps,
+    )
+    const command = createCommand()
+    command.allowance = 3
+
+    await create(command)
+
+    expect(asked).toEqual([groupId])
+    expect(calls.createdPlans).toEqual([{ maxMembers: 3, memberRoles: false }])
+  })
+
+  it("accepts with the plan of the invitation's group and tells the person's tabs", async () => {
     const { store, calls } = fakeStore()
     const asked: string[] = []
     const { deps, events } = dependencies(store, {
-      allowanceOf: (id) => {
+      planOf: (id) => {
         asked.push(id)
-        return Promise.resolve(3)
+        return Promise.resolve({ maxMembers: 3, memberRoles: false })
       },
     })
     const accept = createInvitationAcceptHandler(deps)
@@ -205,7 +228,11 @@ describe("invitation handlers", () => {
 
     expect(asked).toEqual([groupId])
     expect(calls.accepted).toEqual([
-      { lookup: { tokenHash: await sha256Hex(token) }, userId: 42, allowance: 3 },
+      {
+        lookup: { tokenHash: await sha256Hex(token) },
+        userId: 42,
+        plan: { maxMembers: 3, memberRoles: false },
+      },
     ])
     expect(events.map((event) => event.data)).toEqual([{ userId: 42, groupId }])
   })

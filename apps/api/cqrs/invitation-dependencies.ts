@@ -1,4 +1,4 @@
-import { entitlementsOf } from "@domain/billing"
+import { entitlementsOf, UNLIMITED } from "@domain/billing"
 import { provenAddressOwner } from "@server/auth/email-verification.ts"
 import { createMailSender, readMailSetup } from "@server/mail/mail.ts"
 import { PostgresInvitationRepository } from "@server/groups/postgres-invitation-repository.ts"
@@ -20,8 +20,8 @@ export const invitationRateLimits = createInvitationRateLimits({
 })
 
 /**
- * What the invitation handlers run on. The member cap of an accept is read here, for the group the
- * invitation names, the way the entitlement gate reads it for a create.
+ * What the invitation handlers run on. The plan of an invitation's group is read here, the way the
+ * entitlement gate reads it.
  */
 // The same plan reading, clock and grace period as the entitlement gate's.
 const planOf = createPlanOf(db.billing, billingSetup)
@@ -29,10 +29,12 @@ const planOf = createPlanOf(db.billing, billingSetup)
 export const invitationDependencies: InvitationHandlerDependencies = {
   invitations: new PostgresInvitationRepository(sql),
   ownerOf: (email) => provenAddressOwner(db.authStore, email),
-  allowanceOf: async (groupId) =>
-    billingSetup.provider === null
-      ? null
-      : entitlementsOf(await planOf(groupId), true).limits.maxMembers,
+  planOf: async (groupId) => {
+    const { limits, features } = billingSetup.provider === null
+      ? UNLIMITED
+      : entitlementsOf(await planOf(groupId), true)
+    return { maxMembers: limits.maxMembers, memberRoles: features.memberRoles }
+  },
   mail: {
     sender: createMailSender(readMailSetup(Deno.env), sql),
     brand: { webAppUrl: config.webAppUrl },

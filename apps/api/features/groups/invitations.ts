@@ -21,6 +21,7 @@ import {
   type InvitationCreateRecord,
   type InvitationLookup,
   invitationLookup,
+  type InvitationPlan,
   type InvitationTarget,
   newInvitationToken,
 } from "@server/groups/postgres-invitation-repository.ts"
@@ -38,7 +39,7 @@ export interface InvitationStore {
   create(
     record: InvitationCreateRecord,
     actorId: number,
-    allowance: number | null,
+    plan: InvitationPlan,
   ): Promise<{ invitation: GroupInvitation; groupName: string } | null>
   listPending(groupId: string, actorId: number): Promise<GroupInvitation[] | null>
   revoke(
@@ -53,7 +54,7 @@ export interface InvitationStore {
   accept(
     ref: InvitationLookup,
     userId: number,
-    allowance: number | null,
+    plan: InvitationPlan,
     requestId?: string,
   ): Promise<GroupInvitationAcceptResult>
   decline(ref: InvitationLookup, userId: number, requestId?: string): Promise<void>
@@ -74,8 +75,11 @@ export interface InvitationHandlerDependencies {
   invitations: InvitationStore
   /** The user who proved `email`, or `null`: `provenAddressOwner`. */
   ownerOf(email: string): Promise<number | null>
-  /** The group's member cap on its plan now, `null` for none (billing off, or no cap). */
-  allowanceOf(groupId: string): Promise<number | null>
+  /**
+   * What the group's plan allows an invitation now, read as the entitlement gate reads it: no cap
+   * and every role while billing is off.
+   */
+  planOf(groupId: string): Promise<InvitationPlan>
   mail: InvitationMail
   emit(event: GroupSelectedEvent): void
 }
@@ -89,12 +93,12 @@ const ROLE_NAMES: Record<GroupRole, string> = {
 
 /**
  * Creates an invitation and, when asked, mails its link. The token is made here and handed back
- * once; the store keeps only its hash. Who may invite with which role, and the group's member cap,
- * are checked by the store on locked rows. A mail that is not sent leaves the invitation in place:
+ * once; the store keeps only its hash. Who may invite with which role, whether the plan allows
+ * that role, and the group's member cap are checked by the store on locked rows. A mail that is not sent leaves the invitation in place:
  * the answer says `mailSent: false` and the creator copies the link instead.
  */
 export function createInvitationCreateHandler(
-  { invitations, mail }: InvitationHandlerDependencies,
+  { invitations, planOf, mail }: InvitationHandlerDependencies,
 ): CommandHandler<GroupInvitationCreateCommand> {
   return async (command) => {
     const { data, allowance } = command
@@ -120,7 +124,8 @@ export function createInvitationCreateHandler(
         requestId: data.requestId,
       },
       data.actor.userId,
-      allowance,
+      // The gate's cap, and the plan's word on the role, which the gate cannot also check.
+      { ...await planOf(data.groupId), maxMembers: allowance },
     )
     if (!created) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
     const mailSent = data.sendEmail && email !== null
@@ -217,13 +222,13 @@ export function createMyInvitationsHandler(
 
 /**
  * Accepts an invitation. An address-bound one is checked with `ownerOf` first, the one check that
- * trusts an address to name a person, and again by the store on locked rows. The group's member cap
- * is read for the invitation's group, which only the invitation names, so the entitlement gate
- * cannot check it before the handler; the store counts under the group's lock instead. Then the
- * person's other tabs are told about their new selected group.
+ * trusts an address to name a person, and again by the store on locked rows. The group's plan
+ * (member cap and roles) is read for the invitation's group, which only the invitation names, so
+ * the entitlement gate cannot check it before the handler; the store counts under the group's lock
+ * instead. Then the person's other tabs are told about their new selected group.
  */
 export function createInvitationAcceptHandler(
-  { invitations, ownerOf, allowanceOf, emit }: InvitationHandlerDependencies,
+  { invitations, ownerOf, planOf, emit }: InvitationHandlerDependencies,
 ): CommandHandler<GroupInvitationAcceptCommand> {
   return async ({ data }) => {
     const lookup = await invitationLookup(data.invitation)
@@ -238,7 +243,7 @@ export function createInvitationAcceptHandler(
     const result = await invitations.accept(
       lookup,
       data.actor.userId,
-      await allowanceOf(target.groupId),
+      await planOf(target.groupId),
       data.requestId,
     )
     emit(new GroupSelectedEvent({ userId: data.actor.userId, groupId: result.groupId }))
