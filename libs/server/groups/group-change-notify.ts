@@ -68,8 +68,8 @@ export async function listenForGroupChanges(
 
 /**
  * The Postgres channel on which a change that takes people's access to a group away names them. It
- * is sent from inside that change's transaction (`recordAccessChange` in `group-change-log.ts`), so Postgres delivers
- * it only once the change has committed, and never for one that rolled back.
+ * is sent from inside that change's transaction (`recordAccessChange` in `group-change-log.ts`), so
+ * Postgres delivers it only once the change has committed, and never for one that rolled back.
  */
 export const GROUP_ACCESS_LOST_CHANNEL = "group_access_lost"
 

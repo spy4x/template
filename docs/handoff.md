@@ -409,11 +409,11 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    `authorization_revision` and names every member on the `group_access_lost` channel at its
    commit, so each member's socket gets the delete's hint and their pages read again.
    `listMemberUserIds` leaves a deleted group out, so no later hint for it reaches anyone. The
-   restore raises the revision too. The owner restores it from the "Deleted groups" section of `/groups`
-   (`POST /api/groups/:id/restore`, `group.restore`, `POST /groups/:id/restore`; the list is
-   `GET /api/groups/deleted`, `group.deleted`) for `GROUP_RESTORE_DAYS` (30) days, by the database
-   clock. The nightly `outbox.cleanup` job also runs `purgeDeletedGroups`, which removes groups past
-   that for good, with their notes and members, so a group may live up to a day longer
+   restore raises the revision too. The owner restores it from the "Deleted groups" section of
+   `/groups` (`POST /api/groups/:id/restore`, `group.restore`, `POST /groups/:id/restore`; the list
+   is `GET /api/groups/deleted`, `group.deleted`) for `GROUP_RESTORE_DAYS` (30) days, by the
+   database clock. The nightly `outbox.cleanup` job also runs `purgeDeletedGroups`, which removes
+   groups past that for good, with their notes and members, so a group may live up to a day longer
    than 30 days but can no longer be restored. The settings page of a deleted group is a 404.
 10. **The personal kind is gone** (migration `2026_10_07_0001_group_kind_removed.sql`: it drops
    `groups.kind` and its indexes and rewrites no row, so every group, membership and note stays).
