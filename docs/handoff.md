@@ -395,7 +395,7 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
 
     The migration drops `groups.kind`, so the API that reads it must not run against the migrated
     database and the new API must not run against the old one: migrate before the API starts. Compose
-    already does (migrations run on every start, before the API), so there is no rolling deploy and
+    already does (the API and the worker wait for the `migrate` service to complete), so there is no rolling deploy and
     nothing to add; a deploy that keeps the old API running while the new migration applies would
     break it.
 
