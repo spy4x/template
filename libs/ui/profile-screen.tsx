@@ -271,6 +271,16 @@ export function ProfileScreen(
               </div>
             </Stack>
           </ScreenForm>
+          <p class="mt-4 text-sm">
+            <Link
+              href={SCREEN_PATHS.email}
+              navigate={navigate}
+              class="pc-link"
+              data-e2e="profile-email-link"
+            >
+              E-mail address
+            </Link>
+          </p>
         </CardBody>
       </Card>
 

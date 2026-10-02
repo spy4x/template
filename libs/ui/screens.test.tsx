@@ -3,6 +3,8 @@ import { describe, it } from "@std/testing/bdd"
 import type { VNode } from "preact"
 import { renderToString } from "preact-render-to-string"
 import {
+  authEmailChangeSchema,
+  authEmailCodeSchema,
   authOTPSchema,
   authPasswordChangeSchema,
   authPasswordForgotSchema,
@@ -35,6 +37,7 @@ import {
 import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
 import { NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
 import { ForgotPasswordScreen, ResetPasswordScreen } from "./password-reset-screen.tsx"
+import { EmailBanner, EmailScreen, type EmailScreenProps } from "./email-screen.tsx"
 
 /** One `<form>` in rendered HTML: its attributes and the names of the fields it submits. */
 interface RenderedForm {
@@ -912,5 +915,57 @@ describe("NoteEditorScreen", () => {
 
     expect(html).toContain("Loading the note...")
     expect(html).not.toContain("<form")
+  })
+})
+
+const emailDefaults: EmailScreenProps = {
+  status: { email: "ann@example.com", proven: false, pending: null },
+  values: { code: "", email: "", password: "" },
+  onValueChange: () => {},
+  errors: { verify: null, send: null, change: null },
+  notices: { send: null, change: null },
+  pending: { verify: false, send: false, change: false },
+}
+
+describe("EmailScreen without JavaScript", () => {
+  it("posts the code, a new-code request and an address change with the API's field names", () => {
+    const surface = noScriptSurface(<EmailScreen {...emailDefaults} />)
+    expect(surface.forms).toEqual([
+      { action: FORM_ACTIONS.emailVerify, method: "post", fields: schemaKeys(authEmailCodeSchema) },
+      { action: FORM_ACTIONS.emailSend, method: "post", fields: [] },
+      {
+        action: FORM_ACTIONS.emailChange,
+        method: "post",
+        fields: schemaKeys(authEmailChangeSchema),
+      },
+    ])
+    expect(surface.links).toEqual([SCREEN_PATHS.profile])
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("asks for no code once the address is proven and no change waits", () => {
+    const status = { email: "ann@example.com", proven: true, pending: null }
+    const surface = noScriptSurface(<EmailScreen {...emailDefaults} status={status} />)
+    expect(surface.forms.map((form) => form.action)).toEqual([FORM_ACTIONS.emailChange])
+  })
+
+  it("asks for the code of the waiting new address, and keeps the old one shown", () => {
+    const status = { email: "ann@example.com", proven: true, pending: "new@example.com" }
+    const html = renderToString(<EmailScreen {...emailDefaults} status={status} />)
+    expect(html).toContain("We sent a code to <strong>new@example.com</strong>")
+    expect(html).toContain("You sign in with <strong>ann@example.com</strong>")
+  })
+})
+
+describe("EmailBanner without JavaScript", () => {
+  it("links to the e-mail page while an address waits for its code", () => {
+    const status = { email: "ann@example.com", proven: false, pending: null }
+    expect(noScriptSurface(<EmailBanner status={status} />).links).toEqual([SCREEN_PATHS.email])
+  })
+
+  it("draws nothing once the address is proven, or before its state is known", () => {
+    const proven = { email: "ann@example.com", proven: true, pending: null }
+    expect(renderToString(<EmailBanner status={proven} />)).toBe("")
+    expect(renderToString(<EmailBanner status={null} />)).toBe("")
   })
 })

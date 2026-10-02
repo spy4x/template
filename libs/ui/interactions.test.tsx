@@ -26,6 +26,7 @@ import {
   ResetPasswordScreen,
   type ResetPasswordScreenProps,
 } from "./password-reset-screen.tsx"
+import { EmailScreen, type EmailScreenProps } from "./email-screen.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
 const own = { document: globalThis.document, FormData: globalThis.FormData }
@@ -728,5 +729,98 @@ describe("GroupSettingsScreen in the browser", () => {
 
     expect(find<HTMLButtonElement>("[data-e2e=group-delete]").disabled).toBe(true)
     expect(root?.querySelector(`form[action="${GROUP_PATHS.delete("g-1")}"]`)).toBeNull()
+  })
+})
+
+const emailDefaults: EmailScreenProps = {
+  status: { email: "ann@example.com", proven: false, pending: null },
+  values: { code: "", email: "", password: "" },
+  onValueChange: () => {},
+  errors: { verify: null, send: null, change: null },
+  notices: { send: null, change: null },
+  pending: { verify: false, send: false, change: false },
+}
+
+describe("EmailScreen in the browser", () => {
+  it("reports the typed code and checks it through the app's callback", async () => {
+    const change = spy<[string, string]>()
+    const verify = spy<[]>()
+    await mount(<EmailScreen {...emailDefaults} onValueChange={change.fn} onVerify={verify.fn} />)
+
+    await type("[data-e2e=email-code]", "Ab3_x-9Q")
+
+    expect(change.calls).toEqual([["code", "Ab3_x-9Q"]])
+    expect(await submit(FORM_ACTIONS.emailVerify)).toBe(true)
+    expect(verify.calls).toHaveLength(1)
+  })
+
+  it("posts each form natively when the app takes nothing over", async () => {
+    const values = { code: "Ab3_x-9Q", email: "new@example.com", password: "Passw0rd!" }
+    await mount(<EmailScreen {...emailDefaults} values={values} />)
+
+    const sent = (action: string) =>
+      Object.fromEntries(new FormData(find<HTMLFormElement>(`form[action="${action}"]`)))
+    expect(sent(FORM_ACTIONS.emailVerify)).toEqual({ code: "Ab3_x-9Q" })
+    expect(sent(FORM_ACTIONS.emailChange)).toEqual({
+      email: "new@example.com",
+      password: "Passw0rd!",
+    })
+    for (const action of [FORM_ACTIONS.emailVerify, FORM_ACTIONS.emailSend]) {
+      expect(await submit(action)).toBe(false)
+    }
+  })
+
+  it("refuses a second check while the first is pending", async () => {
+    const verify = spy<[]>()
+    await mount(
+      <EmailScreen
+        {...emailDefaults}
+        pending={{ ...emailDefaults.pending, verify: true }}
+        onVerify={verify.fn}
+      />,
+    )
+
+    await submit(FORM_ACTIONS.emailVerify)
+
+    expect(verify.calls).toHaveLength(0)
+  })
+
+  it("ties a refused code to the code field and moves focus there", async () => {
+    await mount(<EmailScreen {...emailDefaults} />)
+    find("[data-e2e=email-verify]").focus()
+
+    const errors = { ...emailDefaults.errors, verify: "This code is wrong" }
+    await rerender(<EmailScreen {...emailDefaults} errors={errors} />)
+
+    const field = find("[data-e2e=email-code]")
+    const describedBy = field.getAttribute("aria-describedby") ?? ""
+    expect(describedBy.split(" ").map((id) => document.getElementById(id)?.textContent))
+      .toContain("This code is wrong")
+    expect(focused()).toBe("email-code")
+  })
+
+  it("moves focus to the code field once a change asks for the new address's code", async () => {
+    const proven = { email: "ann@example.com", proven: true, pending: null }
+    await mount(<EmailScreen {...emailDefaults} status={proven} />)
+    find("[data-e2e=email-change]").focus()
+
+    await rerender(
+      <EmailScreen {...emailDefaults} status={{ ...proven, pending: "new@example.com" }} />,
+    )
+
+    expect(focused()).toBe("email-code")
+  })
+
+  it("moves focus to the new address when a change is refused", async () => {
+    await mount(<EmailScreen {...emailDefaults} />)
+    find("[data-e2e=email-change]").focus()
+
+    const errors = { ...emailDefaults.errors, change: "Invalid password" }
+    await rerender(<EmailScreen {...emailDefaults} errors={errors} />)
+
+    expect(focused()).toBe("email-new")
+    expect(find("[data-e2e=email-change]").closest("form")?.textContent).toContain(
+      "Invalid password",
+    )
   })
 })

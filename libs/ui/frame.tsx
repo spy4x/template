@@ -57,16 +57,18 @@ function displayName(user: FrameUser): string {
  * JavaScript): a form that posts to its route, which the app takes over. Without it, a page
  * rendered on the server, "Sign out" is a form in the header. `connection` is shown only when the
  * app has a live connection to report. `groupPicker` puts the group picker at the bottom of the
- * side menu and the mobile drawer; without it the menu has none (nobody to pick for).
+ * side menu and the mobile drawer; without it the menu has none (nobody to pick for). `banner`
+ * shows above every page, such as the request to verify the e-mail address.
  */
 export function AppFrame(
-  { user, connection, currentPath, navigate, onSignOut, groupPicker, children }: {
+  { user, connection, currentPath, navigate, onSignOut, groupPicker, banner, children }: {
     user: FrameUser
     connection?: ConnectionStatus
     currentPath?: string
     navigate?: Navigate
     onSignOut?: () => void
     groupPicker?: GroupPickerData
+    banner?: ComponentChildren
     children: ComponentChildren
   },
 ): JSX.Element {
@@ -93,7 +95,10 @@ export function AppFrame(
         </>
       }
     >
-      <div class="mx-auto w-full max-w-5xl px-2 py-6 sm:px-6">{children}</div>
+      <div class="mx-auto w-full max-w-5xl px-2 py-6 sm:px-6">
+        {banner}
+        {children}
+      </div>
     </Shell>
   )
 }
