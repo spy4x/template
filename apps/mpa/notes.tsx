@@ -9,7 +9,15 @@ import {
   NotesScreen,
 } from "@ui/notes-screen.tsx"
 import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
-import { type Api, type ApiAnswer, errorCode, errorMessage, isOk, isRecord } from "./api.ts"
+import {
+  type Api,
+  type ApiAnswer,
+  errorCode,
+  errorMessage,
+  isOk,
+  isRecord,
+  planRefusalOf,
+} from "./api.ts"
 import { readGroup, readSelected } from "./groups.ts"
 import { Frame, readSession, type Session, signInPath } from "./session.tsx"
 import type { State } from "./utils.ts"
@@ -215,7 +223,7 @@ export async function renderNoteOfSelectedGroup(
 /** The form error of a refused note write, and whether it was a stale version. */
 export function refusal(answer: ApiAnswer, fallback: string) {
   return {
-    errors: { title: null, form: errorMessage(answer, fallback) },
+    errors: { title: null, form: errorMessage(answer, fallback), plan: planRefusalOf(answer) },
     conflict: errorCode(answer) === "VERSION_CONFLICT",
   }
 }

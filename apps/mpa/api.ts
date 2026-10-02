@@ -1,3 +1,4 @@
+import { type PlanRefusal, readPlanRefusal } from "@domain/billing"
 /**
  * The browser's request headers the API needs, passed on unchanged: the session cookie, the two
  * headers the API's cross-site guard checks, and what its audit log and rate limits record. The
@@ -93,6 +94,11 @@ export function errorMessage(answer: ApiAnswer, fallback: string): string {
   if (typeof error === "string") return error
   if (isRecord(error) && typeof error.message === "string") return error.message
   return fallback
+}
+
+/** What the group's plan refused, from the `error` of a 402 answer, or `null`. */
+export function planRefusalOf(answer: ApiAnswer): PlanRefusal | null {
+  return isRecord(answer.body) ? readPlanRefusal(answer.body.error) : null
 }
 
 /** The code of a group or note error, such as `VERSION_CONFLICT`. */

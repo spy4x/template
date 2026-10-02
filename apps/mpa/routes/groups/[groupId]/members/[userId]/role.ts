@@ -1,5 +1,5 @@
 import { GROUP_PATHS } from "@ui/progressive.tsx"
-import { errorMessage, isOk } from "../../../../../api.ts"
+import { errorMessage, isOk, planRefusalOf } from "../../../../../api.ts"
 import { API_BODIES, readForm } from "../../../../../forms.ts"
 import { renderGroupSettings } from "../../../../../group-settings.tsx"
 import { define } from "../../../../../utils.ts"
@@ -21,6 +21,7 @@ export const handler = define.handlers({
       memberError: {
         userId: Number(userId),
         message: errorMessage(answer, "The role could not be changed"),
+        plan: planRefusalOf(answer),
       },
       status: answer.status,
     })
