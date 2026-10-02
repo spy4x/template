@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd"
 import type { Sql } from "@spy4x/server/db"
 import {
   createMailSender,
+  emailCodeMail,
   mailOffWarning,
   MailTransport,
   passwordResetMail,
@@ -122,5 +123,21 @@ describe("passwordResetMail", () => {
   it("wraps the HTML in the shared shell, branded with the app's host", () => {
     expect(mail.html).toMatch(/^<!doctype html>/)
     expect(mail.html).toContain(">app.example.com</a>")
+  })
+})
+
+describe("emailCodeMail", () => {
+  const mail = emailCodeMail(
+    { webAppUrl: "https://app.example.com" },
+    { to: "ann@example.com", code: "a<b-C9_z", validMinutes: 10 },
+  )
+
+  it("carries the code and how long it works in the text and the escaped HTML, with no link", () => {
+    expect(mail.to).toBe("ann@example.com")
+    expect(mail.text).toContain("\na<b-C9_z\n")
+    expect(mail.text).toContain("10 minutes")
+    expect(mail.html).toContain("a&lt;b-C9_z")
+    expect(mail.html).not.toContain("a<b-C9_z")
+    expect(mail.text).not.toMatch(/https?:\/\//)
   })
 })
