@@ -61,7 +61,7 @@ test.describe("two-factor sign-in", () => {
         code = ((await response.json()) as { text: string }).text.split("\n\n")[1].trim()
         return response.status()
       }, { timeout: 20_000, message: "the worker mails the code" }).toBe(200)
-      await page.goto("/email")
+      await gotoApp(page, "/email", page.locator("[data-e2e=email-code]"))
       await page.locator("[data-e2e=email-code]").fill(code)
       await page.locator("[data-e2e=email-verify]").click()
       await expect(page.locator("[data-e2e=email-current]")).toContainText("which is verified")

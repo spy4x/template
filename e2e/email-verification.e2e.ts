@@ -1,4 +1,6 @@
-import { type APIRequestContext, expect, type Page, test } from "@playwright/test"
+import type { APIRequestContext, Page } from "@playwright/test"
+import { expect, test } from "./fixtures/stack.ts"
+import { gotoApp, signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -46,8 +48,8 @@ test("a new account proves its address with the mailed code, then moves to a new
     expect(signUp.ok(), await signUp.text()).toBe(true)
 
     // Every signed-in page asks for the code until the address is proven.
-    await page.goto("/")
     const banner = page.locator("[data-e2e=email-banner]")
+    await gotoApp(page, "/", banner)
     await expect(banner).toContainText(email)
     await banner.getByRole("link", { name: "Enter the code" }).click()
     await expect(page).toHaveURL("/email")
@@ -59,12 +61,11 @@ test("a new account proves its address with the mailed code, then moves to a new
     await enterCode(page, code)
     await expect(page.locator("[data-e2e=email-verified]")).toBeVisible()
     await expect(page.locator("[data-e2e=email-current]")).toContainText("which is verified")
-    await page.goto("/")
-    await expect(page.locator("[data-e2e=profile-email-link]")).toBeVisible()
+    await gotoApp(page, "/", page.locator("[data-e2e=profile-email-link]"))
     await expect(banner).toHaveCount(0)
 
     // A change waits for the new address's code; until then the account keeps the old one.
-    await page.goto("/email")
+    await gotoApp(page, "/email", page.locator("[data-e2e=email-new]"))
     await page.locator("[data-e2e=email-new]").fill(next)
     await page.locator("[data-e2e=email-password]").fill(password)
     await page.locator("[data-e2e=email-change]").click()
@@ -82,14 +83,12 @@ test("a new account proves its address with the mailed code, then moves to a new
     await page.getByRole("menuitem", { name: "Sign out" }).click()
     // Signed out, the e-mail page has nothing to show and hands over to sign-in.
     await expect(page).toHaveURL("/sign-in")
-    for (const [login, works] of [[email, false], [next, true]] as const) {
-      await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(login)
-      await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      if (works) await page.waitForURL("/")
-      else await expect(page.getByText("Invalid e-mail, username or password")).toBeVisible()
-    }
+    await gotoApp(page, "/sign-in", page.locator("[data-e2e=auth-form-login]"))
+    await page.locator("[data-e2e=auth-form-login]").fill(email)
+    await page.locator("[data-e2e=auth-form-password]").fill(password)
+    await page.locator("[data-e2e=auth-form-submit]").click()
+    await expect(page.getByText("Invalid e-mail, username or password")).toBeVisible()
+    await signIn(page, next, password)
   } finally {
     await cleanup(request, email, true)
     await cleanup(request, next, true)
