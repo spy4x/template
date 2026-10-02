@@ -1309,6 +1309,8 @@ describe("invitations", () => {
       status: null,
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
+      trialEnd: null,
+      notice: null,
       canManage: true,
       subscribed: false,
       hasCustomer: false,
