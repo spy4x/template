@@ -5,6 +5,7 @@ import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { groupsStore } from "../state/groups.ts"
 import { membersStore } from "../state/members.ts"
 import { selectionStore } from "../state/selection.ts"
+import { GroupBillingCard } from "./BillingViews.tsx"
 
 /**
  * Wires one group's settings screen to the groups store, which already holds every group, and to
@@ -70,6 +71,7 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
           await selectionStore.refresh().catch(() => {})
           navigate(SCREEN_PATHS.groups)
         })}
+      billing={group && <GroupBillingCard groupId={groupId} />}
     />
   )
 }
