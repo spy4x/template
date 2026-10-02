@@ -42,7 +42,7 @@ answers.
 
 | Key            | Kind    | Free    | Pro     | Enforced                                                     |
 | -------------- | ------- | ------- | ------- | ------------------------------------------------------------ |
-| `memberRoles`  | feature | no      | yes     | Changing a member's role (`GroupMemberRoleCommand`)          |
+| `memberRoles`  | feature | no      | yes     | Promoting a member (`GroupMemberRoleCommand`)                |
 | `maxNotes`     | limit   | 10      | no cap  | Creating a note (`NoteCreateCommand`)                        |
 | `maxMembers`   | limit   | 3       | 50      | Not yet: no command adds a member until invitations (#131)   |
 | `storageBytes` | limit   | 50 MiB  | 10 GiB  | Not yet: the key ships for attachments (#157)                |
@@ -50,12 +50,23 @@ answers.
 A limit of `null` means no cap.
 
 **One check, on the command bus.** `apps/api/cqrs/entitlement-gate.ts` runs after the idempotency
-middleware, so a retry still gets its stored answer. `ENTITLEMENT_NEEDS`
+middleware, so a retry still gets its stored answer; `apps/api/cqrs/command-middleware.ts` holds
+that order, and its test fails if it changes. `ENTITLEMENT_NEEDS`
 (`apps/api/cqrs/entitlement-needs.ts`) lists each command that needs something from its group's
 plan. The gate reads the group's plan and refuses such a command before its handler runs. Queries
-pass untouched, and so does every command that is not listed. The gate judges only an actor whose
-role could run the command at all. A stranger still gets 404 and a viewer still gets 403 from the
-handler, so neither learns anything about the group's plan.
+pass untouched, and so does every command that is not listed.
+
+The gate judges a listed command only when the handler would carry it out on a plan that allows
+it. Anything the handler refuses on every plan goes on to the handler, which gives the same answer
+on Free as on Pro:
+
+- a stranger gets 404, and a viewer who tries to write gets 403;
+- an admin who tries to demote the owner gets 409 `LAST_OWNER`;
+- a role change for someone who has left the group gets 404 `MEMBER_NOT_FOUND`.
+
+**Only a promotion is a paid feature.** `memberRoles` gates a role change that raises the member's
+role. A group on any plan can give a member a lower role or remove them, so a group back on Free
+can still demote an admin it made on Pro.
 
 **The refusal.** The API answers **402 Payment Required**, so a client can tell a plan refusal from
 a role refusal (403):
@@ -88,7 +99,8 @@ it. A handler that gets no `allowance` throws, so a bus without the gate fails c
 
 **Downgrade.** Nothing is deleted when a group drops to a smaller plan. Everything over a cap stays
 readable, editable and deletable; only a write that adds to the count is refused, until the group
-is back under the cap or upgrades. A feature the new plan lacks is refused from then on.
+is back under the cap or upgrades. A feature the new plan lacks is refused from then on: members
+promoted on Pro keep their roles and can still be demoted or removed, but nobody new is promoted.
 
 **Billing off.** With `BILLING_PROVIDER=off` nobody can pay to lift a cap, so every group gets
 every feature with no cap (`UNLIMITED`). The settings page still shows the group as Free.
