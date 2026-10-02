@@ -18,6 +18,11 @@ export interface PullDependencies {
  * The notes of the open group are read only after the groups list is read, and only while that
  * group is still in it. A group that was deleted, or that the person left, is gone from the list,
  * so its notes are never requested (the server would answer "not found").
+ *
+ * The cost: the notes read waits for the groups read, which includes the deleted-groups fetch, and
+ * a groups read that fails rejects the pull before the notes are read. A failed groups read
+ * therefore skips the notes refresh of that pull; the next pull (the next hint, a reconnect)
+ * reads both again.
  */
 export function createPull(dependencies: PullDependencies) {
   const { userId, profile, selection, groups, notes } = dependencies

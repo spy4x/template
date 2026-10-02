@@ -393,6 +393,12 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    is `{ id, name }`; the picker and list show the role only; the seed and the dev add-member
    route no longer look at a kind.
 
+    The migration drops `groups.kind`, so the API that reads it must not run against the migrated
+    database and the new API must not run against the old one: migrate before the API starts. Compose
+    already does (migrations run on every start, before the API), so there is no rolling deploy and
+    nothing to add; a deploy that keeps the old API running while the new migration applies would
+    break it.
+
 ## Next steps, in dependency order
 
 Each is intended to be one small PR. Small PRs are an explicit requirement here.
