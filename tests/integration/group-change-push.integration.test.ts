@@ -15,6 +15,10 @@ interface IdRow extends postgres.Row {
 
 const SETTLE_MS = 5_000
 
+// NOTIFY is database-wide, not schema-wide. On Woodpecker the e2e-mpa step runs a worker against
+// the same database while this suite runs, so a listener also hears other processes' changes.
+// Every listener here keeps only the groups this test created.
+
 /** Runs `body` on a fresh schema built from schema.sql. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
   const connection = requireDbConnection()
@@ -70,10 +74,12 @@ Deno.test("a committed group change reaches its members' sockets as a hint", asy
     const stranger = await insertUser(sql)
 
     await t.step("the worker's publish reaches the API's listener with the sequence", async () => {
+      const groupId = crypto.randomUUID()
       const heard = next<{ groupId: string; sequence: number }>()
-      const stop = await listenForGroupChanges(sql, heard.push)
+      const stop = await listenForGroupChanges(sql, (change) => {
+        if (change.groupId === groupId) heard.push(change)
+      })
       try {
-        const groupId = crypto.randomUUID()
         await repository.create({ id: groupId, name: "Pushed" }, owner)
         const result = await processor.drainOnce()
 
@@ -86,12 +92,15 @@ Deno.test("a committed group change reaches its members' sockets as a hint", asy
 
     await t.step("a change that rolled back is never announced", async () => {
       await processor.drainOnce()
+      const rolledBackId = crypto.randomUUID()
       const announced: unknown[] = []
-      const stop = await listenForGroupChanges(sql, (change) => announced.push(change))
+      const stop = await listenForGroupChanges(sql, (change) => {
+        if (change.groupId === rolledBackId) announced.push(change)
+      })
       try {
         await expect(sql.begin(async (transaction: postgres.TransactionSql) => {
           await new PostgresGroupRepository(transaction).createFirst(
-            { id: crypto.randomUUID(), name: "Personal" },
+            { id: rolledBackId, name: "Personal" },
             stranger,
           )
           throw new Error("the sign-up fails after the group was written")
@@ -126,12 +135,13 @@ Deno.test("a committed group change reaches its members' sockets as a hint", asy
         socket.openFromPeer()
         realtime.attach(socket, buildAuthData({ user: { id: userId } }))
       }
+      const groupId = crypto.randomUUID()
       const heard = next<{ groupId: string; sequence: number }>()
       const stop = await listenForGroupChanges(sql, (change) => {
+        if (change.groupId !== groupId) return
         realtime.notifyGroupChange(change.groupId, change.sequence).then(() => heard.push(change))
       })
       try {
-        const groupId = crypto.randomUUID()
         await repository.create({ id: groupId, name: "Members only" }, owner)
         await processor.drainOnce()
         await heard.promise
