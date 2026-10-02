@@ -8,9 +8,12 @@ import { selectionStore } from "../state/selection.ts"
 export function GroupsView() {
   const store = groupsStore
   const [, navigate] = useLocation()
+  const working = store.working.value
+  const failure = store.actionError.value
   return (
     <GroupsScreen
       groups={store.groups.value}
+      deleted={store.deleted.value}
       selectedId={selectionStore.groupId.value}
       navigate={navigate}
       name={store.name.value}
@@ -20,6 +23,9 @@ export function GroupsView() {
       error={store.error.value}
       onCreate={() => void store.create()}
       onRefresh={() => void store.refreshFromUser()}
+      restoreError={failure?.action === "restore" ? failure.message : null}
+      restoringId={working?.action === "restore" ? working.groupId : null}
+      onRestore={(groupId) => void store.restore(groupId)}
       onOpen={(groupId) => {
         void selectionStore.select(groupId)
         navigate(NOTE_PATHS.list)

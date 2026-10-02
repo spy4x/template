@@ -119,7 +119,7 @@ async function seedGroup(sql: postgres.Sql) {
   const viewer = await insertUser(sql)
   const stranger = await insertUser(sql)
   const groupId = crypto.randomUUID()
-  await groups.createShared({ id: groupId, name: "Team" }, owner)
+  await groups.create({ id: groupId, name: "Team" }, owner)
   await sql`
     INSERT INTO group_members (group_id, user_id, role, added_by_user_id) VALUES
       (${groupId}, ${editor}, ${GroupRole.EDITOR}, ${owner}),

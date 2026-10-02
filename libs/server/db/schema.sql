@@ -115,7 +115,6 @@ COMMENT ON COLUMN users.mfa IS '1=not_configured, 2=confuration_not_finished, 3=
 
 CREATE TABLE groups (
     id UUID PRIMARY KEY,
-    kind INT2 NOT NULL,
     name VARCHAR(100) NOT NULL,
     owner_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     created_by_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -124,21 +123,15 @@ CREATE TABLE groups (
     created_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMPTZ,
-    CONSTRAINT groups_kind_check CHECK (kind = ANY (ARRAY[1, 2])),
     CONSTRAINT groups_name_check CHECK (length(btrim(name)) BETWEEN 1 AND 100),
     CONSTRAINT groups_authorization_revision_check CHECK (authorization_revision >= 1),
     CONSTRAINT groups_next_change_sequence_check CHECK (next_change_sequence >= 1)
 );
 
-COMMENT ON COLUMN groups.kind IS '1=personal, 2=shared';
-
-CREATE UNIQUE INDEX idx_groups_one_active_personal_per_user
-    ON groups (owner_user_id)
-    WHERE kind = 1 AND deleted_at IS NULL;
-CREATE INDEX idx_groups_kind_created_id ON groups (kind, created_at, id);
 CREATE INDEX idx_groups_updated_id_active
     ON groups (updated_at DESC, id)
     WHERE deleted_at IS NULL;
+CREATE INDEX idx_groups_deleted_at ON groups (deleted_at) WHERE deleted_at IS NOT NULL;
 
 CREATE TABLE group_members (
     group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -156,11 +149,6 @@ COMMENT ON COLUMN group_members.role IS '1=viewer, 2=editor, 3=admin, 4=owner';
 CREATE INDEX idx_group_members_user_group_role
     ON group_members (user_id, group_id) INCLUDE (role);
 CREATE INDEX idx_group_members_group_role ON group_members (group_id, role);
-
--- The personal-group invariant (exactly one member, the owner, with role 4) is
--- enforced by the repository inside the creating transaction, not by triggers.
--- idx_groups_one_active_personal_per_user still guarantees at most one active
--- personal group per user declaratively.
 
 CREATE TABLE user_totp (
     user_id INT4 PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -200,7 +188,7 @@ CREATE TABLE audit_events (
     id BIGSERIAL PRIMARY KEY,
     event_kind VARCHAR(64) NOT NULL,
     actor_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    group_id UUID NOT NULL REFERENCES groups(id) ON DELETE RESTRICT,
+    group_id UUID REFERENCES groups(id) ON DELETE SET NULL,
     request_id VARCHAR(100),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT audit_events_kind_check CHECK (length(btrim(event_kind)) BETWEEN 1 AND 64)

@@ -23,6 +23,8 @@ const MIGRATIONS = [
   "2026_01_27_0001_drop_user_profiles.sql",
   "2026_08_18_0001_group_core.sql",
   "2026_08_18_0002_personal_group_backfill.sql",
+  "2026_10_07_0001_group_kind_removed.sql",
+  "2026_10_08_0001_audit_outlives_group.sql",
 ]
 
 Deno.test({
@@ -174,8 +176,8 @@ async function seedUser(sql: postgres.Sql): Promise<number> {
 async function seedGroup(sql: postgres.Sql, userId: number): Promise<string> {
   const id = crypto.randomUUID()
   await sql`
-    INSERT INTO groups (id, kind, name, owner_user_id, created_by_user_id)
-    VALUES (${id}, 2, 'outbox fixture', ${userId}, ${userId})
+    INSERT INTO groups (id, name, owner_user_id, created_by_user_id)
+    VALUES (${id}, 'outbox fixture', ${userId}, ${userId})
   `
   await sql`
     INSERT INTO group_members (group_id, user_id, role, added_by_user_id)

@@ -12,6 +12,9 @@ import { handler as note } from "./routes/notes/[noteId]/index.tsx"
 import { handler as selectGroup } from "./routes/groups/select.ts"
 import { handler as groupsPage } from "./routes/groups/index.tsx"
 import { handler as groupSettings } from "./routes/groups/[groupId]/index.tsx"
+import { handler as renameGroup } from "./routes/groups/[groupId]/rename.ts"
+import { handler as deleteGroup } from "./routes/groups/[groupId]/delete.ts"
+import { handler as restoreGroup } from "./routes/groups/[groupId]/restore.ts"
 import { handler as oldNotes } from "./routes/groups/[groupId]/notes/index.tsx"
 import { handler as oldNote } from "./routes/groups/[groupId]/notes/[noteId]/index.tsx"
 import { pageMiddleware } from "./middleware.ts"
@@ -51,6 +54,9 @@ function appWith(fetch: typeof globalThis.fetch) {
     .post("/groups/select", selectGroup.POST!)
     .get("/groups", groupsPage.GET!)
     .get("/groups/:groupId", groupSettings.GET!)
+    .post("/groups/:groupId/rename", renameGroup.POST!)
+    .post("/groups/:groupId/delete", deleteGroup.POST!)
+    .post("/groups/:groupId/restore", restoreGroup.POST!)
     .get("/groups/:groupId/notes", oldNotes.GET!)
     .get("/groups/:groupId/notes/:noteId", oldNote.GET!)
     .post("/forgot-password", forgotPassword.POST!)
@@ -320,8 +326,8 @@ function notesApi(
     if (path === "/api/groups") {
       return Response.json({
         groups: [
-          { id: groupId, name: "Trip", kind: 2, role: 4 },
-          { id: otherGroupId, name: "Work", kind: 2, role: 1 },
+          { id: groupId, name: "Trip", role: 4 },
+          { id: otherGroupId, name: "Work", role: 1 },
         ],
         nextCursor: null,
       })
@@ -411,7 +417,7 @@ describe("the notes page", () => {
     const farId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111099"
     const { calls, fetch } = notesApi(farId, (path) => {
       if (path === `/api/groups/${farId}`) {
-        return Response.json({ group: { id: farId, name: "Far away", kind: 2, role: 4 } })
+        return Response.json({ group: { id: farId, name: "Far away", role: 4 } })
       }
       return notesList()
     })
@@ -567,7 +573,7 @@ describe("the groups pages", () => {
       groupId,
       (path) =>
         path === `/api/groups/${otherGroupId}`
-          ? Response.json({ group: { id: otherGroupId, name: "Work", kind: 2, role: 1 } })
+          ? Response.json({ group: { id: otherGroupId, name: "Work", role: 1 } })
           : notesList(),
     )
 
@@ -578,6 +584,162 @@ describe("the groups pages", () => {
     expect(html).toContain("Work")
     expect(html).toContain("Viewer")
     expect(html).not.toContain(">Selected<")
+  })
+
+  const settings = (path: string, method: string) => {
+    if (path === `/api/groups/${groupId}` && method === "GET") {
+      return Response.json({ group: { id: groupId, name: "Trip", role: 4 } })
+    }
+    return notesList()
+  }
+  const refusal = (status: number, code: string, message: string) =>
+    Response.json({ error: { code, message } }, { status })
+
+  it("gives the owner the rename form and the delete section on a group's settings", async () => {
+    const { fetch } = notesApi(groupId, settings)
+
+    const html = await (await get(fetch, `/groups/${groupId}`)).text()
+
+    expect(html).toContain(`action="/groups/${groupId}/rename"`)
+    expect(html).toContain(`action="/groups/${groupId}/delete"`)
+  })
+
+  it("shows a viewer neither the rename form nor the delete section", async () => {
+    const { fetch } = notesApi(
+      groupId,
+      (path) =>
+        path === `/api/groups/${otherGroupId}`
+          ? Response.json({ group: { id: otherGroupId, name: "Work", role: 1 } })
+          : notesList(),
+    )
+
+    const html = await (await get(fetch, `/groups/${otherGroupId}`)).text()
+
+    expect(html).not.toContain("/rename")
+    expect(html).not.toContain("/delete")
+  })
+
+  it("renames through PATCH with the form's name and returns to the settings page", async () => {
+    const { calls, fetch } = notesApi(groupId, () => Response.json({ group: {} }))
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/rename`, { name: "Trek" }),
+      info,
+    )
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe(`/groups/${groupId}`)
+    expect(calls.filter((call) => call.method === "PATCH")).toEqual([
+      { method: "PATCH", path: `/api/groups/${groupId}`, body: { name: "Trek" } },
+    ])
+  })
+
+  it("shows a refused rename on the settings page, with the typed name kept", async () => {
+    const { fetch } = notesApi(
+      groupId,
+      (path, method) =>
+        method === "PATCH"
+          ? refusal(403, "ROLE_INSUFFICIENT", "Group role is insufficient")
+          : settings(path, method),
+    )
+
+    const response = await appWith(fetch)(
+      formPost(`/groups/${groupId}/rename`, { name: "Trek" }),
+      info,
+    )
+    const html = await response.text()
+
+    expect(response.status).toBe(403)
+    expect(html).toContain("Group role is insufficient")
+    expect(html).toContain('value="Trek"')
+  })
+
+  it("deletes through DELETE and shows the groups page, where the group can be restored", async () => {
+    const { calls, fetch } = notesApi(groupId, () => Response.json({ group: {} }))
+
+    const response = await appWith(fetch)(formPost(`/groups/${groupId}/delete`, {}), info)
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe("/groups")
+    expect(calls.filter((call) => call.method === "DELETE").map((call) => call.path))
+      .toEqual([`/api/groups/${groupId}`])
+  })
+
+  it("shows why a delete was refused on the settings page, with the section open", async () => {
+    const { fetch } = notesApi(
+      groupId,
+      (path, method) =>
+        method === "DELETE"
+          ? refusal(409, "LAST_GROUP", "A person must keep at least one group")
+          : settings(path, method),
+    )
+
+    const response = await appWith(fetch)(formPost(`/groups/${groupId}/delete`, {}), info)
+    const html = await response.text()
+
+    expect(response.status).toBe(409)
+    expect(html).toContain("A person must keep at least one group")
+    expect(html).toMatch(/<details[^>]* open/)
+  })
+
+  it("disables the delete button on the settings page of the person's only group", async () => {
+    const { fetch } = fakeApi((path) => {
+      if (path === "/api/auth/me") return Response.json({ firstName: "Ada", lastName: "", mfa: 1 })
+      if (path === "/api/groups") {
+        return Response.json({ groups: [{ id: groupId, name: "Trip", role: 4 }], nextCursor: null })
+      }
+      if (path === "/api/groups/selected") return Response.json({ groupId, version: 1 })
+      return Response.json({ group: { id: groupId, name: "Trip", role: 4 } })
+    })
+
+    const html = await (await get(fetch, `/groups/${groupId}`)).text()
+
+    expect(html).toContain("This is your only group, so it cannot be deleted.")
+    expect(html).not.toContain(`action="/groups/${groupId}/delete"`)
+  })
+
+  it("lists the groups that can still be restored, each with a restore form", async () => {
+    const { fetch } = notesApi(groupId, (path) =>
+      path === "/api/groups/deleted"
+        ? Response.json({
+          groups: [{
+            id: farGroupId,
+            name: "Old trip",
+            role: 4,
+            deletedAt: "2026-10-01T00:00:00Z",
+          }],
+        })
+        : notesList())
+
+    const html = await (await get(fetch, "/groups")).text()
+
+    expect(html).toContain("Old trip")
+    expect(html).toContain(`action="/groups/${farGroupId}/restore"`)
+  })
+
+  it("restores through POST and shows the groups page", async () => {
+    const { calls, fetch } = notesApi(groupId, () => Response.json({ group: {} }))
+
+    const response = await appWith(fetch)(formPost(`/groups/${farGroupId}/restore`, {}), info)
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe("/groups")
+    expect(calls.filter((call) => call.path.endsWith("/restore"))).toEqual([
+      { method: "POST", path: `/api/groups/${farGroupId}/restore`, body: null },
+    ])
+  })
+
+  it("shows why a restore was refused on the groups page", async () => {
+    const { fetch } = notesApi(
+      groupId,
+      (_path, method) =>
+        method === "POST" ? refusal(404, "GROUP_NOT_FOUND", "Group not found") : notesList(),
+    )
+
+    const response = await appWith(fetch)(formPost(`/groups/${farGroupId}/restore`, {}), info)
+
+    expect(response.status).toBe(404)
+    expect(await response.text()).toContain("Group not found")
   })
 
   it("answers 404 for a group the person does not belong to", async () => {

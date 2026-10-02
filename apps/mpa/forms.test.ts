@@ -22,11 +22,15 @@ describe("API_BODIES", () => {
     ).toEqual({ email: "ada@example.com", code: "c", newPassword: "pw" })
   })
 
-  it("sends a note's version and a group's kind as numbers, the way the API's schema takes them", () => {
+  it("sends a note's version as a number, the way the API's schema takes it", () => {
     expect(API_BODIES.noteUpdate(form({ title: "T", body: "B", version: "3" })))
       .toEqual({ title: "T", body: "B", version: 3 })
-    expect(API_BODIES.groupCreate(form({ id: "g", kind: "2", name: "Trip" })))
-      .toEqual({ id: "g", kind: 2, name: "Trip" })
+  })
+
+  it("sends a group's create and rename as the API's schema names the fields", () => {
+    expect(API_BODIES.groupCreate(form({ id: "g", name: "Trip", kind: "2" })))
+      .toEqual({ id: "g", name: "Trip" })
+    expect(API_BODIES.groupRename(form({ name: "Trek", extra: "x" }))).toEqual({ name: "Trek" })
   })
 
   it("leaves a version that is not a whole number for the API to refuse", () => {

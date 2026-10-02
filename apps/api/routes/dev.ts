@@ -5,7 +5,7 @@ import { validate } from "@spy4x/validation"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import { normalizeEmail } from "@spy4x/server/auth"
 import { authEmailSchema, authLoginSchema } from "@domain/identity"
-import { GroupKind, GroupRole } from "@domain/groups"
+import { GroupRole } from "@domain/groups"
 import { type } from "arktype"
 import type { Sql, Transaction } from "@spy4x/server/db"
 import type { AppDbBase } from "@api/services/db-base.ts"
@@ -79,8 +79,7 @@ export function createDevRoute(deps: DevRouteDeps) {
         INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
         SELECT groups.id, ${key.userId}, ${role}, groups.owner_user_id
         FROM groups
-        WHERE groups.id = ${groupId} AND groups.kind = ${GroupKind.SHARED}
-          AND groups.deleted_at IS NULL
+        WHERE groups.id = ${groupId} AND groups.deleted_at IS NULL
         ON CONFLICT (group_id, user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()
           WHERE group_members.role <> ${GroupRole.OWNER}
         RETURNING user_id
@@ -91,7 +90,7 @@ export function createDevRoute(deps: DevRouteDeps) {
           WHERE group_id = ${groupId} AND user_id = ${key.userId} AND role = ${GroupRole.OWNER}
         `
         if (owner.length > 0) return c.json({ error: "The owner's role is not changed here" }, 409)
-        return c.json({ error: "No such shared group" }, 404)
+        return c.json({ error: "No such group" }, 404)
       }
       return c.json({ success: true })
     })

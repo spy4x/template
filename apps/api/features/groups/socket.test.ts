@@ -1,6 +1,6 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
-import { GroupCreateCommand, GroupError, GroupKind, GroupRole } from "@domain/groups"
+import { GroupCreateCommand, GroupError, GroupRole } from "@domain/groups"
 import type {
   GroupGetQuery,
   GroupListQuery,
@@ -24,6 +24,14 @@ const actor = {
 
 const signal = new AbortController().signal
 
+/** The rename, delete and restore requests, which these tests never call. */
+const UNUSED_GROUP_CHANGES = {
+  rename: () => Promise.reject(new Error("not used")),
+  delete: () => Promise.reject(new Error("not used")),
+  restore: () => Promise.reject(new Error("not used")),
+  deleted: () => Promise.reject(new Error("not used")),
+}
+
 function harness() {
   const seen: {
     command: GroupCreateCommand | null
@@ -45,7 +53,6 @@ function harness() {
         created: true,
         group: {
           id,
-          kind: GroupKind.SHARED,
           name: command.data.name,
           role: GroupRole.OWNER,
           authorizationRevision: "1",
@@ -59,7 +66,6 @@ function harness() {
       return Promise.resolve({
         group: {
           id: query.data.groupId,
-          kind: GroupKind.SHARED,
           name: "Team",
           role: GroupRole.VIEWER,
           authorizationRevision: "1",
@@ -76,6 +82,7 @@ function harness() {
       seen.selected = query
       return Promise.resolve({ groupId: id, version: 2 })
     },
+    ...UNUSED_GROUP_CHANGES,
     list(query) {
       seen.query = query
       return Promise.resolve({ groups: [], nextPageKey: { updatedAt: new Date(0), id } })
@@ -104,13 +111,12 @@ describe("group socket requests", () => {
       requestId: "req-1",
       signal,
       idempotencyKey: "key-1",
-      payload: { id, kind: GroupKind.SHARED, name: " Team " },
+      payload: { id, name: " Team " },
     })
 
     expect(seen.command?.data).toEqual({
       actor,
       id,
-      kind: GroupKind.SHARED,
       name: "Team",
       requestId: "req-1",
       idempotencyKey: "key-1",
@@ -125,7 +131,7 @@ describe("group socket requests", () => {
       requestId: "req-1",
       signal,
       idempotencyKey: "key-1",
-      payload: { id, kind: GroupKind.SHARED, name: "Team", userId: 999 },
+      payload: { id, name: "Team", userId: 999 },
     })).rejects.toBeInstanceOf(GroupError)
     expect(seen.command).toBe(null)
   })
@@ -169,7 +175,6 @@ describe("group socket requests", () => {
           groupId === ownGroup && userId === 19
             ? {
               id: ownGroup,
-              kind: GroupKind.SHARED,
               name: "Team",
               role: GroupRole.OWNER,
               authorizationRevision: "1",
@@ -185,6 +190,7 @@ describe("group socket requests", () => {
       get: handler,
       select: () => Promise.reject(new Error("not used")),
       selected: () => Promise.reject(new Error("not used")),
+      ...UNUSED_GROUP_CHANGES,
       cursor: { encode: () => Promise.resolve(""), decode: () => Promise.reject(new Error("x")) },
     })
     const ask = async (groupId: string) => {
@@ -313,4 +319,83 @@ describe("group.list payload", () => {
       expect(() => parseListPayload(payload)).toThrow(GroupError)
     })
   }
+})
+
+describe("group changes over the socket", () => {
+  /** The three commands, each recording what the socket dispatched to it. */
+  function changes() {
+    const seen: { name: string; data: object }[] = []
+    const record = (name: string) => (command: { data: object }) => {
+      seen.push({ name, data: command.data })
+      return Promise.resolve({
+        group: {
+          id,
+          name: "Team",
+          role: GroupRole.OWNER,
+          authorizationRevision: "1",
+          changeSequence: "1",
+          updatedAt: new Date(0),
+          deletedAt: new Date(0),
+        },
+      })
+    }
+    const requests = createGroupSocketRequests({
+      create: () => Promise.reject(new Error("not used")),
+      list: () => Promise.reject(new Error("not used")),
+      get: () => Promise.reject(new Error("not used")),
+      select: () => Promise.reject(new Error("not used")),
+      selected: () => Promise.reject(new Error("not used")),
+      cursor: {
+        encode: () => Promise.reject(new Error("not used")),
+        decode: () => Promise.reject(),
+      },
+      rename: record("rename"),
+      delete: record("delete"),
+      restore: record("restore"),
+      deleted: () => Promise.resolve({ groups: [] }),
+    })
+    return { requests, seen }
+  }
+
+  const call = { actor, requestId: "req-1", signal, idempotencyKey: "key-1" }
+
+  it("declares rename, delete and restore as commands and the deleted list as a query", () => {
+    const { requests } = changes()
+
+    expect(requests["group.rename"].kind).toBe("command")
+    expect(requests["group.delete"].kind).toBe("command")
+    expect(requests["group.restore"].kind).toBe("command")
+    expect(requests["group.deleted"].kind).toBe("query")
+  })
+
+  it("dispatches each command with the actor, group, request id and idempotency key", async () => {
+    const { requests, seen } = changes()
+
+    await requests["group.rename"].handle({ ...call, payload: { groupId: id, name: " Trip " } })
+    await requests["group.delete"].handle({ ...call, payload: { groupId: id } })
+    await requests["group.restore"].handle({ ...call, payload: { groupId: id } })
+
+    const common = { actor, groupId: id, requestId: "req-1", idempotencyKey: "key-1" }
+    expect(seen).toEqual([
+      { name: "rename", data: { ...common, name: "Trip" } },
+      { name: "delete", data: common },
+      { name: "restore", data: common },
+    ])
+  })
+
+  it("refuses a payload with fields it does not know, before any command runs", async () => {
+    const { requests, seen } = changes()
+
+    for (
+      const [name, payload] of [
+        ["group.rename", { groupId: id, name: "Trip", userId: 999 }],
+        ["group.rename", { groupId: id }],
+        ["group.delete", { groupId: id, force: true }],
+        ["group.restore", {}],
+      ] as const
+    ) {
+      await expect(requests[name].handle({ ...call, payload })).rejects.toBeInstanceOf(GroupError)
+    }
+    expect(seen).toEqual([])
+  })
 })

@@ -74,7 +74,7 @@ Deno.test("a committed group change reaches its members' sockets as a hint", asy
       const stop = await listenForGroupChanges(sql, heard.push)
       try {
         const groupId = crypto.randomUUID()
-        await repository.createShared({ id: groupId, name: "Pushed" }, owner)
+        await repository.create({ id: groupId, name: "Pushed" }, owner)
         const result = await processor.drainOnce()
 
         expect(result.failed).toBe(0)
@@ -90,7 +90,7 @@ Deno.test("a committed group change reaches its members' sockets as a hint", asy
       const stop = await listenForGroupChanges(sql, (change) => announced.push(change))
       try {
         await expect(sql.begin(async (transaction: postgres.TransactionSql) => {
-          await new PostgresGroupRepository(transaction).createPersonal(
+          await new PostgresGroupRepository(transaction).createFirst(
             { id: crypto.randomUUID(), name: "Personal" },
             stranger,
           )
@@ -110,7 +110,7 @@ Deno.test("a committed group change reaches its members' sockets as a hint", asy
     await t.step("the hint goes to the owner's socket and to nobody else's", async () => {
       // The stranger belongs to a group of their own, so "not a member of this group" is what
       // keeps the owner's hint from them, not "not a member of any group".
-      await repository.createShared({ id: crypto.randomUUID(), name: "Not shared" }, stranger)
+      await repository.create({ id: crypto.randomUUID(), name: "Not shared" }, stranger)
       await processor.drainOnce()
       const clock = new FakeClock()
       const realtime = new Realtime({
@@ -132,7 +132,7 @@ Deno.test("a committed group change reaches its members' sockets as a hint", asy
       })
       try {
         const groupId = crypto.randomUUID()
-        await repository.createShared({ id: groupId, name: "Members only" }, owner)
+        await repository.create({ id: groupId, name: "Members only" }, owner)
         await processor.drainOnce()
         await heard.promise
         await drainMicrotasks()

@@ -3,14 +3,12 @@ import { describe, it } from "@std/testing/bdd"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { type Actor, UserMFAStatus } from "@domain/identity"
 import {
-  CreatePersonalGroupInput,
-  CreateSharedGroupInput,
-  Group,
+  CreateGroupInput,
+  FirstGroupInput,
   GroupAccess,
   GroupCreateCommand,
   GroupError,
   GroupGetQuery,
-  GroupKind,
   GroupListQuery,
   GroupRepository,
   GroupRole,
@@ -31,7 +29,6 @@ import {
 const now = new Date("2026-08-18T10:00:00.000Z")
 const summary: GroupSummary = {
   id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001",
-  kind: GroupKind.SHARED,
   name: "Team",
   role: GroupRole.OWNER,
   authorizationRevision: "1",
@@ -60,16 +57,36 @@ class FakeGroupRepository implements GroupRepository {
     return Promise.resolve(null)
   }
 
-  createShared(input: CreateSharedGroupInput, actorId: number) {
+  create(input: CreateGroupInput, actorId: number) {
     this.createActorId = actorId
     return Promise.resolve({ group: { ...summary, id: input.id, name: input.name }, created: true })
   }
 
-  createPersonal(_input: CreatePersonalGroupInput, _userId: number): Promise<Group> {
+  createFirst(_input: FirstGroupInput, _userId: number): Promise<void> {
     throw new Error("Not used")
   }
 
-  ensurePersonal(_input: CreatePersonalGroupInput, _userId: number): Promise<Group> {
+  ensureFirst(_input: FirstGroupInput, _userId: number): Promise<void> {
+    throw new Error("Not used")
+  }
+
+  getRestorableForMember(): Promise<GroupAccess | null> {
+    throw new Error("Not used")
+  }
+
+  rename(): Promise<GroupSummary | null> {
+    throw new Error("Not used")
+  }
+
+  softDelete(): Promise<never> {
+    throw new Error("Not used")
+  }
+
+  restore(): Promise<GroupSummary | null> {
+    throw new Error("Not used")
+  }
+
+  listRestorable(): Promise<never[]> {
     throw new Error("Not used")
   }
 
@@ -105,7 +122,6 @@ describe("group CQRS handlers", () => {
       new GroupCreateCommand({
         actor: actor(42),
         id: summary.id,
-        kind: GroupKind.SHARED,
         name: "Team",
       }),
     )

@@ -5,7 +5,6 @@ import { gotoApp, signIn } from "./fixtures/app.ts"
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 const password = "Passw0rd!"
-const SHARED_GROUP = 2
 
 async function cleanup(request: APIRequestContext, email: string): Promise<void> {
   const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
@@ -33,7 +32,7 @@ async function groupWithNote(page: Page, name: string, title: string) {
   const noteId = crypto.randomUUID()
   const group = await page.request.post(`${apiBase}/api/groups`, {
     headers,
-    data: { id: groupId, kind: SHARED_GROUP, name },
+    data: { id: groupId, name },
   })
   expect(group.status(), await group.text()).toBe(201)
   const note = await page.request.post(`${apiBase}/api/groups/${groupId}/notes`, {

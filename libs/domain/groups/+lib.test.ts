@@ -1,21 +1,33 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import {
+  assertCanDelete,
+  assertCanRename,
   assertOwnerRemains,
-  assertPersonalInvariant,
+  canDelete,
   canManageMember,
   canMutateNotes,
   canRead,
+  canRename,
   GroupError,
-  GroupKind,
   GroupRole,
-  parseCreateSharedGroupRequest,
+  parseCreateGroupRequest,
+  parseGroupIdRequest,
+  parseRenameGroupBody,
+  parseRenameGroupRequest,
 } from "./+lib.ts"
+
+/** The code of the `GroupError` `run` throws, or `undefined` when it throws nothing. */
+function codeOf(run: () => void): string | undefined {
+  try {
+    run()
+  } catch (error) {
+    return (error as GroupError).code
+  }
+}
 
 describe("group domain", () => {
   it("keeps fixed v1 enum values", () => {
-    expect(GroupKind.PERSONAL).toBe(1)
-    expect(GroupKind.SHARED).toBe(2)
     expect(GroupRole.VIEWER).toBe(1)
     expect(GroupRole.EDITOR).toBe(2)
     expect(GroupRole.ADMIN).toBe(3)
@@ -62,46 +74,82 @@ describe("group domain", () => {
     expect(() => assertOwnerRemains(0)).toThrow(GroupError)
   })
 
-  it("blocks personal-group governance mutations", () => {
-    const operations = [
-      "delete",
-      "invite",
-      "manual-create",
-      "remove-owner",
-      "transfer-owner",
-    ] as const
-    for (const operation of operations) {
-      expect(() => assertPersonalInvariant({ kind: GroupKind.PERSONAL }, operation)).toThrow(
-        GroupError,
-      )
+  it("lets only an admin or the owner rename a group", () => {
+    expect([GroupRole.VIEWER, GroupRole.EDITOR, GroupRole.ADMIN, GroupRole.OWNER].map(canRename))
+      .toEqual([false, false, true, true])
+    expect(() => assertCanRename(GroupRole.ADMIN)).not.toThrow()
+    expect(() => assertCanRename(GroupRole.OWNER)).not.toThrow()
+    for (const role of [GroupRole.VIEWER, GroupRole.EDITOR]) {
+      expect(codeOf(() => assertCanRename(role))).toBe("ROLE_INSUFFICIENT")
     }
-    expect(() => assertPersonalInvariant({ kind: GroupKind.SHARED }, "invite")).not.toThrow()
   })
 
-  it("parses only strict shared-group create intent", () => {
-    expect(parseCreateSharedGroupRequest({
+  it("lets only the owner delete or restore a group", () => {
+    expect([GroupRole.VIEWER, GroupRole.EDITOR, GroupRole.ADMIN, GroupRole.OWNER].map(canDelete))
+      .toEqual([false, false, false, true])
+    expect(() => assertCanDelete(GroupRole.OWNER)).not.toThrow()
+    for (const role of [GroupRole.VIEWER, GroupRole.EDITOR, GroupRole.ADMIN]) {
+      expect(codeOf(() => assertCanDelete(role))).toBe("ROLE_INSUFFICIENT")
+    }
+  })
+
+  it("tells a non-member the group does not exist, whatever they tried", () => {
+    for (const assert of [assertCanRename, assertCanDelete]) {
+      expect(codeOf(() => assert(null))).toBe("GROUP_NOT_FOUND")
+    }
+  })
+
+  it("parses only strict group create intent", () => {
+    expect(parseCreateGroupRequest({
       id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001",
-      kind: 2,
       name: "  Team  ",
     })).toEqual({
       id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001",
-      kind: GroupKind.SHARED,
       name: "Team",
     })
   })
 
-  it("rejects personal, malformed, uppercase, empty, long, and extra create data", () => {
+  it("still accepts and ignores kind 2 from a page cached before the kind was dropped", () => {
+    const id = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
+
+    expect(parseCreateGroupRequest({ id, name: "Team", kind: 2 })).toEqual({ id, name: "Team" })
+  })
+
+  it("rejects malformed, uppercase, empty, long, and extra create data", () => {
     const id = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
     const invalid = [
-      { id, kind: GroupKind.PERSONAL, name: "Personal" },
-      { id: "not-a-uuid", kind: GroupKind.SHARED, name: "Team" },
-      { id: id.toUpperCase(), kind: GroupKind.SHARED, name: "Team" },
-      { id, kind: GroupKind.SHARED, name: "  " },
-      { id, kind: GroupKind.SHARED, name: "x".repeat(101) },
-      { id, kind: GroupKind.SHARED, name: "Team", userId: 99 },
+      { id: "not-a-uuid", name: "Team" },
+      { id: id.toUpperCase(), name: "Team" },
+      { id, name: "  " },
+      { id, name: "x".repeat(101) },
+      { id, name: "Team", userId: 99 },
+      { id, name: "Team", kind: 1 },
+      { id, name: "Team", kind: 2, userId: 99 },
     ]
     for (const value of invalid) {
-      expect(() => parseCreateSharedGroupRequest(value)).toThrow(GroupError)
+      expect(() => parseCreateGroupRequest(value)).toThrow(GroupError)
     }
+  })
+
+  it("parses a rename as exactly a trimmed name, with the group id for the socket", () => {
+    const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
+    expect(parseRenameGroupBody({ name: "  Trip  " })).toEqual({ name: "Trip" })
+    expect(parseRenameGroupRequest({ groupId, name: "Trip" })).toEqual({ groupId, name: "Trip" })
+    for (const value of [{}, { name: "" }, { name: "x".repeat(101) }, { name: 5 }]) {
+      expect(() => parseRenameGroupBody(value)).toThrow(GroupError)
+    }
+    for (const value of [{ name: "Trip" }, { groupId, name: " " }, { groupId, name: "a", x: 1 }]) {
+      expect(() => parseRenameGroupRequest(value)).toThrow(GroupError)
+    }
+    expect(() => parseRenameGroupBody({ name: "Trip", groupId })).toThrow(GroupError)
+  })
+
+  it("parses a request that names one group as exactly its lowercase id", () => {
+    const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
+    expect(parseGroupIdRequest({ groupId })).toEqual({ groupId })
+    for (const value of [{}, { groupId: "nope" }, { groupId: groupId.toUpperCase() }]) {
+      expect(() => parseGroupIdRequest(value)).toThrow(GroupError)
+    }
+    expect(() => parseGroupIdRequest({ groupId, name: "x" })).toThrow(GroupError)
   })
 })

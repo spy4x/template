@@ -13,7 +13,7 @@ import {
   NoteVersionConflictError,
   type NoteWriteResult,
 } from "@domain/notes"
-import { recordGroupChange } from "@server/groups/group-change-log.ts"
+import { GroupNotActiveError, recordGroupChange } from "@server/groups/group-change-log.ts"
 
 interface NoteRow extends postgres.Row, Note {}
 
@@ -25,6 +25,26 @@ interface DeletedRow extends postgres.Row {
   id: string
   groupId: string
   version: number
+}
+
+/**
+ * Records a note's change on its group. A group deleted since the role check is answered as a
+ * missing group, and the note write rolls back with it.
+ */
+async function recordNoteChange(
+  sql: postgres.Sql,
+  groupId: string,
+  actorId: number,
+  eventKind: string,
+): Promise<string> {
+  try {
+    return await recordGroupChange(sql, groupId, actorId, eventKind)
+  } catch (error) {
+    if (error instanceof GroupNotActiveError) {
+      throw new NoteError("GROUP_NOT_FOUND", "Group not found")
+    }
+    throw error
+  }
 }
 
 /**
@@ -148,7 +168,7 @@ export class PostgresNoteRepository implements NoteRepository {
         `
       )[0]
       if (!deleted) return await repository.refuseStaleWrite(input.groupId, input.id)
-      const sequence = await recordGroupChange(
+      const sequence = await recordNoteChange(
         transaction,
         input.groupId,
         actorId,
@@ -174,7 +194,7 @@ export class PostgresNoteRepository implements NoteRepository {
     actorId: number,
     eventKind: string,
   ): Promise<Note> {
-    const sequence = await recordGroupChange(this.sql, groupId, actorId, eventKind)
+    const sequence = await recordNoteChange(this.sql, groupId, actorId, eventKind)
     const row = (
       await this.sql<NoteRow[]>`
         UPDATE notes SET change_sequence = ${sequence}::bigint

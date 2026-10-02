@@ -12,14 +12,14 @@ import { Window } from "happy-dom"
 import { render, type VNode } from "preact"
 import { act } from "preact/test-utils"
 import { UserMFAStatus, type UserPushTokenPublic } from "@domain/identity"
-import { GroupKind, GroupRole } from "@domain/groups"
+import { GroupRole } from "@domain/groups"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
 import { GroupSettingsScreen } from "./group-settings-screen.tsx"
 import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
 import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
-import { FORM_ACTIONS, NOTE_PATHS } from "./progressive.tsx"
+import { FORM_ACTIONS, GROUP_PATHS, NOTE_PATHS } from "./progressive.tsx"
 import {
   ForgotPasswordScreen,
   type ForgotPasswordScreenProps,
@@ -462,7 +462,7 @@ describe("NoteEditorScreen in the browser", () => {
 })
 
 const groupsDefaults: GroupsScreenProps = {
-  groups: [{ id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER }],
+  groups: [{ id: "g-1", name: "Home", role: GroupRole.OWNER }],
   selectedId: "g-1",
   name: "",
   creating: false,
@@ -504,7 +504,7 @@ describe("GroupsScreen in the browser", () => {
 
   it("opens a group's notes through the app's callback, and posts natively without one", async () => {
     const open = spy<[string]>()
-    const groups = [{ id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER }]
+    const groups = [{ id: "g-1", name: "Home", role: GroupRole.OWNER }]
     await mount(<GroupsScreen {...groupsDefaults} groups={groups} onOpen={open.fn} />)
 
     expect(await submit(FORM_ACTIONS.groupSelect)).toBe(true)
@@ -512,6 +512,30 @@ describe("GroupsScreen in the browser", () => {
 
     await rerender(<GroupsScreen {...groupsDefaults} groups={groups} />)
     expect(await submit(FORM_ACTIONS.groupSelect)).toBe(false)
+  })
+  it("moves focus to the message when a restore is refused", async () => {
+    const deleted = [{ id: "d-1", name: "Old trip", deletedAt: "2026-10-01T12:00:00.000Z" }]
+    const screen = (restoreError: string | null) => (
+      <GroupsScreen {...groupsDefaults} deleted={deleted} restoreError={restoreError} />
+    )
+    await mount(screen(null))
+    expect(focused()).not.toBe("group-restore-error")
+
+    await rerender(screen("Group not found"))
+
+    expect(focused()).toBe("group-restore-error")
+  })
+
+  it("restores a deleted group through the app's callback, and posts natively without one", async () => {
+    const restore = spy<[string]>()
+    const deleted = [{ id: "d-1", name: "Old trip", deletedAt: "2026-10-01T12:00:00.000Z" }]
+    await mount(<GroupsScreen {...groupsDefaults} deleted={deleted} onRestore={restore.fn} />)
+
+    expect(await submit(GROUP_PATHS.restore("d-1"))).toBe(true)
+    expect(restore.calls).toEqual([["d-1"]])
+
+    await rerender(<GroupsScreen {...groupsDefaults} deleted={deleted} />)
+    expect(await submit(GROUP_PATHS.restore("d-1"))).toBe(false)
   })
 })
 
@@ -614,7 +638,7 @@ describe("GroupsScreen links in the browser", () => {
 })
 
 describe("GroupSettingsScreen in the browser", () => {
-  const group = { id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER }
+  const group = { id: "g-1", name: "Home", role: GroupRole.OWNER }
 
   it("opens the group's notes through the app's callback, and posts natively without one", async () => {
     const open = spy<[string]>()
@@ -627,5 +651,82 @@ describe("GroupSettingsScreen in the browser", () => {
 
     await rerender(<GroupSettingsScreen group={group} selected={false} loading={false} />)
     expect(await submit(FORM_ACTIONS.groupSelect)).toBe(false)
+  })
+
+  it("reports the typed name and renames through the app's callbacks, and posts natively without them", async () => {
+    const name = spy<[string]>()
+    const rename = spy<[]>()
+    const screen = (props: Partial<Parameters<typeof GroupSettingsScreen>[0]> = {}) => (
+      <GroupSettingsScreen group={group} selected={false} loading={false} {...props} />
+    )
+    await mount(screen({ onNameChange: name.fn, onRename: rename.fn }))
+
+    await type("[data-e2e=group-rename-name]", "Trip")
+    expect(name.calls).toEqual([["Trip"]])
+    expect(await submit(GROUP_PATHS.rename("g-1"))).toBe(true)
+    expect(rename.calls).toHaveLength(1)
+
+    await rerender(screen())
+    expect(await submit(GROUP_PATHS.rename("g-1"))).toBe(false)
+  })
+
+  it("moves focus to the name field when a rename is refused", async () => {
+    const screen = (renameError: string | null) => (
+      <GroupSettingsScreen
+        group={group}
+        selected={false}
+        loading={false}
+        renameError={renameError}
+      />
+    )
+    await mount(screen(null))
+    expect(focused()).not.toBe("group-rename-name")
+
+    await rerender(screen("Only an admin can"))
+
+    expect(focused()).toBe("group-rename-name")
+  })
+
+  it("moves focus to the message when a delete is refused", async () => {
+    const screen = (deleteError: string | null) => (
+      <GroupSettingsScreen
+        group={group}
+        selected={false}
+        loading={false}
+        deleteError={deleteError}
+      />
+    )
+    await mount(screen(null))
+    expect(focused()).not.toBe("group-delete-error")
+
+    await rerender(screen("Only the owner can delete a group"))
+
+    expect(focused()).toBe("group-delete-error")
+  })
+
+  it("deletes through the app's callback, refuses a second delete while one is pending, and posts natively without it", async () => {
+    const del = spy<[]>()
+    const screen = (props: Partial<Parameters<typeof GroupSettingsScreen>[0]> = {}) => (
+      <GroupSettingsScreen group={group} selected={false} loading={false} {...props} />
+    )
+    await mount(screen({ onDelete: del.fn }))
+    expect(await submit(GROUP_PATHS.delete("g-1"))).toBe(true)
+    expect(del.calls).toHaveLength(1)
+
+    await rerender(screen({ onDelete: del.fn, deleting: true }))
+    expect(await submit(GROUP_PATHS.delete("g-1"))).toBe(true)
+    expect(del.calls).toHaveLength(1)
+
+    await rerender(screen())
+    expect(await submit(GROUP_PATHS.delete("g-1"))).toBe(false)
+  })
+
+  it("lets nothing delete the only group: the button is disabled and no form is there", async () => {
+    await mount(
+      <GroupSettingsScreen group={group} selected={false} loading={false} isLastGroup />,
+    )
+
+    expect(find<HTMLButtonElement>("[data-e2e=group-delete]").disabled).toBe(true)
+    expect(root?.querySelector(`form[action="${GROUP_PATHS.delete("g-1")}"]`)).toBeNull()
   })
 })

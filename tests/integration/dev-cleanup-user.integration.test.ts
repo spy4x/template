@@ -129,7 +129,7 @@ Deno.test("dev cleanup-user route", async (t) => {
   await withSchema(async (sql) => {
     const app = buildApp(sql, true)
 
-    await t.step("deletes a signed-up user with their personal group", async () => {
+    await t.step("deletes a signed-up user with their first group", async () => {
       const userId = await signUp(app, "personal-only")
       const personal = await sql<
         GroupIdRow[]
@@ -148,8 +148,8 @@ Deno.test("dev cleanup-user route", async (t) => {
 
     await t.step("deletes the shared groups the user created, with their events", async () => {
       const userId = await signUp(app, "shared-owner")
-      await app.db.group.createShared({ id: crypto.randomUUID(), name: "Team" }, userId)
-      // One event for the personal group made at sign-up, one for the shared group.
+      await app.db.group.create({ id: crypto.randomUUID(), name: "Team" }, userId)
+      // One event for the first group made at sign-up, one for the shared group.
       expect((await rowsOf(sql, userId)).outbox_events).toBe(2)
 
       const response = await app.post("/test/cleanup-user", { login: "shared-owner@example.com" })
@@ -195,7 +195,7 @@ Deno.test("dev cleanup-user route", async (t) => {
       const ownerId = await signUp(app, "notes-owner")
       const writerId = await signUp(app, "notes-writer")
       const groupId = crypto.randomUUID()
-      await app.db.group.createShared({ id: groupId, name: "Notes" }, ownerId)
+      await app.db.group.create({ id: groupId, name: "Notes" }, ownerId)
       expect(
         (await app.post("/test/add-member", {
           login: "notes-writer@example.com",
@@ -220,11 +220,11 @@ Deno.test("dev cleanup-user route", async (t) => {
         .toEqual([kept.note.id])
     })
 
-    await t.step("add-member gives a user a role in a shared group, and changes it", async () => {
+    await t.step("add-member gives a user a role in a group, and changes it", async () => {
       const ownerId = await signUp(app, "member-owner")
       const joinerId = await signUp(app, "member-joiner")
       const groupId = crypto.randomUUID()
-      await app.db.group.createShared({ id: groupId, name: "Team" }, ownerId)
+      await app.db.group.create({ id: groupId, name: "Team" }, ownerId)
       const roleOf = async () =>
         (await sql<{ role: number }[]>`
           SELECT role FROM group_members WHERE group_id = ${groupId} AND user_id = ${joinerId}
@@ -253,7 +253,7 @@ Deno.test("dev cleanup-user route", async (t) => {
     await t.step("add-member leaves the owner's role alone", async () => {
       const ownerId = await signUp(app, "member-kept-owner")
       const groupId = crypto.randomUUID()
-      await app.db.group.createShared({ id: groupId, name: "Team" }, ownerId)
+      await app.db.group.create({ id: groupId, name: "Team" }, ownerId)
 
       const response = await app.post("/test/add-member", {
         login: "member-kept-owner@example.com",
@@ -270,15 +270,16 @@ Deno.test("dev cleanup-user route", async (t) => {
     })
 
     await t.step(
-      "add-member refuses an owner role, a personal group and a missing user",
+      "add-member refuses an owner role, a deleted group and a missing user",
       async () => {
         const ownerId = await signUp(app, "member-refuser")
         await signUp(app, "member-refused")
-        const personal = (
+        const deletedGroup = (
           await sql<GroupIdRow[]>`SELECT id FROM groups WHERE owner_user_id = ${ownerId}`
         )[0].id
+        await sql`UPDATE groups SET deleted_at = now() WHERE id = ${deletedGroup}`
         const shared = crypto.randomUUID()
-        await app.db.group.createShared({ id: shared, name: "Team" }, ownerId)
+        await app.db.group.create({ id: shared, name: "Team" }, ownerId)
 
         expect(
           (await app.post("/test/add-member", {
@@ -290,7 +291,7 @@ Deno.test("dev cleanup-user route", async (t) => {
         expect(
           (await app.post("/test/add-member", {
             login: "member-refused@example.com",
-            groupId: personal,
+            groupId: deletedGroup,
             role: 1,
           })).status,
         ).toBe(404)

@@ -38,7 +38,7 @@ async function sharedGroup(
   const groupId = crypto.randomUUID()
   const created = await owner.request.post(`${apiBase}/api/groups`, {
     headers,
-    data: { id: groupId, kind: 2, name },
+    data: { id: groupId, name },
   })
   expect(created.status(), await created.text()).toBe(201)
   const added = await request.post(`${apiBase}/api/test/add-member`, {
@@ -251,7 +251,7 @@ test.describe("notes in a shared group", () => {
       const otherGroup = crypto.randomUUID()
       const created = await page.request.post(`${apiBase}/api/groups`, {
         headers,
-        data: { id: otherGroup, kind: 2, name: "Other team" },
+        data: { id: otherGroup, name: "Other team" },
       })
       expect(created.status(), await created.text()).toBe(201)
       const noteId = crypto.randomUUID()

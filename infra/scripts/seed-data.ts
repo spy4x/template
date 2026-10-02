@@ -1,7 +1,7 @@
 /// <reference lib="deno.ns" />
 /**
  * Seeds a development database with a small, neutral demo data set: a user `demo` (with the
- * personal group every sign-up gets) who owns one shared group, `Demo team`.
+ * first group every sign-up gets, named `Personal`) who owns a second group, `Demo team`.
  *
  * Usage, after `deno task db:migrate`, with the same `DB_*` values:
  * `DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=… DB_PASS=… DB_NAME=… AUTH_PEPPER=… SEED_PASSWORD=…
@@ -12,7 +12,7 @@
  * - `SEED_PASSWORD` is the demo user's password, 8 to 50 characters like any sign-up.
  *
  * The user is created through the API's own sign-up (`createSignIn`), so the auth user, password
- * key, profile and personal group are written exactly as a real sign-up writes them. The session
+ * key, profile and first group are written exactly as a real sign-up writes them. The session
  * that sign-up opens is signed out at once. Running the seed again changes nothing: it stops when
  * `demo` exists. It refuses to run when `ENV` is `prod`, so no production database gets a
  * `demo` account with a known password.
@@ -95,7 +95,7 @@ export async function seed(db: AppDbBase, options: SeedOptions): Promise<boolean
   if (userId === null) return false
 
   await db.sessionStore.signOutUser(userId, null)
-  await db.group.createShared({ id: crypto.randomUUID(), name: DEMO_GROUP_NAME }, userId)
+  await db.group.create({ id: crypto.randomUUID(), name: DEMO_GROUP_NAME }, userId)
   return true
 }
 

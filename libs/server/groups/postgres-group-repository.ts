@@ -1,12 +1,13 @@
 import type postgres from "postgres"
 import {
   CreatedGroup,
-  CreatePersonalGroupInput,
-  CreateSharedGroupInput,
+  CreateGroupInput,
+  DeletedGroupSummary,
+  FirstGroupInput,
   Group,
+  GROUP_RESTORE_DAYS,
   GroupAccess,
   GroupError,
-  GroupKind,
   GroupListPage,
   GroupListResult,
   GroupRepository,
@@ -18,7 +19,6 @@ import { recordGroupChange } from "./group-change-log.ts"
 
 interface GroupRow extends postgres.Row {
   id: string
-  kind: GroupKind
   name: string
   ownerUserId: number
   createdByUserId: number
@@ -35,7 +35,6 @@ interface GroupAccessRow extends GroupRow {
 
 interface GroupSummaryRow extends postgres.Row {
   id: string
-  kind: GroupKind
   name: string
   role: GroupRole
   authorizationRevision: string
@@ -51,9 +50,8 @@ interface MemberRow extends postgres.Row {
   userId: number
 }
 
-interface PersonalMembershipCountRow extends postgres.Row {
-  memberCount: number
-  ownerCount: number
+interface DeletedGroupSummaryRow extends GroupSummaryRow {
+  deletedAt: Date
 }
 
 interface SelectionRow extends postgres.Row {
@@ -62,6 +60,15 @@ interface SelectionRow extends postgres.Row {
 }
 
 const GROUP_CREATED_EVENT = "group.created"
+const GROUP_RENAMED_EVENT = "group.renamed"
+const GROUP_DELETED_EVENT = "group.deleted"
+const GROUP_RESTORED_EVENT = "group.restored"
+
+/** The name of the group a person gets when a deletion would leave them with none. */
+const REPLACEMENT_GROUP_NAME = "Personal"
+
+/** Most deleted groups the restore list shows; a person does not delete this many in 30 days. */
+const RESTORABLE_LIST_LIMIT = 100
 
 export class PostgresGroupRepository implements GroupRepository {
   constructor(private readonly sql: postgres.Sql) {}
@@ -71,7 +78,6 @@ export class PostgresGroupRepository implements GroupRepository {
     const rows = await this.sql<GroupSummaryRow[]>`
       SELECT
         groups.id,
-        groups.kind,
         groups.name,
         group_members.role,
         groups.authorization_revision::text AS authorization_revision,
@@ -110,7 +116,6 @@ export class PostgresGroupRepository implements GroupRepository {
     const rows = await this.sql<GroupSummaryRow[]>`
       SELECT
         groups.id,
-        groups.kind,
         groups.name,
         group_members.role,
         groups.authorization_revision::text AS authorization_revision,
@@ -134,7 +139,6 @@ export class PostgresGroupRepository implements GroupRepository {
       await this.sql<GroupAccessRow[]>`
         SELECT
           groups.id,
-          groups.kind,
           groups.name,
           groups.owner_user_id,
           groups.created_by_user_id,
@@ -163,7 +167,6 @@ export class PostgresGroupRepository implements GroupRepository {
     const rows = await this.sql<MemberRow[]>`
       SELECT group_members.user_id
       FROM group_members
-      INNER JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL
       INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
       WHERE group_members.group_id = ${groupId}
       ORDER BY group_members.user_id
@@ -172,8 +175,8 @@ export class PostgresGroupRepository implements GroupRepository {
   }
 
   /**
-   * The group the person works in: the one they chose, while they are still a member of it, else
-   * their personal group, then their oldest shared one. A read only: the fallback is not stored, so
+   * The group the person works in: the one they chose, while they are still a member of it and it
+   * is not deleted, else the oldest group they belong to. A read only: the fallback is not stored, so
    * a read can never overwrite a choice committed at the same moment, and it announces nothing.
    * It is the same answer every time until membership changes, so every device agrees on it.
    */
@@ -195,7 +198,7 @@ export class PostgresGroupRepository implements GroupRepository {
          AND group_members.user_id = ${userId}
         INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
         WHERE groups.deleted_at IS NULL
-        ORDER BY groups.kind, groups.created_at, groups.id
+        ORDER BY groups.created_at, groups.id
         LIMIT 1
       `
     )[0]
@@ -253,157 +256,61 @@ export class PostgresGroupRepository implements GroupRepository {
     return { groupId, version: current.version }
   }
 
-  async createShared(
-    input: CreateSharedGroupInput,
-    actorId: number,
-  ): Promise<CreatedGroup> {
+  async create(input: CreateGroupInput, actorId: number): Promise<CreatedGroup> {
     return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
       const repository = new PostgresGroupRepository(transaction)
-      return await repository.createSharedInCurrentTransaction(input, actorId)
+      return await repository.createInCurrentTransaction(input, actorId)
     })
   }
 
-  async createPersonal(input: CreatePersonalGroupInput, userId: number): Promise<Group> {
-    const group = (
-      await this.sql<GroupRow[]>`
-        INSERT INTO groups (
-          id,
-          kind,
-          name,
-          owner_user_id,
-          created_by_user_id
-        ) VALUES (
-          ${input.id},
-          ${GroupKind.PERSONAL},
-          ${input.name},
-          ${userId},
-          ${userId}
-        )
-        RETURNING
-          id,
-          kind,
-          name,
-          owner_user_id,
-          created_by_user_id,
-          authorization_revision::text AS authorization_revision,
-          next_change_sequence::text AS next_change_sequence,
-          created_at,
-          updated_at,
-          deleted_at
-      `
-    )[0]
-    if (!group) {
-      throw new Error("Personal group insert returned no row")
-    }
-    await this.sql`
-      INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
-      VALUES (${group.id}, ${userId}, ${GroupRole.OWNER}, ${userId})
+  async createFirst(input: FirstGroupInput, userId: number): Promise<void> {
+    await this.insertFirst(input, userId)
+  }
+
+  async ensureFirst(input: FirstGroupInput, userId: number): Promise<void> {
+    await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const repository = new PostgresGroupRepository(transaction)
+      // The lock on the user's row serialises two sign-ins of one person, so they cannot both see
+      // "no group" and each make one.
+      await repository.assertActiveUser(userId)
+      if (await repository.hasActiveGroup(userId)) return
+      await repository.insertFirst(input, userId)
+    })
+  }
+
+  private async hasActiveGroup(userId: number): Promise<boolean> {
+    const rows = await this.sql`
+      SELECT 1
+      FROM group_members
+      INNER JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL
+      WHERE group_members.user_id = ${userId}
+      LIMIT 1
     `
-    await this.assertPersonalGroupInvariant(group.id, userId)
-    return toGroup(
-      withStampedSequence(group, await this.recordChange(group.id, userId, GROUP_CREATED_EVENT)),
-    )
+    return rows.length > 0
+  }
+
+  private async insertFirst(input: FirstGroupInput, userId: number): Promise<void> {
+    const group = await this.insertGroup(input, userId, false)
+    await this.recordChange(group!.id, userId, GROUP_CREATED_EVENT)
   }
 
   /**
-   * Enforces the personal-group invariant that a deferred constraint trigger used
-   * to enforce in the database: exactly one membership, held by the owner.
-   *
-   * Runs inside the creating transaction, so a violation rolls back the whole
-   * signup rather than leaving a half-formed personal group behind. A failure
-   * here means this repository is broken, not that the caller sent bad input,
-   * so it raises a plain Error and surfaces as a 500.
+   * Inserts a group and its owner's membership. With `ignoreConflict`, an id already taken gives
+   * `null` and writes nothing; without it, a taken id fails the statement, which rolls back the
+   * caller's transaction (a sign-up with a taken group id leaves no half-made account).
    */
-  private async assertPersonalGroupInvariant(groupId: string, ownerUserId: number): Promise<void> {
-    const counts = (
-      await this.sql<PersonalMembershipCountRow[]>`
-        SELECT
-          COUNT(*)::int AS member_count,
-          COUNT(*) FILTER (
-            WHERE user_id = ${ownerUserId} AND role = ${GroupRole.OWNER}
-          )::int AS owner_count
-        FROM group_members
-        WHERE group_id = ${groupId}
-      `
-    )[0]
-
-    if (!counts || counts.memberCount !== 1 || counts.ownerCount !== 1) {
-      throw new Error(
-        `Personal group ${groupId} must have exactly one owner membership, ` +
-          `found ${counts?.memberCount ?? 0} member(s) and ${counts?.ownerCount ?? 0} owner(s)`,
-      )
-    }
-  }
-
-  async ensurePersonal(input: CreatePersonalGroupInput, userId: number): Promise<Group> {
-    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
-      const repository = new PostgresGroupRepository(transaction)
-      await repository.assertActiveUser(userId)
-      const existing = await repository.getPersonalForOwner(userId)
-      if (existing) {
-        return existing
-      }
-
-      const inserted = (
-        await transaction<GroupRow[]>`
-          INSERT INTO groups (id, kind, name, owner_user_id, created_by_user_id)
-          VALUES (${input.id}, ${GroupKind.PERSONAL}, ${input.name}, ${userId}, ${userId})
-          ON CONFLICT (owner_user_id) WHERE kind = 1 AND deleted_at IS NULL DO NOTHING
-          RETURNING
-            id,
-            kind,
-            name,
-            owner_user_id,
-            created_by_user_id,
-            authorization_revision::text AS authorization_revision,
-            next_change_sequence::text AS next_change_sequence,
-            created_at,
-            updated_at,
-            deleted_at
-        `
-      )[0]
-      if (inserted) {
-        await transaction`
-          INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
-          VALUES (${inserted.id}, ${userId}, ${GroupRole.OWNER}, ${userId})
-        `
-        await repository.assertPersonalGroupInvariant(inserted.id, userId)
-        const sequence = await repository.recordChange(inserted.id, userId, GROUP_CREATED_EVENT)
-        return toGroup(withStampedSequence(inserted, sequence))
-      }
-
-      const concurrent = await repository.getPersonalForOwner(userId)
-      if (!concurrent) {
-        throw new Error("Personal group conflict resolved without an accessible group")
-      }
-      return concurrent
-    })
-  }
-
-  private async createSharedInCurrentTransaction(
-    input: CreateSharedGroupInput,
-    actorId: number,
-  ): Promise<CreatedGroup> {
-    await this.assertActiveUser(actorId)
+  private async insertGroup(
+    input: { id: string; name: string },
+    ownerId: number,
+    ignoreConflict: boolean,
+  ): Promise<GroupRow | null> {
     const inserted = (
       await this.sql<GroupRow[]>`
-        INSERT INTO groups (
-          id,
-          kind,
-          name,
-          owner_user_id,
-          created_by_user_id
-        ) VALUES (
-          ${input.id},
-          ${GroupKind.SHARED},
-          ${input.name},
-          ${actorId},
-          ${actorId}
-        )
-        ON CONFLICT (id) DO NOTHING
+        INSERT INTO groups (id, name, owner_user_id, created_by_user_id)
+        VALUES (${input.id}, ${input.name}, ${ownerId}, ${ownerId})
+        ${ignoreConflict ? this.sql`ON CONFLICT (id) DO NOTHING` : this.sql``}
         RETURNING
           id,
-          kind,
           name,
           owner_user_id,
           created_by_user_id,
@@ -414,12 +321,22 @@ export class PostgresGroupRepository implements GroupRepository {
           deleted_at
       `
     )[0]
+    if (!inserted) return null
+    await this.sql`
+      INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+      VALUES (${inserted.id}, ${ownerId}, ${GroupRole.OWNER}, ${ownerId})
+    `
+    return inserted
+  }
+
+  private async createInCurrentTransaction(
+    input: CreateGroupInput,
+    actorId: number,
+  ): Promise<CreatedGroup> {
+    await this.assertActiveUser(actorId)
+    const inserted = await this.insertGroup(input, actorId, true)
 
     if (inserted) {
-      await this.sql`
-        INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
-        VALUES (${inserted.id}, ${actorId}, ${GroupRole.OWNER}, ${actorId})
-      `
       await this.sql`
         INSERT INTO audit_events (event_kind, actor_user_id, group_id, request_id)
         VALUES (
@@ -438,8 +355,7 @@ export class PostgresGroupRepository implements GroupRepository {
 
     const existing = await this.getForMember(input.id, actorId)
     if (
-      existing?.group.kind === GroupKind.SHARED &&
-      existing.group.createdByUserId === actorId &&
+      existing?.group.createdByUserId === actorId &&
       existing.group.name === input.name &&
       existing.role === GroupRole.OWNER
     ) {
@@ -451,13 +367,270 @@ export class PostgresGroupRepository implements GroupRepository {
     throw new GroupError("ID_ALREADY_EXISTS", "Group id is already in use")
   }
 
+  /**
+   * The role checks inside the writes below repeat the handlers' rule (`canRename`, `canDelete` in
+   * `@domain/groups`) as the least role the write needs, so a role changed between the handler's
+   * read and the write cannot slip through.
+   */
+  async rename(
+    groupId: string,
+    name: string,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupSummary | null> {
+    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const repository = new PostgresGroupRepository(transaction)
+      const renamed = (
+        await transaction<GroupSummaryRow[]>`
+          UPDATE groups
+          SET name = ${name}, updated_at = CURRENT_TIMESTAMP
+          FROM group_members
+          WHERE groups.id = ${groupId}
+            AND groups.deleted_at IS NULL
+            AND group_members.group_id = groups.id
+            AND group_members.user_id = ${actorId}
+            AND group_members.role >= ${GroupRole.ADMIN}
+          RETURNING
+            groups.id,
+            groups.name,
+            group_members.role,
+            groups.authorization_revision::text AS authorization_revision,
+            groups.next_change_sequence::text AS change_sequence,
+            groups.updated_at
+        `
+      )[0]
+      if (!renamed) return null
+      await repository.audit(groupId, actorId, GROUP_RENAMED_EVENT, requestId)
+      const sequence = await repository.recordChange(groupId, actorId, GROUP_RENAMED_EVENT)
+      return { ...renamed, changeSequence: sequence }
+    })
+  }
+
+  async softDelete(
+    groupId: string,
+    actorId: number,
+    requestId?: string,
+  ): Promise<DeletedGroupSummary | null> {
+    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const repository = new PostgresGroupRepository(transaction)
+      await repository.lockMembersAndActor(groupId, actorId)
+      const group = await repository.lockOwnedGroup(groupId, actorId, false)
+      if (!group) return null
+
+      const others = (
+        await transaction<{ count: number }[]>`
+          SELECT COUNT(*)::int AS count
+          FROM group_members
+          INNER JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL
+          WHERE group_members.user_id = ${actorId}
+            AND group_members.group_id <> ${groupId}
+        `
+      )[0]
+      if (others.count === 0) {
+        throw new GroupError("LAST_GROUP", "A person must keep at least one group")
+      }
+
+      const deleted = (
+        await transaction<{ deletedAt: Date; updatedAt: Date }[]>`
+          UPDATE groups
+          SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ${groupId}
+          RETURNING deleted_at, updated_at
+        `
+      )[0]
+
+      // A member whose only group this was would be left with nowhere to work: they get a new one,
+      // as they would at sign-up. The deleted group no longer counts, as the update above is done.
+      const stranded = await transaction<MemberRow[]>`
+        SELECT group_members.user_id
+        FROM group_members
+        INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+        WHERE group_members.group_id = ${groupId}
+          AND NOT EXISTS (
+            SELECT 1
+            FROM group_members AS other
+            INNER JOIN groups ON groups.id = other.group_id AND groups.deleted_at IS NULL
+            WHERE other.user_id = group_members.user_id
+          )
+        ORDER BY group_members.user_id
+      `
+      for (const { userId } of stranded) {
+        await repository.insertFirst(
+          { id: crypto.randomUUID(), name: REPLACEMENT_GROUP_NAME },
+          userId,
+        )
+      }
+
+      await repository.audit(groupId, actorId, GROUP_DELETED_EVENT, requestId)
+      const sequence = await repository.recordChange(groupId, actorId, GROUP_DELETED_EVENT, {
+        allowDeleted: true,
+      })
+      return {
+        id: groupId,
+        name: group.name,
+        role: GroupRole.OWNER,
+        authorizationRevision: group.authorizationRevision,
+        changeSequence: sequence,
+        updatedAt: deleted.updatedAt,
+        deletedAt: deleted.deletedAt,
+      }
+    })
+  }
+
+  async restore(
+    groupId: string,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupSummary | null> {
+    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const repository = new PostgresGroupRepository(transaction)
+      await repository.assertActiveUser(actorId)
+      const group = await repository.lockOwnedGroup(groupId, actorId, true)
+      if (!group) return null
+      const restored = (
+        await transaction<{ updatedAt: Date }[]>`
+          UPDATE groups
+          SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ${groupId}
+          RETURNING updated_at
+        `
+      )[0]
+      await repository.audit(groupId, actorId, GROUP_RESTORED_EVENT, requestId)
+      const sequence = await repository.recordChange(groupId, actorId, GROUP_RESTORED_EVENT)
+      return {
+        id: groupId,
+        name: group.name,
+        role: GroupRole.OWNER,
+        authorizationRevision: group.authorizationRevision,
+        changeSequence: sequence,
+        updatedAt: restored.updatedAt,
+      }
+    })
+  }
+
+  async listRestorable(userId: number): Promise<DeletedGroupSummary[]> {
+    return await this.sql<DeletedGroupSummaryRow[]>`
+      SELECT
+        groups.id,
+        groups.name,
+        group_members.role,
+        groups.authorization_revision::text AS authorization_revision,
+        (groups.next_change_sequence - 1)::text AS change_sequence,
+        groups.updated_at,
+        groups.deleted_at
+      FROM groups
+      INNER JOIN group_members
+        ON group_members.group_id = groups.id
+       AND group_members.user_id = ${userId}
+       AND group_members.role = ${GroupRole.OWNER}
+      INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+      WHERE groups.deleted_at > now() - make_interval(days => ${GROUP_RESTORE_DAYS})
+      ORDER BY groups.deleted_at DESC, groups.id
+      LIMIT ${RESTORABLE_LIST_LIMIT}
+    `
+  }
+
+  async getRestorableForMember(groupId: string, userId: number): Promise<GroupAccess | null> {
+    const row = (
+      await this.sql<GroupAccessRow[]>`
+        SELECT
+          groups.id,
+          groups.name,
+          groups.owner_user_id,
+          groups.created_by_user_id,
+          groups.authorization_revision::text AS authorization_revision,
+          groups.next_change_sequence::text AS next_change_sequence,
+          groups.created_at,
+          groups.updated_at,
+          groups.deleted_at,
+          group_members.role
+        FROM groups
+        INNER JOIN group_members
+          ON group_members.group_id = groups.id
+         AND group_members.user_id = ${userId}
+        INNER JOIN users
+          ON users.id = group_members.user_id
+         AND users.deleted_at IS NULL
+        WHERE groups.id = ${groupId}
+          AND groups.deleted_at > now() - make_interval(days => ${GROUP_RESTORE_DAYS})
+        LIMIT 1
+      `
+    )[0]
+    return row ? { group: toGroup(row), role: row.role } : null
+  }
+
+  /**
+   * Locks the rows of the actor and of every member of the group, in id order, so two deletions
+   * that touch the same people wait for each other instead of each leaving them a group the other
+   * deletes. Id order keeps two such waits from deadlocking.
+   */
+  private async lockMembersAndActor(groupId: string, actorId: number): Promise<void> {
+    const locked = await this.sql<ActiveUserRow[]>`
+      SELECT users.id
+      FROM users
+      WHERE users.deleted_at IS NULL
+        AND (
+          users.id = ${actorId}
+          OR users.id IN (SELECT user_id FROM group_members WHERE group_id = ${groupId})
+        )
+      ORDER BY users.id
+      FOR NO KEY UPDATE
+    `
+    if (!locked.some((user) => user.id === actorId)) {
+      throw new GroupError("USER_NOT_ACTIVE", "User is not active")
+    }
+  }
+
+  /**
+   * Locks the group row when `actorId` owns it: an active group, or with `restorable` a group
+   * deleted inside the restore window. `null` when it is neither, or the actor is not its owner.
+   */
+  private async lockOwnedGroup(
+    groupId: string,
+    actorId: number,
+    restorable: boolean,
+  ): Promise<{ name: string; authorizationRevision: string } | null> {
+    const row = (
+      await this.sql<{ name: string; authorizationRevision: string }[]>`
+        SELECT groups.name, groups.authorization_revision::text AS authorization_revision
+        FROM groups
+        INNER JOIN group_members
+          ON group_members.group_id = groups.id
+         AND group_members.user_id = ${actorId}
+         AND group_members.role = ${GroupRole.OWNER}
+        WHERE groups.id = ${groupId}
+          AND ${
+        restorable
+          ? this.sql`groups.deleted_at > now() - make_interval(days => ${GROUP_RESTORE_DAYS})`
+          : this.sql`groups.deleted_at IS NULL`
+      }
+        FOR NO KEY UPDATE OF groups
+      `
+    )[0]
+    return row ?? null
+  }
+
+  /** Writes one audit row in the current transaction. It outlives the group (see the purge). */
+  private async audit(
+    groupId: string,
+    actorId: number,
+    eventKind: string,
+    requestId: string | undefined,
+  ): Promise<void> {
+    await this.sql`
+      INSERT INTO audit_events (event_kind, actor_user_id, group_id, request_id)
+      VALUES (${eventKind}, ${actorId}, ${groupId}, ${requestId || null})
+    `
+  }
+
   /** Records a change on a group in the current transaction; see {@link recordGroupChange}. */
   private async recordChange(
     groupId: string,
     actorId: number,
     eventKind: string,
+    options: { allowDeleted?: boolean } = {},
   ): Promise<string> {
-    return await recordGroupChange(this.sql, groupId, actorId, eventKind)
+    return await recordGroupChange(this.sql, groupId, actorId, eventKind, options)
   }
 
   private async assertActiveUser(userId: number): Promise<void> {
@@ -474,44 +647,11 @@ export class PostgresGroupRepository implements GroupRepository {
       throw new GroupError("USER_NOT_ACTIVE", "User is not active")
     }
   }
-
-  private async getPersonalForOwner(userId: number): Promise<Group | null> {
-    const row = (
-      await this.sql<GroupAccessRow[]>`
-        SELECT
-          groups.id,
-          groups.kind,
-          groups.name,
-          groups.owner_user_id,
-          groups.created_by_user_id,
-          groups.authorization_revision::text AS authorization_revision,
-          groups.next_change_sequence::text AS next_change_sequence,
-          groups.created_at,
-          groups.updated_at,
-          groups.deleted_at,
-          group_members.role
-        FROM groups
-        INNER JOIN group_members
-          ON group_members.group_id = groups.id
-         AND group_members.user_id = ${userId}
-         AND group_members.role = ${GroupRole.OWNER}
-        INNER JOIN users
-          ON users.id = group_members.user_id
-         AND users.deleted_at IS NULL
-        WHERE groups.owner_user_id = ${userId}
-          AND groups.kind = ${GroupKind.PERSONAL}
-          AND groups.deleted_at IS NULL
-        LIMIT 1
-      `
-    )[0]
-    return row ? toGroup(row) : null
-  }
 }
 
 function toGroup(row: GroupRow): Group {
   return {
     id: row.id,
-    kind: row.kind,
     name: row.name,
     ownerUserId: row.ownerUserId,
     createdByUserId: row.createdByUserId,
@@ -529,15 +669,11 @@ function withStampedSequence(row: GroupRow, sequence: string): GroupRow {
 }
 
 function toSummary(
-  group: Pick<
-    Group,
-    "id" | "kind" | "name" | "authorizationRevision" | "nextChangeSequence" | "updatedAt"
-  >,
+  group: Pick<Group, "id" | "name" | "authorizationRevision" | "nextChangeSequence" | "updatedAt">,
   role: GroupRole,
 ): GroupSummary {
   return {
     id: group.id,
-    kind: group.kind,
     name: group.name,
     role,
     authorizationRevision: group.authorizationRevision,

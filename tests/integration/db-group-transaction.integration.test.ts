@@ -37,6 +37,8 @@ const MIGRATIONS = [
   "2026_01_27_0001_drop_user_profiles.sql",
   "2026_08_18_0001_group_core.sql",
   "2026_08_18_0002_personal_group_backfill.sql",
+  "2026_10_07_0001_group_kind_removed.sql",
+  "2026_10_08_0001_audit_outlives_group.sql",
 ]
 
 Deno.test({
@@ -64,7 +66,7 @@ Deno.test({
 
       await expect(
         db.begin(async (tx) => {
-          await tx.group.createPersonal({ id: groupId, name: "must roll back" }, userId)
+          await tx.group.createFirst({ id: groupId, name: "must roll back" }, userId)
           throw new Error("rollback")
         }),
       ).rejects.toThrow("rollback")

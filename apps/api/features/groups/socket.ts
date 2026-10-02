@@ -1,15 +1,25 @@
 import {
   GroupCreateCommand,
+  GroupDeleteCommand,
+  GroupDeletedListQuery,
   GroupError,
   GroupGetQuery,
-  GroupKind,
+  GroupRenameCommand,
+  GroupRestoreCommand,
   GroupSelectCommand,
   GroupSelectedQuery,
-  parseCreateSharedGroupRequest,
+  parseCreateGroupRequest,
   parseGroupId,
-  parseSelectGroupRequest,
+  parseGroupIdRequest,
+  parseRenameGroupRequest,
 } from "@domain/groups"
-import type { GroupCreateResult, GroupGetResult, SelectedGroup } from "@domain/groups"
+import type {
+  DeletedGroupSummary,
+  GroupCreateResult,
+  GroupGetResult,
+  GroupSummary,
+  SelectedGroup,
+} from "@domain/groups"
 import type { SocketRequests } from "../../services/realtime.ts"
 import { type GroupListDependencies, listGroupsPage, parseListPayload } from "./list.ts"
 
@@ -19,6 +29,10 @@ export interface GroupSocketDependencies extends GroupListDependencies {
   get(query: GroupGetQuery): Promise<GroupGetResult>
   select(command: GroupSelectCommand): Promise<SelectedGroup>
   selected(query: GroupSelectedQuery): Promise<SelectedGroup>
+  rename(command: GroupRenameCommand): Promise<{ group: GroupSummary }>
+  delete(command: GroupDeleteCommand): Promise<{ group: DeletedGroupSummary }>
+  restore(command: GroupRestoreCommand): Promise<{ group: GroupSummary }>
+  deleted(query: GroupDeletedListQuery): Promise<{ groups: DeletedGroupSummary[] }>
 }
 
 /**
@@ -31,12 +45,11 @@ export function createGroupSocketRequests(dependencies: GroupSocketDependencies)
     "group.create": {
       kind: "command",
       handle: async ({ actor, requestId, payload, idempotencyKey }) => {
-        const input = parseCreateSharedGroupRequest(payload)
+        const input = parseCreateGroupRequest(payload)
         return await dependencies.create(
           new GroupCreateCommand({
             actor,
             id: input.id,
-            kind: GroupKind.SHARED,
             name: input.name,
             requestId,
             idempotencyKey,
@@ -58,11 +71,42 @@ export function createGroupSocketRequests(dependencies: GroupSocketDependencies)
     "group.select": {
       kind: "command",
       handle: async ({ actor, requestId, payload, idempotencyKey }) => {
-        const { groupId } = parseSelectGroupRequest(payload)
+        const { groupId } = parseGroupIdRequest(payload)
         return await dependencies.select(
           new GroupSelectCommand({ actor, groupId, requestId, idempotencyKey }),
         )
       },
+    },
+    "group.rename": {
+      kind: "command",
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
+        const { groupId, name } = parseRenameGroupRequest(payload)
+        return await dependencies.rename(
+          new GroupRenameCommand({ actor, groupId, name, requestId, idempotencyKey }),
+        )
+      },
+    },
+    "group.delete": {
+      kind: "command",
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
+        const { groupId } = parseGroupIdRequest(payload)
+        return await dependencies.delete(
+          new GroupDeleteCommand({ actor, groupId, requestId, idempotencyKey }),
+        )
+      },
+    },
+    "group.restore": {
+      kind: "command",
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
+        const { groupId } = parseGroupIdRequest(payload)
+        return await dependencies.restore(
+          new GroupRestoreCommand({ actor, groupId, requestId, idempotencyKey }),
+        )
+      },
+    },
+    "group.deleted": {
+      kind: "query",
+      handle: async ({ actor }) => await dependencies.deleted(new GroupDeletedListQuery({ actor })),
     },
     "group.selected": {
       kind: "query",

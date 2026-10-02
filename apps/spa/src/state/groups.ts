@@ -1,6 +1,6 @@
 import { signal } from "@preact/signals"
 import { RealtimeRequestError } from "@spy4x/realtime"
-import { GroupKind, type GroupRole } from "@domain/groups"
+import type { GroupRole } from "@domain/groups"
 import { apiFetch } from "./api.ts"
 import { advanceGroupCursor, realtimeCommand, realtimeQuery } from "./realtime.ts"
 import { offlineGroups } from "../offline/groups-offline.ts"
@@ -9,12 +9,16 @@ import { currentLayer } from "../offline/index.ts"
 /** A group as the API sends it: dates are ISO strings, the sequence a decimal string. */
 export interface GroupItem {
   id: string
-  kind: GroupKind
   name: string
   role: GroupRole
   authorizationRevision: string
   changeSequence: string
   updatedAt: string
+}
+
+/** A deleted group its owner can still restore; `deletedAt` is an ISO string. */
+export interface DeletedGroupItem extends GroupItem {
+  deletedAt: string
 }
 
 /** One page of the API's group list. */
@@ -27,14 +31,23 @@ export interface GroupPage {
 export interface GroupsDependencies {
   /** Reads one page of the person's groups, over REST or as the socket's `group.list` query. */
   fetchPage(cursor: string | null, via: ReadChannel): Promise<GroupPage>
-  /** Creates a shared group and returns it. */
-  create(input: { id: string; kind: GroupKind; name: string }): Promise<{ group: GroupItem }>
+  /** Reads the groups the person deleted and can still restore. */
+  fetchDeleted(via: ReadChannel): Promise<{ groups: DeletedGroupItem[] }>
+  /** Creates a group and returns it. */
+  create(input: { id: string; name: string }): Promise<{ group: GroupItem }>
+  rename(input: { groupId: string; name: string }): Promise<{ group: GroupItem }>
+  /** Deletes a group, softly: its owner can restore it for 30 days. */
+  remove(input: { groupId: string }): Promise<{ group: DeletedGroupItem }>
+  restore(input: { groupId: string }): Promise<{ group: GroupItem }>
   /** Records that this page holds a group up to a sequence. */
   advance(groupId: string, sequence: number): void
   newId(): string
   /** What the device already holds of the list, shown before the read answers. */
   readLocal?(): Promise<readonly GroupItem[]>
 }
+
+/** The changes to an existing group the store can make. */
+export type GroupAction = "rename" | "delete" | "restore"
 
 /** How a read reaches the API. */
 export type ReadChannel = "rest" | "socket"
@@ -55,7 +68,16 @@ function describe(error: unknown, fallback: string): string {
  */
 export function createGroupsStore(dependencies: GroupsDependencies) {
   const groups = signal<readonly GroupItem[]>([])
+  const deleted = signal<readonly DeletedGroupItem[]>([])
   const name = signal("")
+  /** What the person typed as a group's new name, with the group it is for. */
+  const renameDraft = signal<{ groupId: string; name: string } | null>(null)
+  /** The group a rename, delete or restore is in flight for, and which of the three. */
+  const working = signal<{ groupId: string; action: GroupAction } | null>(null)
+  /** Why the last rename, delete or restore was refused. */
+  const actionError = signal<{ groupId: string; action: GroupAction; message: string } | null>(
+    null,
+  )
   const loading = signal(false)
   const creating = signal(false)
   const error = signal<string | null>(null)
@@ -75,6 +97,12 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
     }
     groups.value = all
     for (const group of all) dependencies.advance(group.id, Number(group.changeSequence))
+    // The restore list is a second read of the same moment. Without a network it keeps what it
+    // had: the groups above are what the page cannot do without.
+    deleted.value = await dependencies.fetchDeleted(via).then(
+      (result) => result.groups,
+      () => deleted.value,
+    )
   }
 
   /** Shows what the device holds while the first read runs, unless the read answered first. */
@@ -133,7 +161,6 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
     try {
       const { group } = await dependencies.create({
         id: dependencies.newId(),
-        kind: GroupKind.SHARED,
         name: trimmed,
       })
       groups.value = [group, ...groups.value.filter((existing) => existing.id !== group.id)]
@@ -146,8 +173,65 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
     }
   }
 
+  /**
+   * Runs one change of an existing group, showing it as in flight and its refusal as an error.
+   * Resolves to whether it succeeded. A second change while one runs is refused.
+   */
+  async function change(
+    groupId: string,
+    action: GroupAction,
+    run: () => Promise<void>,
+    fallback: string,
+  ): Promise<boolean> {
+    if (working.value) return false
+    working.value = { groupId, action }
+    actionError.value = null
+    try {
+      await run()
+      return true
+    } catch (cause) {
+      actionError.value = { groupId, action, message: describe(cause, fallback) }
+      return false
+    } finally {
+      working.value = null
+    }
+  }
+
+  /** Renames a group to what the person typed. Resolves to whether it worked. */
+  async function rename(groupId: string): Promise<boolean> {
+    const draft = renameDraft.value
+    const trimmed = (draft?.groupId === groupId ? draft.name : "").trim()
+    if (trimmed.length === 0) return false
+    return await change(groupId, "rename", async () => {
+      const { group } = await dependencies.rename({ groupId, name: trimmed })
+      groups.value = groups.value.map((existing) => existing.id === group.id ? group : existing)
+      renameDraft.value = null
+    }, "Could not rename the group")
+  }
+
+  /** Deletes a group. Resolves to whether it worked, so the page can leave the group's settings. */
+  async function remove(groupId: string): Promise<boolean> {
+    return await change(groupId, "delete", async () => {
+      const { group } = await dependencies.remove({ groupId })
+      groups.value = groups.value.filter((existing) => existing.id !== groupId)
+      deleted.value = [group, ...deleted.value.filter((existing) => existing.id !== groupId)]
+    }, "Could not delete the group")
+  }
+
+  async function restore(groupId: string): Promise<boolean> {
+    return await change(groupId, "restore", async () => {
+      const { group } = await dependencies.restore({ groupId })
+      deleted.value = deleted.value.filter((existing) => existing.id !== groupId)
+      groups.value = [group, ...groups.value.filter((existing) => existing.id !== groupId)]
+    }, "Could not restore the group")
+  }
+
   function reset(): void {
     groups.value = []
+    deleted.value = []
+    renameDraft.value = null
+    working.value = null
+    actionError.value = null
     name.value = ""
     error.value = null
     loadError.value = null
@@ -159,6 +243,13 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
 
   return {
     groups,
+    deleted,
+    renameDraft,
+    working,
+    actionError,
+    rename,
+    remove,
+    restore,
     name,
     loading,
     creating,
@@ -186,7 +277,18 @@ const onlineGroups: GroupsDependencies = {
     if (!result.ok) throw new Error(result.error.message)
     return result.data
   },
+  async fetchDeleted(via) {
+    if (via === "socket") {
+      return await realtimeQuery<{ groups: DeletedGroupItem[] }>("group.deleted")
+    }
+    const result = await apiFetch<{ groups: DeletedGroupItem[] }>("/api/groups/deleted")
+    if (!result.ok) throw new Error(result.error.message)
+    return result.data
+  },
   create: (input) => realtimeCommand("group.create", input),
+  rename: (input) => realtimeCommand("group.rename", input),
+  remove: (input) => realtimeCommand("group.delete", input),
+  restore: (input) => realtimeCommand("group.restore", input),
   advance: advanceGroupCursor,
   newId: () => crypto.randomUUID(),
 }

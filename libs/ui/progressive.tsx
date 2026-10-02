@@ -26,7 +26,7 @@ export const FORM_ACTIONS = {
   totpFinish: "/profile/totp/finish",
   totpDisable: "/profile/totp/disable",
   pushRemove: "/profile/push/remove",
-  /** Creates a shared group: `{ id, kind, name }`. */
+  /** Creates a group: `{ id, name }`. */
   groupCreate: "/groups",
   /** Selects the group the notes show: `{ groupId }`. */
   groupSelect: "/groups/select",
@@ -69,6 +69,12 @@ export const SCREEN_PATHS = {
 export const GROUP_PATHS = {
   /** The group's settings page. */
   settings: (groupId: string) => `/groups/${encodeURIComponent(groupId)}`,
+  /** `POST` renames the group: `{ name }`. */
+  rename: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/rename`,
+  /** `POST` deletes the group, which its owner can restore for 30 days. Takes no fields. */
+  delete: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/delete`,
+  /** `POST` restores a deleted group. Takes no fields. */
+  restore: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/restore`,
 } as const
 
 /** `EnhancedForm` announces nothing itself: each screen shows its own busy button and error. */

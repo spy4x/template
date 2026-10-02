@@ -16,7 +16,13 @@ import {
 import { pushUnsubscribeRequestSchema } from "@spy4x/platform/model"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
-import { GroupKind, GroupRole, parseSelectGroupRequest } from "@domain/groups"
+import {
+  GROUP_RESTORE_DAYS,
+  GroupRole,
+  parseCreateGroupRequest,
+  parseGroupIdRequest,
+  parseRenameGroupBody,
+} from "@domain/groups"
 import { GroupSettingsScreen, type GroupSettingsScreenProps } from "./group-settings-screen.tsx"
 import { GroupsScreen, type GroupsScreenProps, ROLE_TEXT } from "./groups-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
@@ -69,7 +75,9 @@ function noScriptSurface(node: VNode): NoScriptSurface {
       .join("")
   })
   const links = [...html.matchAll(/<a\b[^>]*>/g)].map(([tag]) => attribute(tag, "href") ?? "")
+  // A disabled button is not an action: it does nothing with or without JavaScript.
   const scriptOnlyButtons = [...outside.matchAll(/<button\b[^>]*>/g)]
+    .filter(([tag]) => !/\sdisabled(\s|=|>)/.test(tag))
     .map(([tag]) => attribute(tag, "data-e2e") ?? "(unnamed)")
   return { forms, links, scriptOnlyButtons }
 }
@@ -359,7 +367,7 @@ describe("the group picker without JavaScript", () => {
     const body = Object.fromEntries(
       pickerForms[0].fields.map((name) => [name, "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"]),
     )
-    expect(parseSelectGroupRequest(body)).toEqual(body)
+    expect(parseGroupIdRequest(body)).toEqual(body)
   })
 
   it("draws the form through ScreenForm, so it has EnhancedForm's status line and not a plain form's", () => {
@@ -412,21 +420,21 @@ const groupsDefaults: GroupsScreenProps = {
 }
 
 describe("GroupsScreen", () => {
-  it("lists each group with its kind and the person's role", () => {
+  it("lists each group with the person's role", () => {
     const html = renderToString(
       <GroupsScreen
         {...groupsDefaults}
         groups={[
-          { id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER },
-          { id: "g-2", name: "Team", kind: GroupKind.SHARED, role: GroupRole.VIEWER },
+          { id: "g-1", name: "Home", role: GroupRole.OWNER },
+          { id: "g-2", name: "Team", role: GroupRole.VIEWER },
         ]}
       />,
     )
 
     expect(html).toContain("Home")
-    expect(html).toContain("Personal · Owner")
+    expect(html).toContain("Owner")
     expect(html).toContain("Team")
-    expect(html).toContain("Shared · Viewer")
+    expect(html).toContain("Viewer")
     expect(html).not.toContain("No groups yet.")
   })
 
@@ -446,7 +454,7 @@ describe("GroupsScreen", () => {
     expect(html).toContain('value="Trip"')
   })
 
-  it("posts a new shared group with the API's field names and the id it was drawn with", () => {
+  it("posts a new group with the API's field names and the id it was drawn with", () => {
     const draftId = "5f0c7c2e-2a4b-4c7e-9b1d-3e2f1a0b9c8d"
     const screen = <GroupsScreen {...groupsDefaults} draftId={draftId} />
     const html = renderToString(screen)
@@ -454,10 +462,14 @@ describe("GroupsScreen", () => {
     expect(formAt(noScriptSurface(screen), FORM_ACTIONS.groupCreate)).toEqual({
       action: "/groups",
       method: "post",
-      fields: ["id", "kind", "name"],
+      fields: ["id", "name"],
     })
     expect(html).toContain(`name="id" value="${draftId}"`)
-    expect(html).toContain(`name="kind" value="${GroupKind.SHARED}"`)
+    // What the form posts is what the API's parser accepts, and nothing it refuses.
+    expect(parseCreateGroupRequest({ id: draftId, name: "Team" })).toEqual({
+      id: draftId,
+      name: "Team",
+    })
   })
 
   it("offers Refresh only to an app that can read the list again", () => {
@@ -473,8 +485,8 @@ describe("GroupsScreen", () => {
       <GroupsScreen
         {...groupsDefaults}
         groups={[
-          { id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER },
-          { id: "g-2", name: "Team", kind: GroupKind.SHARED, role: GroupRole.VIEWER },
+          { id: "g-1", name: "Home", role: GroupRole.OWNER },
+          { id: "g-2", name: "Team", role: GroupRole.VIEWER },
         ]}
       />
     )
@@ -495,8 +507,8 @@ describe("GroupsScreen", () => {
       <GroupsScreen
         {...groupsDefaults}
         groups={[
-          { id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER },
-          { id: "g-2", name: "Team", kind: GroupKind.SHARED, role: GroupRole.VIEWER },
+          { id: "g-1", name: "Home", role: GroupRole.OWNER },
+          { id: "g-2", name: "Team", role: GroupRole.VIEWER },
         ]}
       />
     )
@@ -510,8 +522,8 @@ describe("GroupsScreen", () => {
 
   it("marks only the selected group", () => {
     const groups = [
-      { id: "g-1", name: "Home", kind: GroupKind.PERSONAL, role: GroupRole.OWNER },
-      { id: "g-2", name: "Team", kind: GroupKind.SHARED, role: GroupRole.VIEWER },
+      { id: "g-1", name: "Home", role: GroupRole.OWNER },
+      { id: "g-2", name: "Team", role: GroupRole.VIEWER },
     ]
     const marked = (selectedId: string | null) =>
       renderToString(<GroupsScreen {...groupsDefaults} groups={groups} selectedId={selectedId} />)
@@ -525,36 +537,145 @@ describe("GroupsScreen", () => {
   })
 })
 
+describe("GroupsScreen deleted groups", () => {
+  const deleted = [{ id: "d-1", name: "Old trip", deletedAt: "2026-10-01T12:00:00.000Z" }]
+
+  it("lists no section when nothing can be restored", () => {
+    expect(renderToString(<GroupsScreen {...groupsDefaults} />)).not.toContain("Deleted groups")
+  })
+
+  it("gives each deleted group a restore form with no fields, named after the group", () => {
+    const screen = <GroupsScreen {...groupsDefaults} deleted={deleted} />
+    const html = renderToString(screen)
+
+    expect(formAt(noScriptSurface(screen), GROUP_PATHS.restore("d-1"))).toEqual({
+      action: "/groups/d-1/restore",
+      method: "post",
+      fields: [],
+    })
+    expect(html).toContain("Old trip")
+    expect(html).toContain('aria-label="Restore Old trip"')
+  })
+
+  it("says the last day a group can be restored, 30 days after it was deleted", () => {
+    const html = renderToString(<GroupsScreen {...groupsDefaults} deleted={deleted} />)
+
+    expect(GROUP_RESTORE_DAYS).toBe(30)
+    expect(html).toContain('datetime="2026-10-31T12:00:00.000Z"')
+    expect(html).toContain(">2026-10-31<")
+  })
+
+  it("shows why a restore was refused above the deleted groups", () => {
+    const html = renderToString(
+      <GroupsScreen {...groupsDefaults} deleted={deleted} restoreError="Group not found" />,
+    )
+
+    expect(html).toContain("Group not found")
+  })
+})
+
 const settingsDefaults: GroupSettingsScreenProps = {
-  group: { id: "g-1", name: "Team", kind: GroupKind.SHARED, role: GroupRole.OWNER },
+  group: { id: "g-1", name: "Team", role: GroupRole.OWNER },
   selected: false,
   loading: false,
 }
 
 describe("GroupSettingsScreen", () => {
-  for (const role of [GroupRole.VIEWER, GroupRole.EDITOR, GroupRole.ADMIN, GroupRole.OWNER]) {
+  const asRole = (role: GroupRole, props: Partial<GroupSettingsScreenProps> = {}) => (
+    <GroupSettingsScreen
+      {...settingsDefaults}
+      group={{ ...settingsDefaults.group!, role }}
+      {...props}
+    />
+  )
+
+  for (const role of [GroupRole.VIEWER, GroupRole.EDITOR]) {
     it(`shows the General section read-only to a person whose role is ${GroupRole[role]}`, () => {
-      const screen = (
-        <GroupSettingsScreen
-          {...settingsDefaults}
-          group={{ ...settingsDefaults.group!, role }}
-        />
-      )
+      const screen = asRole(role)
       const html = renderToString(screen)
       const surface = noScriptSurface(screen)
 
       expect(html).toContain("General")
       expect(html).toContain("Team")
       expect(html).toContain(`data-e2e="group-general-role">${ROLE_TEXT[role]}<`)
-      // The only form is "Open notes"; there is nothing to edit, and no button that does nothing.
+      // The only form is "Open notes": nothing to rename or delete, and no button that does nothing.
       expect(surface.forms).toEqual([
         { action: FORM_ACTIONS.groupSelect, method: "post", fields: ["groupId"] },
       ])
       expect(surface.scriptOnlyButtons).toEqual([])
       expect(html).not.toContain('<input type="text"')
-      expect(html).not.toContain("<textarea")
+      expect(html).not.toContain("group-section-danger")
     })
   }
+
+  it("gives an admin a rename form that posts the API's field names, and no delete", () => {
+    const screen = asRole(GroupRole.ADMIN)
+    const surface = noScriptSurface(screen)
+
+    expect(formAt(surface, GROUP_PATHS.rename("g-1"))).toEqual({
+      action: "/groups/g-1/rename",
+      method: "post",
+      fields: ["name"],
+    })
+    expect(parseRenameGroupBody({ name: "Trip" })).toEqual({ name: "Trip" })
+    expect(surface.forms).toHaveLength(2)
+    expect(renderToString(screen)).not.toContain("group-section-danger")
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("fills the rename field with the group's name until the person types another", () => {
+    expect(renderToString(asRole(GroupRole.OWNER))).toContain('value="Team"')
+    expect(renderToString(asRole(GroupRole.OWNER, { name: "Trip" }))).toContain('value="Trip"')
+  })
+
+  it("shows a refused rename under the name field, tied to it", () => {
+    const html = renderToString(asRole(GroupRole.OWNER, { renameError: "Only an admin can" }))
+
+    expect(html).toContain("Only an admin can")
+    expect(html).toMatch(/<input[^>]*aria-describedby="[^"]*group-rename-name[^"]*"/)
+  })
+
+  it("gives the owner a delete form with no fields, behind a confirmation that says what happens", () => {
+    const screen = asRole(GroupRole.OWNER)
+    const html = renderToString(screen)
+    const surface = noScriptSurface(screen)
+
+    expect(formAt(surface, GROUP_PATHS.delete("g-1"))).toEqual({
+      action: "/groups/g-1/delete",
+      method: "post",
+      fields: [],
+    })
+    // The form sits inside a closed <details>, so the person reads the text before the button.
+    expect(html).toMatch(/<details[^>]*>[\s\S]*group-delete-confirmation[\s\S]*<\/details>/)
+    expect(html).not.toMatch(/<details[^>]* open/)
+    const text = html.match(/data-e2e="group-delete-confirmation">([\s\S]*?)<\/p>/)![1]
+      .replace(/<!--.*?-->/g, "")
+    expect(text).toContain("Delete &quot;Team&quot;?")
+    expect(text).toContain("disappears for every member right away")
+    expect(text).toContain(`restore it from the Groups page for ${GROUP_RESTORE_DAYS} days`)
+    expect(text).toContain("deleted for good")
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("opens the delete section when the delete was refused, so the reason is seen", () => {
+    const html = renderToString(asRole(GroupRole.OWNER, { deleteError: "Try again later" }))
+
+    expect(html).toMatch(/<details[^>]* open/)
+    expect(html).toContain("Try again later")
+  })
+
+  it("disables the delete button of the person's only group and says why", () => {
+    const screen = asRole(GroupRole.OWNER, { isLastGroup: true })
+    const html = renderToString(screen)
+    const surface = noScriptSurface(screen)
+
+    expect(html).toContain("This is your only group, so it cannot be deleted.")
+    const button = html.match(/<button\b[^>]*data-e2e="group-delete"[^>]*>/)![0]
+    expect(button).toContain("disabled")
+    expect(attribute(button, "aria-describedby")).toBe("group-delete-why")
+    expect(html).toContain('id="group-delete-why"')
+    expect(surface.forms.map((form) => form.action)).not.toContain(GROUP_PATHS.delete("g-1"))
+  })
 
   it("marks the group as selected only when it is the selected one", () => {
     expect(renderToString(<GroupSettingsScreen {...settingsDefaults} />)).not.toContain(
