@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures/stack.ts"
+import { gotoApp, signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -35,11 +36,7 @@ test.describe("profile over the socket", () => {
           profileWrites.push(req.url())
         }
       })
-      await first.goto("/sign-in")
-      await first.locator("[data-e2e=auth-form-login]").fill(email)
-      await first.locator("[data-e2e=auth-form-password]").fill(password)
-      await first.locator("[data-e2e=auth-form-submit]").click()
-      await first.waitForURL("/")
+      await signIn(first, email, password)
       await first.getByRole("navigation", { name: "Main navigation" })
         .getByRole("link", { name: "Profile" }).click()
       await expect(first.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible()
@@ -77,7 +74,7 @@ test.describe("profile over the socket", () => {
         route.connectToServer()
         openSockets.push(route)
       })
-      await second.goto("/")
+      await gotoApp(second, "/", second.locator("[data-e2e=shell-ws-status]"))
       await second.getByRole("navigation", { name: "Main navigation" })
         .getByRole("link", { name: "Profile" }).click()
       await expect(second.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible()
@@ -106,6 +103,9 @@ test.describe("profile over the socket", () => {
       socketBlocked = true
       for (const route of openSockets) route.close()
       await expect(second.locator("[data-e2e=shell-ws-status]")).not.toHaveText("Online")
+      // The first save's notice closes on its own five seconds after it opened. While it is still
+      // open, the second save's notice makes the "Saved" text below match twice.
+      await expect(first.locator("[data-e2e=profile-saved]")).toHaveCount(0, { timeout: 10_000 })
       await first.locator("[data-e2e=profile-first-name]").fill("Grace")
       await first.locator("[data-e2e=profile-save]").click()
       await first.locator("[data-e2e=profile-saved]").getByText("Saved", { exact: true }).waitFor()

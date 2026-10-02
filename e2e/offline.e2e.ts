@@ -1,10 +1,6 @@
-import {
-  type APIRequestContext,
-  type BrowserContext,
-  expect,
-  type Page,
-  test,
-} from "@playwright/test"
+import { type APIRequestContext, type BrowserContext, type Page } from "@playwright/test"
+import { expect, test } from "./fixtures/stack.ts"
+import { gotoApp, signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -26,12 +22,8 @@ async function signUp(request: APIRequestContext, email: string): Promise<void> 
   expect(response.ok(), await response.text()).toBe(true)
 }
 
-async function signIn(page: Page, email: string): Promise<void> {
-  await page.goto("/sign-in")
-  await page.locator("[data-e2e=auth-form-login]").fill(email)
-  await page.locator("[data-e2e=auth-form-password]").fill(password)
-  await page.locator("[data-e2e=auth-form-submit]").click()
-  await page.waitForURL("/")
+async function signInOnline(page: Page, email: string): Promise<void> {
+  await signIn(page, email, password)
   await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 }
 
@@ -59,14 +51,13 @@ async function openNotesAndCacheShell(page: Page, groupId: string): Promise<void
     data: { groupId },
   })
   expect(selected.ok(), await selected.text()).toBe(true)
-  await page.goto("/notes")
+  await gotoApp(page, "/notes", page.locator("[data-e2e=shell-ws-status]"))
   await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready
   })
   // One more load under the worker's control, so everything the page needs is cached.
-  await page.reload()
-  await expect(page.locator("[data-e2e=note-list]")).toBeVisible()
+  await gotoApp(page, page.url(), page.locator("[data-e2e=note-list]"))
 }
 
 /** Goes offline and loads the page again: the app must start from the cache alone. */
@@ -83,6 +74,11 @@ async function serverNotes(page: Page, groupId: string): Promise<{ title: string
 }
 
 test.describe("offline notes", () => {
+  // Each spec signs in up to twice, loads the app three times so the service worker holds it, and
+  // goes offline and back. That takes 15 s on an idle machine, up to 29 s on a loaded one, and one run
+  // went past the 30 s default (it timed out in the cleanup after its last step).
+  test.describe.configure({ timeout: 60_000 })
+
   test("a person with no network opens the app, reads notes, adds one, and it syncs when the network is back", async ({ browser, request }) => {
     const user = "e2e_offline_writer@example.com"
     await cleanup(request, user)
@@ -90,7 +86,7 @@ test.describe("offline notes", () => {
     try {
       await signUp(request, user)
       const page = await context.newPage()
-      await signIn(page, user)
+      await signInOnline(page, user)
       const { groupId } = await groupWithNote(page, "Offline team", "Written online")
       await openNotesAndCacheShell(page, groupId)
 
@@ -132,7 +128,7 @@ test.describe("offline notes", () => {
         .toEqual(["Written offline", "Written online"])
 
       // Still there after a fresh load.
-      await page.reload()
+      await gotoApp(page, page.url(), page.locator("[data-e2e=shell-ws-status]"))
       await expect(titles).toHaveText(["Written offline", "Written online"])
     } finally {
       await context.close()
@@ -147,7 +143,7 @@ test.describe("offline notes", () => {
     try {
       await signUp(request, user)
       const page = await context.newPage()
-      await signIn(page, user)
+      await signInOnline(page, user)
       const first = await groupWithNote(page, "Offline first", "In the first")
       const second = await groupWithNote(page, "Offline second", "In the second")
       // Open both online so their notes are in the local store.
@@ -182,8 +178,6 @@ test.describe("offline notes", () => {
   })
 
   test("two devices editing the same note offline end with one visible conflict and no lost edit", async ({ browser, request }) => {
-    // Two browsers, two offline reloads and a 20 s wait for sync: 28 s on main, which is too close to 30 s.
-    test.setTimeout(60_000)
     const user = "e2e_offline_pair@example.com"
     await cleanup(request, user)
     const baseURL = test.info().project.use.baseURL
@@ -193,8 +187,8 @@ test.describe("offline notes", () => {
       await signUp(request, user)
       const a = await contextA.newPage()
       const b = await contextB.newPage()
-      await signIn(a, user)
-      await signIn(b, user)
+      await signInOnline(a, user)
+      await signInOnline(b, user)
       const { groupId } = await groupWithNote(a, "Pair team", "Shared note")
       for (const page of [a, b]) await openNotesAndCacheShell(page, groupId)
       await reloadOffline(contextA, a)
@@ -235,8 +229,6 @@ test.describe("offline notes", () => {
   })
 
   test("choosing the server's version drops the offline edit and shows the server's note", async ({ browser, request }) => {
-    // Two browsers, two offline reloads and a 20 s wait for sync: 28 s on main, which is too close to 30 s.
-    test.setTimeout(60_000)
     const user = "e2e_offline_theirs@example.com"
     await cleanup(request, user)
     const baseURL = test.info().project.use.baseURL
@@ -246,8 +238,8 @@ test.describe("offline notes", () => {
       await signUp(request, user)
       const a = await contextA.newPage()
       const b = await contextB.newPage()
-      await signIn(a, user)
-      await signIn(b, user)
+      await signInOnline(a, user)
+      await signInOnline(b, user)
       const { groupId, noteId } = await groupWithNote(a, "Theirs team", "Shared note")
       for (const page of [a, b]) await openNotesAndCacheShell(page, groupId)
       await reloadOffline(contextB, b)

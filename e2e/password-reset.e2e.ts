@@ -1,4 +1,6 @@
-import { type APIRequestContext, expect, type Page, test } from "@playwright/test"
+import { type APIRequestContext, type Page } from "@playwright/test"
+import { expect, test } from "./fixtures/stack.ts"
+import { gotoApp, signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -25,8 +27,9 @@ async function resetLinkFor(request: APIRequestContext, email: string): Promise<
   return link.pathname + link.search
 }
 
-async function signIn(page: Page, email: string, secret: string): Promise<void> {
-  await page.goto("/sign-in")
+/** Sends the sign-in form and leaves the outcome to the caller. */
+async function trySignIn(page: Page, email: string, secret: string): Promise<void> {
+  await gotoApp(page, "/sign-in", page.locator("[data-e2e=auth-form-login]"))
   await page.locator("[data-e2e=auth-form-login]").fill(email)
   await page.locator("[data-e2e=auth-form-password]").fill(secret)
   await page.locator("[data-e2e=auth-form-submit]").click()
@@ -43,8 +46,9 @@ test("a forgotten password is reset through the mailed link, which works once", 
     })
     expect(signUp.ok(), await signUp.text()).toBe(true)
 
-    await page.goto("/sign-in")
-    await page.getByRole("link", { name: "Forgot your password?" }).click()
+    const forgotLink = page.getByRole("link", { name: "Forgot your password?" })
+    await gotoApp(page, "/sign-in", forgotLink)
+    await forgotLink.click()
     await expect(page).toHaveURL("/forgot-password")
     await page.locator("[data-e2e=forgot-password-email]").fill(email.toUpperCase())
     await page.locator("[data-e2e=forgot-password-submit]").click()
@@ -52,7 +56,7 @@ test("a forgotten password is reset through the mailed link, which works once", 
 
     const link = await resetLinkFor(request, email)
     expect(link).toMatch(/^\/reset-password\?/)
-    await page.goto(link)
+    await gotoApp(page, link, page.locator("[data-e2e=reset-password-new]"))
     // The code is in the address, so the page's own requests must not carry it as the Referer.
     await expect(page.locator("meta[name=referrer]")).toHaveAttribute("content", "no-referrer")
     await page.locator("[data-e2e=reset-password-new]").fill(newPassword)
@@ -60,22 +64,21 @@ test("a forgotten password is reset through the mailed link, which works once", 
     await expect(page.locator("[data-e2e=reset-password-done]")).toBeVisible()
 
     // The link was spent: opening it again offers nothing but a refusal.
-    await page.goto(link)
+    await gotoApp(page, link, page.locator("[data-e2e=reset-password-new]"))
     await page.locator("[data-e2e=reset-password-new]").fill("Other-Passw0rd")
     await page.locator("[data-e2e=reset-password-submit]").click()
     await expect(page.getByText("This link is invalid, used or expired")).toBeVisible()
 
-    await signIn(page, email, password)
+    await trySignIn(page, email, password)
     await expect(page.getByText("Invalid e-mail, username or password")).toBeVisible()
     await signIn(page, email, newPassword)
-    await page.waitForURL("/")
   } finally {
     await cleanup(request, email, true)
   }
 })
 
 test("asking for a link answers the same for an address no account uses", async ({ page }) => {
-  await page.goto("/forgot-password")
+  await gotoApp(page, "/forgot-password", page.locator("[data-e2e=forgot-password-email]"))
   await page.locator("[data-e2e=forgot-password-email]").fill(
     `e2e-nobody-${crypto.randomUUID().slice(0, 8)}@example.com`,
   )

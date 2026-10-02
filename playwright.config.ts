@@ -40,9 +40,8 @@ export default defineConfig({
 
     // Navigation timeout (10 seconds)
     navigationTimeout: 10_000,
-    // Collect trace when retrying the failed test
-    // trace: "on-first-retry",
-
+    // Keep the trace of every failed test
+    trace: "retain-on-failure",
     // Take screenshot on failure
     // screenshot: "only-on-failure",
 

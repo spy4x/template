@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures/stack.ts"
+import { gotoApp, signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -21,11 +22,7 @@ test.describe("group list and settings pages", () => {
         data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
-      await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(email)
-      await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      await page.waitForURL("/")
+      await signIn(page, email, password)
       await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 
       await page.getByRole("navigation", { name: "Main navigation" })
@@ -71,12 +68,10 @@ test.describe("group list and settings pages", () => {
         data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
+      // Signed in at the default width: below 640 px the connection status that `signIn` waits for
+      // is hidden.
+      await signIn(page, email, password)
       await page.setViewportSize({ width: 375, height: 812 })
-      await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(email)
-      await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      await page.waitForURL("/")
       const longName = "A group with a very long name that must wrap and never push the page wider"
       const created = await page.request.post(`${apiBase}/api/groups`, {
         headers,
@@ -88,8 +83,9 @@ test.describe("group list and settings pages", () => {
         page.evaluate(() =>
           document.documentElement.scrollWidth - document.documentElement.clientWidth
         )
-      await page.goto("/groups")
-      await expect(page.getByRole("heading", { level: 1, name: "Groups" })).toBeVisible()
+      const heading = page.getByRole("heading", { level: 1, name: "Groups" })
+      await gotoApp(page, "/groups", heading)
+      await expect(heading).toBeVisible()
       await expect(page.locator("[data-e2e=group-item-name]").filter({ hasText: "A group" }))
         .toBeVisible()
       expect(await overflow()).toBeLessThanOrEqual(0)

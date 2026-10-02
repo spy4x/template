@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test"
+import { gotoApp } from "./fixtures/app.ts"
 
 /**
  * `useUrlFilters` in a real browser: browser back and forward bring the filters back in step with
@@ -59,7 +60,7 @@ test.describe("url filters", () => {
     const errors: string[] = []
     page.on("pageerror", (error) => errors.push(error.message))
 
-    await page.goto(`${origin}/list`)
+    await gotoApp(page, `${origin}/list`, page.locator("[data-e2e=filter-status]"))
     await expectFilters(page, "", "all", "1")
 
     await page.locator("[data-e2e=status-open]").click()

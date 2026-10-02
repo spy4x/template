@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures/stack.ts"
+import { gotoApp, submitAuthForm } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 
@@ -27,13 +28,14 @@ test.describe("auth profile ws push flow", () => {
       })
       expect(signUp.ok()).toBe(true)
 
-      await page.goto("/sign-in")
-      await expect(page.getByRole("heading", { level: 1, name: "Welcome back" })).toBeVisible()
+      await gotoApp(
+        page,
+        "/sign-in",
+        page.getByRole("heading", { level: 1, name: "Welcome back" }),
+      )
       await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-
-      await page.waitForURL("/")
+      await submitAuthForm(page, "/", page.locator("[data-e2e=shell-ws-status]"))
       await page.locator("[data-e2e=ws-status]", { hasText: "open" }).waitFor()
 
       // The signed-in layout: the skip link is the first thing Tab reaches, and the navigation
