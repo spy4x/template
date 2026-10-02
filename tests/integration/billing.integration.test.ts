@@ -705,19 +705,20 @@ Deno.test("billing events against Postgres", async (t) => {
   })
 })
 
-/** A new user who signs in with `email`, already proven, and the group they own. */
+/** A new user who signs in with `email`, proven unless `proven` is false, and the group they own. */
 async function seedOwnerWithAddress(
   sql: postgres.Sql,
-  email: string | null,
+  email: string,
+  proven = true,
 ): Promise<{ groupId: string; owner: number }> {
   const seeded = await seedGroup(sql)
-  if (email !== null) {
+  if (proven) {
     await sql`INSERT INTO auth_email_owners (email, user_id) VALUES (${email}, ${seeded.owner})`
-    await sql`
-      INSERT INTO auth_keys (user_id, method, subject, email, secret, proven_at)
-      VALUES (${seeded.owner}, 'password', ${email}, ${email}, 'hash', now())
-    `
   }
+  await sql`
+    INSERT INTO auth_keys (user_id, method, subject, email, secret, proven_at)
+    VALUES (${seeded.owner}, 'password', ${email}, ${email}, 'hash', ${proven ? new Date() : null})
+  `
   return seeded
 }
 
@@ -769,7 +770,7 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
         const failed = await seedOwnerWithAddress(sql, "failed@example.com")
         const undone = await seedOwnerWithAddress(sql, "undone@example.com")
         const moved = await seedOwnerWithAddress(sql, "moved@example.com")
-        const silent = await seedOwnerWithAddress(sql, null)
+        const silent = await seedOwnerWithAddress(sql, "silent@example.com", false)
         const trialEnd = new Date(start.getTime() + 10 * DAY)
         await apply(trial.groupId, { status: SubscriptionStatus.Trialing, trialEnd })
         await apply(ending.groupId, { cancelAtPeriodEnd: true })
