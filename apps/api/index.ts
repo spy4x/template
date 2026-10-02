@@ -1,7 +1,5 @@
 import { Hono } from "hono"
-import { contextStorage } from "hono/context-storage"
-import { requestIdMiddleware } from "./services/request-id.ts"
-import { requestLog } from "@spy4x/server/request-log"
+import { applyBaseMiddleware } from "./base-middleware.ts"
 import { db, sql } from "@api/services/db.ts"
 import { config } from "@api/services/config.ts"
 import { log } from "@api/services/log.ts"
@@ -42,12 +40,7 @@ const mailWarning = mailOffWarning(readMailSetup(Deno.env))
 if (mailWarning) log(mailWarning)
 
 const app = new Hono<APIContext>().basePath("/api")
-app.use(
-  contextStorage(),
-  requestIdMiddleware(),
-  requestLog({ write: log, skipPaths: ["/api/health"] }),
-  parseAuth,
-)
+applyBaseMiddleware(app, { write: log, parseAuth })
 
 app.route(
   "/health",
