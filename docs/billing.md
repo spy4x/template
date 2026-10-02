@@ -124,4 +124,8 @@ provider, so its public secret cannot sign a real event.
 - Two checkout sessions opened before either is paid can both be paid, which starts two
   subscriptions for one group. The 409 above only covers a subscription the webhook has already
   stored. Refund and cancel the extra one in the Stripe dashboard.
+- A webhook can store a subscription for a group that was already deleted, if the owner paid and
+  deleted the group before the webhook arrived. The purge keeps such a group, and the worker logs
+  how many it kept. The group is past its restore window, so the owner cannot reach the portal:
+  cancel the subscription in the Stripe dashboard, and the next purge removes the group.
 - Payment events are stored (so repeats are skipped) but change nothing yet.

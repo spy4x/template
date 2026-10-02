@@ -1,6 +1,7 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
 import postgres from "postgres"
+import { BillingStatus } from "@domain/billing"
 import { GroupRole } from "@domain/groups"
 import { NoteError } from "@domain/notes"
 import {
@@ -248,7 +249,7 @@ Deno.test("purge: removes groups deleted over 30 days ago with everything in the
     await expireDeletion(sql, groupId, 31)
     await expireDeletion(sql, kept.id, 29)
 
-    expect(await purgeDeletedGroups(sql)).toBe(1)
+    expect(await purgeDeletedGroups(sql)).toEqual({ removed: 1, kept: 0 })
 
     for (const table of ["groups", "group_members", "notes"]) {
       const rows = await sql`SELECT 1 FROM ${sql(table)} WHERE ${
@@ -266,7 +267,82 @@ Deno.test("purge: removes groups deleted over 30 days ago with everything in the
     expect(survivors.length).toBe(0)
     const stillThere = await sql`SELECT 1 FROM groups WHERE id = ${kept.id}`
     expect(stillThere.length).toBe(1)
-    expect(await purgeDeletedGroups(sql)).toBe(0)
+    expect(await purgeDeletedGroups(sql)).toEqual({ removed: 0, kept: 0 })
+  })
+})
+
+Deno.test("purge: keeps a deleted group that a webhook subscribed after the delete", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner } = await team(sql)
+    const cancelled = (await repository.create({ id: crypto.randomUUID(), name: "Old" }, owner))
+      .group
+    await repository.softDelete(groupId, owner)
+    await repository.softDelete(cancelled.id, owner)
+    // The webhooks arrive after the deletes: one live subscription, one already cancelled.
+    for (
+      const [id, status] of [
+        [groupId, BillingStatus.Active],
+        [cancelled.id, BillingStatus.Canceled],
+      ] as const
+    ) {
+      await sql`
+        INSERT INTO subscriptions (group_id, provider_subscription_id, plan_id, status,
+          provider_event_at, provider_event_rank)
+        VALUES (${id}, ${"sub_" + id}, 'pro', ${status}, now(), 1)
+      `
+    }
+    await expireDeletion(sql, groupId, 31)
+    await expireDeletion(sql, cancelled.id, 31)
+
+    expect(await purgeDeletedGroups(sql)).toEqual({ removed: 1, kept: 1 })
+
+    const left = await sql`SELECT 1 FROM subscriptions WHERE group_id = ${groupId}`
+    expect(left.length).toBe(1)
+    const gone = await sql`SELECT 1 FROM groups WHERE id = ${cancelled.id}`
+    expect(gone.length).toBe(0)
+  })
+})
+
+Deno.test("purge: keeps a group whose subscription a webhook commits while the purge waits", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner } = await team(sql)
+    await repository.softDelete(groupId, owner)
+    await expireDeletion(sql, groupId, 31)
+
+    let commit = () => {}
+    const committed = new Promise<void>((resolve) => (commit = resolve))
+    let locked = () => {}
+    const holding = new Promise<void>((resolve) => (locked = resolve))
+    // The webhook's transaction holds the group row with its new subscription, uncommitted.
+    const webhook = sql.begin(async (transaction) => {
+      await transaction`
+        INSERT INTO subscriptions (group_id, provider_subscription_id, plan_id, status,
+          provider_event_at, provider_event_rank)
+        VALUES (${groupId}, 'sub_late', 'pro', ${BillingStatus.Active}, now(), 1)
+      `
+      await transaction`UPDATE groups SET updated_at = now() WHERE id = ${groupId}`
+      locked()
+      await committed
+    })
+    await holding
+    const purge = purgeDeletedGroups(sql)
+    let purgeWaited = false
+    for (let attempt = 0; attempt < 50 && !purgeWaited; attempt++) {
+      const [{ waiting }] = await sql<{ waiting: number }[]>`
+        SELECT count(*)::int AS waiting FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+      `
+      purgeWaited = waiting >= 1
+      if (!purgeWaited) await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    commit()
+    // Without the wait this test would not exercise the race at all.
+    expect(purgeWaited).toBe(true)
+    await webhook
+
+    expect(await purge).toEqual({ removed: 0, kept: 1 })
+    const left = await sql`SELECT 1 FROM subscriptions WHERE group_id = ${groupId}`
+    expect(left.length).toBe(1)
   })
 })
 

@@ -53,7 +53,12 @@ export function createOutboxProcessor(
         const staleCodes = await removeStaleEmailCodeRequests(sql)
         if (staleCodes > 0) console.log(`Removed ${staleCodes} unsent e-mail code request(s)`)
         const groups = await purgeDeletedGroups(sql)
-        if (groups > 0) console.log(`Removed ${groups} deleted group(s) for good`)
+        if (groups.removed > 0) console.log(`Removed ${groups.removed} deleted group(s) for good`)
+        if (groups.kept > 0) {
+          console.warn(
+            `Kept ${groups.kept} deleted group(s) with a live subscription; cancel it in Stripe`,
+          )
+        }
       },
       [PASSWORD_RESET_MAIL_JOB]: passwordResetMailJob({ sql, ...mail }),
       [EMAIL_CODE_MAIL_JOB]: emailCodeMailJob({ sql, ...mail }),
