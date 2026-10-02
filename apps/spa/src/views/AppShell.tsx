@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact"
-import { useLocation } from "wouter-preact"
+import { useLocation, useSearch } from "wouter-preact"
 import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { AppFrame, PublicFrame as PublicFrameScreen } from "@ui/frame.tsx"
 import { EmailBanner } from "@ui/email-screen.tsx"
@@ -8,6 +8,22 @@ import { signOut } from "../state/auth.ts"
 import { groupsStore } from "../state/groups.ts"
 import { selectionStore } from "../state/selection.ts"
 import type { SessionState, SessionUser } from "../state/session.ts"
+import { signOutRedirect } from "./sign-in-gate.ts"
+
+/**
+ * Signs out, leaving a page for signed-in people for plain sign-in first, while the session still
+ * holds: once it is cleared, the sign-in gate would keep the page as `next` for whoever signs in
+ * next.
+ */
+function useSignOut(): () => void {
+  const [location, navigate] = useLocation()
+  const search = useSearch()
+  return () => {
+    const target = signOutRedirect(location, search)
+    if (target) navigate(target, { replace: true })
+    void signOut()
+  }
+}
 
 /** Wires the signed-in `AppFrame` to this app's router and `signOut`. */
 export function AppShell(
@@ -18,6 +34,7 @@ export function AppShell(
   },
 ) {
   const [location, navigate] = useLocation()
+  const onSignOut = useSignOut()
   return (
     <AppFrame
       groupPicker={{
@@ -37,7 +54,7 @@ export function AppShell(
       connection={wsStatus}
       currentPath={location}
       navigate={navigate}
-      onSignOut={() => void signOut()}
+      onSignOut={onSignOut}
     >
       {children}
     </AppFrame>
@@ -49,11 +66,12 @@ export function PublicFrame(
   { canSignOut, children }: { canSignOut: boolean; children: ComponentChildren },
 ) {
   const [, navigate] = useLocation()
+  const onSignOut = useSignOut()
   return (
     <PublicFrameScreen
       canSignOut={canSignOut}
       navigate={navigate}
-      onSignOut={() => void signOut()}
+      onSignOut={onSignOut}
     >
       {children}
     </PublicFrameScreen>

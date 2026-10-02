@@ -1,6 +1,6 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
-import { signInRedirect } from "./sign-in-gate.ts"
+import { signInRedirect, signOutRedirect } from "./sign-in-gate.ts"
 
 const signedOut = { user: null, isMfaRequired: false }
 const codeOwed = { user: null, isMfaRequired: true }
@@ -37,5 +37,22 @@ describe("where a visit goes before sign-in is finished", () => {
 
   it("leaves a signed-in person where they are", () => {
     expect(signInRedirect("/notes/abc", "", signedIn)).toBe(null)
+  })
+})
+
+describe("where a sign-out goes first", () => {
+  it("leaves a page for signed-in people for plain sign-in, with no next", () => {
+    expect(signOutRedirect("/notes/abc", "")).toBe("/sign-in")
+    expect(signOutRedirect("/email", "")).toBe("/sign-in")
+    expect(signOutRedirect("/groups/g1", "x=1")).toBe("/sign-in")
+  })
+
+  it("leaves an auth page that carries next for plain sign-in", () => {
+    expect(signOutRedirect("/totp", "next=%2Fnotes%2Fabc")).toBe("/sign-in")
+  })
+
+  it("leaves a page open to anyone where it is", () => {
+    expect(signOutRedirect("/", "")).toBe(null)
+    expect(signOutRedirect("/totp", "")).toBe(null)
   })
 })
