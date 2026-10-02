@@ -384,7 +384,6 @@ export function SeatPriceConfirm(
     <div data-e2e="seat-price">
       <Field
         id="invitation-seat-price"
-        labelFor={false}
         error={error}
         hint={`Each person who joins adds ${money(amount)} a month: with one more member the ` +
           `group pays ${money(amount * (seats + 1))} instead of ${money(amount * seats)}. ` +
@@ -396,7 +395,6 @@ export function SeatPriceConfirm(
           value="true"
           data-e2e="seat-price-accept"
           checked={checked}
-          aria-invalid={error ? true : undefined}
           onChange={(e) => onChange?.(e.currentTarget.checked)}
         >
           I accept the higher price for each person who joins

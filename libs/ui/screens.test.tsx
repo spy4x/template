@@ -1430,6 +1430,8 @@ describe("GroupInvitationsSection without JavaScript", () => {
     const box = html.match(/<input[^>]*name="acceptSeatPrice"[^>]*>/)?.[0] ?? ""
 
     expect(html).toMatch(/<label[^>]*>\s*<input[^>]*name="acceptSeatPrice"[^>]*>I accept/)
+    // One label: a second `for` label would name the box twice.
+    expect(html.match(/<label/g)).toHaveLength(1)
     expect(attribute(box, "id")).toBe("invitation-seat-price")
     expect(attribute(box, "aria-invalid")).toBe("true")
     const described = attribute(box, "aria-describedby")?.split(" ") ?? []
