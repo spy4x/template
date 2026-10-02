@@ -257,13 +257,14 @@ These cost real time to find. Do not rediscover them.
    prints the link, and container logs are shipped. The SPA's nginx logs paths
    without the query string, and the reset pages send no referrer.
 
-   **Owner step before reset mails go out in production.** Production has no
-   SMTP account yet. Until all five `SMTP_*` keys are in the production env file,
-   the API and the worker start, each logs one warning naming the missing keys,
-   `/forgot-password` gives its usual answer and sends nothing, sign-up works but
-   no code arrives, so the banner stays, and everything else works. No code is
-   ever logged outside `ENV=dev`. Add the five keys (see `infra/envs/.env.example`) and deploy; the
-   worker reads them at start-up.
+   **Production mail.** Since 2026-10-02 production sends through the
+   `noreply@antonshubin.com` mailbox on the owner's mail server (shared with
+   Vaultwarden and Healthchecks), set in the main checkout's
+   `infra/envs/.env.prod`. When any of the five `SMTP_*` keys is missing or invalid, the API
+   and the worker still start, each logs one warning naming the missing keys,
+   `/forgot-password` gives its usual answer and sends nothing, and sign-up works
+   but no code arrives. No code is ever logged outside `ENV=dev`. The worker
+   reads the keys at start-up, so a change needs a deploy.
 
 9. **A full-stack e2e spec imports `test` from `e2e/fixtures/stack.ts` and loads pages
    through `gotoApp` or `signIn` (#105).** That fixture warms Vite's page bundles once per
