@@ -135,6 +135,27 @@ Deno.test({
         },
       )
 
+      await t.step("an audit row outlives its group, with the group id emptied", async () => {
+        await applyMigration(sql, "2026_10_08_0001_audit_outlives_group.sql")
+        const userId = await insertUser(sql)
+        const groupId = crypto.randomUUID()
+        await sql`
+          INSERT INTO groups (id, name, owner_user_id, created_by_user_id)
+          VALUES (${groupId}, 'audited', ${userId}, ${userId})
+        `
+        await sql`
+          INSERT INTO audit_events (event_kind, actor_user_id, group_id)
+          VALUES ('group.deleted', ${userId}, ${groupId})
+        `
+
+        await sql`DELETE FROM groups WHERE id = ${groupId}`
+
+        const rows = await sql<{ groupId: string | null }[]>`
+          SELECT group_id FROM audit_events WHERE actor_user_id = ${userId}
+        `
+        expect(rows).toEqual([{ groupId: null }])
+      })
+
       await t.step(
         "schema snapshot matches tables, functions, and trigger definitions",
         async () => {

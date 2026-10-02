@@ -1,6 +1,14 @@
 import type postgres from "postgres"
 import { GROUP_AGGREGATE } from "@domain/groups"
 
+/** The group is missing or deleted, so nothing may be written inside it. */
+export class GroupNotActiveError extends Error {
+  constructor(readonly groupId: string) {
+    super(`Group ${groupId} is deleted or missing`)
+    this.name = "GroupNotActiveError"
+  }
+}
+
 interface ChangeSequenceRow extends postgres.Row {
   sequence: string
 }
@@ -15,23 +23,31 @@ interface ChangeSequenceRow extends postgres.Row {
  * group row, which is what hands two concurrent changes two different sequences in commit order.
  * The outbox row carries the group as its aggregate and the sequence as its version, so the
  * publisher can name both without reading the group again; `eventKind` says what changed.
+ *
+ * A deleted group takes no change: the `UPDATE` matches no row and {@link GroupNotActiveError} is
+ * thrown, which rolls back the write it belongs to. That is what stops a note saved a moment after
+ * its group was deleted: the role check before the write cannot see the delete, this can, because
+ * the `UPDATE` waits for the deleting transaction and then re-reads the group. The delete itself
+ * records its change with `allowDeleted`, as it has just set `deleted_at`.
  */
 export async function recordGroupChange(
   sql: postgres.Sql,
   groupId: string,
   actorId: number,
   eventKind: string,
+  options: { allowDeleted?: boolean } = {},
 ): Promise<string> {
+  const allowDeleted = options.allowDeleted === true
   const stamped = (
     await sql<ChangeSequenceRow[]>`
       UPDATE groups
       SET next_change_sequence = next_change_sequence + 1
-      WHERE id = ${groupId}
+      WHERE id = ${groupId} AND (deleted_at IS NULL OR ${allowDeleted})
       RETURNING (next_change_sequence - 1)::text AS sequence
     `
   )[0]
   if (!stamped) {
-    throw new Error(`Group ${groupId} vanished while its change was being recorded`)
+    throw new GroupNotActiveError(groupId)
   }
   await sql`
     INSERT INTO outbox_events (

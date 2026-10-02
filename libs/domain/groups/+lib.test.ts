@@ -109,6 +109,12 @@ describe("group domain", () => {
     })
   })
 
+  it("still accepts and ignores kind 2 from a page cached before the kind was dropped", () => {
+    const id = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
+
+    expect(parseCreateGroupRequest({ id, name: "Team", kind: 2 })).toEqual({ id, name: "Team" })
+  })
+
   it("rejects malformed, uppercase, empty, long, and extra create data", () => {
     const id = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
     const invalid = [
@@ -117,7 +123,8 @@ describe("group domain", () => {
       { id, name: "  " },
       { id, name: "x".repeat(101) },
       { id, name: "Team", userId: 99 },
-      { id, name: "Team", kind: 2 },
+      { id, name: "Team", kind: 1 },
+      { id, name: "Team", kind: 2, userId: 99 },
     ]
     for (const value of invalid) {
       expect(() => parseCreateGroupRequest(value)).toThrow(GroupError)

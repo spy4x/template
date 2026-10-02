@@ -385,7 +385,7 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    (`POST /api/groups/:id/restore`, `group.restore`, `POST /groups/:id/restore`; the list is
    `GET /api/groups/deleted`, `group.deleted`) for `GROUP_RESTORE_DAYS` (30) days, by the database
    clock. The nightly `outbox.cleanup` job also runs `purgeDeletedGroups`, which removes groups past
-   that for good, with their notes, members and audit rows, so a group may live up to a day longer
+   that for good, with their notes and members, so a group may live up to a day longer
    than 30 days but can no longer be restored. The settings page of a deleted group is a 404.
 10. **The personal kind is gone** (migration `2026_10_07_0001_group_kind_removed.sql`: it drops
    `groups.kind` and its indexes and rewrites no row, so every group, membership and note stays).
@@ -398,6 +398,28 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
     already does (the API and the worker wait for the `migrate` service to complete), so there is no rolling deploy and
     nothing to add; a deploy that keeps the old API running while the new migration applies would
     break it.
+
+    **Audit.** Rename, delete and restore each write an `audit_events` row (kind `group.renamed`,
+    `group.deleted`, `group.restored`, with the actor and request id) in the same transaction as
+    the change. Migration `2026_10_08_0001_audit_outlives_group.sql` makes `audit_events.group_id`
+    nullable with `ON DELETE SET NULL`, so the purge leaves the rows behind with the group id
+    emptied; they are the record of who deleted what.
+
+    **A note and a delete racing.** The handlers check the role before the write, so a delete can
+    land between the check and a note write. `recordGroupChange` refuses a deleted group inside the
+    write's transaction (`GroupNotActiveError`, answered as `GROUP_NOT_FOUND`), and the note write
+    rolls back; the delete records its own change with `allowDeleted`. The delete's row locks are
+    `FOR NO KEY UPDATE`, because `FOR UPDATE` conflicts with the key-share lock a note insert takes
+    on its foreign keys and the two deadlock.
+
+    **Rollback of the kind migration.** Dropping the column cannot be undone by the migration
+    runner (they are forward-only). To go back by hand, after stopping the new API:
+    `ALTER TABLE groups ADD COLUMN kind INT2 NOT NULL DEFAULT 2;`
+    `ALTER TABLE groups ADD CONSTRAINT groups_kind_check CHECK (kind IN (1, 2));`
+    `CREATE INDEX idx_groups_kind_created_id ON groups (kind, created_at, id);`
+    and, to restore the old one-personal-group rule, set `kind = 1` on each user's oldest group and
+    `CREATE UNIQUE INDEX idx_groups_one_active_personal_per_user ON groups (owner_user_id) WHERE kind = 1 AND deleted_at IS NULL;`.
+    Every group comes back as shared (`2`) until that step.
 
 ## Next steps, in dependency order
 

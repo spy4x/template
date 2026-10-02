@@ -372,7 +372,12 @@ export class PostgresGroupRepository implements GroupRepository {
    * `@domain/groups`) as the least role the write needs, so a role changed between the handler's
    * read and the write cannot slip through.
    */
-  async rename(groupId: string, name: string, actorId: number): Promise<GroupSummary | null> {
+  async rename(
+    groupId: string,
+    name: string,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupSummary | null> {
     return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
       const repository = new PostgresGroupRepository(transaction)
       const renamed = (
@@ -395,12 +400,17 @@ export class PostgresGroupRepository implements GroupRepository {
         `
       )[0]
       if (!renamed) return null
+      await repository.audit(groupId, actorId, GROUP_RENAMED_EVENT, requestId)
       const sequence = await repository.recordChange(groupId, actorId, GROUP_RENAMED_EVENT)
       return { ...renamed, changeSequence: sequence }
     })
   }
 
-  async softDelete(groupId: string, actorId: number): Promise<DeletedGroupSummary | null> {
+  async softDelete(
+    groupId: string,
+    actorId: number,
+    requestId?: string,
+  ): Promise<DeletedGroupSummary | null> {
     return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
       const repository = new PostgresGroupRepository(transaction)
       await repository.lockMembersAndActor(groupId, actorId)
@@ -451,7 +461,10 @@ export class PostgresGroupRepository implements GroupRepository {
         )
       }
 
-      const sequence = await repository.recordChange(groupId, actorId, GROUP_DELETED_EVENT)
+      await repository.audit(groupId, actorId, GROUP_DELETED_EVENT, requestId)
+      const sequence = await repository.recordChange(groupId, actorId, GROUP_DELETED_EVENT, {
+        allowDeleted: true,
+      })
       return {
         id: groupId,
         name: group.name,
@@ -464,7 +477,11 @@ export class PostgresGroupRepository implements GroupRepository {
     })
   }
 
-  async restore(groupId: string, actorId: number): Promise<GroupSummary | null> {
+  async restore(
+    groupId: string,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupSummary | null> {
     return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
       const repository = new PostgresGroupRepository(transaction)
       await repository.assertActiveUser(actorId)
@@ -478,6 +495,7 @@ export class PostgresGroupRepository implements GroupRepository {
           RETURNING updated_at
         `
       )[0]
+      await repository.audit(groupId, actorId, GROUP_RESTORED_EVENT, requestId)
       const sequence = await repository.recordChange(groupId, actorId, GROUP_RESTORED_EVENT)
       return {
         id: groupId,
@@ -556,7 +574,7 @@ export class PostgresGroupRepository implements GroupRepository {
           OR users.id IN (SELECT user_id FROM group_members WHERE group_id = ${groupId})
         )
       ORDER BY users.id
-      FOR UPDATE
+      FOR NO KEY UPDATE
     `
     if (!locked.some((user) => user.id === actorId)) {
       throw new GroupError("USER_NOT_ACTIVE", "User is not active")
@@ -586,10 +604,23 @@ export class PostgresGroupRepository implements GroupRepository {
           ? this.sql`groups.deleted_at > now() - make_interval(days => ${GROUP_RESTORE_DAYS})`
           : this.sql`groups.deleted_at IS NULL`
       }
-        FOR UPDATE OF groups
+        FOR NO KEY UPDATE OF groups
       `
     )[0]
     return row ?? null
+  }
+
+  /** Writes one audit row in the current transaction. It outlives the group (see the purge). */
+  private async audit(
+    groupId: string,
+    actorId: number,
+    eventKind: string,
+    requestId: string | undefined,
+  ): Promise<void> {
+    await this.sql`
+      INSERT INTO audit_events (event_kind, actor_user_id, group_id, request_id)
+      VALUES (${eventKind}, ${actorId}, ${groupId}, ${requestId || null})
+    `
   }
 
   /** Records a change on a group in the current transaction; see {@link recordGroupChange}. */
@@ -597,8 +628,9 @@ export class PostgresGroupRepository implements GroupRepository {
     groupId: string,
     actorId: number,
     eventKind: string,
+    options: { allowDeleted?: boolean } = {},
   ): Promise<string> {
-    return await recordGroupChange(this.sql, groupId, actorId, eventKind)
+    return await recordGroupChange(this.sql, groupId, actorId, eventKind, options)
   }
 
   private async assertActiveUser(userId: number): Promise<void> {

@@ -2,6 +2,8 @@
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import { GroupRole } from "@domain/groups"
+import { NoteError } from "@domain/notes"
+import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { purgeDeletedGroups } from "@server/groups/purge-deleted-groups.ts"
 import { requireDbConnection } from "./db-connection.ts"
@@ -215,12 +217,20 @@ Deno.test("purge: removes groups deleted over 30 days ago with everything in the
 
     expect(await purgeDeletedGroups(sql)).toBe(1)
 
-    for (const table of ["groups", "group_members", "notes", "audit_events"]) {
+    for (const table of ["groups", "group_members", "notes"]) {
       const rows = await sql`SELECT 1 FROM ${sql(table)} WHERE ${
         sql(table === "groups" ? "id" : "group_id")
       } = ${groupId}`
       expect(rows.length).toBe(0)
     }
+    // The audit rows stay as a record, without the group they were about.
+    const audit = await sql<{ kind: string; groupId: string | null }[]>`
+      SELECT event_kind AS kind, group_id FROM audit_events
+      WHERE actor_user_id = ${owner} AND event_kind = 'group.created' AND group_id IS NULL
+    `
+    expect(audit.length).toBeGreaterThan(0)
+    const survivors = await sql`SELECT 1 FROM audit_events WHERE group_id = ${groupId}`
+    expect(survivors.length).toBe(0)
     const stillThere = await sql`SELECT 1 FROM groups WHERE id = ${kept.id}`
     expect(stillThere.length).toBe(1)
     expect(await purgeDeletedGroups(sql)).toBe(0)
@@ -310,5 +320,130 @@ Deno.test("delete: a group that is already deleted does not count as another gro
       code: "LAST_GROUP",
     })
     expect((await repository.getSummaryForMember(live.id, owner))?.name).toBe("Live")
+  })
+})
+
+Deno.test("rename, delete and restore each write an audit row with the request id", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner } = await team(sql)
+
+    await repository.rename(groupId, "Trip", owner, "req-rename")
+    await repository.softDelete(groupId, owner, "req-delete")
+    await repository.restore(groupId, owner, "req-restore")
+
+    const rows = await sql<{ kind: string; actor: number; request: string }[]>`
+      SELECT event_kind AS kind, actor_user_id AS actor, request_id AS request
+      FROM audit_events WHERE group_id = ${groupId} AND event_kind <> 'group.created'
+      ORDER BY id
+    `
+    expect(rows).toEqual([
+      { kind: "group.renamed", actor: owner, request: "req-rename" },
+      { kind: "group.deleted", actor: owner, request: "req-delete" },
+      { kind: "group.restored", actor: owner, request: "req-restore" },
+    ])
+  })
+})
+
+Deno.test("a refused rename, delete or restore writes no audit row", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, viewer } = await team(sql)
+
+    await repository.rename(groupId, "Nope", viewer, "req-1")
+    await repository.softDelete(groupId, viewer, "req-2")
+    await repository.restore(groupId, viewer, "req-3")
+
+    const rows = await sql`
+      SELECT 1 FROM audit_events WHERE group_id = ${groupId} AND event_kind <> 'group.created'
+    `
+    expect(rows.length).toBe(0)
+  })
+})
+
+Deno.test("rename: a deleted group cannot be renamed, even by its owner", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner } = await team(sql)
+    await repository.softDelete(groupId, owner)
+
+    expect(await repository.rename(groupId, "Too late", owner)).toBeNull()
+
+    const name = await sql<{ name: string }[]>`SELECT name FROM groups WHERE id = ${groupId}`
+    expect(name[0].name).toBe("Team")
+  })
+})
+
+Deno.test("notes: a write after the group was deleted is refused and leaves no trace", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner } = await team(sql)
+    const notes = new PostgresNoteRepository(sql)
+    const existing = crypto.randomUUID()
+    await notes.create({ groupId, id: existing, title: "Before", body: "" }, owner)
+    // The handlers check the role, then write. A delete that lands between the two:
+    await repository.softDelete(groupId, owner)
+    const outboxBefore = (await sql`SELECT 1 FROM outbox_events`).length
+
+    const refused = [
+      () => notes.create({ groupId, id: crypto.randomUUID(), title: "New", body: "" }, owner),
+      () =>
+        notes.update(
+          { groupId, id: existing, title: "After", body: "", expectedVersion: 1 },
+          owner,
+        ),
+      () => notes.delete({ groupId, id: existing, expectedVersion: 1 }, owner),
+    ]
+
+    for (const write of refused) {
+      const error = await write().then(() => null, (cause) => cause)
+      expect(error).toBeInstanceOf(NoteError)
+      expect(error).toMatchObject({ code: "GROUP_NOT_FOUND" })
+    }
+    const rows = await sql<{ title: string; version: number; deletedAt: Date | null }[]>`
+      SELECT title, version, deleted_at FROM notes WHERE group_id = ${groupId}
+    `
+    expect(rows).toEqual([{ title: "Before", version: 1, deletedAt: null }])
+    expect((await sql`SELECT 1 FROM outbox_events`).length).toBe(outboxBefore)
+  })
+})
+
+Deno.test("delete: a note written while the delete is between its locks finishes with it", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner } = await team(sql)
+    const notes = new PostgresNoteRepository(sql)
+    const waiting = async (count: number) => {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const [{ n }] = await sql<{ n: number }[]>`
+          SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE wait_event_type = 'Lock' AND datname = current_database()
+        `
+        if (n >= count) return
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      throw new Error(`fewer than ${count} requests are waiting on a lock`)
+    }
+
+    // A third transaction holds the group row, so the delete stops after locking the people and
+    // before locking the group; the note write then starts, and both are let go together.
+    const hold = await sql.reserve()
+    await hold`BEGIN`
+    await hold`SELECT id FROM groups WHERE id = ${groupId} FOR NO KEY UPDATE`
+    const deleting = repository.softDelete(groupId, owner)
+    await waiting(1)
+    const noteId = crypto.randomUUID()
+    const writing = notes.create({ groupId, id: noteId, title: "Racing", body: "" }, owner)
+    await waiting(2)
+    await hold`COMMIT`
+    hold.release()
+
+    const [deleted, written] = await Promise.allSettled([deleting, writing])
+
+    // Neither request deadlocked. Which one reaches the group first is up to the database: the
+    // delete always goes through, and the note is either saved before it or refused after it.
+    expect(deleted.status === "rejected" ? String(deleted.reason) : "fulfilled").toBe("fulfilled")
+    const saved = (await sql`SELECT 1 FROM notes WHERE id = ${noteId}`).length
+    if (written.status === "fulfilled") {
+      expect(saved).toBe(1)
+    } else {
+      expect(written.reason).toMatchObject({ code: "GROUP_NOT_FOUND" })
+      expect(saved).toBe(0)
+    }
   })
 })

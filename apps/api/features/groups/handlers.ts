@@ -81,7 +81,12 @@ export function createGroupRenameHandler(
   return async ({ data }) => {
     const access = await repository.getForMember(data.groupId, data.actor.userId)
     assertCanRename(access?.role ?? null)
-    const group = await repository.rename(data.groupId, data.name, data.actor.userId)
+    const group = await repository.rename(
+      data.groupId,
+      data.name,
+      data.actor.userId,
+      data.requestId,
+    )
     if (!group) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
     return { group }
   }
@@ -97,7 +102,7 @@ export function createGroupDeleteHandler(
   return async ({ data }) => {
     const access = await repository.getForMember(data.groupId, data.actor.userId)
     assertCanDelete(access?.role ?? null)
-    const group = await repository.softDelete(data.groupId, data.actor.userId)
+    const group = await repository.softDelete(data.groupId, data.actor.userId, data.requestId)
     if (!group) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
     return { group }
   }
@@ -110,7 +115,7 @@ export function createGroupRestoreHandler(
   return async ({ data }) => {
     const access = await repository.getRestorableForMember(data.groupId, data.actor.userId)
     assertCanDelete(access?.role ?? null)
-    const group = await repository.restore(data.groupId, data.actor.userId)
+    const group = await repository.restore(data.groupId, data.actor.userId, data.requestId)
     if (!group) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
     return { group }
   }

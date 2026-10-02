@@ -308,15 +308,24 @@ export interface GroupRepository {
    */
   ensureFirst(input: FirstGroupInput, userId: number): Promise<void>
   /** Renames the group and announces the change. `null` when it is missing or deleted. */
-  rename(groupId: string, name: string, actorId: number): Promise<GroupSummary | null>
+  rename(
+    groupId: string,
+    name: string,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupSummary | null>
   /**
    * Soft-deletes the group, in one transaction: refuses with `LAST_GROUP` when it is the actor's
    * only active group; gives every other member who would be left with no group a new one; and
    * announces the change. `null` when the group is missing or already deleted.
    */
-  softDelete(groupId: string, actorId: number): Promise<DeletedGroupSummary | null>
+  softDelete(
+    groupId: string,
+    actorId: number,
+    requestId?: string,
+  ): Promise<DeletedGroupSummary | null>
   /** Brings a group back inside its restore window. `null` when it is not restorable. */
-  restore(groupId: string, actorId: number): Promise<GroupSummary | null>
+  restore(groupId: string, actorId: number, requestId?: string): Promise<GroupSummary | null>
   /** The groups the user owns that can still be restored, most recently deleted first. */
   listRestorable(userId: number): Promise<DeletedGroupSummary[]>
 }
@@ -345,10 +354,15 @@ export function parseGroupName(value: unknown): string {
 }
 
 export function parseCreateGroupRequest(value: unknown): CreateGroupRequest {
-  if (!hasExactKeys(value, CREATE_KEYS)) {
+  // TODO(remove after the first release that ships this change): a page cached before the deploy
+  // still posts `kind: 2`. It is accepted and ignored for one release, so those pages can still
+  // create groups; then delete these two lines and the test that names them.
+  const { kind, ...rest } = isRecord(value) ? value : { kind: undefined }
+  const request = kind === 2 ? rest : value
+  if (!hasExactKeys(request, CREATE_KEYS)) {
     throw new GroupError("INVALID_REQUEST", "Expected exactly id and name")
   }
-  return { id: parseGroupId(value.id), name: parseGroupName(value.name) }
+  return { id: parseGroupId(request.id), name: parseGroupName(request.name) }
 }
 
 /** The body of a rename over REST, where the path names the group: exactly `{ name }`. */

@@ -40,8 +40,8 @@ Target libraries:
 - `libs/server`: Postgres and server-side adapters.
 - `libs/client`: Vite adapters. Preact UI comes from the `@spy4x/preact-*` packages.
 
-Every group, including the one made at sign-up, uses one authorization and sync model. Full boundary and sync rules
-are recorded in [ADR 001](decisions/001-deno-platform-template.md).
+Every group, including the one made at sign-up, uses one authorization and sync model. Full
+boundary and sync rules are recorded in [ADR 001](decisions/001-deno-platform-template.md).
 
 Distribution proceeds in stages: Git template first, proven generic libraries on JSR second,
 then a CLI after generation and upgrade flows stabilize.
