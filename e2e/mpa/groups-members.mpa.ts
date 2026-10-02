@@ -1,4 +1,5 @@
 import { type APIRequestContext, type Browser, expect, type Page, test } from "@playwright/test"
+import { BILLING_WEBHOOK_PATH, proWebhook } from "../fixtures/billing.ts"
 
 const password = "Passw0rd!"
 
@@ -43,6 +44,9 @@ test("without JavaScript, the owner changes a member's role and removes them, an
       const added = await request.post("/api/test/add-member", { data: { login, groupId, role } })
       expect(added.status(), await added.text()).toBe(200)
     }
+    // Changing a role is a paid feature: the free plan refuses it (plan-limits.mpa.ts).
+    const upgraded = await request.post(BILLING_WEBHOOK_PATH, await proWebhook(groupId))
+    expect(upgraded.status(), await upgraded.text()).toBe(200)
 
     await ownerPage.goto(`/groups/${groupId}`)
     await expect(ownerPage.locator("[data-e2e=group-member]")).toHaveCount(3)
