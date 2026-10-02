@@ -83,12 +83,13 @@ describe("billing screens without JavaScript", () => {
     expect(forms(<BillingCard groupId={groupId} billing={member} />)).toEqual([])
   })
 
-  it("offers no upgrade while billing is off", () => {
+  it("shows only the plan while billing is off: no upgrade, and no word about who could change it", () => {
     const off = { ...FREE_OWNER, enabled: false, canManage: false }
     const html = renderToString(<BillingCard groupId={groupId} billing={off} />)
 
     expect(html).toContain(`data-plan="free"`)
     expect(html).not.toContain(BILLING_PATHS.pricing(groupId))
+    expect(html).not.toContain(`data-e2e="billing-owner-only"`)
   })
 
   it("posts each paid plan to the checkout with the API's field name", () => {
