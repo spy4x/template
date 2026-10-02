@@ -26,6 +26,8 @@ export interface BillingHandlerDependencies {
   log: (message: string, detail?: unknown) => void
   /** Days a past-due group keeps its plan (`BILLING_GRACE_DAYS`). */
   graceDays: number
+  /** Whether a trial's checkout asks for a card (`BILLING_TRIAL_REQUIRES_CARD`). */
+  trialRequiresCard: boolean
   /** The current time; tests pass a fixed one. */
   now: () => Date
 }
@@ -79,7 +81,7 @@ export function createBillingCheckoutHandler(
       reference: data.groupId,
       // Only a group's first checkout starts with a trial: a group that ever paid, or tried, has a
       // customer already.
-      ...(customerId ? { customerId } : plan.trialDays > 0 ? { trialDays: plan.trialDays } : {}),
+      ...(customerId ? { customerId } : trialOf(plan.trialDays, dependencies.trialRequiresCard)),
       // The client's key is scoped to the group and the person, so one person's key can never
       // replay a checkout the provider made for another group or person.
       ...(data.idempotencyKey
@@ -92,6 +94,15 @@ export function createBillingCheckoutHandler(
     }
     return { url: result.value.url }
   }
+}
+
+/** The checkout's trial fields: none for a plan without trial days. */
+function trialOf(
+  trialDays: number,
+  requiresCard: boolean,
+): { trialDays?: number; trialWithoutPaymentMethod?: boolean } {
+  if (trialDays <= 0) return {}
+  return requiresCard ? { trialDays } : { trialDays, trialWithoutPaymentMethod: true }
 }
 
 export function createBillingPortalHandler(

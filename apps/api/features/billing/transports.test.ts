@@ -58,11 +58,12 @@ function fakeProvider(recorder: Recorder): BillingProvider {
 }
 
 function stack(
-  { subscription = null, customer = null, enabled = true, now = NOW }: {
+  { subscription = null, customer = null, enabled = true, now = NOW, trialRequiresCard = true }: {
     subscription?: StoredSubscription | null
     customer?: string | null
     enabled?: boolean
     now?: Date
+    trialRequiresCard?: boolean
   } = {},
 ) {
   const recorder: Recorder = { checkouts: [], portals: [] }
@@ -83,6 +84,7 @@ function stack(
     webAppUrl: "https://app.example.com",
     log: () => {},
     graceDays: 7,
+    trialRequiresCard,
     now: () => now,
   }
   const commands = new CommandBus()
@@ -194,6 +196,20 @@ describe("billing over REST", () => {
 
     expect(first.recorder.checkouts[0].trialDays).toBe(14)
     expect(again.recorder.checkouts[0]).not.toHaveProperty("trialDays")
+  })
+
+  it("asks for a card to start a trial unless the setup says a trial needs none", async () => {
+    const withCard = stack()
+    const withoutCard = stack({ trialRequiresCard: false })
+
+    await withCard.call(OWNER, "POST", "/checkout", { planId: "pro" })
+    await withoutCard.call(OWNER, "POST", "/checkout", { planId: "pro" })
+
+    expect(withCard.recorder.checkouts[0]).not.toHaveProperty("trialWithoutPaymentMethod")
+    expect(withoutCard.recorder.checkouts[0]).toMatchObject({
+      trialDays: 14,
+      trialWithoutPaymentMethod: true,
+    })
   })
 
   it("tells the owner, and no one else, that the trial ends soon", async () => {

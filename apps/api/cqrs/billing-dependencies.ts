@@ -1,4 +1,4 @@
-import { planClockOf } from "../features/billing/config.ts"
+import { billingSettingsOf } from "../features/billing/config.ts"
 import type { BillingHandlerDependencies } from "../features/billing/handlers.ts"
 import { billingSetup } from "../services/billing.ts"
 import { config } from "../services/config.ts"
@@ -17,5 +17,5 @@ export const billingDependencies: BillingHandlerDependencies = {
   provider: billingSetup.provider,
   webAppUrl: config.webAppUrl,
   log,
-  ...planClockOf(billingSetup),
+  ...billingSettingsOf(billingSetup),
 }

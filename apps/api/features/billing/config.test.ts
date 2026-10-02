@@ -12,10 +12,10 @@ import { DEV_PRO_PRICE_ID, DEV_WEBHOOK_SECRET } from "../../../../e2e/fixtures/b
 import {
   BillingConfigError,
   BillingMode,
+  billingSettingsOf,
   createPlanOf,
   FAKE_PRO_PRICE_ID,
   FAKE_WEBHOOK_SECRET,
-  planClockOf,
   readBillingSetup,
 } from "./config.ts"
 import { createBillingGetHandler } from "./handlers.ts"
@@ -30,7 +30,12 @@ describe("billing configuration", () => {
   it("starts with billing off in production when no billing variable is set", () => {
     const setup = readBillingSetup(createEnvReader({}), "prod")
 
-    expect(setup).toEqual({ mode: BillingMode.Off, provider: null, graceDays: DEFAULT_GRACE_DAYS })
+    expect(setup).toEqual({
+      mode: BillingMode.Off,
+      provider: null,
+      graceDays: DEFAULT_GRACE_DAYS,
+      trialRequiresCard: true,
+    })
   })
 
   it("starts with the development provider in development when no billing variable is set", () => {
@@ -105,6 +110,37 @@ describe("billing configuration", () => {
     }
   })
 
+  it("reads whether a trial asks for a card, yes when unset or blank", () => {
+    const requiresCard = (value?: string) =>
+      readBillingSetup(
+        createEnvReader(value === undefined ? {} : { BILLING_TRIAL_REQUIRES_CARD: value }),
+        "dev",
+      ).trialRequiresCard
+
+    expect([requiresCard(), requiresCard(""), requiresCard("true"), requiresCard("false")])
+      .toEqual([true, true, true, false])
+  })
+
+  it("stops start-up on a trial card setting that is not true or false", () => {
+    for (const value of ["yes", "0", "FALSE", " false"]) {
+      const env = createEnvReader({ BILLING_TRIAL_REQUIRES_CARD: value })
+
+      expect(() => readBillingSetup(env, "prod")).toThrow(
+        new BillingConfigError("BILLING_TRIAL_REQUIRES_CARD must be true or false"),
+      )
+    }
+  })
+
+  it("hands the billing handlers the trial card setting the setup read", () => {
+    const settings = (value: string) =>
+      billingSettingsOf(
+        readBillingSetup(createEnvReader({ BILLING_TRIAL_REQUIRES_CARD: value }), "dev"),
+      )
+
+    expect(settings("false").trialRequiresCard).toBe(false)
+    expect(settings("true").trialRequiresCard).toBe(true)
+  })
+
   describe("the API's plan clock, as the command bus and the billing read are wired", () => {
     const DAY = 24 * 60 * 60 * 1000
     const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
@@ -139,7 +175,7 @@ describe("billing configuration", () => {
         provider: configured.provider,
         webAppUrl: "https://app.example.com",
         log: () => {},
-        ...planClockOf(configured),
+        ...billingSettingsOf(configured),
       })
       const actor = { userId: 1 } as BillingGetQuery["data"]["actor"]
       return (await handler(new BillingGetQuery({ actor, groupId }))).billing.planId

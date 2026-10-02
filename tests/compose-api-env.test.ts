@@ -26,6 +26,7 @@ Deno.test("the api container receives every billing variable the API reads", asy
       "STRIPE_WEBHOOK_SECRET",
       "STRIPE_PRICE_PRO",
       "BILLING_GRACE_DAYS",
+      "BILLING_TRIAL_REQUIRES_CARD",
     ]
   ) {
     expect(names, name).toContain(name)
