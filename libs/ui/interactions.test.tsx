@@ -513,6 +513,19 @@ describe("GroupsScreen in the browser", () => {
     await rerender(<GroupsScreen {...groupsDefaults} groups={groups} />)
     expect(await submit(FORM_ACTIONS.groupSelect)).toBe(false)
   })
+  it("moves focus to the message when a restore is refused", async () => {
+    const deleted = [{ id: "d-1", name: "Old trip", deletedAt: "2026-10-01T12:00:00.000Z" }]
+    const screen = (restoreError: string | null) => (
+      <GroupsScreen {...groupsDefaults} deleted={deleted} restoreError={restoreError} />
+    )
+    await mount(screen(null))
+    expect(focused()).not.toBe("group-restore-error")
+
+    await rerender(screen("Group not found"))
+
+    expect(focused()).toBe("group-restore-error")
+  })
+
   it("restores a deleted group through the app's callback, and posts natively without one", async () => {
     const restore = spy<[string]>()
     const deleted = [{ id: "d-1", name: "Old trip", deletedAt: "2026-10-01T12:00:00.000Z" }]
@@ -672,6 +685,23 @@ describe("GroupSettingsScreen in the browser", () => {
     await rerender(screen("Only an admin can"))
 
     expect(focused()).toBe("group-rename-name")
+  })
+
+  it("moves focus to the message when a delete is refused", async () => {
+    const screen = (deleteError: string | null) => (
+      <GroupSettingsScreen
+        group={group}
+        selected={false}
+        loading={false}
+        deleteError={deleteError}
+      />
+    )
+    await mount(screen(null))
+    expect(focused()).not.toBe("group-delete-error")
+
+    await rerender(screen("Only the owner can delete a group"))
+
+    expect(focused()).toBe("group-delete-error")
   })
 
   it("deletes through the app's callback, refuses a second delete while one is pending, and posts natively without it", async () => {

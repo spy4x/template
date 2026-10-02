@@ -92,6 +92,12 @@ export function GroupSettingsScreen(
   useEffect(() => {
     if (renameError) nameInput.current?.focus()
   }, [renameError])
+  // A refused delete has no field to fix, so focus lands on the message, which stays where the
+  // person pressed the button.
+  const deleteMessage = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (deleteError) deleteMessage.current?.focus()
+  }, [deleteError])
 
   const back = (
     <Link href={SCREEN_PATHS.groups} navigate={navigate} class="pc-link text-sm">
@@ -194,7 +200,9 @@ export function GroupSettingsScreen(
                         This is your only group, so it cannot be deleted. Create another group
                         first.
                       </p>
-                      <ErrorState message={deleteError} />
+                      <div ref={deleteMessage} tabIndex={-1} data-e2e="group-delete-error">
+                        <ErrorState message={deleteError} />
+                      </div>
                       <div>
                         <Button
                           type="button"
@@ -229,7 +237,9 @@ export function GroupSettingsScreen(
                               days. After that it and all its notes are deleted for good and cannot
                               be recovered.
                             </p>
-                            <ErrorState message={deleteError} />
+                            <div ref={deleteMessage} tabIndex={-1} data-e2e="group-delete-error">
+                              <ErrorState message={deleteError} />
+                            </div>
                             <div>
                               <Button
                                 type="submit"

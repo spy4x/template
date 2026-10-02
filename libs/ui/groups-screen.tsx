@@ -1,4 +1,5 @@
 import type { JSX } from "preact"
+import { useEffect, useRef } from "preact/hooks"
 import { Button } from "@spy4x/preact-ui/button"
 import { Badge } from "@spy4x/preact-ui/badge"
 import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
@@ -99,6 +100,11 @@ export function GroupsScreen(
     restoringId = null,
   }: GroupsScreenProps,
 ): JSX.Element {
+  // A refused restore has no field to fix, so focus lands on the message above the list.
+  const restoreMessage = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (restoreError) restoreMessage.current?.focus()
+  }, [restoreError])
   return (
     <Stack gap="lg">
       <h1 class="text-xl font-semibold">Groups</h1>
@@ -212,7 +218,9 @@ export function GroupsScreen(
             A deleted group and its notes can be restored for {GROUP_RESTORE_DAYS}{" "}
             days. After that they are deleted for good.
           </p>
-          <ErrorState message={restoreError} />
+          <div ref={restoreMessage} tabIndex={-1} data-e2e="group-restore-error">
+            <ErrorState message={restoreError} />
+          </div>
           <ul class="flex flex-col gap-3" data-e2e="deleted-group-list">
             {deleted.map((group) => (
               <li key={group.id} data-e2e={`deleted-group-${group.id}`}>
