@@ -56,7 +56,9 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
         void team.leave().then(async (left) => {
           if (!left) return
           // The server may have moved this person's selection; read the list and where it went.
-          await Promise.all([store.refresh(), selectionStore.refresh()]).catch(() => {})
+          // A failed list read shows its error on the Groups page. A failed selection read is left
+          // alone: the leave is done, and the next pull reads the selection again.
+          await Promise.all([store.refreshFromUser(), selectionStore.refresh().catch(() => {})])
           navigate(SCREEN_PATHS.groups)
         })}
       deleting={working?.groupId === groupId && working.action === "delete"}
