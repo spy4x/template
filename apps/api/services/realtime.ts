@@ -117,6 +117,8 @@ const GROUP_ERROR_CODES: Record<
   LAST_GROUP: "conflict",
   LAST_OWNER: "conflict",
   MEMBER_NOT_FOUND: "not_found",
+  NAME_MISMATCH: "bad_request",
+  PASSWORD_INVALID: "bad_request",
   ROLE_INSUFFICIENT: "forbidden",
   USER_NOT_ACTIVE: "unauthorized",
 }

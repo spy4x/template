@@ -22,12 +22,14 @@ import {
   GroupSelectCommand,
   GroupSelectedQuery,
   type GroupSummary,
+  GroupTransferCommand,
   parseCreateGroupRequest,
   parseGroupId,
   parseGroupIdRequest,
   parseMemberRoleBody,
   parseMemberUserIdParam,
   parseRenameGroupBody,
+  parseTransferBody,
   type SelectedGroup,
 } from "@domain/groups"
 import { createSameOriginMutationGuard } from "@spy4x/server/http/same-origin"
@@ -51,6 +53,12 @@ export interface GroupsRouteDependencies {
   setRole(command: GroupMemberRoleCommand): Promise<{ member: GroupMemberSummary }>
   removeMember(command: GroupMemberRemoveCommand): Promise<{ removed: true }>
   leave(command: GroupLeaveCommand): Promise<{ left: true }>
+  transfer(command: GroupTransferCommand): Promise<{ transferred: true }>
+  /**
+   * The limit a transfer spends before its password is checked: the per-user budget a password
+   * change spends, so the two together cannot be used to guess the password faster.
+   */
+  passwordLimit: MiddlewareHandler<APIContext>
   cursor: {
     encode(userId: number, pageKey: GroupListPageKey): Promise<string>
     decode(cursor: string, expectedUserId: number): Promise<GroupListPageKey>
@@ -205,6 +213,23 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
             groupId,
             requestId: c.get("requestId"),
             idempotencyKey: c.req.header("idempotency-key"),
+          }),
+        ),
+      )
+    })
+    // HTTP only, never the socket: the password travels in this one request and is not kept.
+    .post("/:groupId/transfer", requireSameOrigin, dependencies.passwordLimit, async (c) => {
+      const groupId = parseGroupId(c.req.param("groupId"))
+      const { userId, name, password } = parseTransferBody(await readJsonBody(c))
+      return c.json(
+        await dependencies.transfer(
+          new GroupTransferCommand({
+            actor: actorFromAuth(c.get("auth")!),
+            groupId,
+            userId,
+            name,
+            password,
+            requestId: c.get("requestId"),
           }),
         ),
       )

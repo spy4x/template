@@ -3,6 +3,7 @@ import {
   assertCanChangeRole,
   assertCanLeave,
   assertCanRemoveMember,
+  assertCanTransfer,
   canRename,
   canSeeMemberEmails,
   CreatedGroup,
@@ -109,6 +110,7 @@ const GROUP_RESTORED_EVENT = "group.restored"
 const MEMBER_ROLE_CHANGED_EVENT = "group.member_role_changed"
 const MEMBER_REMOVED_EVENT = "group.member_removed"
 const MEMBER_LEFT_EVENT = "group.member_left"
+const OWNERSHIP_TRANSFERRED_EVENT = "group.ownership_transferred"
 
 /**
  * Most members one members read returns. Members join by invitation, and a plan caps them far
@@ -756,6 +758,47 @@ export class PostgresGroupRepository implements GroupRepository {
       // Their own links would let them back in.
       await revokeInvitationsOf(transaction, groupId, userId, null, actorId, requestId)
       await recordAccessChange(transaction, groupId, actorId, MEMBER_REMOVED_EVENT, [userId])
+      return true
+    })
+  }
+
+  /**
+   * Checks {@link assertCanTransfer} on locked rows, so of two transfers at once the second finds
+   * its actor an admin and is refused. The old owner is demoted before the new one is promoted:
+   * the unique index on the owner role refuses any order that would hold two owners at once.
+   */
+  async transferOwnership(
+    groupId: string,
+    userId: number,
+    actorId: number,
+    requestId?: string,
+  ): Promise<boolean> {
+    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const repository = new PostgresGroupRepository(transaction)
+      // Users before the group, in the order a removal takes them.
+      await repository.lockUsers([actorId, userId], actorId)
+      if (!await repository.lockActiveGroup(groupId)) return false
+      const roles = await repository.lockMemberRoles(groupId, [actorId, userId])
+      assertCanTransfer(roles.get(actorId) ?? null, roles.get(userId) ?? null)
+      await transaction`
+        UPDATE group_members
+        SET role = ${GroupRole.ADMIN}, updated_at = CURRENT_TIMESTAMP
+        WHERE group_id = ${groupId} AND user_id = ${actorId}
+      `
+      await transaction`
+        UPDATE group_members
+        SET role = ${GroupRole.OWNER}, updated_at = CURRENT_TIMESTAMP
+        WHERE group_id = ${groupId} AND user_id = ${userId}
+      `
+      await transaction`
+        UPDATE groups SET owner_user_id = ${userId} WHERE id = ${groupId}
+      `
+      await repository.audit(groupId, actorId, OWNERSHIP_TRANSFERRED_EVENT, requestId)
+      // The old owner is now an admin: their admin links go, their viewer and editor links stay.
+      // The new owner may invite with every role, so their links all stay.
+      await revokeInvitationsOf(transaction, groupId, actorId, GroupRole.ADMIN, actorId, requestId)
+      // Both keep reading the group; the raised revision updates their open pages' controls.
+      await recordAccessChange(transaction, groupId, actorId, OWNERSHIP_TRANSFERRED_EVENT, [])
       return true
     })
   }

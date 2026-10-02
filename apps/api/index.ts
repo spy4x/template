@@ -165,6 +165,8 @@ app.route(
     setRole: (command) => commandBus.execute(command),
     removeMember: (command) => commandBus.execute(command),
     leave: (command) => commandBus.execute(command),
+    transfer: (command) => commandBus.execute(command),
+    passwordLimit: rateLimits.strictByUser,
     cursor: groupListCursor,
     expectedOrigin,
   }),

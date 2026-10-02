@@ -14,6 +14,12 @@ export class GroupSelectedEvent implements Event<{ userId: number; groupId: stri
   constructor(public data: { userId: number; groupId: string }) {}
 }
 
+/** A group has a new owner, who is told by web push. */
+export class GroupOwnershipTransferredEvent
+  implements Event<{ groupId: string; groupName: string; newOwnerId: number }> {
+  constructor(public data: { groupId: string; groupName: string; newOwnerId: number }) {}
+}
+
 export class PushDevicesUpdatedEvent
   implements Event<{ userId: number; devices: UserPushTokenPublic[]; request: RequestInfo }> {
   constructor(

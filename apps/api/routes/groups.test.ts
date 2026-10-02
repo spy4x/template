@@ -95,6 +95,8 @@ function dependencies(): GroupsRouteDependencies & {
     setRole: () => Promise.reject(new Error("not used")),
     removeMember: () => Promise.reject(new Error("not used")),
     leave: () => Promise.reject(new Error("not used")),
+    transfer: () => Promise.reject(new Error("not used")),
+    passwordLimit: (_c, next) => next(),
     list(query) {
       this.listQuery = query
       return Promise.resolve({ groups: [], nextPageKey: null })

@@ -84,6 +84,10 @@ class FakeGroupRepository implements GroupRepository {
     throw new Error("Not used")
   }
 
+  transferOwnership(): Promise<boolean> {
+    throw new Error("Not used")
+  }
+
   ensureFirst(_input: FirstGroupInput, _userId: number): Promise<void> {
     throw new Error("Not used")
   }

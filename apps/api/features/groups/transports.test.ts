@@ -13,6 +13,7 @@ import {
   GroupRenameCommand,
   GroupRestoreCommand,
   GroupRole,
+  GroupTransferCommand,
 } from "@domain/groups"
 import { FREE_PLAN_ID, PRO_PLAN_ID } from "@domain/billing"
 import { createSessionGate } from "../../cqrs/session-gate.ts"
@@ -32,6 +33,7 @@ import {
   createGroupMembersHandler,
   createGroupRenameHandler,
   createGroupRestoreHandler,
+  createGroupTransferHandler,
 } from "./handlers.ts"
 import { createGroupSocketRequests } from "./socket.ts"
 
@@ -48,6 +50,8 @@ const EDITOR = 3
 const ADMIN = 4
 const OWNER = 5
 const STRANGER = 9
+/** The one password `stack` accepts, for every person. */
+const PASSWORD = "correct-horse"
 
 function stack(plan = PRO_PLAN_ID) {
   const groups = new MemoryGroupRepository(groupId, {
@@ -73,6 +77,21 @@ function stack(plan = PRO_PLAN_ID) {
   commands.register(GroupMemberRoleCommand, createGroupMemberRoleHandler(groups))
   commands.register(GroupMemberRemoveCommand, createGroupMemberRemoveHandler(groups))
   commands.register(GroupLeaveCommand, createGroupLeaveHandler(groups))
+  /** Every password check the transfer made, and every new owner it announced. */
+  const passwordChecks: number[] = []
+  const transferred: number[] = []
+  commands.register(
+    GroupTransferCommand,
+    createGroupTransferHandler(groups, {
+      checkPassword: (userId, password) => {
+        passwordChecks.push(userId)
+        return Promise.resolve(password === PASSWORD)
+      },
+      emit: (event) => transferred.push(event.data.newOwnerId),
+    }),
+  )
+  /** How many requests reached the password limit; past `passwordBudget`, it answers 429. */
+  const limit = { spent: 0, passwordBudget: Infinity }
   const queries = new QueryBus()
   queries.use(createSessionGate([]))
   queries.register(GroupDeletedListQuery, createGroupDeletedListHandler(groups))
@@ -93,8 +112,13 @@ function stack(plan = PRO_PLAN_ID) {
     setRole: (command: GroupMemberRoleCommand) => commands.execute(command),
     removeMember: (command: GroupMemberRemoveCommand) => commands.execute(command),
     leave: (command: GroupLeaveCommand) => commands.execute(command),
+    transfer: (command: GroupTransferCommand) => commands.execute(command),
+    passwordLimit: async (c, next) => {
+      if (++limit.spent > limit.passwordBudget) return c.json({ error: "Too many requests" }, 429)
+      await next()
+    },
   } satisfies GroupsRouteDependencies
-  return { groups, buses }
+  return { groups, buses, passwordChecks, transferred, limit }
 }
 
 function rest(buses: GroupsRouteDependencies, userId: number) {
@@ -849,6 +873,135 @@ describe("the members of a group over the socket", () => {
     for (const frame of frames) {
       expect(frame).toMatchObject({ kind: "server.error", code: "bad_request" })
     }
+    expect(groups.writes).toBe(0)
+    ws.shutdown()
+  })
+})
+
+describe("transferring ownership over REST", () => {
+  const transfer = (userId: number, name = "Team", password = PASSWORD) => ({
+    userId,
+    name,
+    password,
+  })
+
+  it("makes the member the owner and the owner an admin, and announces the new owner", async () => {
+    const { groups, buses, transferred } = stack()
+
+    const response = await rest(buses, OWNER)("POST", `/${groupId}/transfer`, transfer(EDITOR))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ transferred: true })
+    expect((await groups.getForMember(groupId, EDITOR))?.role).toBe(GroupRole.OWNER)
+    expect((await groups.getForMember(groupId, OWNER))?.role).toBe(GroupRole.ADMIN)
+    expect(groups.requestIds).toEqual(["req-groups"])
+    expect(transferred).toEqual([EDITOR])
+  })
+
+  it("refuses a wrong password with 400 PASSWORD_INVALID and changes nothing", async () => {
+    const { groups, buses, transferred } = stack()
+
+    const response = await rest(buses, OWNER)(
+      "POST",
+      `/${groupId}/transfer`,
+      transfer(EDITOR, "Team", "wrong-password"),
+    )
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error.code).toBe("PASSWORD_INVALID")
+    expect(groups.writes).toBe(0)
+    expect(transferred).toEqual([])
+  })
+
+  it("refuses a name that is not the group's before it checks the password", async () => {
+    const { groups, buses, passwordChecks } = stack()
+
+    const response = await rest(buses, OWNER)(
+      "POST",
+      `/${groupId}/transfer`,
+      transfer(EDITOR, "Teams"),
+    )
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error.code).toBe("NAME_MISMATCH")
+    expect(passwordChecks).toEqual([])
+    expect(groups.writes).toBe(0)
+  })
+
+  it("lets only the owner transfer, to another member, without spending a password check", async () => {
+    const { groups, buses, passwordChecks } = stack()
+    const cases = [
+      { user: ADMIN, to: EDITOR, status: 403, code: "ROLE_INSUFFICIENT" },
+      { user: VIEWER, to: EDITOR, status: 403, code: "ROLE_INSUFFICIENT" },
+      { user: STRANGER, to: EDITOR, status: 404, code: "GROUP_NOT_FOUND" },
+      { user: OWNER, to: STRANGER, status: 404, code: "MEMBER_NOT_FOUND" },
+      { user: OWNER, to: OWNER, status: 400, code: "INVALID_REQUEST" },
+    ]
+
+    for (const { user, to, status, code } of cases) {
+      const response = await rest(buses, user)("POST", `/${groupId}/transfer`, transfer(to))
+      expect({ user, to, status: response.status, code: (await response.json()).error.code })
+        .toEqual({ user, to, status, code })
+    }
+    expect(passwordChecks).toEqual([])
+    expect(groups.writes).toBe(0)
+  })
+
+  it("refuses a body with a missing or extra field", async () => {
+    const { groups, buses } = stack()
+    const owner = rest(buses, OWNER)
+
+    for (
+      const body of [
+        { userId: EDITOR, name: "Team" },
+        { ...transfer(EDITOR), role: GroupRole.OWNER },
+        { userId: "3", name: "Team", password: PASSWORD },
+      ]
+    ) {
+      const response = await owner("POST", `/${groupId}/transfer`, body)
+      expect(response.status).toBe(400)
+      expect((await response.json()).error.code).toBe("INVALID_REQUEST")
+    }
+    expect(groups.writes).toBe(0)
+  })
+
+  it("is refused from another site before the password limit is spent", async () => {
+    const { groups, buses, limit } = stack()
+
+    const response = await rest(buses, OWNER)(
+      "POST",
+      `/${groupId}/transfer`,
+      transfer(EDITOR),
+      { origin: "https://evil.example.net", "sec-fetch-site": "cross-site" },
+    )
+
+    expect(response.status).toBe(403)
+    expect((await response.json()).error.code).toBe("REQUEST_ORIGIN_INVALID")
+    expect(limit.spent).toBe(0)
+    expect(groups.writes).toBe(0)
+  })
+
+  it("spends the password limit on every attempt and stops at it", async () => {
+    const { groups, buses, limit, passwordChecks } = stack()
+    limit.passwordBudget = 1
+    const owner = rest(buses, OWNER)
+
+    const first = await owner("POST", `/${groupId}/transfer`, transfer(EDITOR, "Team", "wrong"))
+    const second = await owner("POST", `/${groupId}/transfer`, transfer(EDITOR))
+
+    expect(first.status).toBe(400)
+    expect(second.status).toBe(429)
+    expect(passwordChecks).toEqual([OWNER])
+    expect(groups.writes).toBe(0)
+  })
+
+  it("is not offered over the socket, where the password would cross a long-lived channel", async () => {
+    const { groups, buses } = stack()
+    const ws = socket(buses, OWNER)
+
+    const frame = await ws.command("group.transfer", transfer(EDITOR))
+
+    expect(frame).toMatchObject({ kind: "server.error" })
     expect(groups.writes).toBe(0)
     ws.shutdown()
   })

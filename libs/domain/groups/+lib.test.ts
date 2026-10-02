@@ -6,13 +6,16 @@ import {
   assertCanLeave,
   assertCanRemoveMember,
   assertCanRename,
+  assertCanTransfer,
   assertOwnerRemains,
+  assertTransferNameMatches,
   assignableRoles,
   canDelete,
   canManageMember,
   canMutateNotes,
   canRead,
   canRename,
+  canTransfer,
   GroupError,
   GroupRole,
   parseCreateGroupRequest,
@@ -23,6 +26,7 @@ import {
   parseMemberUserIdParam,
   parseRenameGroupBody,
   parseRenameGroupRequest,
+  parseTransferBody,
 } from "./+lib.ts"
 
 /** The code of the `GroupError` `run` throws, or `undefined` when it throws nothing. */
@@ -264,6 +268,53 @@ describe("group members", () => {
     }
     for (const value of ["0", "007", "1e3", "-1", "2147483648", "abc"]) {
       expect(codeOf(() => parseMemberUserIdParam(value))).toBe("INVALID_REQUEST")
+    }
+  })
+})
+
+describe("transferring ownership", () => {
+  it("lets only the owner hand the group to another member", () => {
+    for (const target of [VIEWER, EDITOR, ADMIN]) {
+      expect(canTransfer(OWNER, target)).toBe(true)
+      expect(codeOf(() => assertCanTransfer(OWNER, target))).toBeUndefined()
+    }
+    for (const actor of [VIEWER, EDITOR, ADMIN]) {
+      expect(canTransfer(actor, VIEWER)).toBe(false)
+      expect(codeOf(() => assertCanTransfer(actor, VIEWER))).toBe("ROLE_INSUFFICIENT")
+    }
+  })
+
+  it("tells a non-member the group does not exist and the owner the person is not a member", () => {
+    expect(codeOf(() => assertCanTransfer(null, VIEWER))).toBe("GROUP_NOT_FOUND")
+    expect(codeOf(() => assertCanTransfer(OWNER, null))).toBe("MEMBER_NOT_FOUND")
+  })
+
+  it("refuses the owner naming themselves", () => {
+    expect(canTransfer(OWNER, OWNER)).toBe(false)
+    expect(codeOf(() => assertCanTransfer(OWNER, OWNER))).toBe("INVALID_REQUEST")
+  })
+
+  it("accepts the group's name with spaces around it, and no other spelling", () => {
+    expect(codeOf(() => assertTransferNameMatches(" Team ", "Team"))).toBeUndefined()
+    for (const typed of ["team", "Teams", "", "T eam"]) {
+      expect(codeOf(() => assertTransferNameMatches(typed, "Team"))).toBe("NAME_MISMATCH")
+    }
+  })
+
+  it("parses exactly a member, a name and a password", () => {
+    expect(parseTransferBody({ userId: 7, name: "Team", password: "pw" }))
+      .toEqual({ userId: 7, name: "Team", password: "pw" })
+    const bad = [
+      { userId: 7, name: "Team" },
+      { userId: 7, name: "Team", password: "pw", role: 4 },
+      { userId: "7", name: "Team", password: "pw" },
+      { userId: 7, name: 1, password: "pw" },
+      { userId: 7, name: "Team", password: null },
+      { userId: 7, name: "x".repeat(201), password: "pw" },
+      { userId: 7, name: "Team", password: "x".repeat(1025) },
+    ]
+    for (const value of bad) {
+      expect(codeOf(() => parseTransferBody(value))).toBe("INVALID_REQUEST")
     }
   })
 })

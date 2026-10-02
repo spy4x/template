@@ -184,6 +184,20 @@ export class MemoryGroupRepository implements GroupRepository {
     return Promise.resolve(true)
   }
 
+  transferOwnership(
+    _groupId: string,
+    userId: number,
+    actorId: number,
+    requestId?: string,
+  ): Promise<boolean> {
+    if (!this.#access(actorId, false)) return Promise.resolve(false)
+    this.roles[actorId] = GroupRole.ADMIN
+    this.roles[userId] = GroupRole.OWNER
+    this.writes++
+    this.requestIds.push(requestId)
+    return Promise.resolve(true)
+  }
+
   leave(_groupId: string, actorId: number, requestId?: string): Promise<boolean> {
     if (!this.#access(actorId, false)) return Promise.resolve(false)
     if (this.lastGroup) {
