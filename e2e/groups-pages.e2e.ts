@@ -115,14 +115,10 @@ test.describe("group list and settings pages", () => {
         data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
-      await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(email)
-      await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      await page.waitForURL("/")
+      await signIn(page, email, password)
       await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 
-      await page.goto("/groups")
+      await gotoApp(page, "/groups", page.getByRole("heading", { level: 1, name: "Groups" }))
       await page.locator("[data-e2e=group-name]").fill("Trip")
       await page.getByRole("button", { name: "New group" }).click()
       await page.getByRole("link", { name: "Settings of Trip" }).click()
@@ -165,14 +161,10 @@ test.describe("group list and settings pages", () => {
         data: { email, password },
       })
       expect(signUp.ok()).toBe(true)
-      await page.goto("/sign-in")
-      await page.locator("[data-e2e=auth-form-login]").fill(email)
-      await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await page.locator("[data-e2e=auth-form-submit]").click()
-      await page.waitForURL("/")
+      await signIn(page, email, password)
       await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 
-      await page.goto("/groups")
+      await gotoApp(page, "/groups", page.getByRole("heading", { level: 1, name: "Groups" }))
       await page.getByRole("link", { name: "Settings of Personal" }).click()
       await expect(page.locator("[data-e2e=group-delete]")).toBeDisabled()
       await expect(page.locator("[data-e2e=group-delete-why]")).toBeVisible()
