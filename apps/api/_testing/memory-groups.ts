@@ -30,6 +30,8 @@ export class MemoryGroupRepository implements GroupRepository {
   name: string
   deleted = false
   lastGroup = false
+  /** The group has a live subscription: a delete fails as the database refuses it. */
+  subscribed = false
 
   constructor(
     readonly groupId: string,
@@ -100,6 +102,14 @@ export class MemoryGroupRepository implements GroupRepository {
     if (!access) return Promise.resolve(null)
     if (this.lastGroup) {
       return Promise.reject(new GroupError("LAST_GROUP", "A person must keep at least one group"))
+    }
+    if (this.subscribed) {
+      return Promise.reject(
+        new GroupError(
+          "GROUP_SUBSCRIBED",
+          "Cancel the group's subscription in the billing portal before deleting it",
+        ),
+      )
     }
     this.deleted = true
     this.writes++

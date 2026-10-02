@@ -59,6 +59,12 @@ export interface GroupSettingsScreenProps {
    * and the page says why. The server refuses it too.
    */
   isLastGroup?: boolean
+  /**
+   * The group has a subscription that is not cancelled, so it cannot be deleted until the owner
+   * cancels it in the billing portal: the delete control is disabled and the page says why. The
+   * server refuses it too.
+   */
+  hasSubscription?: boolean
   /** A delete is in flight. */
   deleting?: boolean
   /** Why the delete was refused, shown in the delete section, or `null`. */
@@ -109,6 +115,7 @@ export function GroupSettingsScreen(
     renameError = null,
     onRename,
     isLastGroup = false,
+    hasSubscription = false,
     deleting = false,
     deleteError = null,
     onDelete,
@@ -135,6 +142,12 @@ export function GroupSettingsScreen(
   useEffect(() => {
     if (deleteError) deleteMessage.current?.focus()
   }, [deleteError])
+
+  const deleteBlocked = isLastGroup
+    ? "This is your only group, so it cannot be deleted. Create another group first."
+    : hasSubscription
+    ? "This group has a subscription. Cancel it in the billing portal first, then delete the group."
+    : null
 
   const back = (
     <Link href={SCREEN_PATHS.groups} navigate={navigate} class="pc-link text-sm">
@@ -253,12 +266,11 @@ export function GroupSettingsScreen(
             <CardBody>
               <Stack>
                 <h2 id="group-danger" class="text-base font-semibold">Delete group</h2>
-                {isLastGroup
+                {deleteBlocked
                   ? (
                     <>
                       <p id="group-delete-why" class="text-sm" data-e2e="group-delete-why">
-                        This is your only group, so it cannot be deleted. Create another group
-                        first.
+                        {deleteBlocked}
                       </p>
                       <div ref={deleteMessage} tabIndex={-1} data-e2e="group-delete-error">
                         <ErrorState message={deleteError} />

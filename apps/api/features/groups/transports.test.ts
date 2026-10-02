@@ -218,6 +218,20 @@ describe("deleting a group over REST", () => {
     expect(groups.deleted).toBe(false)
   })
 
+  it("answers 409 GROUP_SUBSCRIBED while the group has a live subscription", async () => {
+    const { groups, buses } = stack()
+    groups.subscribed = true
+
+    const response = await rest(buses, OWNER)("DELETE", `/${groupId}`)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toMatchObject({
+      code: "GROUP_SUBSCRIBED",
+      message: "Cancel the group's subscription in the billing portal before deleting it",
+    })
+    expect(groups.deleted).toBe(false)
+  })
+
   it("tells a non-member the group does not exist and deletes nothing", async () => {
     const { groups, buses } = stack()
 

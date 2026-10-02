@@ -5,6 +5,7 @@ import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { groupsStore } from "../state/groups.ts"
 import { membersStore } from "../state/members.ts"
 import { selectionStore } from "../state/selection.ts"
+import { billingStore } from "../state/billing.ts"
 import { GroupBillingCard } from "./BillingViews.tsx"
 
 /**
@@ -45,6 +46,8 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
       renameError={failure?.action === "rename" ? failure.message : null}
       onRename={() => void store.rename(groupId)}
       isLastGroup={store.groups.value.length <= 1}
+      hasSubscription={billingStore.current.value?.groupId === groupId &&
+        billingStore.current.value.billing.subscribed}
       members={ours ? team.members.value : null}
       membersError={ours ? team.loadError.value : null}
       memberPendingId={ours ? team.pendingUserId.value : null}

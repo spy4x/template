@@ -51,6 +51,7 @@ export async function renderGroupSettings(
         deleteError={deleteError}
         // Unknown when the picker could not be read; the server refuses the last group anyway.
         isLastGroup={session.picker !== null && session.picker.groups.length <= 1}
+        hasSubscription={billing?.subscribed ?? false}
         members={members}
         membersError={members ? null : "The members could not be read"}
         memberError={memberError}

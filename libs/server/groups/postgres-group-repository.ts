@@ -22,6 +22,7 @@ import {
   GroupSummary,
   SelectedGroup,
 } from "@domain/groups"
+import { BillingStatus } from "@domain/billing"
 import {
   GroupNotActiveError,
   lockActorRole,
@@ -508,6 +509,18 @@ export class PostgresGroupRepository implements GroupRepository {
       )[0]
       if (others.count === 0) {
         throw new GroupError("LAST_GROUP", "A person must keep at least one group")
+      }
+      // A subscription the provider may still charge outlives a deleted group, so the owner cancels
+      // it in the billing portal first.
+      const live = await transaction`
+        SELECT 1 FROM subscriptions
+        WHERE group_id = ${groupId} AND status <> ${BillingStatus.Canceled}
+      `
+      if (live.length > 0) {
+        throw new GroupError(
+          "GROUP_SUBSCRIBED",
+          "Cancel the group's subscription in the billing portal before deleting it",
+        )
       }
 
       const deleted = (

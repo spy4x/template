@@ -23,6 +23,7 @@ export enum GroupRole {
 
 export type GroupErrorCode =
   | "GROUP_NOT_FOUND"
+  | "GROUP_SUBSCRIBED"
   | "ID_ALREADY_EXISTS"
   | "INVALID_CURSOR"
   | "INVALID_REQUEST"

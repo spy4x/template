@@ -732,6 +732,17 @@ describe("GroupSettingsScreen", () => {
     expect(surface.forms.map((form) => form.action)).not.toContain(GROUP_PATHS.delete("g-1"))
   })
 
+  it("disables the delete button of a group with a live subscription and says why", () => {
+    const screen = asRole(GroupRole.OWNER, { hasSubscription: true })
+    const html = renderToString(screen)
+    const surface = noScriptSurface(screen)
+
+    expect(html).toContain("This group has a subscription. Cancel it in the billing portal first")
+    const button = html.match(/<button\b[^>]*data-e2e="group-delete"[^>]*>/)![0]
+    expect(button).toContain("disabled")
+    expect(surface.forms.map((form) => form.action)).not.toContain(GROUP_PATHS.delete("g-1"))
+  })
+
   it("marks the group as selected only when it is the selected one", () => {
     expect(renderToString(<GroupSettingsScreen {...settingsDefaults} />)).not.toContain(
       ">Selected<",
