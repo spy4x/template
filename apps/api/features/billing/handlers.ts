@@ -62,9 +62,8 @@ export function createBillingCheckoutHandler(
 ): CommandHandler<BillingCheckoutCommand> {
   return async ({ data }) => {
     const provider = await authorize(dependencies, data.groupId, data.actor.userId)
-    if (!PAID_PLANS.some((plan) => plan.id === data.planId)) {
-      throw new BillingError("UNKNOWN_PLAN", "No such plan")
-    }
+    const plan = PAID_PLANS.find((candidate) => candidate.id === data.planId)
+    if (!plan) throw new BillingError("UNKNOWN_PLAN", "No such plan")
     // A second checkout would start a second subscription and charge twice; the portal changes the
     // plan of the one the group has. Any subscription that is not cancelled counts, even a paused,
     // incomplete or unknown-price one that shows as the free plan.
@@ -78,7 +77,9 @@ export function createBillingCheckoutHandler(
       successUrl: appUrl(dependencies, `/groups/${data.groupId}`),
       cancelUrl: appUrl(dependencies, `/groups/${data.groupId}/pricing`),
       reference: data.groupId,
-      ...(customerId ? { customerId } : {}),
+      // Only a group's first checkout starts with a trial: a group that ever paid, or tried, has a
+      // customer already.
+      ...(customerId ? { customerId } : plan.trialDays > 0 ? { trialDays: plan.trialDays } : {}),
       // The client's key is scoped to the group and the person, so one person's key can never
       // replay a checkout the provider made for another group or person.
       ...(data.idempotencyKey

@@ -12,6 +12,7 @@ import { act } from "preact/test-utils"
 import { renderToString } from "preact-render-to-string"
 import {
   billingCheckoutRequestSchema,
+  BillingNoticeKind,
   BillingStatus,
   FREE_PLAN_ID,
   type GroupBilling,
@@ -27,6 +28,8 @@ const FREE_OWNER: GroupBilling = {
   status: null,
   currentPeriodEnd: null,
   cancelAtPeriodEnd: false,
+  trialEnd: null,
+  notice: null,
   canManage: true,
   subscribed: false,
   hasCustomer: false,
@@ -110,6 +113,64 @@ describe("billing screens without JavaScript", () => {
     expect(html).toContain(`data-e2e="billing-owner-only"`)
     expect(html).not.toContain(BILLING_PATHS.pricing(groupId))
     expect(forms(<BillingCard groupId={groupId} billing={member} />)).toEqual([])
+  })
+
+  it("shows a trial's end on the plan, and the owner how many days are left", () => {
+    const trialEnd = new Date("2026-10-15T10:00:00Z")
+    const trial = {
+      ...PRO_OWNER,
+      status: BillingStatus.Trialing,
+      trialEnd,
+      currentPeriodEnd: new Date("2026-11-15T10:00:00Z"),
+      notice: { kind: BillingNoticeKind.TrialEnding, at: trialEnd, daysLeft: 2 },
+    }
+    const html = renderToString(<BillingCard groupId={groupId} billing={trial} />)
+
+    expect(html).toContain("Trial ends on October 15, 2026")
+    expect(html).toContain(`role="status"`)
+    expect(html).toContain("The trial ends in 2 days, on October 15, 2026.")
+  })
+
+  it("tells the owner when a cancelled plan ends and how to renew it, beside the portal", () => {
+    const at = new Date("2026-11-01T00:00:00Z")
+    const ending = {
+      ...PRO_OWNER,
+      cancelAtPeriodEnd: true,
+      notice: { kind: BillingNoticeKind.PlanEnding, at, daysLeft: 1 },
+    }
+    const html = renderToString(<BillingCard groupId={groupId} billing={ending} />)
+
+    expect(html).toContain(
+      "The Pro plan was cancelled and ends in 1 day, on November 1, 2026. To keep it, renew it",
+    )
+    expect(forms(<BillingCard groupId={groupId} billing={ending} />)).toEqual([
+      { action: BILLING_PATHS.portal(groupId), method: "post", fields: [] },
+    ])
+  })
+
+  it("tells the owner of a failed payment until when the plan is kept, and after that how to get it back", () => {
+    const at = new Date("2026-10-08T10:00:00Z")
+    const failed = (planId: string, daysLeft: number) => ({
+      ...PRO_OWNER,
+      planId,
+      status: BillingStatus.PastDue,
+      notice: { kind: BillingNoticeKind.PaymentFailed, at, daysLeft },
+    })
+
+    expect(renderToString(<BillingCard groupId={groupId} billing={failed(PRO_PLAN_ID, 6)} />))
+      .toContain("within 6 days, by October 8, 2026, to keep the Pro plan.")
+    const lapsed = renderToString(
+      <BillingCard groupId={groupId} billing={failed(FREE_PLAN_ID, 0)} />,
+    )
+    expect(lapsed).toContain("so the group is on the free plan.")
+    expect(lapsed).toContain("to get the paid plan back.")
+    expect(forms(<BillingCard groupId={groupId} billing={failed(FREE_PLAN_ID, 0)} />))
+      .toEqual([{ action: BILLING_PATHS.portal(groupId), method: "post", fields: [] }])
+  })
+
+  it("shows no notice when there is none", () => {
+    expect(renderToString(<BillingCard groupId={groupId} billing={PRO_OWNER} />))
+      .not.toContain(`data-e2e="billing-notice"`)
   })
 
   it("shows only the plan while billing is off: no upgrade, and no word about who could change it", () => {

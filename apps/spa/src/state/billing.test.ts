@@ -48,6 +48,8 @@ const billingJson = {
   status: 2,
   currentPeriodEnd: "2026-11-01T00:00:00.000Z",
   cancelAtPeriodEnd: false,
+  trialEnd: null,
+  notice: null,
   canManage: true,
   subscribed: true,
   hasCustomer: true,
@@ -68,6 +70,36 @@ describe("billing store", () => {
       groupId,
       billing: { ...billingJson, currentPeriodEnd: new Date("2026-11-01T00:00:00Z") },
     })
+  })
+
+  it("turns the trial's end and the notice's date into dates", async () => {
+    const trial = {
+      ...billingJson,
+      status: 1,
+      trialEnd: "2026-10-15T10:00:00.000Z",
+      notice: { kind: 1, at: "2026-10-15T10:00:00.000Z", daysLeft: 2 },
+    }
+    const { store } = harness({ ok: true, status: 200, data: { billing: trial } })
+
+    await store.load(groupId)
+
+    expect(store.current.value?.billing).toMatchObject({
+      trialEnd: new Date("2026-10-15T10:00:00Z"),
+      notice: { kind: 1, at: new Date("2026-10-15T10:00:00Z"), daysLeft: 2 },
+    })
+  })
+
+  it("refuses an answer it cannot read, and keeps no billing from it", async () => {
+    const { store } = harness({
+      ok: true,
+      status: 200,
+      data: { billing: { ...billingJson, notice: { kind: 9, at: "x", daysLeft: 1 } } },
+    })
+
+    await store.load(groupId)
+
+    expect(store.current.value).toBeNull()
+    expect(store.error.value?.message).toBe("The plan could not be read.")
   })
 
   it("posts the chosen plan to the checkout and leaves for the provider's page", async () => {

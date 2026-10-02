@@ -119,6 +119,7 @@ describe("billing configuration", () => {
           currentPeriodEnd: null,
           cancelAtPeriodEnd: false,
           pastDueSince: new Date(Date.now() - days * DAY),
+          trialEnd: null,
         }),
     })
     const setup = (graceDays?: string) =>

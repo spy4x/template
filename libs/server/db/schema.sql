@@ -379,6 +379,8 @@ CREATE TABLE subscriptions (
     -- When the provider first reported it past due (#204): the grace period counts from here. A
     -- later past-due event keeps it; any other status clears it.
     past_due_since TIMESTAMPTZ,
+    -- When the trial ends (#204), as the provider last reported it; `NULL` without a trial.
+    trial_end TIMESTAMPTZ,
     CONSTRAINT subscriptions_status_check CHECK (status BETWEEN 1 AND 6),
     CONSTRAINT subscriptions_provider_event_rank_check CHECK (provider_event_rank BETWEEN 1 AND 3),
     CONSTRAINT subscriptions_past_due_since_check

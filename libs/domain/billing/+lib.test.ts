@@ -7,6 +7,8 @@ import {
   assertFeature,
   assertRoomFor,
   BillingError,
+  BillingNoticeKind,
+  billingNoticeOf,
   BillingStatus,
   DEFAULT_GRACE_DAYS,
   effectivePlanId,
@@ -18,10 +20,12 @@ import {
   PLANS,
   PRO_PLAN_ID,
   providerPageUrl,
+  readGroupBilling,
   readPlanRefusal,
   type StoredSubscription,
   toGroupBilling,
   toPlanRefusal,
+  TRIAL_NOTICE_DAYS,
   UNLIMITED,
 } from "./+lib.ts"
 
@@ -39,7 +43,24 @@ const subscription = (status: BillingStatus, planId: string | null = PRO_PLAN_ID
     currentPeriodEnd: null,
     cancelAtPeriodEnd: false,
     pastDueSince: status === BillingStatus.PastDue ? FAILED_AT : null,
+    trialEnd: null,
   }) satisfies StoredSubscription
+
+/** When the trial and the period end in the tests of trials and cancellations. */
+const ENDS_AT = new Date("2026-10-15T10:00:00Z")
+const at = (ms: number) => new Date(ENDS_AT.getTime() + ms)
+const trial = (changes: Partial<StoredSubscription> = {}): StoredSubscription => ({
+  ...subscription(BillingStatus.Trialing),
+  trialEnd: ENDS_AT,
+  currentPeriodEnd: ENDS_AT,
+  ...changes,
+})
+const cancelled = (changes: Partial<StoredSubscription> = {}): StoredSubscription => ({
+  ...subscription(BillingStatus.Active),
+  currentPeriodEnd: ENDS_AT,
+  cancelAtPeriodEnd: true,
+  ...changes,
+})
 
 /** The plan of a subscription past due since {@link FAILED_AT}, `elapsed` ms later. */
 const planAfter = (elapsed: number, graceDays = DEFAULT_GRACE_DAYS) =>
@@ -121,10 +142,106 @@ describe("billing domain", () => {
         status: null,
         currentPeriodEnd: null,
         cancelAtPeriodEnd: false,
+        trialEnd: null,
+        notice: null,
         canManage: false,
         subscribed: false,
         hasCustomer: false,
       })
+  })
+
+  it("keeps a trial's plan until the trial ends, then gives the free plan", () => {
+    expect(effectivePlanId(trial(), at(-1), DEFAULT_GRACE_DAYS)).toBe(PRO_PLAN_ID)
+    expect(effectivePlanId(trial(), at(0), DEFAULT_GRACE_DAYS)).toBe(FREE_PLAN_ID)
+    // Once the trial has turned into a paid subscription, its old end no longer counts.
+    expect(effectivePlanId(trial({ status: BillingStatus.Active }), at(DAY), DEFAULT_GRACE_DAYS))
+      .toBe(PRO_PLAN_ID)
+  })
+
+  it("keeps a cancelled plan until its period ends, and for good once the cancellation is undone", () => {
+    expect(effectivePlanId(cancelled(), at(-1), DEFAULT_GRACE_DAYS)).toBe(PRO_PLAN_ID)
+    expect(effectivePlanId(cancelled(), at(0), DEFAULT_GRACE_DAYS)).toBe(FREE_PLAN_ID)
+    expect(effectivePlanId(cancelled({ cancelAtPeriodEnd: false }), at(0), DEFAULT_GRACE_DAYS))
+      .toBe(PRO_PLAN_ID)
+  })
+
+  it("tells of a trial's end only in its last three days, counting the days left", () => {
+    expect(TRIAL_NOTICE_DAYS).toBe(3)
+    expect(billingNoticeOf(trial(), at(-3 * DAY - 1), 7)).toBeNull()
+    expect(billingNoticeOf(trial(), at(-3 * DAY), 7))
+      .toEqual({ kind: BillingNoticeKind.TrialEnding, at: ENDS_AT, daysLeft: 3 })
+    expect(billingNoticeOf(trial(), at(-DAY - 1), 7)?.daysLeft).toBe(2)
+    expect(billingNoticeOf(trial(), at(0), 7)).toBeNull()
+  })
+
+  it("tells of a cancelled plan's end until then, and of nothing once the cancellation is undone", () => {
+    expect(billingNoticeOf(cancelled(), at(-20 * DAY), 7))
+      .toEqual({ kind: BillingNoticeKind.PlanEnding, at: ENDS_AT, daysLeft: 20 })
+    expect(billingNoticeOf(trial({ cancelAtPeriodEnd: true }), at(-10 * DAY), 7)?.kind)
+      .toBe(BillingNoticeKind.PlanEnding)
+    expect(billingNoticeOf(cancelled(), at(0), 7)).toBeNull()
+    expect(billingNoticeOf(cancelled({ cancelAtPeriodEnd: false }), at(-DAY), 7)).toBeNull()
+  })
+
+  it("tells of a failed payment first, with the end of its grace period", () => {
+    const failed = { ...cancelled(), status: BillingStatus.PastDue, pastDueSince: FAILED_AT }
+
+    expect(billingNoticeOf(failed, NOW, 7)).toEqual({
+      kind: BillingNoticeKind.PaymentFailed,
+      at: new Date("2026-10-08T10:00:00Z"),
+      daysLeft: 6,
+    })
+    expect(billingNoticeOf(failed, new Date("2026-10-09T10:00:00Z"), 7)?.daysLeft).toBe(0)
+  })
+
+  it("tells of nothing for a plain paid, ended or missing subscription", () => {
+    for (const status of [BillingStatus.Active, BillingStatus.Canceled, BillingStatus.Paused]) {
+      expect(billingNoticeOf(subscription(status), NOW, 7)).toBeNull()
+    }
+    expect(billingNoticeOf(null, NOW, 7)).toBeNull()
+  })
+
+  it("shows the notice to the owner only, with the trial's end", () => {
+    const view = (role: GroupRole) =>
+      toGroupBilling(trial(), role, true, true, at(-DAY), DEFAULT_GRACE_DAYS)
+
+    expect(view(GroupRole.OWNER)).toMatchObject({
+      trialEnd: ENDS_AT,
+      notice: { kind: BillingNoticeKind.TrialEnding, at: ENDS_AT, daysLeft: 1 },
+    })
+    expect(view(GroupRole.ADMIN)).toMatchObject({ trialEnd: ENDS_AT, notice: null })
+  })
+
+  it("reads the billing back from the API's JSON, dates included", () => {
+    const view = toGroupBilling(trial(), GroupRole.OWNER, true, true, at(-DAY), 7)
+    const json = JSON.parse(JSON.stringify(view))
+
+    expect(readGroupBilling(json)).toEqual(view)
+  })
+
+  it("reads no billing from JSON with a field missing or of the wrong kind", () => {
+    const view = toGroupBilling(trial(), GroupRole.OWNER, true, true, at(-DAY), 7)
+    const json = JSON.parse(JSON.stringify(view))
+    const broken = [
+      { ...json, trialEnd: 5 },
+      { ...json, currentPeriodEnd: "not a date" },
+      { ...json, status: 9 },
+      { ...json, notice: { ...json.notice, kind: 9 } },
+      { ...json, notice: { ...json.notice, daysLeft: -1 } },
+      { ...json, notice: undefined },
+      { ...json, canManage: "yes" },
+      null,
+    ]
+    for (const value of broken) {
+      expect({ value, read: readGroupBilling(value) }).toEqual({ value, read: null })
+    }
+  })
+
+  it("offers a trial on the paid plan only", () => {
+    expect(PLANS.map((plan) => [plan.id, plan.trialDays])).toEqual([
+      [FREE_PLAN_ID, 0],
+      [PRO_PLAN_ID, 14],
+    ])
   })
 
   it("counts every subscription that is not cancelled as live, whatever plan it shows", () => {

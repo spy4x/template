@@ -7,7 +7,15 @@ import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Link } from "@spy4x/preact-ui/link"
 import { Stack } from "@spy4x/preact-ui/layout"
-import { findPlan, FREE_PLAN_ID, type GroupBilling, PAID_PLANS } from "@domain/billing"
+import {
+  type BillingNotice,
+  BillingNoticeKind,
+  BillingStatus,
+  findPlan,
+  FREE_PLAN_ID,
+  type GroupBilling,
+  PAID_PLANS,
+} from "@domain/billing"
 import { GROUP_PATHS, type Navigate } from "./progressive.tsx"
 
 /**
@@ -36,6 +44,64 @@ const PRICING_PLANS = PAID_PLANS.map((plan) => ({
 
 function planName(planId: string): string {
   return findPlan(planId)?.name ?? planId
+}
+
+/** A date as the plan card writes it: `October 15, 2026`, in UTC, the same on server and browser. */
+function noticeDate(date: Date): string {
+  return new Intl.DateTimeFormat("en", { dateStyle: "long", timeZone: "UTC" }).format(date)
+}
+
+function days(count: number): string {
+  return count === 1 ? "1 day" : `${count} days`
+}
+
+/** What the owner reads for a notice: what happened, when, and what to do in the portal. */
+export function billingNoticeText(notice: BillingNotice, planName: string): string {
+  const date = noticeDate(notice.at)
+  const left = days(notice.daysLeft)
+  switch (notice.kind) {
+    case BillingNoticeKind.TrialEnding:
+      return `The trial ends in ${left}, on ${date}. The ${planName} subscription then starts and ` +
+        `is charged; to stop it, cancel it under Manage billing.`
+    case BillingNoticeKind.PlanEnding:
+      return `The ${planName} plan was cancelled and ends in ${left}, on ${date}. To keep it, ` +
+        `renew it under Manage billing.`
+    case BillingNoticeKind.PaymentFailed:
+      return notice.daysLeft > 0
+        ? `A payment failed. Update the card under Manage billing within ${left}, by ${date}, to ` +
+          `keep the ${planName} plan.`
+        : `A payment failed, so the group is on the free plan. Update the card under Manage ` +
+          `billing to get the ${planName} plan back.`
+  }
+}
+
+/**
+ * The owner's notice about the subscription: a trial that ends soon, a failed payment, or a
+ * cancelled plan that ends. Announced politely as a status; nothing when there is no notice.
+ */
+export function BillingNoticeBanner(
+  { notice, planName }: { notice: BillingNotice | null; planName: string },
+): JSX.Element | null {
+  if (!notice) return null
+  return (
+    <div
+      role="status"
+      class="mb-4 rounded-lg border border-amber-500 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+      data-e2e="billing-notice"
+      data-kind={notice.kind}
+    >
+      <p>{billingNoticeText(notice, planName)}</p>
+    </div>
+  )
+}
+
+/**
+ * The date the plan card shows: a trial's end while trialing, else the end of the period. The
+ * provider usually reports both as one moment during a trial; the trial's own end wins when not.
+ */
+function cardDate(billing: GroupBilling): Date | undefined {
+  if (billing.status === BillingStatus.Trialing && billing.trialEnd) return billing.trialEnd
+  return billing.currentPeriodEnd ?? undefined
 }
 
 export interface BillingCardProps {
@@ -104,6 +170,11 @@ export function BillingCard(
                 : <p class="text-sm">Loading the plan...</p>)
               : (
                 <div data-e2e="billing-plan" data-plan={billing.planId}>
+                  <BillingNoticeBanner
+                    notice={billing.notice}
+                    // A group past its grace shows the free plan; its notice names the paid one.
+                    planName={billing.planId === FREE_PLAN_ID ? "paid" : planName(billing.planId)}
+                  />
                   {planCard
                     ? (
                       // The fieldset disables the manage button while the portal opens.
@@ -118,7 +189,7 @@ export function BillingCard(
                               interval: BillingInterval.Month,
                             }
                             : undefined}
-                          periodEnd={billing.currentPeriodEnd ?? undefined}
+                          periodEnd={cardDate(billing)}
                           cancelAtPeriodEnd={billing.cancelAtPeriodEnd}
                           manageAction={BILLING_PATHS.portal(groupId)}
                           headingLevel={3}
