@@ -47,6 +47,10 @@ The subscription's quantity is the group's member count, the owner included: the
 - **The nightly cleanup** queues a seat sync for every group whose stored quantity differs from its
   count. That catches a sync the outbox gave up on after a long outage, and a count that moved
   without a group change, such as a member's account being deleted.
+- **Subscriptions that existed before per-member pricing** start with an empty stored quantity
+  (migration `2026_10_14_0001_subscription_quantity.sql`). The first nightly run queues a seat sync
+  for each, so each live Pro subscription moves from one seat to one per member then. Stripe
+  prorates the change on the next invoice, and the owner gets no notice of it.
 
 **The owner confirms the price.** In a group billed per member, the invitation form shows what one
 more member adds to the bill and a box to accept it (`SeatPriceConfirm`). A create without
@@ -353,7 +357,9 @@ provider, so its public secret cannot sign a real event.
 - An invitation created before its group moved to per-member billing carries no price
   confirmation; accepting it still adds a seat. An admin confirms the price as the owner does.
 - The pricing page shows Pro's price without "per member"; the plan's feature list says it.
-- Seat syncs of one group run one after another only because one worker drains the outbox. Two
-  workers could send two syncs at once; the nightly check corrects the quantity either way.
+- One worker drains the outbox today (compose names its container, so it runs once). Seat syncs of
+  a group therefore run one after another. With two workers, two syncs could run at once and the
+  older count could reach Stripe last: the stored quantity would then match the members while
+  Stripe bills another count, and only a later webhook from Stripe would correct it.
 - The worker imports `readBillingSetup` from the API (`apps/api/features/billing/config.ts`)
   rather than from a shared library.
