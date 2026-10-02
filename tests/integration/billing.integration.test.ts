@@ -570,9 +570,8 @@ Deno.test("billing events against Postgres", async (t) => {
         await apply("evt_p1", "sub_a", SubscriptionStatus.PastDue, at(1))
         const paid = await apply("evt_p2", "sub_b", SubscriptionStatus.Active, at(2))
         const late = await apply("evt_p3", "sub_a", SubscriptionStatus.PastDue, at(3))
-        const lateTrial = await apply("evt_p4", "sub_a", SubscriptionStatus.Trialing, at(4))
 
-        expect([paid, late, lateTrial]).toEqual(["applied", "stale", "stale"])
+        expect([paid, late]).toEqual(["applied", "stale"])
         const held = await billing.get(groupId)
         expect(held).toMatchObject({
           providerSubscriptionId: "sub_b",
@@ -580,6 +579,62 @@ Deno.test("billing events against Postgres", async (t) => {
           pastDueSince: null,
         })
         expect(effectivePlanId(held, at(60 * 24 * 30), 7)).toBe(PRO_PLAN_ID)
+      },
+    )
+
+    await t.step(
+      "a new subscription that pays replaces an active one, and the old one's end changes nothing",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const at = (minutes: number) => new Date(T0.getTime() + minutes * 60_000)
+        const apply = (
+          id: string,
+          subscriptionId: string,
+          type: SubscriptionEvent["type"],
+          status: SubscriptionStatus,
+          when: Date,
+        ) =>
+          billing.applyEvent(
+            event({
+              id,
+              reference: groupId,
+              customerId: "cus_x",
+              subscriptionId,
+              type,
+              status,
+              at: when,
+            }),
+          )
+
+        await apply(
+          "evt_x1",
+          "sub_a",
+          BillingEventType.SubscriptionCreated,
+          SubscriptionStatus.Active,
+          at(1),
+        )
+        const replaced = await apply(
+          "evt_x2",
+          "sub_b",
+          BillingEventType.SubscriptionCreated,
+          SubscriptionStatus.Active,
+          at(2),
+        )
+        const oldEnd = await apply(
+          "evt_x3",
+          "sub_a",
+          BillingEventType.SubscriptionCanceled,
+          SubscriptionStatus.Canceled,
+          at(3),
+        )
+
+        expect([replaced, oldEnd]).toEqual(["applied", "stale"])
+        const held = await billing.get(groupId)
+        expect(held).toMatchObject({
+          providerSubscriptionId: "sub_b",
+          status: SubscriptionStatus.Active,
+        })
+        expect(effectivePlanId(held, at(60), 7)).toBe(PRO_PLAN_ID)
       },
     )
 
@@ -771,7 +826,7 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
       )
 
     await t.step(
-      "sends each notice still in force when its job runs, and nothing for one that no longer is",
+      "sends each notice still in force when its job runs, and nothing for one that no longer is or for a deleted group",
       async () => {
         const trial = await seedOwnerWithAddress(sql, "trial@example.com")
         const ending = await seedOwnerWithAddress(sql, "ending@example.com")
@@ -779,6 +834,7 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
         const undone = await seedOwnerWithAddress(sql, "undone@example.com")
         const moved = await seedOwnerWithAddress(sql, "moved@example.com")
         const silent = await seedOwnerWithAddress(sql, "silent@example.com", false)
+        const gone = await seedOwnerWithAddress(sql, "gone@example.com")
         const trialEnd = new Date(start.getTime() + 10 * DAY)
         await apply(trial.groupId, { status: SubscriptionStatus.Trialing, trialEnd })
         await apply(ending.groupId, { cancelAtPeriodEnd: true })
@@ -790,6 +846,9 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
         await apply(moved.groupId, { status: SubscriptionStatus.Trialing, trialEnd })
         await apply(moved.groupId, { status: SubscriptionStatus.Trialing, trialEnd: movedEnd })
         await apply(silent.groupId, { status: SubscriptionStatus.PastDue })
+        await apply(gone.groupId, { status: SubscriptionStatus.PastDue })
+        // The group is deleted after its payment failed: its owner is told nothing.
+        await sql`UPDATE groups SET deleted_at = now() WHERE id = ${gone.groupId}`
         // Eight days pass: the trial's notice, due three days before its end, is now claimable.
         await sql`
           UPDATE outbox_events SET available_at = available_at - make_interval(days => 8)

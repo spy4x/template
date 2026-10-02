@@ -145,9 +145,9 @@ export class PostgresBillingRepository implements BillingRepository {
 
       const subscription = event.subscription
       const rank = EVENT_RANK[event.type]
-      // A different subscription than the one held takes over only when the held one has ended, or
-      // when it pays and the held one does not. The end, or a late failed charge, of an old
-      // subscription must never take the plan of the newer one that pays (#242).
+      // A different subscription than the one held takes over when it pays, whatever the held one's
+      // status, or when the held one has ended. One that does not pay, such as a late failed charge
+      // or the end of an old subscription, never takes the plan of the one held (#242).
       const paying = PAYING_STATUSES.includes(subscription.status)
       // The grace period counts from the first past-due event of this subscription: a later one
       // (Stripe's `unpaid` arrives as past due too) keeps the stored start, and any other status
@@ -203,7 +203,7 @@ export class PostgresBillingRepository implements BillingRepository {
             <= (EXCLUDED.provider_event_at, EXCLUDED.provider_event_rank)
           AND (subscriptions.provider_subscription_id = EXCLUDED.provider_subscription_id
             OR subscriptions.status = ${SubscriptionStatus.Canceled}
-            OR (${paying} AND subscriptions.status <> ALL(${PAYING_STATUSES}::smallint[])))
+            OR ${paying})
         RETURNING group_id
       `
       if (written.length === 0) return "stale"
