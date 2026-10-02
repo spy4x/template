@@ -2,6 +2,7 @@ import type { Context } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { NoteError, type NoteErrorCode, NoteVersionConflictError } from "@domain/notes"
 import { AccessError } from "@domain/identity"
+import { PlanError, type PlanErrorCode, toPlanRefusal } from "@domain/billing"
 import { IdempotencyError } from "@spy4x/server/idempotency"
 import type { APIContext } from "../../_types.ts"
 
@@ -13,6 +14,7 @@ export type NoteFeatureErrorCode =
   | "IDEMPOTENCY_KEY_REUSED"
   | "INTERNAL_ERROR"
   | "MFA_REQUIRED"
+  | PlanErrorCode
   | "REQUEST_ORIGIN_INVALID"
 
 /** A refusal the REST route makes itself, before anything is dispatched. */
@@ -47,6 +49,8 @@ const ERROR_DEFINITIONS: Record<NoteFeatureErrorCode, ErrorDefinition> = {
   INTERNAL_ERROR: { status: 500, message: "Internal server error" },
   INVALID_CURSOR: { status: 400, message: "Note list cursor is invalid" },
   INVALID_REQUEST: { status: 400, message: "Request is invalid" },
+  PLAN_FEATURE_MISSING: { status: 402, message: "The group's plan does not include this" },
+  PLAN_LIMIT_REACHED: { status: 402, message: "The group has reached its plan's limit" },
   MFA_REQUIRED: { status: 401, message: "Complete MFA to access notes" },
   NOTE_NOT_FOUND: { status: 404, message: "Note not found" },
   REQUEST_ORIGIN_INVALID: { status: 403, message: "Request origin is invalid" },
@@ -68,7 +72,7 @@ const IDEMPOTENCY_CODES: Record<IdempotencyError["code"], NoteFeatureErrorCode> 
 export function noteErrorResponse(c: Context<APIContext>, error: unknown): Response {
   const code: NoteFeatureErrorCode =
     error instanceof NoteFeatureError || error instanceof NoteError ||
-      error instanceof AccessError
+      error instanceof AccessError || error instanceof PlanError
       ? error.code
       : error instanceof IdempotencyError
       ? IDEMPOTENCY_CODES[error.code]
@@ -82,6 +86,8 @@ export function noteErrorResponse(c: Context<APIContext>, error: unknown): Respo
       ...(error instanceof NoteVersionConflictError
         ? { currentVersion: error.currentVersion }
         : {}),
+      // A plan refusal names the feature or cap, so the client draws the upgrade prompt from it.
+      ...(error instanceof PlanError ? toPlanRefusal(error) : {}),
     },
   }, definition.status)
 }

@@ -4,6 +4,7 @@ import { subscribe } from "@api/services/eventBus.ts"
 import { sql } from "@api/services/db.ts"
 import { log } from "@api/services/log.ts"
 import { createIdempotencyMiddleware, PostgresIdempotencyStore } from "@spy4x/server/idempotency"
+import { entitlementGate } from "@api/cqrs/entitlements.ts"
 import {
   PushRegisterCommand,
   PushRemoveCommand,
@@ -93,6 +94,9 @@ subscribe(GroupSelectedEvent, realtimeOnGroupSelectedHandler)
 commandBus.use(
   createIdempotencyMiddleware({ store: new PostgresIdempotencyStore(sql), onStoreFailure: log }),
 )
+// After the key store: a retry of a create that already landed gets its stored answer, even when
+// the group has reached its cap since. The query bus has no such gate: reads are never refused.
+commandBus.use(entitlementGate)
 
 commandBus.register(UserProfileUpdateCommand, userProfileUpdateHandler)
 commandBus.register(PushRegisterCommand, pushRegisterHandler)

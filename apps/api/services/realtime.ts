@@ -13,6 +13,7 @@ import {
 import { GROUP_AGGREGATE, GroupError } from "@domain/groups"
 import { AccessError, type Actor, userChangeGroupId } from "@domain/identity"
 import { NoteError, NoteVersionConflictError } from "@domain/notes"
+import { PlanError, toPlanRefusal } from "@domain/billing"
 import { IdempotencyError } from "@spy4x/server/idempotency"
 import { actorFromAuth } from "../cqrs/actor.ts"
 import type { AppAuthState } from "./sign-in.ts"
@@ -87,6 +88,10 @@ export function toRequestError(error: unknown): RealtimeRequestError | null {
       ? { code: error.code, currentVersion: error.currentVersion }
       : { code: error.code }
     return new RealtimeRequestError(NOTE_ERROR_CODES[error.code], error.message, details)
+  }
+  if (error instanceof PlanError) {
+    // The socket's codes are closed, so a plan refusal is `forbidden` and names itself in details.
+    return new RealtimeRequestError("forbidden", error.message, toPlanRefusal(error))
   }
   if (error instanceof AccessError) {
     return new RealtimeRequestError("unauthorized", error.message, { code: error.code })

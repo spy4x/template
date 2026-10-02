@@ -521,6 +521,7 @@ Deno.test("notes against Postgres", async (t) => {
         const { note } = await notes.create(
           { groupId, id: crypto.randomUUID(), title, body: "" },
           owner,
+          null,
         )
         ids.push(note.id)
         // updated_at is the transaction's start; keep the three apart.
@@ -546,6 +547,7 @@ Deno.test("notes against Postgres", async (t) => {
           const { note } = await notes.create(
             { groupId, id: crypto.randomUUID(), title, body: "" },
             owner,
+            null,
           )
           ids.push(note.id)
         }

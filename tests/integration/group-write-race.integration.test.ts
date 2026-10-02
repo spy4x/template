@@ -72,12 +72,12 @@ for (const change of ["removal", "demotion"] as const) {
         const notes = new PostgresNoteRepository(sql)
         const id = crypto.randomUUID()
         if (write !== "create") {
-          await notes.create({ groupId, id, title: "First", body: "" }, editor)
+          await notes.create({ groupId, id, title: "First", body: "" }, editor, null)
         }
 
         const held = await holdMemberChange(sql, groupId, owner, editor, change)
         const writing = write === "create"
-          ? notes.create({ groupId, id, title: "Late", body: "" }, editor)
+          ? notes.create({ groupId, id, title: "Late", body: "" }, editor, null)
           : write === "update"
           ? notes.update({ groupId, id, title: "Late", body: "", expectedVersion: 1 }, editor)
           : notes.delete({ groupId, id, expectedVersion: 1 }, editor)

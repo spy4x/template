@@ -2,6 +2,7 @@ import type { Context } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { GroupError, GroupErrorCode } from "@domain/groups"
 import { AccessError } from "@domain/identity"
+import { PlanError, type PlanErrorCode, toPlanRefusal } from "@domain/billing"
 import { IdempotencyError } from "@spy4x/server/idempotency"
 import { APIContext } from "../../_types.ts"
 
@@ -13,6 +14,7 @@ export type GroupFeatureErrorCode =
   | "IDEMPOTENCY_KEY_REUSED"
   | "INTERNAL_ERROR"
   | "MFA_REQUIRED"
+  | PlanErrorCode
   | "REQUEST_ORIGIN_INVALID"
 
 export class GroupFeatureError extends Error {
@@ -53,6 +55,8 @@ const ERROR_DEFINITIONS: Record<GroupFeatureErrorCode, ErrorDefinition> = {
     message: "Cancel the group's subscription in the billing portal before deleting it",
   },
   MEMBER_NOT_FOUND: { status: 404, message: "Member not found" },
+  PLAN_FEATURE_MISSING: { status: 402, message: "The group's plan does not include this" },
+  PLAN_LIMIT_REACHED: { status: 402, message: "The group has reached its plan's limit" },
   MFA_REQUIRED: { status: 401, message: "Complete MFA to access groups" },
   REQUEST_ORIGIN_INVALID: { status: 403, message: "Request origin is invalid" },
   ROLE_INSUFFICIENT: { status: 403, message: "Group role is insufficient" },
@@ -68,7 +72,7 @@ const IDEMPOTENCY_CODES: Record<IdempotencyError["code"], GroupFeatureErrorCode>
 
 export function groupErrorResponse(c: Context<APIContext>, error: unknown): Response {
   const code = error instanceof GroupFeatureError || error instanceof GroupError ||
-      error instanceof AccessError
+      error instanceof AccessError || error instanceof PlanError
     ? error.code
     : error instanceof IdempotencyError
     ? IDEMPOTENCY_CODES[error.code]
@@ -79,6 +83,8 @@ export function groupErrorResponse(c: Context<APIContext>, error: unknown): Resp
       code,
       message: definition.message,
       requestId: c.get("requestId") || "unknown",
+      // A plan refusal names the feature or cap, so the client draws the upgrade prompt from it.
+      ...(error instanceof PlanError ? toPlanRefusal(error) : {}),
     },
   }, definition.status)
 }

@@ -1,4 +1,5 @@
-import type { GroupRole } from "@domain/groups"
+import { assertRoomFor } from "@domain/billing"
+import { GroupRole } from "@domain/groups"
 import {
   type DeletedNote,
   type GroupRoleLookup,
@@ -34,8 +35,14 @@ export class MemoryNoteRepository implements NoteRepository {
     return Promise.resolve(note && note.groupId === groupId ? note : null)
   }
 
-  create(input: NoteCreateInput, actorId: number): Promise<NoteWriteResult> {
+  create(
+    input: NoteCreateInput,
+    actorId: number,
+    allowance: number | null,
+  ): Promise<NoteWriteResult> {
     if (this.notes.has(input.id)) throw new NoteError("ID_ALREADY_EXISTS", "taken")
+    const used = [...this.notes.values()].filter((note) => note.groupId === input.groupId).length
+    assertRoomFor("maxNotes", allowance, used, GroupRole.EDITOR)
     const at = new Date("2026-10-02T10:00:00.000Z")
     const note: Note = {
       ...input,
