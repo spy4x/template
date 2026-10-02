@@ -345,6 +345,34 @@ Deno.test("rename, delete and restore each write an audit row with the request i
   })
 })
 
+Deno.test("create, rename, delete and restore keep a 128-character request id whole", async () => {
+  await withSchema(async (sql) => {
+    const repository = new PostgresGroupRepository(sql)
+    const owner = await insertUser(sql)
+    const id = "r".repeat(128)
+    const created =
+      (await repository.create({ id: crypto.randomUUID(), name: "A", requestId: id }, owner))
+        .group
+    // The person keeps a second group, so deleting the first is allowed.
+    await repository.create({ id: crypto.randomUUID(), name: "B" }, owner)
+
+    await repository.rename(created.id, "Trip", owner, id)
+    await repository.softDelete(created.id, owner, id)
+    await repository.restore(created.id, owner, id)
+
+    const rows = await sql<{ kind: string; request: string }[]>`
+      SELECT event_kind AS kind, request_id AS request
+      FROM audit_events WHERE group_id = ${created.id} ORDER BY id
+    `
+    expect(rows).toEqual([
+      { kind: "group.created", request: id },
+      { kind: "group.renamed", request: id },
+      { kind: "group.deleted", request: id },
+      { kind: "group.restored", request: id },
+    ])
+  })
+})
+
 Deno.test("a refused rename, delete or restore writes no audit row", async () => {
   await withSchema(async (sql) => {
     const { repository, groupId, viewer } = await team(sql)

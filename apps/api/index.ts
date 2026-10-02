@@ -1,7 +1,5 @@
 import { Hono } from "hono"
-import { contextStorage } from "hono/context-storage"
-import { requestId } from "hono/request-id"
-import { requestLog } from "@spy4x/server/request-log"
+import { applyBaseMiddleware } from "./base-middleware.ts"
 import { db, sql } from "@api/services/db.ts"
 import { config } from "@api/services/config.ts"
 import { log } from "@api/services/log.ts"
@@ -9,7 +7,6 @@ import { parseAuth, signIn } from "@api/services/auth.ts"
 import { eventBus } from "@api/services/eventBus.ts"
 import { getWebPush } from "@api/services/webPush.ts"
 import { APIContext } from "./_types.ts"
-import { randomBase64Url } from "@spy4x/platform/tokens"
 import { ONE_HOUR_IN_MILLISECONDS } from "@spy4x/platform/universal/time-constants"
 import { startSessionExpiry } from "./services/session-expiry.ts"
 import { createAuthRoute } from "./routes/auth.ts"
@@ -43,12 +40,7 @@ const mailWarning = mailOffWarning(readMailSetup(Deno.env))
 if (mailWarning) log(mailWarning)
 
 const app = new Hono<APIContext>().basePath("/api")
-app.use(
-  contextStorage(),
-  requestId({ generator: () => randomBase64Url(6) }),
-  requestLog({ write: log, skipPaths: ["/api/health"] }),
-  parseAuth,
-)
+applyBaseMiddleware(app, { write: log, parseAuth })
 
 app.route(
   "/health",

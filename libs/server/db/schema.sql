@@ -189,7 +189,7 @@ CREATE TABLE audit_events (
     event_kind VARCHAR(64) NOT NULL,
     actor_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     group_id UUID REFERENCES groups(id) ON DELETE SET NULL,
-    request_id VARCHAR(100),
+    request_id VARCHAR(128),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT audit_events_kind_check CHECK (length(btrim(event_kind)) BETWEEN 1 AND 64)
 );

@@ -102,15 +102,21 @@ function socket(buses: GroupsRouteDependencies, userId: number) {
   const ws = new FakeSocket("wss://app.example.com/api/ws")
   ws.openFromPeer()
   realtime.attach(ws, auth)
-  const send = async (kind: "client.command" | "client.query", name: string, payload: unknown) => {
+  const send = async (
+    kind: "client.command" | "client.query",
+    name: string,
+    payload: unknown,
+    id = name,
+  ) => {
     // Only a command carries an idempotency key; the socket refuses one on a query.
     const key = kind === "client.command" ? { idempotencyKey: `key-${name}` } : {}
-    ws.receive(JSON.stringify({ kind, id: name, name, payload, ...key }))
+    ws.receive(JSON.stringify({ kind, id, name, payload, ...key }))
     await drainMicrotasks()
-    return ws.frames().find((frame) => (frame as { requestId?: string }).requestId === name)
+    return ws.frames().find((frame) => (frame as { requestId?: string }).requestId === id)
   }
   return {
-    command: (name: string, payload: unknown) => send("client.command", name, payload),
+    command: (name: string, payload: unknown, id?: string) =>
+      send("client.command", name, payload, id),
     query: (name: string) => send("client.query", name, undefined),
     shutdown: () => realtime.shutdown(),
   }
@@ -257,6 +263,43 @@ describe("restoring a group over REST", () => {
     expect(owner.groups.map((group: { id: string }) => group.id)).toEqual([groupId])
     expect(admin.groups).toEqual([])
     expect(stranger.groups).toEqual([])
+  })
+})
+
+describe("the request id of a group change", () => {
+  it("reaches the audit trail for rename, delete and restore over REST", async () => {
+    const { groups, buses } = stack()
+    const call = rest(buses, OWNER)
+
+    await call("PATCH", `/${groupId}`, { name: "Trip" })
+    await call("DELETE", `/${groupId}`)
+    await call("POST", `/${groupId}/restore`)
+
+    expect(groups.requestIds).toEqual(["req-groups", "req-groups", "req-groups"])
+  })
+
+  it("reaches the audit trail for rename, delete and restore over the socket", async () => {
+    const { groups, buses } = stack()
+    const ws = socket(buses, OWNER)
+
+    await ws.command("group.rename", { groupId, name: "Trip" }, "frame-rename")
+    await ws.command("group.delete", { groupId }, "frame-delete")
+    await ws.command("group.restore", { groupId }, "frame-restore")
+
+    expect(groups.requestIds).toEqual(["frame-rename", "frame-delete", "frame-restore"])
+    ws.shutdown()
+  })
+
+  it("keeps a 128-character socket frame id whole", async () => {
+    const { groups, buses } = stack()
+    const ws = socket(buses, OWNER)
+    const id = "x".repeat(128)
+
+    const frame = await ws.command("group.rename", { groupId, name: "Trip" }, id)
+
+    expect(frame).toMatchObject({ kind: "server.result" })
+    expect(groups.requestIds).toEqual([id])
+    ws.shutdown()
   })
 })
 
