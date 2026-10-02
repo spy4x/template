@@ -118,7 +118,7 @@ export async function renderGroupSettings(
             role={group.role}
             members={members?.members ?? null}
             hasSubscription={billing?.subscribed ?? false}
-            draft={{ ...transferDraft, password: "" }}
+            draft={transferDraft}
             error={transferError}
           />
         )}
