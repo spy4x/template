@@ -35,7 +35,7 @@ const row = {
 }
 
 describe("invitations store", () => {
-  it("creates from the draft, shows the link once and reads the pending list again", async () => {
+  it("creates from the draft and the price confirmation, shows the link once, clears both and reads the pending list again", async () => {
     const { store, calls } = harness({
       "GET /api/groups/g-1/invitations": [200, { invitations: [row] }],
       "POST /api/groups/g-1/invitations": [201, { invitation: row, token, mailSent: true }],
@@ -46,6 +46,7 @@ describe("invitations store", () => {
       email: " friend@example.com ",
       sendEmail: true,
     }
+    store.acceptSeatPrice.value = true
 
     expect(await store.create()).toBe(true)
 
@@ -55,7 +56,7 @@ describe("invitations store", () => {
       maxUses: 1,
       email: "friend@example.com",
       sendEmail: true,
-      acceptSeatPrice: false,
+      acceptSeatPrice: true,
     })
     expect(store.created.value).toEqual({
       link: `https://app.example.com/invite/${token}`,
@@ -63,6 +64,7 @@ describe("invitations store", () => {
       mailSent: true,
     })
     expect(store.draft.value).toEqual(EMPTY_INVITATION_DRAFT)
+    expect(store.acceptSeatPrice.value).toBe(false)
     expect(calls.filter((call) => call.method === "GET")).toHaveLength(2)
 
     store.closeGroup()

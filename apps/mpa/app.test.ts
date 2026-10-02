@@ -1481,7 +1481,7 @@ describe("invitations", () => {
     })
   })
 
-  it("posts the price confirmation of a group billed per member, and shows its refusal at the box", async () => {
+  it("posts the price confirmation of a group billed per member, shows its refusal at the box and keeps the box as posted", async () => {
     const billing = {
       enabled: true,
       planId: "pro",
@@ -1516,9 +1516,12 @@ describe("invitations", () => {
 
     const refused = await create({})
     const html = await refused.text()
-    await create({ acceptSeatPrice: "true" })
+    const ticked = await (await create({ acceptSeatPrice: "true" })).text()
+    const box = (page: string) => page.match(/<input[^>]*name="acceptSeatPrice"[^>]*>/)?.[0] ?? ""
 
     expect(refused.status).toBe(400)
+    expect(box(html)).not.toMatch(/\schecked/)
+    expect(box(ticked)).toMatch(/\schecked/)
     expect(html).toContain("pays €36.00 instead of €27.00")
     expect(html).toContain(`id="invitation-seat-price-error"`)
     expect(html).toContain("Confirm the higher price")
