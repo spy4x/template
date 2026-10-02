@@ -23,7 +23,10 @@ function bus(notes: number) {
       billingEnabled: true,
       planOf: () => Promise.resolve(FREE_PLAN_ID),
       roleOf: () => Promise.resolve(GroupRole.OWNER),
-      usage: { maxNotes: () => Promise.resolve(group.notes) },
+      usage: {
+        maxNotes: () => Promise.resolve(group.notes),
+        maxMembers: () => Promise.reject(new Error("not part of this test")),
+      },
     }, ENTITLEMENT_NEEDS),
   })
   commands.register(NoteCreateCommand, (command) => {
