@@ -22,6 +22,7 @@ import { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
 import type { Lockout } from "@spy4x/server/lockout"
 import type { AuthRateLimits } from "../middlewares/auth-rate-limits.ts"
+import type { RateLimitDecision } from "@spy4x/platform/rate-limit"
 import { readApiJson } from "@api/services/json-body.ts"
 
 /** What the auth routes call. `index.ts` passes the app's singletons; tests pass fakes. */
@@ -62,6 +63,26 @@ export const EMAIL_NOTHING_TO_VERIFY = "Your e-mail address is already verified.
 
 /** The answer when a right code proves an address another account owns. */
 export const EMAIL_TAKEN = "Another account already uses this address."
+
+/**
+ * The answer when a code mail to an address the account wants to move to is refused. One wording
+ * for both budgets, so it tells nothing about who owns the address.
+ */
+export const EMAIL_CHANGE_TOO_MANY = "Too many address changes, try again later."
+
+/**
+ * Spends a code mail to `email`, an address the account wants to move to: first from the
+ * account's budget, then from the address's change budget. The owner's own code budget stays
+ * untouched, since the address may be someone else's.
+ */
+async function spendChangeMail(
+  rateLimits: AuthRateLimits,
+  userId: number,
+  email: string,
+): Promise<RateLimitDecision> {
+  const byUser = await rateLimits.emailChangeByUser(userId)
+  return byUser.allowed ? await rateLimits.emailChangeByAddress(email) : byUser
+}
 
 /** Sets `Retry-After` and answers 429 with `error`. */
 function tooMany(c: Context<APIContext>, retryAfterMs: number, error: string): Response {
@@ -287,18 +308,25 @@ export function createAuthRoute(
     .get(`/email`, rateLimits.normal, async (c) => {
       return c.json(await signIn.emailStatus(c.get("auth")!))
     })
-    // The normal limit: every mail also spends the address's own hourly budget.
+    // The normal limit, and an hourly mail budget: the account's own address spends its own, an
+    // address the account wants to move to spends the change budgets, as `/email/change` does.
     .post(`/email/send`, rateLimits.normal, async (c) => {
       const authData = c.get("auth")!
-      const email = emailToVerify(await signIn.emailStatus(authData))
+      const status = await signIn.emailStatus(authData)
+      const email = emailToVerify(status)
       if (email === null) return c.json({ error: EMAIL_NOTHING_TO_VERIFY }, 400)
-      const decision = await rateLimits.emailCodeByAddress(email)
-      if (!decision.allowed) {
-        return tooMany(
-          c,
-          decision.retryAfterMs,
-          "Too many codes for this address, try again later.",
-        )
+      if (status.pending !== null) {
+        const decision = await spendChangeMail(rateLimits, authData.user.id, email)
+        if (!decision.allowed) return tooMany(c, decision.retryAfterMs, EMAIL_CHANGE_TOO_MANY)
+      } else {
+        const decision = await rateLimits.emailCodeByAddress(email)
+        if (!decision.allowed) {
+          return tooMany(
+            c,
+            decision.retryAfterMs,
+            "Too many codes for this address, try again later.",
+          )
+        }
       }
       await requestEmailCode(authData.user.id, email)
       return c.json({ success: true, message: `A new code is on its way to ${email}.` })
@@ -345,14 +373,8 @@ export function createAuthRoute(
         return c.json({ success: true, message: "Your address stays as it is." })
       }
       // The change waits either way; a refused mail is asked for again later with /email/send.
-      const decision = await rateLimits.emailCodeByAddress(email)
-      if (!decision.allowed) {
-        return tooMany(
-          c,
-          decision.retryAfterMs,
-          "Too many codes for this address, try again later.",
-        )
-      }
+      const decision = await spendChangeMail(rateLimits, authData.user.id, email)
+      if (!decision.allowed) return tooMany(c, decision.retryAfterMs, EMAIL_CHANGE_TOO_MANY)
       await requestEmailCode(authData.user.id, email)
       return c.json({
         success: true,
