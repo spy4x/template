@@ -1,4 +1,4 @@
-import type { JSX } from "preact"
+import type { ComponentChildren, JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
 import { Badge } from "@spy4x/preact-ui/badge"
 import { Button } from "@spy4x/preact-ui/button"
@@ -83,6 +83,8 @@ export interface GroupSettingsScreenProps {
   leaveError?: string | null
   /** Leaves the group. A form that posts nothing to `GROUP_PATHS.leave`. */
   onLeave?: () => void
+  /** The plan section (`BillingCard`), drawn above Leave; left out, there is none. */
+  billing?: ComponentChildren
 }
 
 /**
@@ -119,6 +121,7 @@ export function GroupSettingsScreen(
     leaving = false,
     leaveError = null,
     onLeave,
+    billing,
   }: GroupSettingsScreenProps,
 ): JSX.Element {
   const nameInput = useRef<HTMLInputElement>(null)
@@ -231,6 +234,8 @@ export function GroupSettingsScreen(
         onRoleChange={onRoleChange}
         onRemove={onRemoveMember}
       />
+
+      {billing}
 
       <GroupLeaveSection
         groupId={group.id}
