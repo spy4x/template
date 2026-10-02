@@ -16,4 +16,6 @@ export const billingDependencies: BillingHandlerDependencies = {
   provider: billingSetup.provider,
   webAppUrl: config.webAppUrl,
   log,
+  graceDays: billingSetup.graceDays,
+  now: () => new Date(),
 }

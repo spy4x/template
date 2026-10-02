@@ -59,7 +59,8 @@ export class PostgresBillingRepository implements BillingRepository {
           plan_id,
           status,
           current_period_end,
-          cancel_at_period_end
+          cancel_at_period_end,
+          past_due_since
         FROM subscriptions
         WHERE group_id = ${groupId}
       `
@@ -72,6 +73,7 @@ export class PostgresBillingRepository implements BillingRepository {
         status: row.status,
         currentPeriodEnd: row.currentPeriodEnd,
         cancelAtPeriodEnd: row.cancelAtPeriodEnd,
+        pastDueSince: row.pastDueSince,
       }
       : null
   }
@@ -128,6 +130,10 @@ export class PostgresBillingRepository implements BillingRepository {
       // A different subscription than the one held takes over only while it is alive: the end of an
       // old subscription must not end the new one that replaced it.
       const replaces = subscription.status !== SubscriptionStatus.Canceled
+      // The grace period counts from the first past-due event of this subscription: a later one
+      // (Stripe's `unpaid` arrives as past due too) keeps the stored start, and any other status
+      // clears it.
+      const pastDue = subscription.status === SubscriptionStatus.PastDue
       const before = (
         await transaction<{ planId: string | null; status: number }[]>`
           SELECT plan_id, status FROM subscriptions WHERE group_id = ${group.id} FOR UPDATE
@@ -142,7 +148,8 @@ export class PostgresBillingRepository implements BillingRepository {
           current_period_end,
           cancel_at_period_end,
           provider_event_at,
-          provider_event_rank
+          provider_event_rank,
+          past_due_since
         ) VALUES (
           ${group.id},
           ${subscription.id},
@@ -151,7 +158,8 @@ export class PostgresBillingRepository implements BillingRepository {
           ${subscription.currentPeriodEnd},
           ${subscription.cancelAtPeriodEnd},
           ${event.occurredAt},
-          ${rank}
+          ${rank},
+          ${pastDue ? event.occurredAt : null}
         )
         ON CONFLICT (group_id) DO UPDATE SET
           provider_subscription_id = EXCLUDED.provider_subscription_id,
@@ -161,6 +169,12 @@ export class PostgresBillingRepository implements BillingRepository {
           cancel_at_period_end = EXCLUDED.cancel_at_period_end,
           provider_event_at = EXCLUDED.provider_event_at,
           provider_event_rank = EXCLUDED.provider_event_rank,
+          past_due_since = CASE
+            WHEN EXCLUDED.past_due_since IS NULL THEN NULL
+            WHEN subscriptions.provider_subscription_id = EXCLUDED.provider_subscription_id
+              THEN COALESCE(subscriptions.past_due_since, EXCLUDED.past_due_since)
+            ELSE EXCLUDED.past_due_since
+          END,
           updated_at = CURRENT_TIMESTAMP
         WHERE (subscriptions.provider_event_at, subscriptions.provider_event_rank)
             <= (EXCLUDED.provider_event_at, EXCLUDED.provider_event_rank)

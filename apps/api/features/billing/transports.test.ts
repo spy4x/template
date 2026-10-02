@@ -34,6 +34,8 @@ const ADMIN = 2
 const EDITOR = 3
 const VIEWER = 4
 const STRANGER = 5
+/** The time the handlers read; a test that needs another passes it to `stack`. */
+const NOW = new Date("2026-10-01T10:00:00Z")
 
 interface Recorder {
   checkouts: CheckoutRequest[]
@@ -55,10 +57,11 @@ function fakeProvider(recorder: Recorder): BillingProvider {
 }
 
 function stack(
-  { subscription = null, customer = null, enabled = true }: {
+  { subscription = null, customer = null, enabled = true, now = NOW }: {
     subscription?: StoredSubscription | null
     customer?: string | null
     enabled?: boolean
+    now?: Date
   } = {},
 ) {
   const recorder: Recorder = { checkouts: [], portals: [] }
@@ -78,6 +81,8 @@ function stack(
     provider: enabled ? fakeProvider(recorder) : null,
     webAppUrl: "https://app.example.com",
     log: () => {},
+    graceDays: 7,
+    now: () => now,
   }
   const commands = new CommandBus()
   commands.use(createSessionGate([]))
@@ -128,6 +133,7 @@ const PRO: StoredSubscription = {
   status: BillingStatus.Active,
   currentPeriodEnd: new Date("2026-11-01T00:00:00Z"),
   cancelAtPeriodEnd: false,
+  pastDueSince: null,
 }
 
 async function code(response: Response): Promise<string> {
@@ -276,6 +282,16 @@ describe("billing over REST", () => {
 
     expect(owner.billing).toMatchObject({ enabled: true, planId: "pro", canManage: true })
     expect(viewer.billing).toMatchObject({ enabled: true, planId: "pro", canManage: false })
+  })
+
+  it("shows a past-due group its plan through the seven-day grace period, then the free plan", async () => {
+    const pastDue = { ...PRO, status: BillingStatus.PastDue, pastDueSince: NOW }
+    const plan = async (now: Date) =>
+      (await (await stack({ subscription: pastDue, now }).call(OWNER, "GET", "")).json())
+        .billing.planId
+
+    expect(await plan(new Date("2026-10-08T09:59:59.999Z"))).toBe("pro")
+    expect(await plan(new Date("2026-10-08T10:00:00Z"))).toBe("free")
   })
 
   it("keeps every group on the free plan when billing is off, and answers checkout with 404", async () => {

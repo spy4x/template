@@ -11,7 +11,8 @@ import { ENTITLEMENT_NEEDS } from "./entitlement-needs.ts"
 export const entitlementGate = createEntitlementGate(
   {
     billingEnabled: billingSetup.provider !== null,
-    planOf: async (groupId) => effectivePlanId(await db.billing.get(groupId)),
+    planOf: async (groupId) =>
+      effectivePlanId(await db.billing.get(groupId), new Date(), billingSetup.graceDays),
     roleOf: async (groupId, userId) => (await db.group.getForMember(groupId, userId))?.role ?? null,
     usage: { maxNotes: (groupId) => db.note.count(groupId) },
   },

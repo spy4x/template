@@ -127,12 +127,19 @@ export enum BillingStatus {
   Paused = 6,
 }
 
-/** The statuses that keep a paid plan. A past-due subscription keeps it while the provider retries. */
+/** The statuses that keep a paid plan for as long as they last. Past due has its own rule. */
 const PAID_STATUSES: ReadonlySet<BillingStatus> = new Set([
   BillingStatus.Trialing,
   BillingStatus.Active,
-  BillingStatus.PastDue,
 ])
+
+/**
+ * How many days a past-due group keeps its plan while the provider retries the charge, when
+ * `BILLING_GRACE_DAYS` is unset.
+ */
+export const DEFAULT_GRACE_DAYS = 7
+
+const DAY_MS = 24 * 60 * 60 * 1000
 
 /** A group's subscription as this app stores it. */
 export interface StoredSubscription {
@@ -143,12 +150,39 @@ export interface StoredSubscription {
   status: BillingStatus
   currentPeriodEnd: Date | null
   cancelAtPeriodEnd: boolean
+  /**
+   * When the provider first reported the subscription past due, kept through every later past-due
+   * event (Stripe's `unpaid` arrives as past due too); `null` whenever the status is not past due.
+   */
+  pastDueSince: Date | null
 }
 
-/** The plan a group is on: the subscription's plan while it is paid, else the free plan. */
-export function effectivePlanId(subscription: StoredSubscription | null): string {
+/**
+ * The moment a past-due subscription stops keeping its plan: `graceDays` after it first became past
+ * due. `null` for any other status. A past-due subscription with no recorded start has no grace.
+ */
+export function graceEndsAt(subscription: StoredSubscription, graceDays: number): Date | null {
+  if (subscription.status !== BillingStatus.PastDue) return null
+  if (subscription.pastDueSince === null) return new Date(0)
+  return new Date(subscription.pastDueSince.getTime() + graceDays * DAY_MS)
+}
+
+/**
+ * The plan a group is on at `now`: the subscription's plan while it is trialing or active, or past
+ * due for less than `graceDays`; else the free plan. Nothing is deleted when the grace ends; the
+ * group only gets the free plan's entitlements, and a payment that makes it active brings the plan
+ * back.
+ */
+export function effectivePlanId(
+  subscription: StoredSubscription | null,
+  now: Date,
+  graceDays: number,
+): string {
   if (subscription === null || subscription.planId === null) return FREE_PLAN_ID
-  if (!PAID_STATUSES.has(subscription.status)) return FREE_PLAN_ID
+  const graceEnd = graceEndsAt(subscription, graceDays)
+  const paid = PAID_STATUSES.has(subscription.status) ||
+    (graceEnd !== null && now.getTime() < graceEnd.getTime())
+  if (!paid) return FREE_PLAN_ID
   return findPlan(subscription.planId) ? subscription.planId : FREE_PLAN_ID
 }
 
@@ -193,16 +227,21 @@ export interface GroupBilling {
   hasCustomer: boolean
 }
 
-/** Builds the {@link GroupBilling} view of one group for one member. */
+/**
+ * Builds the {@link GroupBilling} view of one group for one member, with the plan it is on at `now`
+ * (see {@link effectivePlanId}).
+ */
 export function toGroupBilling(
   subscription: StoredSubscription | null,
   role: GroupRole,
   enabled: boolean,
   hasCustomer: boolean,
+  now: Date,
+  graceDays: number,
 ): GroupBilling {
   return {
     enabled,
-    planId: enabled ? effectivePlanId(subscription) : FREE_PLAN_ID,
+    planId: enabled ? effectivePlanId(subscription, now, graceDays) : FREE_PLAN_ID,
     status: enabled ? subscription?.status ?? null : null,
     currentPeriodEnd: enabled ? subscription?.currentPeriodEnd ?? null : null,
     cancelAtPeriodEnd: enabled ? subscription?.cancelAtPeriodEnd ?? false : false,

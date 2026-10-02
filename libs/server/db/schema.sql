@@ -376,8 +376,13 @@ CREATE TABLE subscriptions (
     provider_event_at TIMESTAMPTZ NOT NULL,
     provider_event_rank INT2 NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    -- When the provider first reported it past due (#204): the grace period counts from here. A
+    -- later past-due event keeps it; any other status clears it.
+    past_due_since TIMESTAMPTZ,
     CONSTRAINT subscriptions_status_check CHECK (status BETWEEN 1 AND 6),
-    CONSTRAINT subscriptions_provider_event_rank_check CHECK (provider_event_rank BETWEEN 1 AND 3)
+    CONSTRAINT subscriptions_provider_event_rank_check CHECK (provider_event_rank BETWEEN 1 AND 3),
+    CONSTRAINT subscriptions_past_due_since_check
+        CHECK ((status = 3) = (past_due_since IS NOT NULL))
 );
 
 COMMENT ON COLUMN subscriptions.status IS

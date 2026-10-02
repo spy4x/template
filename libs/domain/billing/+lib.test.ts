@@ -8,9 +8,11 @@ import {
   assertRoomFor,
   BillingError,
   BillingStatus,
+  DEFAULT_GRACE_DAYS,
   effectivePlanId,
   entitlementsOf,
   FREE_PLAN_ID,
+  graceEndsAt,
   hasLiveSubscription,
   PlanError,
   PLANS,
@@ -23,6 +25,11 @@ import {
   UNLIMITED,
 } from "./+lib.ts"
 
+/** When the first payment failed in the tests below. */
+const FAILED_AT = new Date("2026-10-01T10:00:00Z")
+const NOW = new Date("2026-10-02T10:00:00Z")
+const DAY = 24 * 60 * 60 * 1000
+
 const subscription = (status: BillingStatus, planId: string | null = PRO_PLAN_ID) =>
   ({
     groupId: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002",
@@ -31,7 +38,16 @@ const subscription = (status: BillingStatus, planId: string | null = PRO_PLAN_ID
     status,
     currentPeriodEnd: null,
     cancelAtPeriodEnd: false,
+    pastDueSince: status === BillingStatus.PastDue ? FAILED_AT : null,
   }) satisfies StoredSubscription
+
+/** The plan of a subscription past due since {@link FAILED_AT}, `elapsed` ms later. */
+const planAfter = (elapsed: number, graceDays = DEFAULT_GRACE_DAYS) =>
+  effectivePlanId(
+    subscription(BillingStatus.PastDue),
+    new Date(FAILED_AT.getTime() + elapsed),
+    graceDays,
+  )
 
 describe("billing domain", () => {
   it("numbers its statuses exactly as @spy4x/billing does", () => {
@@ -42,23 +58,63 @@ describe("billing domain", () => {
     expect(ours).toEqual(theirs)
   })
 
-  it("keeps the paid plan while the subscription is trialing, active or past due", () => {
-    for (const status of [BillingStatus.Trialing, BillingStatus.Active, BillingStatus.PastDue]) {
-      expect(effectivePlanId(subscription(status))).toBe(PRO_PLAN_ID)
+  it("keeps the paid plan while the subscription is trialing or active, however long", () => {
+    const years = new Date(FAILED_AT.getTime() + 3 * 365 * DAY)
+    for (const status of [BillingStatus.Trialing, BillingStatus.Active]) {
+      expect(effectivePlanId(subscription(status), years, DEFAULT_GRACE_DAYS)).toBe(PRO_PLAN_ID)
     }
+  })
+
+  it("keeps the paid plan for seven days after the first failed payment, then gives the free plan", () => {
+    expect(DEFAULT_GRACE_DAYS).toBe(7)
+    expect(planAfter(0)).toBe(PRO_PLAN_ID)
+    expect(planAfter(7 * DAY - 1)).toBe(PRO_PLAN_ID)
+    expect(planAfter(7 * DAY)).toBe(FREE_PLAN_ID)
+    expect(planAfter(30 * DAY)).toBe(FREE_PLAN_ID)
+  })
+
+  it("counts the grace period in the configured number of days", () => {
+    expect(planAfter(3 * DAY - 1, 3)).toBe(PRO_PLAN_ID)
+    expect(planAfter(3 * DAY, 3)).toBe(FREE_PLAN_ID)
+    expect(planAfter(0, 0)).toBe(FREE_PLAN_ID)
+  })
+
+  it("gives no grace to a past-due subscription with no recorded start", () => {
+    const unmarked = { ...subscription(BillingStatus.PastDue), pastDueSince: null }
+
+    expect(effectivePlanId(unmarked, FAILED_AT, DEFAULT_GRACE_DAYS)).toBe(FREE_PLAN_ID)
+  })
+
+  it("ends the grace period the configured number of days after it began, only when past due", () => {
+    expect(graceEndsAt(subscription(BillingStatus.PastDue), 7))
+      .toEqual(new Date("2026-10-08T10:00:00Z"))
+    expect(graceEndsAt(subscription(BillingStatus.Active), 7)).toBeNull()
   })
 
   it("falls back to the free plan once the subscription ends, stalls or bills an unknown price", () => {
     for (const status of [BillingStatus.Canceled, BillingStatus.Incomplete, BillingStatus.Paused]) {
-      expect(effectivePlanId(subscription(status))).toBe(FREE_PLAN_ID)
+      expect(effectivePlanId(subscription(status), NOW, DEFAULT_GRACE_DAYS)).toBe(FREE_PLAN_ID)
     }
-    expect(effectivePlanId(subscription(BillingStatus.Active, null))).toBe(FREE_PLAN_ID)
-    expect(effectivePlanId(subscription(BillingStatus.Active, "retired"))).toBe(FREE_PLAN_ID)
-    expect(effectivePlanId(null)).toBe(FREE_PLAN_ID)
+    expect(effectivePlanId(subscription(BillingStatus.Active, null), NOW, DEFAULT_GRACE_DAYS))
+      .toBe(FREE_PLAN_ID)
+    expect(effectivePlanId(subscription(BillingStatus.Active, "retired"), NOW, DEFAULT_GRACE_DAYS))
+      .toBe(FREE_PLAN_ID)
+    expect(effectivePlanId(null, NOW, DEFAULT_GRACE_DAYS)).toBe(FREE_PLAN_ID)
+  })
+
+  it("shows a past-due group's plan as free once its grace period is over", () => {
+    const later = new Date(FAILED_AT.getTime() + 8 * DAY)
+    const billing = (now: Date) =>
+      toGroupBilling(subscription(BillingStatus.PastDue), GroupRole.OWNER, true, true, now, 7)
+
+    expect(billing(NOW)).toMatchObject({ planId: PRO_PLAN_ID, status: BillingStatus.PastDue })
+    expect(billing(later)).toMatchObject({ planId: FREE_PLAN_ID, status: BillingStatus.PastDue })
   })
 
   it("shows the free plan and no way to manage it while billing is off, whatever is stored", () => {
-    expect(toGroupBilling(subscription(BillingStatus.Active), GroupRole.OWNER, false, true))
+    expect(
+      toGroupBilling(subscription(BillingStatus.Active), GroupRole.OWNER, false, true, NOW, 7),
+    )
       .toEqual({
         enabled: false,
         planId: FREE_PLAN_ID,

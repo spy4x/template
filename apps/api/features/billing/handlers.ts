@@ -24,6 +24,10 @@ export interface BillingHandlerDependencies {
   webAppUrl: string
   /** Where a provider failure is written; the person sees only `PROVIDER_ERROR`. */
   log: (message: string, detail?: unknown) => void
+  /** Days a past-due group keeps its plan (`BILLING_GRACE_DAYS`). */
+  graceDays: number
+  /** The current time; tests pass a fixed one. */
+  now: () => Date
 }
 
 /**
@@ -32,7 +36,7 @@ export interface BillingHandlerDependencies {
  * call, never from a cache.
  */
 export function createBillingGetHandler(
-  { billing, groups, provider }: BillingHandlerDependencies,
+  { billing, groups, provider, graceDays, now }: BillingHandlerDependencies,
 ): QueryHandler<BillingGetQuery> {
   return async ({ data }) => {
     const role = await groups.roleOf(data.groupId, data.actor.userId)
@@ -40,7 +44,16 @@ export function createBillingGetHandler(
     const [subscription, customerId] = provider
       ? await Promise.all([billing.get(data.groupId), billing.customerOf(data.groupId)])
       : [null, null]
-    return { billing: toGroupBilling(subscription, role, provider !== null, customerId !== null) }
+    return {
+      billing: toGroupBilling(
+        subscription,
+        role,
+        provider !== null,
+        customerId !== null,
+        now(),
+        graceDays,
+      ),
+    }
   }
 }
 

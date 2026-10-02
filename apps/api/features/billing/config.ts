@@ -1,6 +1,6 @@
 import type { EnvReader } from "@spy4x/server/config"
 import { type BillingProvider, createStripeBilling, type PlanRef } from "@spy4x/billing"
-import { PRO_PLAN_ID } from "@domain/billing"
+import { DEFAULT_GRACE_DAYS, PRO_PLAN_ID } from "@domain/billing"
 
 /**
  * The webhook signing secret of the development provider. It is public on purpose: the e2e tests
@@ -27,6 +27,8 @@ export interface BillingSetup {
   mode: BillingMode
   /** `null` when billing is off. */
   provider: BillingProvider | null
+  /** Days a past-due group keeps its plan while the provider retries the charge. */
+  graceDays: number
 }
 
 /** Thrown at start-up when billing is asked for but cannot run. Names variables, never values. */
@@ -39,8 +41,13 @@ export class BillingConfigError extends Error {
 
 const STRIPE_KEYS = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_PRO"] as const
 
+/** The longest grace period `BILLING_GRACE_DAYS` accepts. */
+export const MAX_GRACE_DAYS = 90
+
 /**
- * Reads `BILLING_PROVIDER` (`stripe`, `fake` or `off`) and builds the provider.
+ * Reads `BILLING_PROVIDER` (`stripe`, `fake` or `off`) and builds the provider, and
+ * `BILLING_GRACE_DAYS`, a whole number of days from 0 to {@link MAX_GRACE_DAYS} (unset:
+ * {@link DEFAULT_GRACE_DAYS}).
  *
  * - Unset, it is `fake` in development and `off` in production, so a deployment with no billing
  *   keys starts and keeps every group on the free plan.
@@ -55,10 +62,11 @@ export function readBillingSetup(
   appEnv: "dev" | "prod",
   options: { fetch?: typeof fetch } = {},
 ): BillingSetup {
+  const graceDays = readGraceDays(env.get("BILLING_GRACE_DAYS"))
   const chosen = env.get("BILLING_PROVIDER") ?? (appEnv === "dev" ? "fake" : "off")
   switch (chosen) {
     case "off":
-      return { mode: BillingMode.Off, provider: null }
+      return { mode: BillingMode.Off, provider: null, graceDays }
     case "fake":
       if (appEnv !== "dev") {
         throw new BillingConfigError(
@@ -68,6 +76,7 @@ export function readBillingSetup(
       return {
         mode: BillingMode.Fake,
         provider: createFakeBilling(env.get("STRIPE_PRICE_PRO") ?? FAKE_PRO_PRICE_ID),
+        graceDays,
       }
     case "stripe": {
       const missing = STRIPE_KEYS.filter((name) => env.get(name) === undefined)
@@ -84,11 +93,23 @@ export function readBillingSetup(
           plans: planRefs(env.get("STRIPE_PRICE_PRO")!),
           fetch: options.fetch,
         }),
+        graceDays,
       }
     }
     default:
       throw new BillingConfigError("BILLING_PROVIDER must be stripe, fake or off")
   }
+}
+
+function readGraceDays(value: string | undefined): number {
+  if (value === undefined) return DEFAULT_GRACE_DAYS
+  const days = /^\d{1,3}$/.test(value) ? Number(value) : NaN
+  if (!(days <= MAX_GRACE_DAYS)) {
+    throw new BillingConfigError(
+      `BILLING_GRACE_DAYS must be a whole number of days from 0 to ${MAX_GRACE_DAYS}`,
+    )
+  }
+  return days
 }
 
 function planRefs(proPriceId: string): PlanRef[] {
