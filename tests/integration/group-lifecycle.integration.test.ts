@@ -270,6 +270,33 @@ Deno.test("purge: removes groups deleted over 30 days ago with everything in the
   })
 })
 
+Deno.test("purge: keeps a deleted group that a webhook subscribed after the delete", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner } = await team(sql)
+    const cancelled = (await repository.create({ id: crypto.randomUUID(), name: "Old" }, owner))
+      .group
+    await repository.softDelete(groupId, owner)
+    await repository.softDelete(cancelled.id, owner)
+    // The webhooks arrive after the deletes: one live subscription, one already cancelled.
+    for (const [id, status] of [[groupId, 2], [cancelled.id, 4]] as const) {
+      await sql`
+        INSERT INTO subscriptions (group_id, provider_subscription_id, plan_id, status,
+          provider_event_at, provider_event_rank)
+        VALUES (${id}, ${"sub_" + id}, 'pro', ${status}, now(), 1)
+      `
+    }
+    await expireDeletion(sql, groupId, 31)
+    await expireDeletion(sql, cancelled.id, 31)
+
+    expect(await purgeDeletedGroups(sql)).toBe(1)
+
+    const left = await sql`SELECT 1 FROM subscriptions WHERE group_id = ${groupId}`
+    expect(left.length).toBe(1)
+    const gone = await sql`SELECT 1 FROM groups WHERE id = ${cancelled.id}`
+    expect(gone.length).toBe(0)
+  })
+})
+
 Deno.test("delete and restore are announced to the members through the outbox", async () => {
   await withSchema(async (sql) => {
     const { repository, groupId, owner } = await team(sql)
