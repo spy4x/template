@@ -13,6 +13,7 @@ import {
   FREE_PLAN_ID,
   hasLiveSubscription,
   PlanError,
+  PLANS,
   PRO_PLAN_ID,
   providerPageUrl,
   readPlanRefusal,
@@ -117,7 +118,14 @@ describe("billing domain", () => {
   })
 
   it("allows every feature with no cap while billing is off", () => {
-    expect(entitlementsOf(FREE_PLAN_ID, false)).toBe(UNLIMITED)
+    const unlimited = entitlementsOf(FREE_PLAN_ID, false)
+    expect(unlimited).toBe(UNLIMITED)
+    expect(Object.values(unlimited.features).every((on) => on === true)).toBe(true)
+    expect(Object.values(unlimited.limits).every((max) => max === null)).toBe(true)
+    // Every key a plan has is on the list, so a key added to the plans but not here fails.
+    expect(Object.keys(unlimited.features)).toEqual(Object.keys(PLANS[0].entitlements.features))
+    expect(Object.keys(unlimited.limits).sort())
+      .toEqual(Object.keys(PLANS[0].entitlements.limits).sort())
   })
 
   it("refuses a feature the plan lacks, and tells only the owner they can upgrade", () => {
