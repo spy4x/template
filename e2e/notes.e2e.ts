@@ -297,7 +297,7 @@ test.describe("notes in a shared group", () => {
       await page.locator("[data-e2e=note-new]").click()
 
       await page.locator("[data-e2e=note-title]").fill("Half a thought")
-      const dialog = page.locator("[data-e2e=unsaved-dialog]")
+      const dialog = page.getByRole("alertdialog", { name: "Leave without saving?" })
       await page.locator("[data-e2e=note-back]").click()
       await expect(dialog).toBeVisible()
       await dialog.getByRole("button", { name: "Stay" }).first().click()
@@ -355,7 +355,7 @@ test.describe("notes in a shared group", () => {
 
       await page.getByRole("link", { name: "Load the latest version" }).click()
       await expect(title).toHaveValue("Theirs")
-      await expect(page.locator("[data-e2e=unsaved-dialog]")).toHaveCount(0)
+      await expect(page.getByRole("alertdialog", { name: "Leave without saving?" })).toHaveCount(0)
       await expect(page.locator("[data-e2e=note-conflict]")).toHaveCount(0)
     } finally {
       await context.close()

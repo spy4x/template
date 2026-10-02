@@ -7,7 +7,8 @@ import { groupsStore } from "../state/groups.ts"
 import { notesStore } from "../state/notes.ts"
 import { selectionStore } from "../state/selection.ts"
 import { OfflineStatus } from "../offline/OfflineStatus.tsx"
-import { UnsavedGuard } from "./UnsavedGuard.tsx"
+import { UnsavedGuard } from "@spy4x/preact-ui/unsaved-guard"
+import { isSpaPath } from "./spa-paths.ts"
 
 /**
  * Wires the note page to the notes store: `/notes/new` (no `noteId`) creates a note in the
@@ -70,8 +71,12 @@ export function NoteEditorView({ noteId = null }: { noteId?: string | null }) {
         navigate={navigate}
       />
       <UnsavedGuard
-        unsaved={store.unsaved.value}
+        when={store.unsaved.value}
+        owns={(url) => isSpaPath(url.pathname)}
         navigate={navigate}
+        labels={{
+          message: "Your changes to this note have not been saved. If you leave, they are lost.",
+        }}
         onDiscard={() => creating && store.discardDraft()}
       />
     </>
