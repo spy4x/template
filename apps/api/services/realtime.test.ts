@@ -381,6 +381,32 @@ describe("realtime group hints", () => {
   })
 })
 
+describe("realtime access loss", () => {
+  it("hints every socket of the users who lost the group, keeps them open, and nobody else", () => {
+    const h = harness()
+    const removed = connect(h, 1)
+    const removedSecondTab = connect(h, 1, 11)
+    const alsoRemoved = connect(h, 3)
+    const stranger = connect(h, 2)
+
+    expect(h.realtime.notifyAccessLoss("0b1f3c58-7f55-4a5d-8f6e-6a3a5a9d1a01", 7, [1, 3])).toBe(3)
+
+    const hint = {
+      kind: "change.hint",
+      groupId: "0b1f3c58-7f55-4a5d-8f6e-6a3a5a9d1a01",
+      aggregate: "group",
+      sequence: 7,
+    }
+    for (const socket of [removed, removedSecondTab, alsoRemoved]) {
+      expect(socket.frames()).toEqual([hint])
+      expect(socket.closeCalls).toEqual([])
+    }
+    expect(stranger.frames()).toEqual([])
+    expect(h.realtime.count()).toBe(4)
+    h.realtime.shutdown()
+  })
+})
+
 describe("realtime user hints", () => {
   it("hints every socket of the user who changed, and nobody else", async () => {
     const h = harness()

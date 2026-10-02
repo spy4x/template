@@ -48,7 +48,11 @@ export type SocketRequests = Readonly<Record<string, SocketRequest>>
 export interface RealtimeOptions {
   /** The session and user as they are now, or `null` when the session may no longer act. */
   entitledSession(sessionId: number): Promise<AppAuthState | null>
-  /** The users a group's change is pushed to. */
+  /**
+   * The users a group's change is pushed to: those who can see the group now. It is called for
+   * every hint and must read the database, never a list kept from earlier, so someone who lost
+   * access stops getting the group's hints.
+   */
   memberUserIds(groupId: string): Promise<readonly number[]>
   requests: SocketRequests
   /** Called with every failure the socket hides from the client. */
@@ -138,6 +142,11 @@ const NOTE_ERROR_CODES: Record<
  *   when a user signs out, on a timer, and before any request is served.
  * - **A group change reaches its members.** {@link notifyGroupChange} sends a sequence-stamped
  *   `change.hint` to each member's sockets. The hint carries no data; a client that is behind pulls.
+ *   Who is a member is read for every hint, so a person who lost access stops getting them.
+ * - **A person who loses a group is told once, and keeps the socket.** {@link notifyAccessLoss}
+ *   sends them the hint of the change that took the group away, so their page reads again and
+ *   drops it. The socket stays open: it still serves their other groups, and every request on it
+ *   is authorized again anyway.
  * - **A user's own change reaches their other tabs.** {@link notifyUserChange} sends a hint for the
  *   profile or push devices to every socket of that user.
  */
@@ -243,6 +252,19 @@ export class Realtime {
   async notifyGroupChange(groupId: string, sequence: number): Promise<NotifyStatus> {
     const outcome = await this.#notifier.notify({ groupId, aggregate: GROUP_AGGREGATE, sequence })
     return outcome.status
+  }
+
+  /**
+   * Sends the users whose access to a group the change at `sequence` took away the hint of that
+   * change, so each of their pages reads again and no longer shows the group. Returns how many
+   * sockets it reached. Only the change that removed access calls this; the group's later hints
+   * go through {@link notifyGroupChange}, which no longer finds them.
+   */
+  notifyAccessLoss(groupId: string, sequence: number, userIds: readonly number[]): number {
+    return this.registry.sendToUsers(
+      userIds.map(String),
+      createHint({ groupId, aggregate: GROUP_AGGREGATE, sequence }),
+    )
   }
 
   /**
