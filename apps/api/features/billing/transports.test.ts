@@ -53,13 +53,22 @@ function fakeProvider(recorder: Recorder): BillingProvider {
       recorder.portals.push(request)
       return Promise.resolve({ ok: true, value: { id: "bps_1", url: "https://pay.example/p" } })
     },
+    updateQuantity: () => Promise.reject(new Error("not used")),
     parseEvent: () => Promise.reject(new Error("not used")),
   }
 }
 
 function stack(
-  { subscription = null, customer = null, enabled = true, now = NOW, trialRequiresCard = true }: {
+  {
+    subscription = null,
+    customer = null,
+    enabled = true,
+    now = NOW,
+    trialRequiresCard = true,
+    members = 1,
+  }: {
     subscription?: StoredSubscription | null
+    members?: number
     customer?: string | null
     enabled?: boolean
     now?: Date
@@ -78,6 +87,7 @@ function stack(
       get: () => Promise.resolve(subscription),
       lockedRoleOf: (id: string, userId: number) => groups.roleOf(id, userId),
       customerOf: () => Promise.resolve(customer),
+      membersOf: () => Promise.resolve(members),
     },
     groups,
     provider: enabled ? fakeProvider(recorder) : null,
@@ -138,6 +148,7 @@ const PRO: StoredSubscription = {
   cancelAtPeriodEnd: false,
   pastDueSince: null,
   trialEnd: null,
+  quantity: 1,
 }
 
 async function code(response: Response): Promise<string> {
@@ -171,8 +182,8 @@ describe("billing over REST", () => {
     expect(recorder.checkouts).toEqual([])
   })
 
-  it("opens the owner's checkout for the group, back to its pages, and answers the provider's URL", async () => {
-    const { recorder, call } = stack({ customer: "cus_1" })
+  it("opens the owner's checkout for the group with a seat per member, back to its pages, and answers the provider's URL", async () => {
+    const { recorder, call } = stack({ customer: "cus_1", members: 3 })
 
     const response = await call(OWNER, "POST", "/checkout", { planId: "pro" })
 
@@ -183,6 +194,7 @@ describe("billing over REST", () => {
       successUrl: `https://app.example.com/groups/${groupId}`,
       cancelUrl: `https://app.example.com/groups/${groupId}/pricing`,
       reference: groupId,
+      quantity: 3,
       customerId: "cus_1",
     }])
   })
@@ -335,6 +347,14 @@ describe("billing over REST", () => {
     expect(viewer.billing).toMatchObject({ enabled: true, planId: "pro", canManage: false })
   })
 
+  it("tells every member the per-member price and how many members the group pays for", async () => {
+    const { call } = stack({ subscription: PRO, members: 4 })
+
+    const viewer = await (await call(VIEWER, "GET", "")).json()
+
+    expect(viewer.billing.seatPrice).toEqual({ seats: 4, amount: 900, currency: "EUR" })
+  })
+
   it("shows a past-due group its plan through the seven-day grace period, then the free plan", async () => {
     const pastDue = { ...PRO, status: BillingStatus.PastDue, pastDueSince: NOW }
     const plan = async (now: Date) =>
@@ -362,6 +382,7 @@ describe("billing over REST", () => {
       canManage: false,
       subscribed: false,
       hasCustomer: false,
+      seatPrice: null,
     })
     expect([checkout.status, await code(checkout)]).toEqual([404, "BILLING_DISABLED"])
   })

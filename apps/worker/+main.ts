@@ -6,6 +6,9 @@ import { PostgresIdempotencyStore } from "@spy4x/server/idempotency"
 import { shutdownSignal, ShutdownSignalError } from "@spy4x/platform/server/shutdown-signal"
 import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
 import { createMailSender, mailOffWarning, readMailSetup } from "@server/mail/mail.ts"
+import { systemEnv } from "@spy4x/server/config"
+// The API's own reading of the billing variables, so both processes run one provider.
+import { readBillingSetup } from "../api/features/billing/config.ts"
 
 const sql = createSqlFromEnv(Deno.env.toObject(), {
   transform: postgres.camel,
@@ -35,6 +38,11 @@ const mailSetup = readMailSetup(Deno.env)
 const mailWarning = mailOffWarning(mailSetup)
 if (mailWarning) console.warn(mailWarning)
 
+// A per-member subscription's quantity is changed from here, through the outbox, so a provider
+// that is down never holds a new member back. A setup that cannot run stops the worker, as it stops
+// the API.
+const billingSetup = readBillingSetup(systemEnv, Deno.env.get("ENV") === "dev" ? "dev" : "prod")
+
 // A committed group change is announced on a Postgres channel; the API process, which holds the
 // sockets, turns it into a hint for the group's members. The same table holds jobs: a row that
 // belongs to no group and runs when its time has come.
@@ -44,7 +52,7 @@ const processor = createOutboxProcessor(sql, {
   // The API's own rule (apps/api/services/config.ts): plain HTTP only in development.
   brand: { webAppUrl: `http${Deno.env.get("ENV") === "dev" ? "" : "s"}://${domain}` },
   log: (line) => console.error(line),
-})
+}, billingSetup.provider)
 
 // Starts the nightly chain the first time; a restart finds the row and adds nothing.
 await scheduleNightlyJobs(sql)

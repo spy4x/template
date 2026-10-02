@@ -5,7 +5,7 @@ import { PostgresInvitationRepository } from "@server/groups/postgres-invitation
 import { createRedisRateLimitStore } from "@spy4x/server/kv"
 import type { InvitationHandlerDependencies } from "../features/groups/invitations.ts"
 import { createInvitationRateLimits } from "../features/groups/invitation-rate-limits.ts"
-import { createPlanOf } from "../features/billing/config.ts"
+import { createPlanOf, createSeatPriced } from "../features/billing/config.ts"
 import { billingSetup } from "../services/billing.ts"
 import { kv } from "../services/cache.ts"
 import { config } from "../services/config.ts"
@@ -35,6 +35,11 @@ export const invitationDependencies: InvitationHandlerDependencies = {
       : entitlementsOf(await planOf(groupId), true)
     return { maxMembers: limits.maxMembers, memberRoles: features.memberRoles }
   },
+  seatPriced: createSeatPriced(
+    db.billing,
+    async (groupId, userId) => (await db.group.getForMember(groupId, userId))?.role ?? null,
+    billingSetup.provider !== null,
+  ),
   mail: {
     sender: createMailSender(readMailSetup(Deno.env), sql),
     brand: { webAppUrl: config.webAppUrl },

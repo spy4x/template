@@ -72,8 +72,16 @@ describe("invitation request bodies", () => {
       maxUses: 1,
       email: null,
       sendEmail: false,
+      acceptSeatPrice: false,
     })
     expect(parseInvitationCreateBody({ role: 1, email: "  ", maxUses: 5 }).email).toBe(null)
+  })
+
+  it("carries the creator's confirmation of the per-member price", () => {
+    expect(parseInvitationCreateBody({ role: 1, acceptSeatPrice: true }).acceptSeatPrice).toBe(true)
+    expect(codeOf(() => parseInvitationCreateBody({ role: 1, acceptSeatPrice: "true" }))).toBe(
+      "INVALID_REQUEST",
+    )
   })
 
   it("refuses an owner role, a mail without an address and several uses for one address", () => {

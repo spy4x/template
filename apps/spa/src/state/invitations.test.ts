@@ -35,7 +35,7 @@ const row = {
 }
 
 describe("invitations store", () => {
-  it("creates from the draft, shows the link once and reads the pending list again", async () => {
+  it("creates from the draft and the price confirmation, shows the link once, clears both and reads the pending list again", async () => {
     const { store, calls } = harness({
       "GET /api/groups/g-1/invitations": [200, { invitations: [row] }],
       "POST /api/groups/g-1/invitations": [201, { invitation: row, token, mailSent: true }],
@@ -46,6 +46,7 @@ describe("invitations store", () => {
       email: " friend@example.com ",
       sendEmail: true,
     }
+    store.acceptSeatPrice.value = true
 
     expect(await store.create()).toBe(true)
 
@@ -55,6 +56,7 @@ describe("invitations store", () => {
       maxUses: 1,
       email: "friend@example.com",
       sendEmail: true,
+      acceptSeatPrice: true,
     })
     expect(store.created.value).toEqual({
       link: `https://app.example.com/invite/${token}`,
@@ -62,6 +64,7 @@ describe("invitations store", () => {
       mailSent: true,
     })
     expect(store.draft.value).toEqual(EMPTY_INVITATION_DRAFT)
+    expect(store.acceptSeatPrice.value).toBe(false)
     expect(calls.filter((call) => call.method === "GET")).toHaveLength(2)
 
     store.closeGroup()
@@ -86,6 +89,31 @@ describe("invitations store", () => {
     expect(store.createError.value?.message).toBe("Full")
     expect(store.createError.value?.plan).toEqual(plan)
     expect(store.created.value).toBeNull()
+  })
+
+  it("posts the creator's price confirmation, keeps the refusal's code and forgets it when the page closes", async () => {
+    const { store, calls } = harness({
+      "GET /api/groups/g-1/invitations": [200, { invitations: [] }],
+      "POST /api/groups/g-1/invitations": [400, {
+        error: { code: "SEAT_PRICE_NOT_ACCEPTED", message: "Confirm the price" },
+      }],
+    })
+    await store.open("g-1")
+
+    expect(await store.create()).toBe(false)
+    expect(store.createError.value).toEqual({
+      message: "Confirm the price",
+      code: "SEAT_PRICE_NOT_ACCEPTED",
+      plan: null,
+    })
+
+    store.acceptSeatPrice.value = true
+    await store.create()
+    expect(calls.filter((call) => call.method === "POST").map((call) => call.body))
+      .toMatchObject([{ acceptSeatPrice: false }, { acceptSeatPrice: true }])
+
+    store.closeGroup()
+    expect(store.acceptSeatPrice.value).toBe(false)
   })
 
   it("revokes one invitation and drops it from the list, or shows why under its row", async () => {

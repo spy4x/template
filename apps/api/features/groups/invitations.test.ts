@@ -96,6 +96,7 @@ function dependencies(
     invitations: store,
     ownerOf: () => Promise.resolve(null),
     planOf: () => Promise.resolve({ maxMembers: null, memberRoles: true }),
+    seatPriced: () => Promise.resolve(false),
     mail: {
       sender,
       brand: { webAppUrl: "https://app.example.com" },
@@ -108,7 +109,9 @@ function dependencies(
   return { deps, sent, events }
 }
 
-function createCommand(overrides: { email?: string | null; sendEmail?: boolean } = {}) {
+function createCommand(
+  overrides: { email?: string | null; sendEmail?: boolean; acceptSeatPrice?: boolean } = {},
+) {
   const command = new GroupInvitationCreateCommand({
     actor: actor(7),
     groupId,
@@ -117,6 +120,7 @@ function createCommand(overrides: { email?: string | null; sendEmail?: boolean }
     maxUses: 1,
     email: null,
     sendEmail: false,
+    acceptSeatPrice: false,
     ...overrides,
   })
   command.allowance = null
@@ -190,6 +194,39 @@ describe("invitation handlers", () => {
     expect(error.code).toBe("INVITATION_WRONG_ACCOUNT")
     expect(calls.accepted).toEqual([])
     expect(events).toEqual([])
+  })
+
+  it("refuses a new invitation to a group billed per member until the creator confirms the price", async () => {
+    const { store, calls } = fakeStore()
+    const asked: [string, number][] = []
+    const create = createInvitationCreateHandler(
+      dependencies(store, {
+        seatPriced: (id, actorId) => {
+          asked.push([id, actorId])
+          return Promise.resolve(true)
+        },
+      }).deps,
+    )
+
+    const refused = await create(createCommand()).catch((error) => error)
+
+    expect(refused).toBeInstanceOf(InvitationError)
+    expect(refused.code).toBe("SEAT_PRICE_NOT_ACCEPTED")
+    expect(asked).toEqual([[groupId, 7]])
+    expect(calls.created).toHaveLength(0)
+
+    await create(createCommand({ acceptSeatPrice: true }))
+
+    expect(calls.created).toHaveLength(1)
+  })
+
+  it("creates without a price confirmation in a group not billed per member", async () => {
+    const { store, calls } = fakeStore()
+    const create = createInvitationCreateHandler(dependencies(store).deps)
+
+    await create(createCommand())
+
+    expect(calls.created).toHaveLength(1)
   })
 
   it("creates with the gate's member cap and the plan's word on roles", async () => {

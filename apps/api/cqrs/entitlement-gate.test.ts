@@ -78,6 +78,7 @@ const invite = (userId: number, role = GroupRole.EDITOR) =>
     maxUses: 1,
     email: null,
     sendEmail: false,
+    acceptSeatPrice: false,
   })
 
 describe("the entitlement gate", () => {

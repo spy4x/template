@@ -4,8 +4,15 @@ import {
   OutboxProcessor,
   PostgresOutboxRepository,
 } from "@spy4x/server/outbox"
+import type { BillingProvider } from "@spy4x/billing"
 import { BillingNoticeKind } from "@domain/billing"
 import { BILLING_NOTICE_JOBS } from "../billing/billing-notices.ts"
+import {
+  queueSeatDrift,
+  SEAT_SYNC_JOB,
+  seatSyncJob,
+  SeatSyncPublisher,
+} from "../billing/seat-sync.ts"
 import { GroupChangeNotifier } from "../groups/group-change-notify.ts"
 import { purgeDeletedGroups } from "../groups/purge-deleted-groups.ts"
 import { billingNoticeMailJob } from "./billing-notice-mail.ts"
@@ -41,11 +48,18 @@ const NIGHTLY_HOUR_UTC = 3
  * cleanup also drops password reset and e-mail code requests whose mail gave up, and removes for
  * good the groups whose 30 days for restoring are over. Every mail job, the owner's billing notices
  * included, shares one sender and brand.
+ *
+ * With a billing `provider`, a change to a group's members queues a seat sync, which sets a
+ * per-member subscription's quantity to the member count, and the nightly cleanup queues one for
+ * every group whose stored quantity has drifted. Without one, a seat sync left in the table does
+ * nothing.
  */
 export function createOutboxProcessor(
   sql: postgres.Sql,
   mail: Omit<PasswordResetMailDeps, "sql">,
+  provider: BillingProvider | null = null,
 ): OutboxProcessor {
+  const notifier = new GroupChangeNotifier(sql)
   return new OutboxProcessor(
     new PostgresOutboxRepository(sql),
     new JobPublisher({
@@ -63,11 +77,16 @@ export function createOutboxProcessor(
             `Kept ${groups.kept} deleted group(s) with a live subscription; cancel it in Stripe`,
           )
         }
+        if (provider) {
+          const drifted = await queueSeatDrift(sql)
+          if (drifted > 0) console.log(`Queued a seat sync for ${drifted} group(s)`)
+        }
       },
+      [SEAT_SYNC_JOB]: provider ? seatSyncJob({ sql, provider }) : async () => {},
       [PASSWORD_RESET_MAIL_JOB]: passwordResetMailJob({ sql, ...mail }),
       [EMAIL_CODE_MAIL_JOB]: emailCodeMailJob({ sql, ...mail }),
       ...billingNoticeJobs(sql, mail),
-    }, new GroupChangeNotifier(sql)),
+    }, provider ? new SeatSyncPublisher(sql, notifier) : notifier),
     { repeatEveryMs: { [OUTBOX_CLEANUP_JOB]: DAY_MS } },
   )
 }

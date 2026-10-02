@@ -12,9 +12,14 @@ import {
 /** `fetch`, or a test's stand-in for it. */
 export type InvitationFetch = (url: string, init?: RequestInit) => Promise<Response>
 
-/** A refused call: the API's own message, and the plan refusal when the plan said no. */
+/**
+ * A refused call: the API's own message and error code, and the plan refusal when the plan said
+ * no.
+ */
 export interface InvitationFailure {
   message: string
+  /** The API's error code, such as `SEAT_PRICE_NOT_ACCEPTED`; `null` when there was no answer. */
+  code: string | null
   plan: PlanRefusal | null
 }
 
@@ -54,7 +59,7 @@ export function createInvitationsStore(
         body: body === undefined ? undefined : JSON.stringify(body),
       })
     } catch (_unreachable) {
-      return { ok: false, failure: { message: OFFLINE, plan: null } }
+      return { ok: false, failure: { message: OFFLINE, code: null, plan: null } }
     }
     const json: unknown = await response.json().catch(() => null)
     if (response.ok) return { ok: true, data: json as T }
@@ -63,7 +68,11 @@ export function createInvitationsStore(
         typeof (error as { message?: unknown }).message === "string"
       ? (error as { message: string }).message
       : "Something went wrong. Try again."
-    return { ok: false, failure: { message, plan: readPlanRefusal(error) } }
+    const code = typeof error === "object" && error !== null &&
+        typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : null
+    return { ok: false, failure: { message, code, plan: readPlanRefusal(error) } }
   }
 
   // The group's side.
@@ -71,6 +80,8 @@ export function createInvitationsStore(
   const invitations = signal<readonly InvitationRow[] | null>(null)
   const loadError = signal<string | null>(null)
   const draft = signal<InvitationDraft>(EMPTY_INVITATION_DRAFT)
+  /** The creator ticked the per-member price confirmation of a group billed per member. */
+  const acceptSeatPrice = signal(false)
   const creating = signal(false)
   const createError = signal<InvitationFailure | null>(null)
   const created = signal<CreatedInvitation | null>(null)
@@ -114,6 +125,7 @@ export function createInvitationsStore(
       maxUses,
       email: email.trim() || null,
       sendEmail,
+      acceptSeatPrice: acceptSeatPrice.value,
     })
     creating.value = false
     if (groupId.value !== id) return false
@@ -127,6 +139,7 @@ export function createInvitationsStore(
       mailSent: result.data.mailSent,
     }
     draft.value = EMPTY_INVITATION_DRAFT
+    acceptSeatPrice.value = false
     await refresh()
     return true
   }
@@ -154,6 +167,7 @@ export function createInvitationsStore(
     invitations.value = null
     loadError.value = null
     draft.value = EMPTY_INVITATION_DRAFT
+    acceptSeatPrice.value = false
     creating.value = false
     createError.value = null
     created.value = null
@@ -250,6 +264,7 @@ export function createInvitationsStore(
     invitations,
     loadError,
     draft,
+    acceptSeatPrice,
     creating,
     createError,
     created,

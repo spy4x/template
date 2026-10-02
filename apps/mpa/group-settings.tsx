@@ -15,6 +15,7 @@ import {
   type TransferError,
 } from "@ui/group-transfer.tsx"
 import { entitlementsOf, type PlanRefusal } from "@domain/billing"
+import { SeatPriceConfirm } from "@ui/billing-screen.tsx"
 import { readGroupInvitations } from "./invitations.tsx"
 import { readBilling } from "./billing.tsx"
 import { readGroup, readMembers } from "./groups.ts"
@@ -38,6 +39,8 @@ export async function renderGroupSettings(
     invitationDraft = EMPTY_INVITATION_DRAFT,
     createError = null,
     createRefusal = null,
+    acceptSeatPrice = false,
+    seatPriceError = null,
     created = null,
     revokeError = null,
     transferDraft = EMPTY_TRANSFER_DRAFT,
@@ -55,6 +58,10 @@ export async function renderGroupSettings(
     invitationDraft?: InvitationDraft
     createError?: string | null
     createRefusal?: PlanRefusal | null
+    /** The creator ticked the per-member price confirmation. */
+    acceptSeatPrice?: boolean
+    /** Why the create was refused for want of the price confirmation, shown at the box. */
+    seatPriceError?: string | null
     created?: CreatedInvitation | null
     revokeError?: { invitationId: string; message: string } | null
     /** What a refused transfer posted, without the password, which is never sent back. */
@@ -101,8 +108,17 @@ export async function renderGroupSettings(
             invitations={invitations.invitations}
             error={invitations.error}
             draft={invitationDraft}
-            createError={createError}
+            // The route shows a refusal for the price at the confirmation; without the billing,
+            // the confirmation is not drawn and the refusal shows under the form.
+            createError={createError ?? (billing?.seatPrice ? null : seatPriceError)}
             createRefusal={createRefusal}
+            seatPrice={billing?.seatPrice && (
+              <SeatPriceConfirm
+                seatPrice={billing.seatPrice}
+                checked={acceptSeatPrice}
+                error={seatPriceError}
+              />
+            )}
             created={created}
             revokeError={revokeError}
           />

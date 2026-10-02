@@ -1,6 +1,7 @@
 import { EMPTY_INVITATION_DRAFT } from "@ui/group-invitations.tsx"
 import { invitationPagePath } from "@ui/progressive.tsx"
-import { errorMessage, isOk, isRecord, planRefusalOf } from "../../../../api.ts"
+import type { InvitationErrorCode } from "@domain/groups"
+import { errorCode, errorMessage, isOk, isRecord, planRefusalOf } from "../../../../api.ts"
 import { API_BODIES, readForm } from "../../../../forms.ts"
 import { renderGroupSettings } from "../../../../group-settings.tsx"
 import { define } from "../../../../utils.ts"
@@ -29,6 +30,10 @@ export const handler = define.handlers({
       })
     }
     const plan = planRefusalOf(answer)
+    const message = errorMessage(answer, "The invitation could not be created")
+    // A create refused for want of the price confirmation shows its message at the confirmation.
+    const seatRefused = errorCode(answer) ===
+      ("SEAT_PRICE_NOT_ACCEPTED" satisfies InvitationErrorCode)
     const fallback = EMPTY_INVITATION_DRAFT
     return renderGroupSettings(ctx, {
       // A value the API refused as not a number goes back as the default; the message says why.
@@ -41,8 +46,10 @@ export const handler = define.handlers({
         email: body.email,
         sendEmail: body.sendEmail,
       },
-      createError: plan ? null : errorMessage(answer, "The invitation could not be created"),
+      createError: plan || seatRefused ? null : message,
       createRefusal: plan,
+      acceptSeatPrice: body.acceptSeatPrice,
+      seatPriceError: seatRefused ? message : null,
       status: answer.status,
     })
   },

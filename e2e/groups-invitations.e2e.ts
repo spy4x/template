@@ -65,6 +65,15 @@ test.describe("group invitations", () => {
       ])
       await section.locator("[data-e2e=invitation-role]").selectOption({ label: "Editor" })
       await section.locator("[data-e2e=invitation-uses]").fill("2")
+      // Pro is billed per member: the admin sees what one more member costs and must accept it.
+      const seatPrice = section.locator("[data-e2e=seat-price]")
+      await expect(seatPrice).toContainText(
+        "with one more member the group pays €27.00 instead of €18.00",
+      )
+      await section.locator("[data-e2e=invitation-create]").click()
+      await expect(seatPrice.locator("#invitation-seat-price-error")).toBeVisible()
+      await expect(section.locator("[data-e2e=seat-price-accept]")).toBeFocused()
+      await section.locator("[data-e2e=seat-price-accept]").check()
       await section.locator("[data-e2e=invitation-create]").click()
       const link = await section.locator("[data-e2e=invitation-created] code").textContent()
       expect(link).toMatch(/\/invite\/[A-Za-z0-9_-]{43}$/)

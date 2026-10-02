@@ -140,7 +140,10 @@ export const GROUP_PATHS = {
   leave: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/leave`,
   /** `POST` hands the group to another member: `{ userId, name, password }`. */
   transfer: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/transfer`,
-  /** `POST` creates an invitation: `{ role, expiresInDays, maxUses, email, sendEmail }`. */
+  /**
+   * `POST` creates an invitation: `{ role, expiresInDays, maxUses, email, sendEmail,
+   * acceptSeatPrice }`.
+   */
   invitationCreate: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/invitations`,
   /** `POST` revokes an invitation. Takes no fields. */
   invitationRevoke: (groupId: string, invitationId: string) =>

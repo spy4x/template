@@ -17,7 +17,7 @@ import {
 } from "@domain/identity"
 import { pushUnsubscribeRequestSchema } from "@spy4x/platform/model"
 import type { PlanRefusal } from "@domain/billing"
-import { BILLING_PATHS } from "./billing-screen.tsx"
+import { BILLING_PATHS, SeatPriceConfirm } from "./billing-screen.tsx"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
 import {
@@ -1394,6 +1394,50 @@ describe("GroupInvitationsSection without JavaScript", () => {
         Object.fromEntries(form.fields.map((key) => [key, sample[key]])),
       ).sendEmail,
     ).toBe(true)
+  })
+
+  it("posts the price confirmation of a group billed per member with the create, by the API's name", () => {
+    const seatPrice = { seats: 3, amount: 900, currency: "EUR" }
+    const section = (
+      <GroupInvitationsSection
+        {...invitationsDefaults}
+        seatPrice={<SeatPriceConfirm seatPrice={seatPrice} checked={false} />}
+      />
+    )
+    const html = renderToString(section)
+    const form = formAt(noScriptSurface(section), GROUP_PATHS.invitationCreate("g-1"))
+
+    expect(form.fields).toContain("acceptSeatPrice")
+    expect(html).toMatch(/<input[^>]*name="acceptSeatPrice"[^>]*value="true"/)
+    expect(parseInvitationCreateBody({ role: GroupRole.EDITOR, acceptSeatPrice: true }))
+      .toMatchObject({ acceptSeatPrice: true })
+    // The owner sees what one more member costs before confirming.
+    expect(html).toContain("adds €9.00 a month")
+    expect(html).toContain("pays €36.00 instead of €27.00")
+    expect(html.indexOf("acceptSeatPrice")).toBeLessThan(
+      html.indexOf('data-e2e="invitation-create"'),
+    )
+  })
+
+  it("labels the price confirmation and ties its refusal to the box", () => {
+    const html = renderToString(
+      <SeatPriceConfirm
+        seatPrice={{ seats: 1, amount: 900, currency: "EUR" }}
+        checked={false}
+        error="Confirm the price"
+      />,
+    )
+    const box = html.match(/<input[^>]*name="acceptSeatPrice"[^>]*>/)?.[0] ?? ""
+
+    expect(html).toMatch(/<label[^>]*>\s*<input[^>]*name="acceptSeatPrice"[^>]*>I accept/)
+    // One label: a second `for` label would name the box twice.
+    expect(html.match(/<label/g)).toHaveLength(1)
+    expect(attribute(box, "id")).toBe("invitation-seat-price")
+    expect(attribute(box, "aria-invalid")).toBe("true")
+    const described = attribute(box, "aria-describedby")?.split(" ") ?? []
+    expect(described).toContain("invitation-seat-price-error")
+    expect(html).toContain(`id="invitation-seat-price-error"`)
+    expect(html).toContain("Confirm the price")
   })
 
   it("lets an admin pick viewer or editor only, and the owner admin too", () => {

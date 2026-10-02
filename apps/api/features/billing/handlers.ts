@@ -43,9 +43,13 @@ export function createBillingGetHandler(
   return async ({ data }) => {
     const role = await groups.roleOf(data.groupId, data.actor.userId)
     assertCanReadBilling(role)
-    const [subscription, customerId] = provider
-      ? await Promise.all([billing.get(data.groupId), billing.customerOf(data.groupId)])
-      : [null, null]
+    const [subscription, customerId, members] = provider
+      ? await Promise.all([
+        billing.get(data.groupId),
+        billing.customerOf(data.groupId),
+        billing.membersOf(data.groupId),
+      ])
+      : [null, null, 0]
     return {
       billing: toGroupBilling(
         subscription,
@@ -54,6 +58,7 @@ export function createBillingGetHandler(
         customerId !== null,
         now(),
         graceDays,
+        members,
       ),
     }
   }
@@ -79,6 +84,8 @@ export function createBillingCheckoutHandler(
       successUrl: appUrl(dependencies, `/groups/${data.groupId}`),
       cancelUrl: appUrl(dependencies, `/groups/${data.groupId}/pricing`),
       reference: data.groupId,
+      // A per-member plan starts with a seat for every member; the worker keeps it in step after.
+      ...(plan.perSeat ? { quantity: await dependencies.billing.membersOf(data.groupId) } : {}),
       // Only a group's first checkout starts with a trial: a group that ever paid, or tried, has a
       // customer already.
       ...(customerId ? { customerId } : trialOf(plan.trialDays, dependencies.trialRequiresCard)),

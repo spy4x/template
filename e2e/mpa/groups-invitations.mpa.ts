@@ -52,6 +52,15 @@ test("without JavaScript, the owner creates a link that a signed-out person foll
     await ownerPage.goto(`/groups/${groupId}`)
     const section = ownerPage.locator("[data-e2e=group-section-invitations]")
     await section.locator("[data-e2e=invitation-role]").selectOption({ label: "Editor" })
+    // Pro is billed per member: the owner sees what one more member costs and must accept it.
+    const seatPrice = section.locator("[data-e2e=seat-price]")
+    await expect(seatPrice).toContainText(
+      "with one more member the group pays €18.00 instead of €9.00",
+    )
+    await section.locator("[data-e2e=invitation-create]").click()
+    await expect(seatPrice.locator("#invitation-seat-price-error")).toBeVisible()
+    await section.locator("[data-e2e=invitation-role]").selectOption({ label: "Editor" })
+    await section.locator("[data-e2e=seat-price-accept]").check()
     await section.locator("[data-e2e=invitation-create]").click()
     const link = await section.locator("[data-e2e=invitation-created] code").textContent()
     expect(link).toMatch(/\/invite\/[A-Za-z0-9_-]{43}$/)
@@ -74,6 +83,7 @@ test("without JavaScript, the owner creates a link that a signed-out person foll
     await ownerPage.goto(`/groups/${groupId}`)
     await expect(ownerPage.locator("[data-e2e=group-member]")).toHaveCount(2)
     await expect(section.locator("[data-e2e=invitation]")).toHaveCount(0)
+    await section.locator("[data-e2e=seat-price-accept]").check()
     await section.locator("[data-e2e=invitation-create]").click()
     await expect(section.locator("[data-e2e=invitation]")).toHaveCount(1)
     await section.locator("[data-e2e=invitation-revoke]").click()

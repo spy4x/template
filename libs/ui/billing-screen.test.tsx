@@ -33,6 +33,7 @@ const FREE_OWNER: GroupBilling = {
   canManage: true,
   subscribed: false,
   hasCustomer: false,
+  seatPrice: null,
 }
 
 const PRO_OWNER: GroupBilling = {
@@ -166,6 +167,14 @@ describe("billing screens without JavaScript", () => {
     expect(lapsed).toContain("to get the paid plan back.")
     expect(forms(<BillingCard groupId={groupId} billing={failed(FREE_PLAN_ID, 0)} />))
       .toEqual([{ action: BILLING_PATHS.portal(groupId), method: "post", fields: [] }])
+  })
+
+  it("shows a group billed per member what it pays: the price times its members", () => {
+    const seats = { ...PRO_OWNER, seatPrice: { seats: 3, amount: 900, currency: "EUR" } }
+    const html = renderToString(<BillingCard groupId={groupId} billing={seats} />)
+
+    expect(html).toContain("€27.00")
+    expect(html).toContain("3 members at €9.00 each a month, the owner included.")
   })
 
   it("shows no notice when there is none", () => {

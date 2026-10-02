@@ -85,6 +85,7 @@ function subscription(
       currentPeriodEnd: new Date("2026-11-01T10:00:00Z"),
       cancelAtPeriodEnd: false,
       trialEnd: null,
+      quantity: 1,
       reference: groupId,
     },
   }
