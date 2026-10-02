@@ -9,7 +9,7 @@ import { requireDbConnection } from "./db-connection.ts"
 /**
  * Rename, delete and restore of a group against a real Postgres built from schema.sql: who may do
  * what, the rule that a person keeps one group, what members see, the 30 days and the purge. Needs
- * `DB_HOST`, `DB_USER`, `DB_PASS` and `DB_NAME` (recipe in docs/handoff.md); it fails when they
+ * "DB_HOST", "DB_USER", "DB_PASS" and "DB_NAME" (recipe in docs/handoff.md); it fails when they
  * are missing.
  */
 
@@ -49,7 +49,7 @@ async function insertUser(sql: postgres.Sql): Promise<number> {
 
 /**
  * An owner with a first group and a team group, plus one member per role in the team and a
- * stranger. The members have a group of their own, except `onlyHere`, whose only group is the team.
+ * stranger. The members have a group of their own, except "onlyHere", whose only group is the team.
  */
 async function team(sql: postgres.Sql) {
   const repository = new PostgresGroupRepository(sql)
@@ -224,5 +224,75 @@ Deno.test("purge: removes groups deleted over 30 days ago with everything in the
     const stillThere = await sql`SELECT 1 FROM groups WHERE id = ${kept.id}`
     expect(stillThere.length).toBe(1)
     expect(await purgeDeletedGroups(sql)).toBe(0)
+  })
+})
+
+Deno.test("delete and restore are announced to the members through the outbox", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner } = await team(sql)
+    const announced = async (kind: string) =>
+      (await sql<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM outbox_events
+        WHERE group_id = ${groupId} AND event_kind = ${kind}
+      `)[0].count
+    const sequence = async () =>
+      (await sql<{ next: string }[]>`
+        SELECT next_change_sequence::text AS next FROM groups WHERE id = ${groupId}
+      `)[0].next
+
+    const before = BigInt(await sequence())
+    await repository.softDelete(groupId, owner)
+    expect(await announced("group.deleted")).toBe(1)
+    expect(BigInt(await sequence()) > before).toBe(true)
+
+    const afterDelete = BigInt(await sequence())
+    await repository.restore(groupId, owner)
+    expect(await announced("group.restored")).toBe(1)
+    expect(BigInt(await sequence()) > afterDelete).toBe(true)
+  })
+})
+
+Deno.test("delete: two deletes at once never leave a person without a group", async () => {
+  await withSchema(async (sql) => {
+    const repository = new PostgresGroupRepository(sql)
+    const ann = await insertUser(sql)
+    const bob = await insertUser(sql)
+    // Each owns one group and is a member of the other's, and has no other group: either delete
+    // alone is allowed, both together would leave both people with nothing.
+    const annsGroup = (await repository.create({ id: crypto.randomUUID(), name: "Ann" }, ann)).group
+    const bobsGroup = (await repository.create({ id: crypto.randomUUID(), name: "Bob" }, bob)).group
+    await sql`
+      INSERT INTO group_members (group_id, user_id, role, added_by_user_id) VALUES
+        (${annsGroup.id}, ${bob}, ${GroupRole.EDITOR}, ${ann}),
+        (${bobsGroup.id}, ${ann}, ${GroupRole.EDITOR}, ${bob})
+    `
+
+    const results = await Promise.allSettled([
+      repository.softDelete(annsGroup.id, ann),
+      repository.softDelete(bobsGroup.id, bob),
+    ])
+
+    for (const person of [ann, bob]) {
+      const { groups } = await repository.listForUser(person, { limit: 10 })
+      expect(groups.length).toBeGreaterThan(0)
+    }
+    const refused = results.filter((result) => result.status === "rejected")
+    expect(refused.length).toBe(1)
+    expect((refused[0] as PromiseRejectedResult).reason).toMatchObject({ code: "LAST_GROUP" })
+  })
+})
+
+Deno.test("delete: a group that is already deleted does not count as another group", async () => {
+  await withSchema(async (sql) => {
+    const repository = new PostgresGroupRepository(sql)
+    const owner = await insertUser(sql)
+    const live = (await repository.create({ id: crypto.randomUUID(), name: "Live" }, owner)).group
+    const gone = (await repository.create({ id: crypto.randomUUID(), name: "Gone" }, owner)).group
+    await sql`UPDATE groups SET deleted_at = now() WHERE id = ${gone.id}`
+
+    await expect(repository.softDelete(live.id, owner)).rejects.toMatchObject({
+      code: "LAST_GROUP",
+    })
+    expect((await repository.getSummaryForMember(live.id, owner))?.name).toBe("Live")
   })
 })
