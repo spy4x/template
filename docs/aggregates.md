@@ -131,7 +131,7 @@ found" page, which tells the person to switch group. The group picker is the one
 | `state/notes.test.ts`     | The store against fake calls.                                                                                                                                                  |
 | `views/NotesView.tsx`     | Passes the store and the group's role to `NotesScreen`.                                                                                                                        |
 | `views/NoteEditorView.tsx` | Passes the store and the group's role to `NoteEditorScreen` for `/notes/new` and `/notes/:id`, with the offline conflict state above it.                                      |
-| `views/UnsavedGuard.tsx`  | Asks before the person leaves the editor page with text that is not saved: on closing the tab, and on a click on any link in the app. The MPA has no such guard.             |
+| `views/spa-paths.ts`      | Lists the paths the router owns, for preact-components' `UnsavedGuard` in `NoteEditorView.tsx`, which asks before the person leaves the editor page with text that is not saved: on closing the tab, and on a click on any link in the app. The MPA has no such guard.             |
 | `app.tsx`                 | The routes, and the pull: a hint for the open group reads its notes again.                                                                                                     |
 
 The store does not move the group's cursor on its own writes: another member's change may have
