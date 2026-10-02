@@ -38,6 +38,8 @@ const AUTH_MIGRATION = "2026_09_24_0001_auth_package_tables.sql"
 const KIND_MIGRATION = "2026_10_07_0001_group_kind_removed.sql"
 // A reset also drops a waiting address change, so the reset tests need its table (#140).
 const EMAIL_MIGRATION = "2026_10_08_0002_email_verification.sql"
+/** Widens the audit row's address to the longest one a form accepts (#191). */
+const AUDIT_IDENTIFIER_MIGRATION = "2026_10_10_0001_auth_audit_identifier_320.sql"
 const MASTER_MIGRATIONS = [
   "2026_01_26_0001_init.sql",
   "2026_01_26_0002_auth_profiles_audit.sql",
@@ -805,7 +807,8 @@ function profileUpdate(sql: postgres.Sql) {
 }
 
 Deno.test("auth audit rows are written with the action they record", async (t) => {
-  await withSchema([...MASTER_MIGRATIONS, AUTH_MIGRATION, KIND_MIGRATION], async (sql) => {
+  const migrations = [...MASTER_MIGRATIONS, AUTH_MIGRATION, KIND_MIGRATION]
+  await withSchema([...migrations, AUDIT_IDENTIFIER_MIGRATION], async (sql) => {
     const signIn = buildSignIn(sql)
     const client = buildApp(signIn)
     const credentials = { login: "audited@example.com", password: "Passw0rd!" }
@@ -833,6 +836,41 @@ Deno.test("auth audit rows are written with the action they record", async (t) =
         row(AuthAuditEventType.PROFILE_UPDATED),
       ])
     })
+
+    await t.step(
+      "a 254-character address and a 400-character user agent sign up, out and in with rows",
+      async () => {
+        // The longest address a mail server delivers: a 64-character local part and a
+        // 189-character domain.
+        const email = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(57)}.com`
+        expect(email.length).toBe(254)
+        const longClient = { ...CLIENT, "user-agent": "u".repeat(400) }
+        const long = buildApp(signIn)
+        const longSignUp = await long.request("POST", "/sign-up", {
+          email,
+          password: credentials.password,
+        }, longClient)
+        expect(longSignUp.status).toBe(200)
+        const longUserId = (await longSignUp.json()).id as number
+        expect((await long.request("POST", "/sign-out", undefined, longClient)).status).toBe(200)
+        const signedIn = await long.request("POST", "/sign-in", {
+          login: email,
+          password: credentials.password,
+        }, longClient)
+        expect(signedIn.status).toBe(200)
+        const row = (eventType: AuthAuditEventType, identifier: string | null = null) => ({
+          eventType,
+          identifier,
+          ip: CLIENT["x-forwarded-for"],
+          userAgent: "u".repeat(300),
+        })
+        expect(await auditRows(sql, longUserId)).toEqual([
+          row(AuthAuditEventType.SIGNED_UP, email),
+          row(AuthAuditEventType.SIGNED_OUT),
+          row(AuthAuditEventType.SIGNED_IN),
+        ])
+      },
+    )
 
     const allowAuditRows = await refuseAuditRows(sql)
 

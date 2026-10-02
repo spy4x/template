@@ -111,10 +111,16 @@ export class AppDbBase extends DbServiceBase {
   get authAudit() {
     const sql = this.sql
     return {
+      /**
+       * Writes one row. The client sends the IP and the user agent, so both are cut to their
+       * column width: a long header must never fail the action the row records.
+       */
       insert: async (row: AuthAuditBase): Promise<void> => {
+        const ip = row.ip?.slice(0, 45) ?? null
+        const userAgent = row.userAgent?.slice(0, 300) ?? null
         await sql`
           INSERT INTO auth_audits (user_id, event_type, identifier, ip, user_agent)
-          VALUES (${row.userId}, ${row.eventType}, ${row.identifier}, ${row.ip}, ${row.userAgent})
+          VALUES (${row.userId}, ${row.eventType}, ${row.identifier}, ${ip}, ${userAgent})
         `
       },
     }
