@@ -121,10 +121,10 @@ describe("group domain", () => {
     })
   })
 
-  it("still accepts and ignores kind 2 from a page cached before the kind was dropped", () => {
+  it("refuses kind on create, now that groups have none", () => {
     const id = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
 
-    expect(parseCreateGroupRequest({ id, name: "Team", kind: 2 })).toEqual({ id, name: "Team" })
+    expect(() => parseCreateGroupRequest({ id, name: "Team", kind: 2 })).toThrow(GroupError)
   })
 
   it("rejects malformed, uppercase, empty, long, and extra create data", () => {
