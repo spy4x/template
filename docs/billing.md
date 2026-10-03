@@ -21,7 +21,7 @@ Pro starts with a 14-day trial (`trialDays` on the plan).
 A group is on a paid plan while its subscription is trialing or active, and for a grace period
 while it is past due (below). A canceled, incomplete or paused subscription, or one billing a price
 that is not in the catalog, puts the group back on Free. To add a plan, add it to `PLANS`, add its
-price variable to `readBillingSetup` (`apps/api/features/billing/config.ts`), to
+price variable to `readBillingSetup` (`libs/server/billing/setup.ts`), to
 `infra/envs/.env.example` and to the `environment` of the api and worker services in
 `infra/compose/compose.shared.yml`.
 
@@ -296,7 +296,10 @@ again inside its transaction, as the note repository does.
 | `fake`     | The development provider, below. Refused in production                         |
 
 With `stripe` and any of the three keys missing, the API refuses to start and names the missing
-ones. Any other value of `BILLING_PROVIDER` also stops the start.
+ones. The worker reads the same setup (`readBillingSetup` in `libs/server/billing/setup.ts`) to
+change a per-member subscription's quantity, but verifies no webhook: it needs `STRIPE_SECRET_KEY`
+and `STRIPE_PRICE_PRO`, refuses to start without either, and never receives
+`STRIPE_WEBHOOK_SECRET`. Any other value of `BILLING_PROVIDER` also stops the start.
 
 `BILLING_GRACE_DAYS` sets the grace period for failed payments: a whole number of days from 0 to
 90, 7 when unset or empty. Any other value stops the start.
@@ -371,7 +374,7 @@ in the environment only; the tracked `.env.example` holds empty placeholders.
 ## The development provider
 
 With `ENV=dev` and no `BILLING_PROVIDER`, the API runs the development provider
-(`createFakeBilling` in `apps/api/features/billing/config.ts`). It calls no network:
+(`createFakeBilling` in `libs/server/billing/setup.ts`). It calls no network:
 
 - A checkout sends the browser straight back to the success URL, as if paid. Nothing changes until
   a webhook arrives.
@@ -431,5 +434,3 @@ provider, so its public secret cannot sign a real event.
   notice ("Notices" above) tells them the trial ends three days before the old plan would have.
 - The old owner, now an admin, can no longer see past invoices through the app; Stripe's receipts
   reach them by mail.
-- The worker imports `readBillingSetup` from the API (`apps/api/features/billing/config.ts`)
-  rather than from a shared library.
