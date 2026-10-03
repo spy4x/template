@@ -86,7 +86,7 @@ carries an `idempotencyKey` runs once per user and key.
 | File                                    | What it holds                                                                                                                                               |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/api/features/notes/list.ts`       | One page of the list, with its cursor. Both transports call it, so they cannot drift apart.                                                                 |
-| `apps/api/features/notes/socket.ts`     | The socket requests `note.create`, `note.update`, `note.delete`, `note.move` (commands) and `note.list`, `note.get` (queries): parse the payload, dispatch. |
+| `apps/api/features/notes/socket.ts`     | The socket requests `note.create`, `note.update`, `note.delete`, `note.move` (commands) and `note.list`, `note.get`, `note.locate` (queries): parse the payload, dispatch. `note.locate` finds the group of a note by its id alone, for a link to a note of another of the person's groups: it answers only a member, and `NOTE_NOT_FOUND` otherwise. |
 | `apps/api/features/notes/errors.ts`     | REST error codes and statuses. A version conflict answers 409 with `currentVersion`.                                                                        |
 | `apps/api/routes/notes.ts`              | `GET`, `POST`, `PATCH`, `DELETE` under `/api/groups/:groupId/notes`, with the same-origin guard on writes and an optional `Idempotency-Key` header.         |
 | `apps/api/services/note-list-cursor.ts` | The cursor codec, keyed from the cookie secret.                                                                                                             |
@@ -118,8 +118,12 @@ preact-components' `ConfirmDialog`; without it, the menu has no delete.
 
 **A note in another of the person's groups.** A note belongs to one group, and the pages work on the
 person's selected group. A link must never change the selection (another site could switch a
-person's group with one), so `/notes/:id` for a note outside the selected group is the "Note not
-found" page, which tells the person to switch group. The group picker is the one way to switch.
+person's group with one), so opening `/notes/:id` never switches. When the note is in another of
+the person's groups, the page (found through `note.locate`) names that group and offers "Switch to
+<group>": only that button selects the group, through the same `group.select` command as the picker,
+and the note then opens. A note that does not exist and a note in a group the person is not in both
+show the plain "Note not found" page; the lookup answers them identically, so it never says whether
+an id is taken.
 
 ### 7. SPA wiring: `apps/spa/src/`
 
