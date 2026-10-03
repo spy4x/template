@@ -40,7 +40,7 @@ export function EmailBanner(
         </Button>
       }
     >
-      Verify <strong class="break-all">{email}</strong> with the code we mail there.
+      Verify <strong class="wrap-anywhere">{email}</strong> with the code we mail there.
     </Notice>
   )
 }
@@ -171,7 +171,7 @@ export function EmailScreen(
           label="Address"
           value={
             <span class="flex flex-wrap items-center gap-2">
-              <span class="break-all" data-e2e="email-current">
+              <span class="wrap-anywhere" data-e2e="email-current">
                 {hasEmail ? status.email : "None yet. You sign in with your username."}
               </span>
               {hasEmail && <EmailState proven={status.proven} />}
@@ -197,8 +197,8 @@ export function EmailScreen(
           description={
             <>
               Enter the code from the mail to{" "}
-              <strong class="break-all">{target}</strong>. It works once, for 10 minutes; if none
-              arrived, ask for a new one.{status.pending &&
+              <strong class="wrap-anywhere">{target}</strong>. It works once, for 10 minutes; if
+              none arrived, ask for a new one.{status.pending &&
                 " Your address changes once you enter it."}
             </>
           }

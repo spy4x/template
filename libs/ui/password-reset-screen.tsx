@@ -169,7 +169,8 @@ export function ResetPasswordScreen(
       description={
         <>
           For{" "}
-          <strong class="break-all">{email}</strong>. Saving it signs your account out everywhere.
+          <strong class="wrap-anywhere">{email}</strong>. Saving it signs your account out
+          everywhere.
         </>
       }
       after={
