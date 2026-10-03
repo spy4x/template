@@ -1,18 +1,16 @@
-import type { JSX } from "preact"
-import { useEffect, useRef, useState } from "preact/hooks"
+import type { ComponentChildren, JSX } from "preact"
+import { useState } from "preact/hooks"
 import { Avatar } from "@spy4x/preact-ui/avatar"
-import { Badge } from "@spy4x/preact-ui/badge"
-import { Button } from "@spy4x/preact-ui/button"
-import { Card, CardBody } from "@spy4x/preact-ui/card"
+import { Card } from "@spy4x/preact-ui/card"
+import { ConfirmDialog } from "@spy4x/preact-ui/confirm-dialog"
+import { DropdownItem } from "@spy4x/preact-ui/dropdown"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
-import { Field } from "@spy4x/preact-ui/field"
-import { Select } from "@spy4x/preact-ui/input"
-import { Stack } from "@spy4x/preact-ui/layout"
 import type { PlanRefusal } from "@domain/billing"
-import { assignableRoles, canLeave, canRemoveMember, GroupRole } from "@domain/groups"
+import { assignableRoles, canRemoveMember, type GroupRole } from "@domain/groups"
 import { ROLE_TEXT } from "./groups-screen.tsx"
+import { FocusedError, MoreMenu, useClosesWhenDone } from "./group-page.tsx"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
-import { GROUP_PATHS, type Navigate, ScreenForm } from "./progressive.tsx"
+import type { Navigate } from "./progressive.tsx"
 
 /** One member of a group as the members section shows them. */
 export interface GroupMemberRow {
@@ -46,13 +44,13 @@ export interface MemberError {
 
 export interface GroupMembersSectionProps {
   groupId: string
-  /** The role of the person looking: it decides which controls each row shows. */
+  /** The role of the person looking: it decides which actions each row's menu holds. */
   actorRole: GroupRole
   /** The members, oldest first; `null` while they are read. */
   members: readonly GroupMemberRow[] | null
   /**
    * How many members the group has. The list stops at 1,000, so this can be more than `members`;
-   * the header shows it, and a line under the list says it is cut off. Left out, the rows count.
+   * the heading shows it, and a line under the list says it is cut off. Left out, the rows count.
    */
   memberCount?: number | null
   /** Why the members could not be read, or `null`. */
@@ -61,20 +59,22 @@ export interface GroupMembersSectionProps {
   pendingUserId?: number | null
   /** The last refused change, shown under its member's row, or `null`. */
   memberError?: MemberError | null
-  /**
-   * Gives a member a new role. A form that posts `{ role }` to `GROUP_PATHS.memberRole`; with this
-   * callback the app takes the submit over.
-   */
+  /** Gives a member a new role. */
   onRoleChange?: (userId: number, role: GroupRole) => void
-  /** Removes a member. A form that posts nothing to `GROUP_PATHS.memberRemove`. */
+  /** Removes a member, once the person confirmed it. */
   onRemove?: (userId: number) => void
   /** Follows the upgrade link of a plan refusal; without it, the browser does. */
   navigate?: Navigate
+  /** Drawn beside the heading: the section's one action, such as "Invite people". */
+  action?: ComponentChildren
+  /** Drawn under the list: the pending invitations. */
+  children?: ComponentChildren
 }
 
 /**
- * The members of a group, for every member to read. Beside each member the owner and an admin
- * find a role form and a remove button, for the members below them; nobody changes the owner here.
+ * The members of a group, for every member to read: one row each with the avatar, the name and the
+ * role. The owner and an admin find a menu on the rows of the members below them, to change the
+ * role or remove the member; nobody changes the owner here.
  */
 export function GroupMembersSection(
   {
@@ -88,53 +88,57 @@ export function GroupMembersSection(
     onRoleChange,
     onRemove,
     navigate,
+    action,
+    children,
   }: GroupMembersSectionProps,
 ): JSX.Element {
   const total = members ? Math.max(memberCount ?? 0, members.length) : null
   return (
-    <section aria-labelledby="group-members" data-e2e="group-section-members">
-      <Card>
-        <CardBody>
-          <Stack>
-            <h2 id="group-members" class="text-base font-semibold">
-              Members{total === null ? "" : ` (${total})`}
-            </h2>
-            {error
-              ? <ErrorState message={error} />
-              : members === null
-              ? (
-                <p class="text-sm text-muted" data-e2e="group-members-loading">
-                  Loading the members...
-                </p>
-              )
-              : (
-                <ul class="flex flex-col divide-y divide-gray-200 dark:divide-gray-700">
-                  {members.map((member) => (
-                    <MemberItem
-                      key={member.userId}
-                      groupId={groupId}
-                      actorRole={actorRole}
-                      member={member}
-                      pending={pendingUserId === member.userId}
-                      error={memberError?.userId === member.userId ? memberError.message : null}
-                      refusal={memberError?.userId === member.userId
-                        ? memberError.plan ?? null
-                        : null}
-                      navigate={navigate}
-                      onRoleChange={onRoleChange}
-                      onRemove={onRemove}
-                    />
-                  ))}
-                </ul>
-              )}
-            {members && total !== null && total > members.length && (
-              <p class="text-sm text-muted" data-e2e="group-members-cut-off">
-                Showing the first {members.length} of {total} members.
-              </p>
-            )}
-          </Stack>
-        </CardBody>
-      </Card>
+    <section
+      aria-labelledby="group-members"
+      class="flex flex-col gap-4"
+      data-e2e="group-section-members"
+    >
+      <div class="flex min-h-11 items-center justify-between gap-3">
+        <h2 id="group-members" class="text-base font-semibold">
+          Members{total === null ? "" : ` (${total})`}
+        </h2>
+        {action}
+      </div>
+      {error
+        ? <ErrorState message={error} />
+        : members === null
+        ? (
+          <p class="text-sm text-muted" data-e2e="group-members-loading">
+            Loading the members...
+          </p>
+        )
+        : (
+          <Card>
+            <ul class="divide-y divide-subtle">
+              {members.map((member) => (
+                <MemberItem
+                  key={member.userId}
+                  groupId={groupId}
+                  actorRole={actorRole}
+                  member={member}
+                  pending={pendingUserId === member.userId}
+                  error={memberError?.userId === member.userId ? memberError.message : null}
+                  refusal={memberError?.userId === member.userId ? memberError.plan ?? null : null}
+                  navigate={navigate}
+                  onRoleChange={onRoleChange}
+                  onRemove={onRemove}
+                />
+              ))}
+            </ul>
+          </Card>
+        )}
+      {members && total !== null && total > members.length && (
+        <p class="text-sm text-muted" data-e2e="group-members-cut-off">
+          Showing the first {members.length} of {total} members.
+        </p>
+      )}
+      {children}
     </section>
   )
 }
@@ -155,214 +159,85 @@ function MemberItem(
   const label = memberLabel(member)
   const roles = assignableRoles(actorRole, member.role)
   const removable = canRemoveMember(actorRole, member.role)
-  const [role, setRole] = useState(member.role)
-  // A role the server confirmed, or a page read again, replaces what the select showed.
-  useEffect(() => setRole(member.role), [member.role])
-  // A refused change has no field of its own, so focus lands on the message under the row.
-  const message = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (error && !refusal) message.current?.focus()
-  }, [error, refusal])
-  const selectId = `group-member-role-${member.userId}`
+  const [removing, setRemoving] = useState(false)
+  useClosesWhenDone(pending, error !== null, () => setRemoving(false))
 
   return (
-    <li class="flex flex-col gap-3 py-3" data-e2e="group-member" data-user-id={member.userId}>
+    <li
+      class="flex flex-col gap-3 px-4 py-3 sm:px-6"
+      data-e2e="group-member"
+      data-user-id={member.userId}
+    >
       <div class="flex min-w-0 items-center gap-3">
         <Avatar name={label} alt="" size="sm" />
-        <div class="flex min-w-0 flex-col gap-1 text-sm">
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="break-words font-medium" data-e2e="group-member-name">{label}</span>
-            {member.isYou && <Badge text="You" color="blue" />}
-          </div>
-          {member.name.trim() && member.email && (
-            <span class="break-all text-xs text-muted">{member.email}</span>
-          )}
-          <span class="text-xs text-muted">
-            <span data-e2e="group-member-role">{ROLE_TEXT[member.role]}</span>
-            {" · joined "}
-            <time dateTime={member.joinedAt}>{member.joinedAt.slice(0, 10)}</time>
+        <div class="flex min-w-0 flex-1 flex-col gap-1">
+          <span class="flex min-w-0 items-center gap-2 text-sm">
+            <span class="truncate font-medium" title={label} data-e2e="group-member-name">
+              {label}
+            </span>
+            {member.isYou && <span class="shrink-0 text-xs text-muted">you</span>}
           </span>
+          {member.name.trim() && member.email && (
+            <span class="truncate text-xs text-muted" title={member.email}>{member.email}</span>
+          )}
         </div>
-      </div>
-      {roles.length > 0 && (
-        <ScreenForm
-          action={GROUP_PATHS.memberRole(groupId, member.userId)}
-          pending={pending}
-          onSubmit={onRoleChange && (() => onRoleChange(member.userId, role))}
-          class="flex flex-wrap items-end gap-2"
-        >
-          <Field id={selectId} label={`Role of ${label}`}>
-            <Select
-              name="role"
-              data-e2e="group-member-role-select"
-              value={String(role)}
-              options={[member.role, ...roles]
-                .sort((a, b) => a - b)
-                .map((value) => ({ value, label: ROLE_TEXT[value] }))}
-              onChange={(event) => setRole(Number(event.currentTarget.value) as GroupRole)}
-            />
-          </Field>
-          <Button
-            type="submit"
-            variant="outline"
-            size="sm"
-            data-e2e="group-member-role-save"
-            busy={pending}
-            busyLabel="Saving..."
-          >
-            Change role
-          </Button>
-        </ScreenForm>
-      )}
-      {removable && (
-        <details data-e2e="group-member-remove-details">
-          <summary class="cursor-pointer text-sm font-medium">Remove {label}...</summary>
-          <div class="mt-3">
-            <ScreenForm
-              action={GROUP_PATHS.memberRemove(groupId, member.userId)}
-              pending={pending}
-              onSubmit={onRemove && (() => onRemove(member.userId))}
-            >
-              <Stack>
-                <p class="text-sm">
-                  Remove {label}{" "}
-                  from this group? They lose access right away, on every device. What they wrote
-                  stays in the group. If this is their only group, they get a new empty one named
-                  "Personal". A team link they still hold lets them back in from another account, so
-                  revoke such links under Invitations.
-                </p>
-                <div>
-                  <Button
-                    type="submit"
-                    variant="danger"
-                    size="sm"
-                    data-e2e="group-member-remove"
-                    busy={pending}
-                    busyLabel="Removing..."
-                  >
-                    Remove member
-                  </Button>
-                </div>
-              </Stack>
-            </ScreenForm>
-          </div>
-        </details>
-      )}
-      {refusal
-        ? (
-          <PlanRefusalNotice
-            groupId={groupId}
-            refusal={refusal}
-            navigate={navigate}
-            headingLevel={3}
-          />
-        )
-        : (
-          <div ref={message} tabIndex={-1} data-e2e="group-member-error">
-            <ErrorState message={error} />
-          </div>
-        )}
-    </li>
-  )
-}
-
-export interface GroupLeaveSectionProps {
-  groupId: string
-  groupName: string
-  /** The role of the person looking. The owner cannot leave; everyone else can. */
-  role: GroupRole
-  /** This is the person's only group, so they cannot leave it: the page says why. */
-  isLastGroup?: boolean
-  /** A leave is in flight. */
-  leaving?: boolean
-  /** Why the leave was refused, or `null`. */
-  error?: string | null
-  /** Leaves the group. A form that posts nothing to `GROUP_PATHS.leave`. */
-  onLeave?: () => void
-}
-
-/** Leaving a group: for every member but the owner, and never from the person's only group. */
-export function GroupLeaveSection(
-  { groupId, groupName, role, isLastGroup = false, leaving = false, error = null, onLeave }:
-    GroupLeaveSectionProps,
-): JSX.Element {
-  const message = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (error) message.current?.focus()
-  }, [error])
-  const errorBox = (
-    <div ref={message} tabIndex={-1} data-e2e="group-leave-error">
-      <ErrorState message={error} />
-    </div>
-  )
-
-  return (
-    <section aria-labelledby="group-leave" data-e2e="group-section-leave">
-      <Card>
-        <CardBody>
-          <Stack>
-            <h2 id="group-leave" class="text-base font-semibold">Leave group</h2>
-            {!canLeave(role)
-              ? (
-                <p class="text-sm" data-e2e="group-leave-why">
-                  You own this group, so you cannot leave it.
-                </p>
-              )
-              : isLastGroup
-              ? (
-                <>
-                  <p id="group-leave-why" class="text-sm" data-e2e="group-leave-why">
-                    This is your only group, so you cannot leave it. Create or join another group
-                    first.
-                  </p>
-                  {errorBox}
-                  <div>
-                    <Button
-                      type="button"
-                      variant="danger"
-                      disabled
-                      aria-describedby="group-leave-why"
-                      data-e2e="group-leave"
-                    >
-                      Leave group
-                    </Button>
-                  </div>
-                </>
-              )
-              : (
-                <details data-e2e="group-leave-details" open={error !== null}>
-                  <summary class="cursor-pointer text-sm font-medium">Leave this group...</summary>
-                  <div class="mt-3">
-                    <ScreenForm
-                      action={GROUP_PATHS.leave(groupId)}
-                      pending={leaving}
-                      onSubmit={onLeave}
-                    >
-                      <Stack>
-                        <p class="text-sm" data-e2e="group-leave-confirmation">
-                          Leave "{groupName}"? You lose access right away, on every device. What you
-                          wrote stays in the group. To come back, someone must add you again.
-                        </p>
-                        {errorBox}
-                        <div>
-                          <Button
-                            type="submit"
-                            variant="danger"
-                            data-e2e="group-leave"
-                            busy={leaving}
-                            busyLabel="Leaving..."
-                          >
-                            Leave group
-                          </Button>
-                        </div>
-                      </Stack>
-                    </ScreenForm>
-                  </div>
-                </details>
+        <span class="shrink-0 text-sm text-muted" data-e2e="group-member-role">
+          {pending ? "Saving..." : ROLE_TEXT[member.role]}
+        </span>
+        {roles.length > 0 || removable
+          ? (
+            <MoreMenu label={`Actions for ${label}`} dataE2E="group-member-menu">
+              {roles.map((role) => (
+                <DropdownItem
+                  key={role}
+                  disabled={pending}
+                  dataE2E="group-member-make"
+                  onClick={() => onRoleChange?.(member.userId, role)}
+                >
+                  Make {ROLE_TEXT[role]}
+                </DropdownItem>
+              ))}
+              {removable && (
+                <DropdownItem
+                  danger
+                  disabled={pending}
+                  dataE2E="group-member-remove-open"
+                  onClick={() => setRemoving(true)}
+                >
+                  Remove from group
+                </DropdownItem>
               )}
-          </Stack>
-        </CardBody>
-      </Card>
-    </section>
+            </MoreMenu>
+          )
+          // A row without a menu keeps its place, so every role lines up.
+          : <span class="w-11 shrink-0 sm:w-9" aria-hidden="true" />}
+      </div>
+      {!removing && (refusal
+        ? <PlanRefusalNotice groupId={groupId} refusal={refusal} navigate={navigate} />
+        : <FocusedError message={error} dataE2E="group-member-error" />)}
+      {removing && (
+        <ConfirmDialog
+          title={`Remove ${label}?`}
+          confirmLabel="Remove member"
+          cancelLabel="Cancel"
+          tone="danger"
+          dataE2E="group-member-remove-dialog"
+          onConfirm={() => {
+            if (!pending) onRemove?.(member.userId)
+          }}
+          onCancel={() =>
+            setRemoving(false)}
+        >
+          <div class="flex flex-col gap-4">
+            <p class="text-sm text-muted">
+              They lose access right away, on every device. What they wrote stays in the group. If
+              this is their only group, they get a new empty one named "Personal". A team link they
+              still hold lets them back in from another account, so revoke such links too.
+            </p>
+            <FocusedError message={error} dataE2E="group-member-remove-error" />
+          </div>
+        </ConfirmDialog>
+      )}
+    </li>
   )
 }

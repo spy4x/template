@@ -168,11 +168,12 @@ const QUIET: EnhancedFormLabels = { sending: "", done: "", failed: "" }
 /**
  * A screen's form: `EnhancedForm` posting to `action`. Without `onSubmit`, the browser posts as
  * usual; with it, the native post is cancelled and `onSubmit` is called. While `pending`, the
- * fields are disabled and a second submit is refused.
+ * fields are disabled and a second submit is refused. A form only the SPA draws, inside a dialog,
+ * has no route to post to and leaves `action` out.
  */
 export function ScreenForm(
   { action, pending = false, onSubmit, class: className, children }: {
-    action: string
+    action?: string
     pending?: boolean
     /** Called with the form's fields, so a callback can read what the browser would have posted. */
     onSubmit?: (data: FormData) => void
