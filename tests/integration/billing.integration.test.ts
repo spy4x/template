@@ -1063,6 +1063,9 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
           ["renewal@example.com", "A payment for Pro failed"],
           ["trial@example.com", "Your Pro trial ends on " + longDate(trialEnd.getTime())],
         ])
+        const textTo = (to: string) => sender.sent.find((mail) => mail.to === to)?.text
+        expect(textTo("failed@example.com")).toContain("The group is now on the free plan.")
+        expect(textTo("renewal@example.com")).toContain("The plan is kept for a few days")
         expect(sender.sent.find((mail) => mail.to === "trial@example.com")?.text)
           .toContain(`http://app.localhost/groups/${trial.groupId}`)
         expect(logged).toEqual([
