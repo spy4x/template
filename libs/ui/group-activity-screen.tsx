@@ -132,6 +132,7 @@ function ActivityItem(
   { event, navigate }: { event: ActivityRow; navigate?: Navigate },
 ): JSX.Element {
   const note = event.entity?.type === "note" && event.entity.exists ? event.entity.id : null
+  const title = typeof event.details.title === "string" ? event.details.title.trim() : ""
   return (
     <li class="flex min-h-11 items-baseline gap-3 px-4 py-3" data-e2e={`activity-${event.id}`}>
       <p class="min-w-0 flex-1 text-sm" data-e2e="activity-text">
@@ -143,6 +144,7 @@ function ActivityItem(
               href={NOTE_PATHS.note(note)}
               navigate={navigate}
               data-e2e="activity-note-link"
+              aria-label={title ? `Open the note “${title}”` : "Open the note"}
             >
               Open the note
             </Link>
