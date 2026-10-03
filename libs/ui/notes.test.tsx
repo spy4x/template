@@ -369,6 +369,8 @@ describe("NotesScreen in the browser", () => {
     await click("[data-e2e=notes-menu]")
     await click("[data-e2e=notes-select]")
 
+    // A click focuses the button it lands on, and Cancel then leaves the page.
+    find<HTMLElement>("[data-e2e=notes-select-cancel]").focus()
     await click("[data-e2e=notes-select-cancel]")
     expect(focused()).toBe("notes-menu")
 
