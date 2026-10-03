@@ -201,6 +201,7 @@ describe("billingNoticeMail", () => {
       planName: "Pro",
       at: new Date("2026-10-15T23:30:00Z"),
       link,
+      planKept: true,
     })
 
   it("says when a trial ends, in UTC, and that it is charged unless cancelled", () => {

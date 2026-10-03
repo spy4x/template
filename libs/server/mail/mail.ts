@@ -215,9 +215,9 @@ export interface BillingNoticeMailInput {
   link: string
   /**
    * For a failed payment: whether the plan is kept for the grace period. A trial whose first charge
-   * failed has none (`false`): the group is already on the free plan. `true` when unset.
+   * failed has none (`false`): the group is already on the free plan. Unused for the other notices.
    */
-  planKept?: boolean
+  planKept: boolean
 }
 
 /**
@@ -227,7 +227,7 @@ export interface BillingNoticeMailInput {
  */
 export function billingNoticeMail(
   brand: MailBrand,
-  { to, kind, groupName, planName, at, link, planKept = true }: BillingNoticeMailInput,
+  { to, kind, groupName, planName, at, link, planKept }: BillingNoticeMailInput,
 ): EmailMessage {
   const group = `"${groupName}"`
   const date = billingDate(at)
