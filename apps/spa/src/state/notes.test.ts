@@ -351,6 +351,25 @@ describe("notes store", () => {
     expect(store.elsewhere.value).toBe(null)
   })
 
+  it("keeps the open note when a read of an earlier note fails late", async () => {
+    let fail!: (cause: unknown) => void
+    const reads = [new Promise<{ note: NoteItem }>((_, reject) => fail = reject)]
+    const { store, calls } = harness({
+      pages: [{ notes: [item("a")], nextCursor: null }],
+      get: () => reads.shift() ?? Promise.resolve({ note: item("a") }),
+    })
+    await store.open(groupId, null)
+    const gone = store.open(groupId, "gone")
+    await store.open(groupId, "a")
+
+    fail(notFound())
+    await gone
+
+    expect(store.editing.value?.id).toBe("a")
+    expect(store.missing.value).toBe(false)
+    expect(calls.some((call) => call.name === "locate")).toBe(false)
+  })
+
   it("drops the other group when another note opens", async () => {
     const { store } = harness({
       pages: [{ notes: [item("a")], nextCursor: null }],
