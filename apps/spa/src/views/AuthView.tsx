@@ -49,7 +49,6 @@ export function AuthView({ screen }: { screen: AuthScreenKind }) {
       error={error}
       navigate={navigate}
       next={next}
-      onModeChange={(mode) => navigate(withNext(AUTH_PATHS[mode], next))}
       onSignIn={({ login, password }: AuthCredentials) => attempt(() => signIn(login, password))}
       onSignUp={({ login, password }: AuthCredentials) => attempt(() => signUp(login, password))}
       onOneTimeCode={(code) => attempt(() => checkTotp(code))}

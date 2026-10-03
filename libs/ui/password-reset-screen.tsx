@@ -1,11 +1,11 @@
 import type { JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
 import { Button } from "@spy4x/preact-ui/button"
-import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
 import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { Link } from "@spy4x/preact-ui/link"
+import { AuthCard } from "./auth-screen.tsx"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
 /** The messages shown when a step failed without a message of its own. */
@@ -14,7 +14,7 @@ export const PASSWORD_RESET_FAILURES = {
   reset: "Could not change the password",
 } as const
 
-/** A card with a heading, a sentence and one link onward. */
+/** A card with a heading, a sentence and the one way onward. */
 function Message(
   { title, text, href, link, navigate, e2e }: {
     title: string
@@ -26,15 +26,10 @@ function Message(
   },
 ): JSX.Element {
   return (
-    <Card class="mx-auto w-full max-w-md" data-e2e={e2e}>
-      <CardHeader>
-        <h1 class="text-lg font-semibold">{title}</h1>
-      </CardHeader>
-      <CardBody>
-        <p class="mb-4" role="status">{text}</p>
-        <Link href={href} navigate={navigate} class="pc-link">{link}</Link>
-      </CardBody>
-    </Card>
+    <AuthCard title={title} e2e={e2e}>
+      <p class="text-sm text-muted" role="status">{text}</p>
+      <Button href={href} navigate={navigate} variant="secondary">{link}</Button>
+    </AuthCard>
   )
 }
 
@@ -85,48 +80,36 @@ export function ForgotPasswordScreen(
     )
   }
   return (
-    <Card class="mx-auto w-full max-w-md">
-      <CardHeader>
-        <h1 class="text-lg font-semibold">Forgot your password?</h1>
-      </CardHeader>
-      <CardBody>
-        <p class="mb-4 text-sm">
-          Enter the e-mail address you signed up with. We send a link that lets you choose a new
-          password. It works once, for 30 minutes.
-        </p>
-        <ScreenForm action={FORM_ACTIONS.forgotPassword} pending={pending} onSubmit={onSubmit}>
-          <Stack>
-            <Field id="forgot-password-email" label="E-mail" error={error} required>
-              <Input
-                ref={field}
-                data-e2e="forgot-password-email"
-                name="email"
-                type="email"
-                autocomplete="email"
-                value={email}
-                onInput={(e) => onEmailChange(e.currentTarget.value)}
-                required
-              />
-            </Field>
-            <div>
-              <Button
-                type="submit"
-                data-e2e="forgot-password-submit"
-                busy={pending}
-                busyLabel="Sending..."
-              >
-                Send the link
-              </Button>
-            </div>
-            <p class="text-sm">
-              <Link href={SCREEN_PATHS.signIn} navigate={navigate} class="pc-link">
-                Back to sign in
-              </Link>
-            </p>
-          </Stack>
-        </ScreenForm>
-      </CardBody>
-    </Card>
+    <AuthCard
+      title="Forgot your password?"
+      description="Enter the e-mail address you signed up with. We mail you a link to choose a new password; it works once, for 30 minutes."
+      after={<>Remembered it? {signInLink(navigate)}</>}
+    >
+      <ScreenForm action={FORM_ACTIONS.forgotPassword} pending={pending} onSubmit={onSubmit}>
+        <Stack>
+          <Field id="forgot-password-email" label="E-mail" error={error} required>
+            <Input
+              ref={field}
+              data-e2e="forgot-password-email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              value={email}
+              onInput={(e) => onEmailChange(e.currentTarget.value)}
+              required
+            />
+          </Field>
+          <Button
+            type="submit"
+            data-e2e="forgot-password-submit"
+            busy={pending}
+            busyLabel="Sending..."
+          >
+            Send the link
+          </Button>
+        </Stack>
+      </ScreenForm>
+    </AuthCard>
   )
 }
 
@@ -181,54 +164,63 @@ export function ResetPasswordScreen(
     )
   }
   return (
-    <Card class="mx-auto w-full max-w-md">
-      <CardHeader>
-        <h1 class="text-lg font-semibold">Choose a new password</h1>
-      </CardHeader>
-      <CardBody>
-        <p class="mb-4 text-sm">
-          For {email}. Saving it signs your account out everywhere.
-        </p>
-        <ScreenForm action={FORM_ACTIONS.resetPassword} pending={pending} onSubmit={onSubmit}>
-          <Stack>
-            <input type="hidden" name="email" value={email} />
-            <input type="hidden" name="code" value={code} />
-            <Field
-              id="reset-password-new"
-              label="New password"
-              hint="8 to 50 characters."
-              error={error}
+    <AuthCard
+      title="Choose a new password"
+      description={
+        <>
+          For{" "}
+          <strong class="break-all">{email}</strong>. Saving it signs your account out everywhere.
+        </>
+      }
+      after={
+        <>
+          Link expired?{" "}
+          <Link href={SCREEN_PATHS.forgotPassword} navigate={navigate} class="pc-link font-medium">
+            Ask for a new one
+          </Link>
+        </>
+      }
+    >
+      <ScreenForm action={FORM_ACTIONS.resetPassword} pending={pending} onSubmit={onSubmit}>
+        <Stack>
+          <input type="hidden" name="email" value={email} />
+          <input type="hidden" name="code" value={code} />
+          <Field
+            id="reset-password-new"
+            label="New password"
+            hint="8 to 50 characters."
+            error={error}
+            required
+          >
+            <Input
+              ref={field}
+              data-e2e="reset-password-new"
+              name="newPassword"
+              type="password"
+              autocomplete="new-password"
+              value={newPassword}
+              onInput={(e) => onNewPasswordChange(e.currentTarget.value)}
               required
-            >
-              <Input
-                ref={field}
-                data-e2e="reset-password-new"
-                name="newPassword"
-                type="password"
-                autocomplete="new-password"
-                value={newPassword}
-                onInput={(e) => onNewPasswordChange(e.currentTarget.value)}
-                required
-              />
-            </Field>
-            <div>
-              <Button
-                type="submit"
-                data-e2e="reset-password-submit"
-                busy={pending}
-                busyLabel="Saving..."
-              >
-                Save the new password
-              </Button>
-            </div>
-            <p class="text-sm">
-              <Link href={SCREEN_PATHS.forgotPassword} navigate={navigate} class="pc-link">
-                Ask for a new link
-              </Link>
-            </p>
-          </Stack>
-        </ScreenForm>
-      </CardBody>
-    </Card>
+            />
+          </Field>
+          <Button
+            type="submit"
+            data-e2e="reset-password-submit"
+            busy={pending}
+            busyLabel="Saving..."
+          >
+            Save the new password
+          </Button>
+        </Stack>
+      </ScreenForm>
+    </AuthCard>
+  )
+}
+
+function signInLink(navigate?: Navigate): JSX.Element {
+  return (
+    <Link href={SCREEN_PATHS.signIn} navigate={navigate} class="pc-link font-medium">
+      Back to sign in
+    </Link>
   )
 }

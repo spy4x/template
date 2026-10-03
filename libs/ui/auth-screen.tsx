@@ -1,6 +1,7 @@
-import type { JSX } from "preact"
+import type { ComponentChildren, JSX } from "preact"
 import { type AuthCredentials, AuthForm, type AuthMode } from "@spy4x/preact-system/auth-form"
-import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
+import { Button } from "@spy4x/preact-ui/button"
+import { Card } from "@spy4x/preact-ui/card"
 import { Link } from "@spy4x/preact-ui/link"
 import { FORM_ACTIONS, type Navigate, NEXT_PARAM, SCREEN_PATHS, withNext } from "./progressive.tsx"
 
@@ -40,17 +41,17 @@ const LOGIN_LABELS: Record<AuthScreenKind, string> = {
 const COPY: Record<AuthScreenKind, { title: string; description: string; failure: string }> = {
   "sign-in": {
     title: "Welcome back",
-    description: "Sign in to manage your profile and push devices.",
+    description: "Sign in with your e-mail address and password.",
     failure: "Sign in failed",
   },
   "sign-up": {
-    title: "Create account",
-    description: "Start with your e-mail address and a password.",
+    title: "Create your account",
+    description: "All it takes is an e-mail address and a password.",
     failure: "Sign up failed",
   },
   "one-time-code": {
-    title: "2FA verification",
-    description: "Enter the 6-digit code from your authenticator app.",
+    title: "Enter your code",
+    description: "Open your authenticator app and enter the six digits it shows.",
     failure: "Invalid token",
   },
 }
@@ -68,7 +69,6 @@ export interface AuthScreenProps {
   isMfaRequired: boolean
   busy: boolean
   error: string | null
-  onModeChange?: (mode: AuthMode) => void
   onSignIn?: (credentials: AuthCredentials) => void
   onSignUp?: (credentials: AuthCredentials) => void
   onOneTimeCode?: (code: string) => void
@@ -80,33 +80,51 @@ export interface AuthScreenProps {
   next?: string | null
 }
 
-/** A card with a heading, a sentence and one link onward. */
-function Notice(
-  { title, text, link, navigate }: {
+/**
+ * The one card of a signed-out page: the page's `h1` and a sentence under it, then the form. A
+ * submit button inside fills the card's width, and `after` sits centred under the card, such as
+ * the link to the other auth page.
+ */
+export function AuthCard(
+  { title, description, after, children, e2e }: {
     title: string
-    text: string
-    link: string
-    navigate?: Navigate
+    description?: ComponentChildren
+    after?: ComponentChildren
+    children: ComponentChildren
+    e2e?: string
   },
 ): JSX.Element {
   return (
-    <Card class="mx-auto w-full max-w-md">
-      <CardHeader>
-        <h1 class="text-lg font-semibold">{title}</h1>
-      </CardHeader>
-      <CardBody>
-        <p class="mb-4">{text}</p>
-        <Link href={SCREEN_PATHS.profile} navigate={navigate} class="pc-link">
-          {link}
-        </Link>
-      </CardBody>
-    </Card>
+    <div class="flex flex-col gap-6">
+      <Card class="w-full" data-e2e={e2e}>
+        <div class="flex flex-col gap-6 p-6 sm:p-8 [&_button[type=submit]]:w-full">
+          <header class="flex flex-col gap-1">
+            <h1 class="text-xl font-semibold">{title}</h1>
+            {description && <p class="text-sm text-muted">{description}</p>}
+          </header>
+          {children}
+        </div>
+      </Card>
+      {after && <p class="text-center text-sm text-muted">{after}</p>}
+    </div>
+  )
+}
+
+/** A signed-out page that has nothing to ask: a heading, a sentence and the way onward. */
+function Done(
+  { title, text, navigate }: { title: string; text: string; navigate?: Navigate },
+): JSX.Element {
+  return (
+    <AuthCard title={title} description={text}>
+      <Button href={SCREEN_PATHS.profile} navigate={navigate}>Open your profile</Button>
+    </AuthCard>
   )
 }
 
 /**
- * Sign-in, sign-up and the second-factor step: one `AuthForm` from `@spy4x/preact-system`. Without
- * callbacks each form posts to its page's route; with them the app takes the submit over.
+ * Sign-in, sign-up and the second-factor step: one `AuthForm` from `@spy4x/preact-system` in an
+ * {@link AuthCard}, with the link to the other mode under the card. Without callbacks each form
+ * posts to its page's route; with them the app takes the submit over.
  */
 export function AuthScreen(
   {
@@ -115,7 +133,6 @@ export function AuthScreen(
     isMfaRequired,
     busy,
     error,
-    onModeChange,
     onSignIn,
     onSignUp,
     onOneTimeCode,
@@ -124,82 +141,65 @@ export function AuthScreen(
   }: AuthScreenProps,
 ): JSX.Element {
   const copy = COPY[screen]
-  const footerLink = screen === "one-time-code"
-    ? (
-      <p class="text-sm">
-        Need help?{" "}
-        <Link href={withNext(SCREEN_PATHS.signIn, next)} navigate={navigate} class="pc-link">
-          Back to sign in
-        </Link>
-      </p>
-    )
-    : screen === "sign-in" && (
-      <p class="text-sm">
-        <Link href={SCREEN_PATHS.forgotPassword} navigate={navigate} class="pc-link">
-          Forgot your password?
-        </Link>
-      </p>
-    )
 
   if (screen === "one-time-code" && !isMfaRequired) {
     return (
-      <Notice
-        title="MFA not required"
-        text="Continue to profile."
-        link="Open profile"
+      <Done
+        title="No code needed"
+        text="This sign-in does not ask for a code."
         navigate={navigate}
       />
     )
   }
 
   if (screen !== "one-time-code" && isSignedIn) {
-    return (
-      <Notice
-        title="Already signed in"
-        text="Go to your profile."
-        link="Open profile"
-        navigate={navigate}
-      />
-    )
+    return <Done title="You are signed in" text="Nothing to do here." navigate={navigate} />
   }
 
+  const linkTo = (path: string, text: string) => (
+    <Link href={withNext(path, next)} navigate={navigate} class="pc-link font-medium">
+      {text}
+    </Link>
+  )
+  const after = screen === "sign-in"
+    ? <>New here? {linkTo(SCREEN_PATHS.signUp, "Create an account")}</>
+    : screen === "sign-up"
+    ? <>Already have an account? {linkTo(SCREEN_PATHS.signIn, "Sign in")}</>
+    : <>Lost your device? {linkTo(SCREEN_PATHS.signIn, "Back to sign in")}</>
+
   return (
-    <Card class="mx-auto w-full max-w-md">
-      <CardHeader>
-        <h1 class="text-lg font-semibold">{copy.title}</h1>
-      </CardHeader>
-      <CardBody>
-        <p class="mb-4 text-sm">{copy.description}</p>
-        <AuthForm
-          mode={screen === "one-time-code" ? "sign-in" : screen}
-          step={screen === "one-time-code" ? "one-time-code" : "credentials"}
-          action={ACTIONS[screen]}
-          busy={busy}
-          error={error}
-          labels={{
-            login: LOGIN_LABELS[screen],
-            codeHint: "Six digits from your authenticator app.",
-          }}
-          names={FIELD_NAMES[screen]}
-          onModeChange={onModeChange}
-          // The mode switch is a link to the other page, so it works before any script runs.
-          modeHrefs={{
-            "sign-in": withNext(SCREEN_PATHS.signIn, next),
-            "sign-up": withNext(SCREEN_PATHS.signUp, next),
-          }}
-          onSignIn={onSignIn}
-          onSignUp={onSignUp}
-          onOneTimeCode={onOneTimeCode}
-          footer={next || footerLink
-            ? (
-              <>
-                {next && <input type="hidden" name={NEXT_PARAM} value={next} />}
-                {footerLink}
-              </>
-            )
-            : undefined}
-        />
-      </CardBody>
-    </Card>
+    <AuthCard title={copy.title} description={copy.description} after={after}>
+      <AuthForm
+        mode={screen === "one-time-code" ? "sign-in" : screen}
+        step={screen === "one-time-code" ? "one-time-code" : "credentials"}
+        action={ACTIONS[screen]}
+        busy={busy}
+        error={error}
+        labels={{
+          login: LOGIN_LABELS[screen],
+          signUp: "Create account",
+          submitCode: "Continue",
+          codeHint: "Six digits from your authenticator app.",
+        }}
+        names={FIELD_NAMES[screen]}
+        onSignIn={onSignIn}
+        onSignUp={onSignUp}
+        onOneTimeCode={onOneTimeCode}
+        footer={next || screen === "sign-in"
+          ? (
+            <>
+              {next && <input type="hidden" name={NEXT_PARAM} value={next} />}
+              {screen === "sign-in" && (
+                <p class="text-center text-sm">
+                  <Link href={SCREEN_PATHS.forgotPassword} navigate={navigate} class="pc-link">
+                    Forgot your password?
+                  </Link>
+                </p>
+              )}
+            </>
+          )
+          : undefined}
+      />
+    </AuthCard>
   )
 }
