@@ -172,6 +172,7 @@ app.route(
     select: (command) => commandBus.execute(command),
     selected: (query) => queryBus.execute(query),
     rename: (command) => commandBus.execute(command),
+    updateDetails: (command) => commandBus.execute(command),
     delete: (command) => commandBus.execute(command),
     restore: (command) => commandBus.execute(command),
     deleted: (query) => queryBus.execute(query),

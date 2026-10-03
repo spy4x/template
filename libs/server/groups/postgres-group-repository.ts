@@ -14,6 +14,8 @@ import {
   GROUP_MEMBER_PREVIEW_LIMIT,
   GROUP_RESTORE_DAYS,
   GroupAccess,
+  GroupColor,
+  GroupDetails,
   GroupError,
   GroupListPage,
   GroupListResult,
@@ -37,6 +39,9 @@ import { revokeInvitationsOf } from "./invitation-revocation.ts"
 interface GroupRow extends postgres.Row {
   id: string
   name: string
+  description: string
+  color: GroupColor | null
+  emoji: string | null
   ownerUserId: number
   createdByUserId: number
   authorizationRevision: string
@@ -53,6 +58,9 @@ interface GroupAccessRow extends GroupRow {
 interface GroupSummaryRow extends postgres.Row {
   id: string
   name: string
+  description: string
+  color: GroupColor | null
+  emoji: string | null
   role: GroupRole
   authorizationRevision: string
   changeSequence: string
@@ -63,6 +71,9 @@ interface GroupSummaryRow extends postgres.Row {
 interface RenamedRow extends postgres.Row {
   id: string
   name: string
+  description: string
+  color: GroupColor | null
+  emoji: string | null
   authorizationRevision: string
   changeSequence: string
   updatedAt: Date
@@ -106,6 +117,7 @@ interface SelectionRow extends postgres.Row {
 
 const GROUP_CREATED_EVENT = "group.created"
 const GROUP_RENAMED_EVENT = "group.renamed"
+const GROUP_DETAILS_UPDATED_EVENT = "group.details_updated"
 const GROUP_DELETED_EVENT = "group.deleted"
 const GROUP_RESTORED_EVENT = "group.restored"
 const MEMBER_ROLE_CHANGED_EVENT = "group.member_role_changed"
@@ -136,6 +148,9 @@ export class PostgresGroupRepository implements GroupRepository {
       SELECT
         groups.id,
         groups.name,
+        groups.description,
+        groups.color,
+        groups.emoji,
         group_members.role,
         groups.authorization_revision::text AS authorization_revision,
         (groups.next_change_sequence - 1)::text AS change_sequence,
@@ -200,6 +215,9 @@ export class PostgresGroupRepository implements GroupRepository {
       SELECT
         groups.id,
         groups.name,
+        groups.description,
+        groups.color,
+        groups.emoji,
         group_members.role,
         groups.authorization_revision::text AS authorization_revision,
         (groups.next_change_sequence - 1)::text AS change_sequence,
@@ -223,6 +241,12 @@ export class PostgresGroupRepository implements GroupRepository {
         SELECT
           groups.id,
           groups.name,
+          groups.description,
+          groups.color,
+          groups.emoji,
+        groups.description,
+        groups.color,
+        groups.emoji,
           groups.owner_user_id,
           groups.created_by_user_id,
           groups.authorization_revision::text AS authorization_revision,
@@ -374,6 +398,9 @@ export class PostgresGroupRepository implements GroupRepository {
         RETURNING
           id,
           name,
+          description,
+          color,
+          emoji,
           owner_user_id,
           created_by_user_id,
           authorization_revision::text AS authorization_revision,
@@ -457,6 +484,9 @@ export class PostgresGroupRepository implements GroupRepository {
           RETURNING
             id,
             name,
+            description,
+            color,
+            emoji,
             authorization_revision::text AS authorization_revision,
             next_change_sequence::text AS change_sequence,
             updated_at
@@ -466,6 +496,47 @@ export class PostgresGroupRepository implements GroupRepository {
       await repository.audit(groupId, actorId, GROUP_RENAMED_EVENT, requestId)
       const sequence = await repository.recordChange(groupId, actorId, GROUP_RENAMED_EVENT)
       return { ...renamed, role, changeSequence: sequence }
+    })
+  }
+
+  async updateDetails(
+    groupId: string,
+    details: GroupDetails,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupSummary | null> {
+    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const repository = new PostgresGroupRepository(transaction)
+      // Whoever may rename may edit the details; the role is read on the locked membership row.
+      const role = await lockActorRole(transaction, groupId, actorId).catch((error) => {
+        if (error instanceof GroupNotActiveError) return null
+        throw error
+      })
+      if (role === null || !canRename(role)) return null
+      const updated = (
+        await transaction<RenamedRow[]>`
+          UPDATE groups
+          SET
+            description = ${details.description},
+            color = ${details.color},
+            emoji = ${details.emoji},
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ${groupId}
+          RETURNING
+            id,
+            name,
+            description,
+            color,
+            emoji,
+            authorization_revision::text AS authorization_revision,
+            next_change_sequence::text AS change_sequence,
+            updated_at
+        `
+      )[0]
+      if (!updated) return null
+      await repository.audit(groupId, actorId, GROUP_DETAILS_UPDATED_EVENT, requestId)
+      const sequence = await repository.recordChange(groupId, actorId, GROUP_DETAILS_UPDATED_EVENT)
+      return { ...updated, role, changeSequence: sequence }
     })
   }
 
@@ -555,6 +626,9 @@ export class PostgresGroupRepository implements GroupRepository {
       return {
         id: groupId,
         name: group.name,
+        description: group.description,
+        color: group.color,
+        emoji: group.emoji,
         role: GroupRole.OWNER,
         authorizationRevision: change.authorizationRevision,
         changeSequence: change.sequence,
@@ -594,6 +668,9 @@ export class PostgresGroupRepository implements GroupRepository {
       return {
         id: groupId,
         name: group.name,
+        description: group.description,
+        color: group.color,
+        emoji: group.emoji,
         role: GroupRole.OWNER,
         authorizationRevision: change.authorizationRevision,
         changeSequence: change.sequence,
@@ -607,6 +684,9 @@ export class PostgresGroupRepository implements GroupRepository {
       SELECT
         groups.id,
         groups.name,
+        groups.description,
+        groups.color,
+        groups.emoji,
         group_members.role,
         groups.authorization_revision::text AS authorization_revision,
         (groups.next_change_sequence - 1)::text AS change_sequence,
@@ -630,6 +710,12 @@ export class PostgresGroupRepository implements GroupRepository {
         SELECT
           groups.id,
           groups.name,
+          groups.description,
+          groups.color,
+          groups.emoji,
+        groups.description,
+        groups.color,
+        groups.emoji,
           groups.owner_user_id,
           groups.created_by_user_id,
           groups.authorization_revision::text AS authorization_revision,
@@ -907,10 +993,10 @@ export class PostgresGroupRepository implements GroupRepository {
     groupId: string,
     actorId: number,
     restorable: boolean,
-  ): Promise<{ name: string } | null> {
+  ): Promise<Pick<GroupSummaryRow, "name" | "description" | "color" | "emoji"> | null> {
     const row = (
-      await this.sql<{ name: string }[]>`
-        SELECT groups.name
+      await this.sql<Pick<GroupSummaryRow, "name" | "description" | "color" | "emoji">[]>`
+        SELECT groups.name, groups.description, groups.color, groups.emoji
         FROM groups
         INNER JOIN group_members
           ON group_members.group_id = groups.id
@@ -982,6 +1068,9 @@ function toGroup(row: GroupRow): Group {
   return {
     id: row.id,
     name: row.name,
+    description: row.description,
+    color: row.color,
+    emoji: row.emoji,
     ownerUserId: row.ownerUserId,
     createdByUserId: row.createdByUserId,
     authorizationRevision: row.authorizationRevision,
@@ -998,12 +1087,25 @@ function withStampedSequence(row: GroupRow, sequence: string): GroupRow {
 }
 
 function toSummary(
-  group: Pick<Group, "id" | "name" | "authorizationRevision" | "nextChangeSequence" | "updatedAt">,
+  group: Pick<
+    Group,
+    | "id"
+    | "name"
+    | "description"
+    | "color"
+    | "emoji"
+    | "authorizationRevision"
+    | "nextChangeSequence"
+    | "updatedAt"
+  >,
   role: GroupRole,
 ): GroupSummary {
   return {
     id: group.id,
     name: group.name,
+    description: group.description,
+    color: group.color,
+    emoji: group.emoji,
     role,
     authorizationRevision: group.authorizationRevision,
     changeSequence: (BigInt(group.nextChangeSequence) - 1n).toString(),

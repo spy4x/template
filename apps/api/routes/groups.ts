@@ -23,7 +23,9 @@ import {
   GroupSelectedQuery,
   type GroupSummary,
   GroupTransferCommand,
+  GroupUpdateDetailsCommand,
   parseCreateGroupRequest,
+  parseGroupDetailsBody,
   parseGroupId,
   parseGroupIdRequest,
   parseMemberRoleBody,
@@ -46,6 +48,7 @@ export interface GroupsRouteDependencies {
   select(command: GroupSelectCommand): Promise<SelectedGroup>
   selected(query: GroupSelectedQuery): Promise<SelectedGroup>
   rename(command: GroupRenameCommand): Promise<{ group: GroupSummary }>
+  updateDetails(command: GroupUpdateDetailsCommand): Promise<{ group: GroupSummary }>
   delete(command: GroupDeleteCommand): Promise<{ group: DeletedGroupSummary }>
   restore(command: GroupRestoreCommand): Promise<{ group: GroupSummary }>
   deleted(query: GroupDeletedListQuery): Promise<{ groups: DeletedGroupSummary[] }>
@@ -132,6 +135,21 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
             actor: actorFromAuth(c.get("auth")!),
             groupId,
             name,
+            requestId: c.get("requestId"),
+            idempotencyKey: c.req.header("idempotency-key"),
+          }),
+        ),
+      )
+    })
+    .put("/:groupId/details", requireSameOrigin, async (c) => {
+      const groupId = parseGroupId(c.req.param("groupId"))
+      const details = parseGroupDetailsBody(await readJsonBody(c))
+      return c.json(
+        await dependencies.updateDetails(
+          new GroupUpdateDetailsCommand({
+            actor: actorFromAuth(c.get("auth")!),
+            groupId,
+            ...details,
             requestId: c.get("requestId"),
             idempotencyKey: c.req.header("idempotency-key"),
           }),

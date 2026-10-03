@@ -32,6 +32,7 @@ import {
   GroupSelectCommand,
   GroupSelectedQuery,
   GroupTransferCommand,
+  GroupUpdateDetailsCommand,
   InvitationPreviewQuery,
   MyInvitationsQuery,
 } from "@domain/groups"
@@ -55,6 +56,7 @@ import { groupGetHandler } from "@api/cqrs/query-handlers/group-get.ts"
 import { groupListHandler } from "@api/cqrs/query-handlers/group-list.ts"
 import { groupSelectHandler } from "@api/cqrs/command-handlers/group-select.ts"
 import { groupRenameHandler } from "@api/cqrs/command-handlers/group-rename.ts"
+import { groupUpdateDetailsHandler } from "@api/cqrs/command-handlers/group-update-details.ts"
 import { groupDeleteHandler } from "@api/cqrs/command-handlers/group-delete.ts"
 import { groupRestoreHandler } from "@api/cqrs/command-handlers/group-restore.ts"
 import { groupDeletedListHandler } from "@api/cqrs/query-handlers/group-deleted-list.ts"
@@ -132,6 +134,7 @@ commandBus.register(PushRemoveCommand, pushRemoveHandler)
 commandBus.register(GroupCreateCommand, groupCreateHandler)
 commandBus.register(GroupSelectCommand, groupSelectHandler)
 commandBus.register(GroupRenameCommand, groupRenameHandler)
+commandBus.register(GroupUpdateDetailsCommand, groupUpdateDetailsHandler)
 commandBus.register(GroupDeleteCommand, groupDeleteHandler)
 commandBus.register(GroupRestoreCommand, groupRestoreHandler)
 commandBus.register(GroupMemberRoleCommand, groupMemberRoleHandler)

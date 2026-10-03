@@ -12,7 +12,9 @@ import {
   GroupRestoreCommand,
   GroupSelectCommand,
   GroupSelectedQuery,
+  GroupUpdateDetailsCommand,
   parseCreateGroupRequest,
+  parseGroupDetailsRequest,
   parseGroupId,
   parseGroupIdRequest,
   parseMemberRequest,
@@ -38,6 +40,7 @@ export interface GroupSocketDependencies extends GroupListDependencies {
   select(command: GroupSelectCommand): Promise<SelectedGroup>
   selected(query: GroupSelectedQuery): Promise<SelectedGroup>
   rename(command: GroupRenameCommand): Promise<{ group: GroupSummary }>
+  updateDetails(command: GroupUpdateDetailsCommand): Promise<{ group: GroupSummary }>
   delete(command: GroupDeleteCommand): Promise<{ group: DeletedGroupSummary }>
   restore(command: GroupRestoreCommand): Promise<{ group: GroupSummary }>
   deleted(query: GroupDeletedListQuery): Promise<{ groups: DeletedGroupSummary[] }>
@@ -95,6 +98,21 @@ export function createGroupSocketRequests(dependencies: GroupSocketDependencies)
         const { groupId, name } = parseRenameGroupRequest(payload)
         return await dependencies.rename(
           new GroupRenameCommand({ actor, groupId, name, requestId, idempotencyKey }),
+        )
+      },
+    },
+    "group.updateDetails": {
+      kind: "command",
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
+        const { groupId, ...details } = parseGroupDetailsRequest(payload)
+        return await dependencies.updateDetails(
+          new GroupUpdateDetailsCommand({
+            actor,
+            groupId,
+            ...details,
+            requestId,
+            idempotencyKey,
+          }),
         )
       },
     },

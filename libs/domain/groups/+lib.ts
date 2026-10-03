@@ -16,6 +16,18 @@ export const GROUP_AGGREGATE = "group"
  */
 export const GROUP_RESTORE_DAYS = 30
 
+/** Longest group description, in characters. */
+export const GROUP_DESCRIPTION_MAX = 500
+
+/**
+ * The colours a group can carry: names of the design tokens' palette, never a hex value, so the
+ * theme decides the shade in light and dark. Adding a name here and in `group-appearance.tsx`
+ * is all a new colour needs; the database stores the name.
+ */
+export const GROUP_COLORS = ["red", "orange", "green", "blue", "purple", "gray"] as const
+
+export type GroupColor = typeof GROUP_COLORS[number]
+
 export enum GroupRole {
   VIEWER = 1,
   EDITOR = 2,
@@ -51,6 +63,12 @@ export class GroupError extends Error {
 export interface Group {
   id: string
   name: string
+  /** Up to {@link GROUP_DESCRIPTION_MAX} characters; empty when unset. */
+  description: string
+  /** `null` when the group has no colour. */
+  color: GroupColor | null
+  /** One emoji, or `null` when the group has none. */
+  emoji: string | null
   ownerUserId: number
   createdByUserId: number
   authorizationRevision: string
@@ -72,6 +90,12 @@ export interface GroupMembership {
 export interface GroupSummary {
   id: string
   name: string
+  /** See {@link Group.description}. */
+  description: string
+  /** See {@link Group.color}. */
+  color: GroupColor | null
+  /** See {@link Group.emoji}. */
+  emoji: string | null
   role: GroupRole
   /**
    * How many members the group has, and the first few of them in the order they joined: what the
@@ -194,6 +218,32 @@ export interface GroupRenamePayload {
 export class GroupRenameCommand implements Command<GroupRenamePayload, { group: GroupSummary }> {
   __resultType?: { group: GroupSummary }
   constructor(public data: GroupRenamePayload) {}
+}
+
+/** The three optional details of a group, as an edit sets them all at once. */
+export interface GroupDetails {
+  description: string
+  color: GroupColor | null
+  emoji: string | null
+}
+
+export interface GroupUpdateDetailsPayload extends GroupDetails {
+  actor: Actor
+  groupId: string
+  requestId?: string
+  /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
+  idempotencyKey?: string
+}
+
+/**
+ * Sets a group's description, colour and emoji. Whoever may rename the group may ({@link
+ * canRename}); a viewer or editor is refused with `ROLE_INSUFFICIENT`, and a non-member is told
+ * `GROUP_NOT_FOUND`. It announces the change like a rename, so every member's page reads again.
+ */
+export class GroupUpdateDetailsCommand
+  implements Command<GroupUpdateDetailsPayload, { group: GroupSummary }> {
+  __resultType?: { group: GroupSummary }
+  constructor(public data: GroupUpdateDetailsPayload) {}
 }
 
 export interface GroupDeletePayload {
@@ -458,6 +508,16 @@ export interface GroupRepository {
     requestId?: string,
   ): Promise<GroupSummary | null>
   /**
+   * Sets the group's description, colour and emoji and announces the change. `null` when the actor
+   * may not edit them or the group is missing or deleted.
+   */
+  updateDetails(
+    groupId: string,
+    details: GroupDetails,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupSummary | null>
+  /**
    * Soft-deletes the group, in one transaction: refuses with `LAST_GROUP` when it is the actor's
    * only active group; gives every other member who would be left with no group a new one; and
    * announces the change. `null` when the group is missing or already deleted.
@@ -520,6 +580,8 @@ const GROUP_ID_KEYS = ["groupId"]
 const CREATE_KEYS = ["id", "name"]
 const RENAME_BODY_KEYS = ["name"]
 const RENAME_KEYS = ["groupId", "name"]
+const DETAILS_BODY_KEYS = ["color", "description", "emoji"]
+const DETAILS_KEYS = ["color", "description", "emoji", "groupId"]
 
 function hasExactKeys(value: unknown, keys: string[]): value is Record<string, unknown> {
   return isRecord(value) && Object.keys(value).sort().join(",") === keys.join(",")
@@ -559,6 +621,82 @@ export function parseRenameGroupRequest(value: unknown): { groupId: string; name
     throw new GroupError("INVALID_REQUEST", "Expected exactly groupId and name")
   }
   return { groupId: parseGroupId(value.groupId), name: parseGroupName(value.name) }
+}
+
+/** A group description: at most {@link GROUP_DESCRIPTION_MAX} characters once trimmed, may be empty. */
+export function parseGroupDescription(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new GroupError("INVALID_REQUEST", "Group description must be a string")
+  }
+  const description = value.trim()
+  if (Array.from(description).length > GROUP_DESCRIPTION_MAX) {
+    throw new GroupError(
+      "INVALID_REQUEST",
+      `Group description must contain at most ${GROUP_DESCRIPTION_MAX} characters`,
+    )
+  }
+  return description
+}
+
+/** A group colour: one of {@link GROUP_COLORS}, or `null` for none. */
+export function parseGroupColor(value: unknown): GroupColor | null {
+  if (value === null) return null
+  if (typeof value === "string" && (GROUP_COLORS as readonly string[]).includes(value)) {
+    return value as GroupColor
+  }
+  throw new GroupError(
+    "INVALID_REQUEST",
+    `Group colour must be null or one of ${GROUP_COLORS.join(", ")}`,
+  )
+}
+
+const EMOJI_PATTERN = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+
+/**
+ * A group emoji: exactly one grapheme (a flag, a family or a skin-toned hand counts as one) that
+ * is an emoji, or `null` or an empty string for none. Letters, digits and several emoji are
+ * refused.
+ */
+export function parseGroupEmoji(value: unknown): string | null {
+  if (value === null) return null
+  if (typeof value !== "string") {
+    throw new GroupError("INVALID_REQUEST", "Group emoji must be a string or null")
+  }
+  const emoji = value.trim()
+  if (emoji === "") return null
+  const graphemes = Array.from(GRAPHEMES.segment(emoji))
+  if (graphemes.length !== 1 || !EMOJI_PATTERN.test(emoji)) {
+    throw new GroupError("INVALID_REQUEST", "Group emoji must be a single emoji")
+  }
+  return emoji
+}
+
+function parseGroupDetails(value: Record<string, unknown>): GroupDetails {
+  return {
+    description: parseGroupDescription(value.description),
+    color: parseGroupColor(value.color),
+    emoji: parseGroupEmoji(value.emoji),
+  }
+}
+
+/** The body of a details update over REST, where the path names the group: the three fields. */
+export function parseGroupDetailsBody(value: unknown): GroupDetails {
+  if (!hasExactKeys(value, DETAILS_BODY_KEYS)) {
+    throw new GroupError("INVALID_REQUEST", "Expected exactly description, color and emoji")
+  }
+  return parseGroupDetails(value)
+}
+
+/** The payload of a details update over the socket: `{ groupId }` and the three fields. */
+export function parseGroupDetailsRequest(value: unknown): GroupDetails & { groupId: string } {
+  if (!hasExactKeys(value, DETAILS_KEYS)) {
+    throw new GroupError(
+      "INVALID_REQUEST",
+      "Expected exactly groupId, description, color and emoji",
+    )
+  }
+  return { groupId: parseGroupId(value.groupId), ...parseGroupDetails(value) }
 }
 
 /**
@@ -708,6 +846,20 @@ export function assertCanRename(role: GroupRole | null): void {
   if (role === null || !canRead(role)) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
   if (!canRename(role)) {
     throw new GroupError("ROLE_INSUFFICIENT", "Only an admin or the owner can rename a group")
+  }
+}
+
+/**
+ * Throws unless `role` may edit the group's description, colour and emoji: whoever may rename it.
+ * See {@link assertCanRename}.
+ */
+export function assertCanEditDetails(role: GroupRole | null): void {
+  if (role === null || !canRead(role)) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+  if (!canRename(role)) {
+    throw new GroupError(
+      "ROLE_INSUFFICIENT",
+      "Only an admin or the owner can edit a group's details",
+    )
   }
 }
 

@@ -2,6 +2,8 @@ import {
   type CreatedGroup,
   type DeletedGroupSummary,
   type GroupAccess,
+  type GroupColor,
+  type GroupDetails,
   GroupError,
   type GroupListPage,
   type GroupListResult,
@@ -29,6 +31,9 @@ export class MemoryGroupRepository implements GroupRepository {
   /** The request id each write received, in order, so a test sees it reach the audit trail. */
   requestIds: (string | undefined)[] = []
   name: string
+  description = ""
+  color: GroupColor | null = null
+  emoji: string | null = null
   deleted = false
   lastGroup = false
   /** The group has a live subscription: a delete fails as the database refuses it. */
@@ -49,6 +54,9 @@ export class MemoryGroupRepository implements GroupRepository {
       group: {
         id: this.groupId,
         name: this.name,
+        description: this.description,
+        color: this.color,
+        emoji: this.emoji,
         ownerUserId: 1,
         createdByUserId: 1,
         authorizationRevision: "1",
@@ -65,6 +73,9 @@ export class MemoryGroupRepository implements GroupRepository {
     return {
       id: this.groupId,
       name: this.name,
+      description: this.description,
+      color: this.color,
+      emoji: this.emoji,
       role,
       authorizationRevision: "1",
       changeSequence: "2",
@@ -89,6 +100,22 @@ export class MemoryGroupRepository implements GroupRepository {
     const access = this.#access(actorId, false)
     if (!access) return Promise.resolve(null)
     this.name = name
+    this.writes++
+    this.requestIds.push(requestId)
+    return Promise.resolve(this.#summary(access.role))
+  }
+
+  updateDetails(
+    _groupId: string,
+    details: GroupDetails,
+    actorId: number,
+    requestId?: string,
+  ): Promise<GroupSummary | null> {
+    const access = this.#access(actorId, false)
+    if (!access) return Promise.resolve(null)
+    this.description = details.description
+    this.color = details.color
+    this.emoji = details.emoji
     this.writes++
     this.requestIds.push(requestId)
     return Promise.resolve(this.#summary(access.role))
