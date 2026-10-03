@@ -117,22 +117,24 @@ test.describe("group members", () => {
       await expect(memberPage.locator("[data-e2e=group-general-role]")).toHaveText("Editor")
       // An editor reads the members but has no control over them.
       await expect(memberPage.locator("[data-e2e=group-member]")).toHaveCount(2)
-      await expect(memberPage.locator("[data-e2e=group-member-role-select]")).toHaveCount(0)
+      await expect(memberPage.locator("[data-e2e=group-member-menu]")).toHaveCount(0)
       // Mark the page, so a reload would show as a missing mark.
       await memberPage.evaluate(() => Object.assign(globalThis, { notReloaded: true }))
 
       await gotoApp(page, `/groups/${groupId}`, settingsReady(page))
       const row = page.locator("[data-e2e=group-member]").filter({ hasText: member })
-      await row.getByLabel(`Role of ${member}`).selectOption({ label: "Viewer" })
-      await row.getByRole("button", { name: "Change role" }).click()
+      await row.getByRole("button", { name: `Actions for ${member}` }).click()
+      await page.getByRole("menuitem", { name: "Make Viewer" }).click()
       await expect(row.locator("[data-e2e=group-member-role]")).toHaveText("Viewer")
 
       await expect(memberPage.locator("[data-e2e=group-general-role]")).toHaveText("Viewer")
       await expect(memberPage.locator(`[data-user-id] [data-e2e=group-member-role]`).last())
         .toHaveText("Viewer")
 
-      await row.getByText(`Remove ${member}...`).click()
-      await row.getByRole("button", { name: "Remove member" }).click()
+      await row.getByRole("button", { name: `Actions for ${member}` }).click()
+      await page.getByRole("menuitem", { name: "Remove from group" }).click()
+      await page.locator("[data-e2e=group-member-remove-dialog]")
+        .getByRole("button", { name: "Remove member" }).click()
       await expect(page.locator("[data-e2e=group-member]")).toHaveCount(1)
 
       await expect(memberPage.getByText("This group does not exist.")).toBeVisible()
@@ -168,8 +170,8 @@ test.describe("group members", () => {
       // The member's page has its answer from REST, and its socket is not yet known to the server.
       await gotoApp(page, `/groups/${groupId}`, settingsReady(page))
       const row = page.locator("[data-e2e=group-member]").filter({ hasText: member })
-      await row.getByLabel(`Role of ${member}`).selectOption({ label: "Viewer" })
-      await row.getByRole("button", { name: "Change role" }).click()
+      await row.getByRole("button", { name: `Actions for ${member}` }).click()
+      await page.getByRole("menuitem", { name: "Make Viewer" }).click()
       await expect(row.locator("[data-e2e=group-member-role]")).toHaveText("Viewer")
       await expect(memberPage.locator("[data-e2e=shell-ws-status]")).not.toHaveText("Online")
 
@@ -197,16 +199,18 @@ test.describe("group members", () => {
       const groupId = await teamWith(page, request, member, 1)
 
       await gotoApp(page, `/groups/${groupId}`, settingsReady(page))
-      await expect(page.locator("[data-e2e=group-leave-why]"))
-        .toHaveText("You own this group, so you cannot leave it.")
-      await expect(page.locator("[data-e2e=group-leave]")).toHaveCount(0)
+      await page.getByRole("button", { name: "More actions" }).click()
+      await expect(page.getByRole("menuitem", { name: "Delete group" })).toBeVisible()
+      await expect(page.locator("[data-e2e=group-leave-open]")).toHaveCount(0)
+      await page.keyboard.press("Escape")
 
       memberPage = await personPage(browser, member)
       await gotoApp(memberPage, `/groups/${groupId}`, settingsReady(memberPage))
-      await memberPage.getByText("Leave this group...").click()
-      await expect(memberPage.locator("[data-e2e=group-leave-confirmation]"))
-        .toContainText('Leave "Team"?')
-      await memberPage.getByRole("button", { name: "Leave group" }).click()
+      await memberPage.getByRole("button", { name: "More actions" }).click()
+      await memberPage.getByRole("menuitem", { name: "Leave group" }).click()
+      const dialog = memberPage.locator("[data-e2e=group-leave-dialog]")
+      await expect(dialog).toContainText('Leave "Team"?')
+      await dialog.getByRole("button", { name: "Leave group" }).click()
       await expect(memberPage).toHaveURL("/groups")
       await expect(memberPage.locator("[data-e2e=group-item-name]")).toHaveText(["Personal"])
 

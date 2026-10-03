@@ -47,8 +47,9 @@ test.describe("group ownership transfer", () => {
 
       await signIn(page, owner, password)
       await gotoApp(page, `/groups/${groupId}`, settingsReady(page))
-      const section = page.locator("[data-e2e=group-section-transfer]")
-      await section.getByText("Transfer ownership...").click()
+      await page.getByRole("button", { name: "More actions" }).click()
+      await page.getByRole("menuitem", { name: "Transfer ownership" }).click()
+      const section = page.getByRole("dialog", { name: 'Transfer "Team"' })
       await expect(section.locator("[data-e2e=group-transfer-member]")).toHaveValue(/\d+/)
       await section.locator("[data-e2e=group-transfer-name]").fill("Team")
       await section.locator("[data-e2e=group-transfer-password]").fill("wrong-password")
@@ -67,7 +68,8 @@ test.describe("group ownership transfer", () => {
       await signIn(memberPage, member, password)
       await gotoApp(memberPage, `/groups/${groupId}`, settingsReady(memberPage))
       await expect(memberPage.locator("[data-e2e=group-general-role]")).toHaveText("Owner")
-      await expect(memberPage.locator("[data-e2e=group-section-transfer]")).toBeVisible()
+      await memberPage.getByRole("button", { name: "More actions" }).click()
+      await expect(memberPage.getByRole("menuitem", { name: "Transfer ownership" })).toBeVisible()
     } finally {
       await memberPage?.context().close()
       for (const email of [owner, member]) await cleanup(request, email, { soft: true })
