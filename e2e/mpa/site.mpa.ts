@@ -36,3 +36,17 @@ test("robots.txt points crawlers at a sitemap that lists the pricing page", asyn
   expect(sitemap.ok()).toBe(true)
   expect(await sitemap.text()).toContain(`<loc>${new URL(baseURL!).origin}/pricing</loc>`)
 })
+
+test("the home page fits a 375 px phone: the quick start scrolls inside its own box", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.goto("/")
+
+  const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+  expect(pageWidth).toBeLessThanOrEqual(375)
+  const quickStart = page.locator("#quick-start pre")
+  const box = await quickStart.evaluate((pre) => ({
+    client: pre.clientWidth,
+    scroll: pre.scrollWidth,
+  }))
+  expect(box.scroll).toBeGreaterThan(box.client)
+})

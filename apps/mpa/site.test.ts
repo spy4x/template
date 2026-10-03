@@ -104,6 +104,15 @@ describe("the public website", () => {
     expect(html).toContain(`<link rel="canonical" href="${site}/pricing"`)
   })
 
+  it("names the trial of every plan that has one, with its length from the catalog", async () => {
+    const { html } = await page("/pricing")
+
+    const withTrial = PLANS.filter((plan) => plan.trialDays > 0)
+    expect(withTrial.length).toBeGreaterThan(0)
+    for (const plan of withTrial) expect(html).toContain(`The first ${plan.trialDays} days free`)
+    expect(html.match(/days free/g)).toHaveLength(withTrial.length)
+  })
+
   it("sends a plan chosen without JavaScript to the SPA's sign-up", async () => {
     const response = await handler(
       new Request(`${site}/pricing`, {
