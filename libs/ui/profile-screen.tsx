@@ -12,7 +12,7 @@ import { Input } from "@spy4x/preact-ui/input"
 import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
 import type { EmailStatus, UserMFAStatus, UserPushTokenPublic } from "@domain/identity"
-import { PageHeader } from "./page-header.tsx"
+import { PageHeader, TOUCH_TARGET } from "./page-header.tsx"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
 import { useSucceeded } from "./use-succeeded.ts"
@@ -231,10 +231,11 @@ export function ProfileScreen(
                 type="button"
                 variant="secondary"
                 size="sm"
+                class={TOUCH_TARGET}
                 data-e2e="profile-edit"
                 onClick={() => setEditingName(true)}
               >
-                Edit
+                Edit <span class="sr-only">name</span>
               </Button>
             }
           />
@@ -247,9 +248,11 @@ export function ProfileScreen(
                 navigate={navigate}
                 variant="secondary"
                 size="sm"
+                class={TOUCH_TARGET}
                 data-e2e="profile-email-link"
               >
-                {email?.email === null ? "Add" : "Change"}
+                {email?.email === null ? "Add" : "Change"}{" "}
+                <span class="sr-only">e-mail address</span>
               </Button>
             }
           />
@@ -266,10 +269,11 @@ export function ProfileScreen(
                 type="button"
                 variant="secondary"
                 size="sm"
+                class={TOUCH_TARGET}
                 data-e2e="password-open"
                 onClick={() => setChangingPassword(true)}
               >
-                Change
+                Change <span class="sr-only">password</span>
               </Button>
             }
           />
@@ -291,11 +295,12 @@ export function ProfileScreen(
                   type="button"
                   variant="ghost"
                   size="sm"
+                  class={TOUCH_TARGET}
                   data-e2e="totp-disable"
                   disabled={pending.totp}
                   onClick={() => setConfirmingDisable(true)}
                 >
-                  Turn off
+                  Turn off <span class="sr-only">two-factor sign-in</span>
                 </Button>
               )
               : (
@@ -309,11 +314,12 @@ export function ProfileScreen(
                     type="submit"
                     variant="secondary"
                     size="sm"
+                    class={TOUCH_TARGET}
                     data-e2e="totp-start"
                     busy={pending.totp && step === TwoFactorStep.Enable}
                     busyLabel="Preparing..."
                   >
-                    Turn on
+                    Turn on <span class="sr-only">two-factor sign-in</span>
                   </Button>
                 </ScreenForm>
               )}
@@ -358,10 +364,11 @@ export function ProfileScreen(
                           type="submit"
                           variant="ghost"
                           size="sm"
+                          class={TOUCH_TARGET}
                           data-e2e={`push-remove-${device.deviceId}`}
                           disabled={pending.push}
                         >
-                          Remove
+                          Remove <span class="sr-only">device {device.deviceId.slice(0, 8)}</span>
                         </Button>
                       </ScreenForm>
                     }

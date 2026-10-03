@@ -4,8 +4,8 @@ import { Button, type ButtonVariant } from "@spy4x/preact-ui/button"
 import { Dropdown } from "@spy4x/preact-ui/dropdown"
 import type { Navigate } from "./progressive.tsx"
 
-/** Touch targets in the header are 44 px on a phone and the library's own size from `sm` up. */
-const TOUCH = "min-h-11 min-w-11 justify-center sm:min-h-9 sm:min-w-9"
+/** A touch target of 44 px on a phone and the library's own size from `sm` up, for small buttons. */
+export const TOUCH_TARGET = "min-h-11 min-w-11 justify-center sm:min-h-9 sm:min-w-9"
 
 export interface PageHeaderProps {
   /** The page's `h1`. It stays on one line and truncates; the full text is its tooltip. */
@@ -50,7 +50,7 @@ export function PageHeader(
           variant="icon"
           size="md"
           aria-label={back.label}
-          class={`-ml-2 ${TOUCH}`}
+          class={`-ml-2 ${TOUCH_TARGET}`}
           data-e2e="page-back"
         >
           <IconArrowLeft class="size-5" aria-hidden="true" />
@@ -74,7 +74,7 @@ export function PageHeader(
               triggerLabel={menuLabel ?? "More actions"}
               menuLabel={menuLabel ?? "More actions"}
               triggerDataE2E={menuDataE2E}
-              triggerClasses={`inline-flex items-center rounded-md text-muted hover:bg-hover hover:text-foreground ${TOUCH}`}
+              triggerClasses={`inline-flex items-center rounded-md text-muted hover:bg-hover hover:text-foreground ${TOUCH_TARGET}`}
               trigger={<IconEllipsisVertical class="size-5" aria-hidden="true" />}
             >
               {menu}
@@ -120,7 +120,7 @@ export function PageAction(
         navigate={navigate}
         variant={variant}
         disabled={disabled}
-        class={TOUCH}
+        class={TOUCH_TARGET}
         data-e2e={dataE2E}
       >
         {content}
@@ -132,7 +132,7 @@ export function PageAction(
         variant={variant}
         onClick={onClick}
         disabled={disabled}
-        class={TOUCH}
+        class={TOUCH_TARGET}
         data-e2e={dataE2E}
       >
         {content}

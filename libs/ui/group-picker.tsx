@@ -53,7 +53,7 @@ export function GroupPicker({ groups, selectedId, onSelect }: GroupPickerData): 
           </span>
         )}
         showClearButton={false}
-        inputClass="h-9 text-sm font-medium"
+        inputClass="h-11 text-sm font-medium sm:h-9"
         placeholder="Select a group"
         emptyMessage="No group matches"
       />

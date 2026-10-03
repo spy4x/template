@@ -9,7 +9,7 @@ import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
 import { Notice } from "@spy4x/preact-ui/notice"
 import { type EmailStatus, emailToVerify } from "@domain/identity"
-import { PageHeader } from "./page-header.tsx"
+import { PageHeader, TOUCH_TARGET } from "./page-header.tsx"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
 import { useSucceeded } from "./use-succeeded.ts"
@@ -36,7 +36,13 @@ export function EmailBanner(
       tone="warning"
       data-e2e="email-banner"
       action={
-        <Button href={SCREEN_PATHS.email} navigate={navigate} variant="outline" size="sm">
+        <Button
+          href={SCREEN_PATHS.email}
+          navigate={navigate}
+          variant="outline"
+          size="sm"
+          class={TOUCH_TARGET}
+        >
           Enter the code
         </Button>
       }
@@ -184,10 +190,11 @@ export function EmailScreen(
               type="button"
               variant="secondary"
               size="sm"
+              class={TOUCH_TARGET}
               data-e2e="email-change-open"
               onClick={() => setChanging(true)}
             >
-              {hasEmail ? "Change" : "Add"}
+              {hasEmail ? "Change" : "Add"} <span class="sr-only">e-mail address</span>
             </Button>
           }
         />
@@ -248,6 +255,7 @@ export function EmailScreen(
                   type="submit"
                   variant="ghost"
                   size="sm"
+                  class={TOUCH_TARGET}
                   data-e2e="email-send"
                   busy={pending.send}
                   busyLabel="Sending..."

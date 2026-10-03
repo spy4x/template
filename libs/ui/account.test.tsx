@@ -181,6 +181,21 @@ describe("AppFrame", () => {
     expect(status.className).not.toContain("sr-only")
   })
 
+  it("gives the group picker a 44 px touch target below the sm breakpoint", async () => {
+    const groups = [{ id: "g-1", name: "Home", role: GroupRole.OWNER }]
+    await mount(
+      <AppFrame
+        user={ada}
+        onSignOut={() => {}}
+        groupPicker={{ groups, selectedId: "g-1", onSelect: () => {} }}
+      >
+        page
+      </AppFrame>,
+    )
+
+    expect(find("#sidebar-group-picker").classList.contains("h-11")).toBe(true)
+  })
+
   it("selects the group the person picks from the header's list, with a check mark on the current one", async () => {
     const select = spy<[string]>()
     const groups = [
@@ -287,6 +302,25 @@ describe("ProfileScreen", () => {
     expect(document.body.textContent).not.toContain("Not verified")
     expect(isOpen("profile-dialog")).toBe(false)
     expect(isOpen("password-dialog")).toBe(false)
+  })
+
+  it("names each row action after its setting, so a screen reader can tell them apart", async () => {
+    await mount(<ProfileScreen {...profileDefaults} />)
+
+    const name = (hook: string) => find(`[data-e2e=${hook}]`).textContent
+    expect(name("profile-edit")).toBe("Edit name")
+    expect(name("profile-email-link")).toBe("Change e-mail address")
+    expect(name("password-open")).toBe("Change password")
+    expect(name("totp-start")).toBe("Turn on two-factor sign-in")
+  })
+
+  it("gives each row action a 44 px touch target below the sm breakpoint", async () => {
+    await mount(<ProfileScreen {...profileDefaults} />)
+
+    for (const hook of ["profile-edit", "profile-email-link", "password-open", "totp-start"]) {
+      const classes = find(`[data-e2e=${hook}]`).classList
+      expect([hook, classes.contains("min-h-11")]).toEqual([hook, true])
+    }
   })
 
   it("names each settings group by its own h2, under the page's one h1", async () => {
@@ -554,6 +588,16 @@ describe("EmailScreen", () => {
     expect(find("[data-e2e=email-change-dialog]").textContent).toContain("Invalid password")
   })
 
+  it("names the change action after the address and gives the row actions a 44 px target on a phone", async () => {
+    await mount(<EmailScreen {...emailDefaults} />)
+
+    expect(find("[data-e2e=email-change-open]").textContent).toBe("Change e-mail address")
+    for (const hook of ["email-change-open", "email-send"]) {
+      const classes = find(`[data-e2e=${hook}]`).classList
+      expect([hook, classes.contains("min-h-11")]).toEqual([hook, true])
+    }
+  })
+
   it("tells a username account that the address replaces the username for sign-in", async () => {
     const status = { email: null, proven: false, pending: null }
     await mount(<EmailScreen {...emailDefaults} status={status} />)
@@ -591,6 +635,11 @@ describe("EmailBanner", () => {
     const html = renderToString(<EmailBanner status={emailDefaults.status} />)
     expect(html).toMatch(/<a [^>]*href="\/email"[^>]*>Enter the code<\/a>/)
     expect(html).toContain("ann@example.com")
+  })
+
+  it("gives its link a 44 px touch target on a phone", () => {
+    const html = renderToString(<EmailBanner status={emailDefaults.status} />)
+    expect(html).toMatch(/<a [^>]*class="[^"]*\bmin-h-11\b[^"]*"[^>]*>Enter the code<\/a>/)
   })
 
   it("draws nothing once the address is proven, or before its state is known", () => {
