@@ -436,6 +436,111 @@ describe("GroupSettingsScreen header", () => {
     expect(focused()).toBe("group-delete-error")
   })
 
+  describe("move all data", () => {
+    const targets = [{ id: "g2", name: "Archive" }, { id: "g3", name: "Home" }]
+    const mover = { ...defaults, moveTargets: targets }
+
+    it("offers the move to an editor with a group to move to, and to no one else", async () => {
+      const move = spy<[string]>()
+      const screen = (props: Partial<GroupSettingsScreenProps>) => (
+        <GroupSettingsScreen {...mover} onMoveAll={move.fn} {...props} />
+      )
+      await mount(screen({ group: { ...team, role: GroupRole.EDITOR } }))
+      expect(has("[data-e2e=group-move-all-open]")).toBe(true)
+      await rerender(screen({ group: { ...team, role: GroupRole.VIEWER } }))
+      expect(has("[data-e2e=group-move-all-open]")).toBe(false)
+      await rerender(screen({ moveTargets: [] }))
+      expect(has("[data-e2e=group-move-all-open]")).toBe(false)
+      await rerender(<GroupSettingsScreen {...mover} />)
+      expect(has("[data-e2e=group-move-all-open]")).toBe(false)
+    })
+
+    it("moves to the group the person picks, and closes without moving on Cancel", async () => {
+      const move = spy<[string]>()
+      await mount(<GroupSettingsScreen {...mover} onMoveAll={move.fn} />)
+      await click("[data-e2e=group-move-all-open]")
+      expect(texts("[data-e2e=group-move-all-to] option")).toEqual(["Archive", "Home"])
+      await clickText("[data-e2e=group-move-all-dialog]", "Cancel")
+      expect(has("[data-e2e=group-move-all-dialog]")).toBe(false)
+      expect(move.calls).toHaveLength(0)
+
+      await click("[data-e2e=group-move-all-open]")
+      await choose("[data-e2e=group-move-all-to]", "g3")
+      await submit("[data-e2e=group-move-all-dialog] form")
+      expect(move.calls).toEqual([["g3"]])
+    })
+
+    it("refuses a second submit while the move runs and shows a refusal in the dialog", async () => {
+      const move = spy<[string]>()
+      const screen = (props: Partial<GroupSettingsScreenProps>) => (
+        <GroupSettingsScreen {...mover} onMoveAll={move.fn} {...props} />
+      )
+      await mount(screen({}))
+      await click("[data-e2e=group-move-all-open]")
+      await rerender(screen({ movingAll: true }))
+      await submit("[data-e2e=group-move-all-dialog] form")
+      expect(move.calls).toHaveLength(0)
+      await rerender(screen({ moveAllError: "Free groups hold 10 notes." }))
+      expect(find("[data-e2e=group-move-all-dialog]").textContent).toContain(
+        "Free groups hold 10 notes.",
+      )
+    })
+
+    it("says how many items moved and offers to delete the group or keep it", async () => {
+      const closed = spy<[]>()
+      const remove = spy<[]>()
+      const screen = (props: Partial<GroupSettingsScreenProps>) => (
+        <GroupSettingsScreen
+          {...mover}
+          onMoveAll={() => {}}
+          onDelete={remove.fn}
+          onMoveAllClose={closed.fn}
+          {...props}
+        />
+      )
+      await mount(screen({}))
+      await click("[data-e2e=group-move-all-open]")
+      await rerender(screen({ moveAllResult: { count: 3, toName: "Archive" } }))
+      expect(find("[data-e2e=group-move-all-done]").textContent).toContain(
+        `Moved 3 items from "Team" to "Archive"`,
+      )
+
+      await click("[data-e2e=group-move-all-delete]")
+      expect(closed.calls).toHaveLength(1)
+      expect(has("[data-e2e=group-move-all-dialog]")).toBe(false)
+      expect(find("[data-e2e=group-delete-dialog]").textContent).toContain(`Delete "Team"?`)
+      expect(remove.calls).toHaveLength(0)
+    })
+
+    it("offers no delete after the move when the group cannot be deleted, and keeping the group closes", async () => {
+      const closed = spy<[]>()
+      const result = { count: 1, toName: "Archive" }
+      await mount(
+        <GroupSettingsScreen
+          {...mover}
+          onMoveAll={() => {}}
+          onMoveAllClose={closed.fn}
+          hasSubscription
+        />,
+      )
+      await click("[data-e2e=group-move-all-open]")
+      await rerender(
+        <GroupSettingsScreen
+          {...mover}
+          onMoveAll={() => {}}
+          onMoveAllClose={closed.fn}
+          hasSubscription
+          moveAllResult={result}
+        />,
+      )
+      expect(has("[data-e2e=group-move-all-delete]")).toBe(false)
+      expect(find("[data-e2e=group-move-all-done]").textContent).toContain("Moved 1 item ")
+      await click("[data-e2e=group-move-all-keep]")
+      expect(closed.calls).toHaveLength(1)
+      expect(has("[data-e2e=group-move-all-dialog]")).toBe(false)
+    })
+  })
+
   it("closes the delete dialog on Cancel without deleting", async () => {
     const remove = spy<[]>()
     await mount(<GroupSettingsScreen {...defaults} onDelete={remove.fn} />)

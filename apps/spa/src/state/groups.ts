@@ -1,6 +1,6 @@
 import { signal } from "@preact/signals"
 import { RealtimeRequestError } from "@spy4x/realtime"
-import type { GroupColor, GroupDetails, GroupRole } from "@domain/groups"
+import type { GroupColor, GroupDetails, GroupMoveAllResult, GroupRole } from "@domain/groups"
 import { apiFetch } from "./api.ts"
 import { advanceGroupCursor, realtimeCommand, realtimeQuery } from "./realtime.ts"
 import { offlineGroups } from "../offline/groups-offline.ts"
@@ -49,6 +49,8 @@ export interface GroupsDependencies {
   /** Deletes a group, softly: its owner can restore it for 30 days. */
   remove(input: { groupId: string }): Promise<{ group: DeletedGroupItem }>
   restore(input: { groupId: string }): Promise<{ group: GroupItem }>
+  /** Moves every live note of a group to another group, all or nothing. */
+  moveAll(input: { groupId: string; toGroupId: string }): Promise<GroupMoveAllResult>
   /** Records that this page holds a group up to a sequence. */
   advance(groupId: string, sequence: number): void
   newId(): string
@@ -57,7 +59,7 @@ export interface GroupsDependencies {
 }
 
 /** The changes to an existing group the store can make. */
-export type GroupAction = "rename" | "details" | "delete" | "restore"
+export type GroupAction = "rename" | "details" | "delete" | "restore" | "moveAll"
 
 /** How a read reaches the API. */
 export type ReadChannel = "rest" | "socket"
@@ -88,6 +90,8 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
   const actionError = signal<{ groupId: string; action: GroupAction; message: string } | null>(
     null,
   )
+  /** The last move of a group's data that worked, until the person closes its dialog. */
+  const moved = signal<{ groupId: string; toGroupId: string; count: number } | null>(null)
   const loading = signal(false)
   const creating = signal(false)
   const error = signal<string | null>(null)
@@ -249,7 +253,26 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
     }, "Could not restore the group")
   }
 
+  /**
+   * Moves everything in a group to another group. Resolves to whether it worked; `moved` then holds
+   * how many items went, and the notes of both groups follow through their own change events.
+   */
+  async function moveAll(groupId: string, toGroupId: string): Promise<boolean> {
+    return await change(groupId, "moveAll", async () => {
+      moved.value = null
+      const result = await dependencies.moveAll({ groupId, toGroupId })
+      moved.value = { groupId, toGroupId, count: result.moved }
+    }, "Could not move the data")
+  }
+
+  /** Forgets a finished move and a refused one, when their dialog closes. */
+  function forgetMoveAll(): void {
+    moved.value = null
+    if (actionError.value?.action === "moveAll") actionError.value = null
+  }
+
   function reset(): void {
+    moved.value = null
     groups.value = []
     deleted.value = []
     renameDraft.value = null
@@ -274,6 +297,9 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
     updateDetails,
     remove,
     restore,
+    moveAll,
+    moved,
+    forgetMoveAll,
     name,
     loading,
     creating,
@@ -314,6 +340,7 @@ const onlineGroups: GroupsDependencies = {
   updateDetails: (input) => realtimeCommand("group.updateDetails", input),
   remove: (input) => realtimeCommand("group.delete", input),
   restore: (input) => realtimeCommand("group.restore", input),
+  moveAll: (input) => realtimeCommand("group.moveAll", input),
   advance: advanceGroupCursor,
   newId: () => crypto.randomUUID(),
 }
