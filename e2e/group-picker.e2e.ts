@@ -53,8 +53,9 @@ async function personalGroup(page: Page): Promise<{ id: string; name: string }> 
   return personal!
 }
 
+/** The notes page's group: its name under the "Notes" heading. */
 const heading = (page: Page, name: string) =>
-  page.getByRole("heading", { level: 1, name: `Notes in ${name}` })
+  page.locator("[data-e2e=notes-group]").filter({ hasText: new RegExp(`^${name}$`) })
 
 /** Opens `path` and waits until the app has booted there. */
 const open = (page: Page, path: string) =>

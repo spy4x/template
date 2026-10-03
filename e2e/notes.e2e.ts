@@ -54,8 +54,8 @@ async function openNotes(page: Page, groupName: string): Promise<void> {
     name: "Groups",
   }).click()
   await page.getByRole("button", { name: `Open notes in ${groupName}` }).click()
-  await expect(page.getByRole("heading", { level: 1, name: `Notes in ${groupName}` }))
-    .toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Notes", exact: true })).toBeVisible()
+  await expect(page.locator("[data-e2e=notes-group]")).toHaveText(groupName)
 }
 
 test.describe("notes in a shared group", () => {
@@ -128,13 +128,15 @@ test.describe("notes in a shared group", () => {
 
       // Delete asks first: keeping the note leaves it, confirming deletes it.
       await ownerPage.getByRole("link", { name: "Groceries for Friday" }).click()
-      await ownerPage.locator("[data-e2e=note-delete]").click()
+      await ownerPage.locator("[data-e2e=note-menu]").click()
+      await ownerPage.getByRole("menuitem", { name: "Delete" }).click()
       const dialog = ownerPage.locator("[data-e2e=note-delete-dialog]")
       await expect(dialog).toBeVisible()
       await dialog.getByRole("button", { name: "Keep it" }).first().click()
       await expect(dialog).toHaveCount(0)
       await expect(ownerPage).toHaveURL(notePath)
-      await ownerPage.locator("[data-e2e=note-delete]").click()
+      await ownerPage.locator("[data-e2e=note-menu]").click()
+      await ownerPage.getByRole("menuitem", { name: "Delete" }).click()
       await dialog.getByRole("button", { name: "Delete", exact: true }).click()
       await expect(ownerPage).toHaveURL("/notes")
       await expect(ownerTitles).toHaveCount(0)
