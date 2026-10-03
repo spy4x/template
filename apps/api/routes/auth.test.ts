@@ -1280,7 +1280,7 @@ describe("deleting one's own account", () => {
     expect(calls).toEqual(["accountDeletionBlockers", "checkPassword"])
   })
 
-  it("deletes with the password and the code, closes the sockets and answers the day it goes", async () => {
+  it("deletes with the password and the code, announces the sign-out and answers the day it goes", async () => {
     const { app, calls, emitted, failureCalls } = buildApp(twoFactorAuth())
     const response = await send(app, withCode, sameOriginHeaders)
 
