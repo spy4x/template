@@ -398,6 +398,24 @@ describe("notes store", () => {
       expect(store.notes.value).toHaveLength(3)
     })
 
+    it("refuses a second move while the first is still on its way", async () => {
+      let settle: () => void = () => {}
+      const { store, calls } = harness({
+        pages,
+        move: () => new Promise((resolve) => (settle = () => resolve({ notes: [] }))),
+      })
+      await store.open(groupId, null)
+
+      const first = store.move("g-2", ["a"])
+      expect(store.moving.value).toBe(true)
+      expect(await store.move("g-2", ["b"])).toBe(false)
+      settle()
+      expect(await first).toBe(true)
+
+      expect(calls.filter((call) => call.name === "move")).toHaveLength(1)
+      expect(store.moving.value).toBe(false)
+    })
+
     it("rereads the list when a ticked note is no longer there", async () => {
       const { store, reads } = harness({
         pages: [...pages, { notes: [item("c")], nextCursor: null }],
