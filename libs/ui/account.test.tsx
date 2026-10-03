@@ -438,6 +438,9 @@ const emailDefaults: EmailScreenProps = {
   pending: { verify: false, send: false, change: false },
 }
 
+/** The e-mail page while its change request is on its way. */
+const changePending = { ...emailDefaults.pending, change: true }
+
 describe("EmailScreen", () => {
   it("reports the typed code and checks it through the app's callback", async () => {
     const change = spy<[string, string]>()
@@ -502,16 +505,32 @@ describe("EmailScreen", () => {
     expect(await submit(FORM_ACTIONS.emailChange)).toBe(true)
     expect(changeAddress.calls).toHaveLength(1)
 
+    await rerender(<EmailScreen {...props} pending={changePending} />)
     await rerender(<EmailScreen {...props} status={{ ...proven, pending: "new@example.com" }} />)
     expect(isOpen("email-change-dialog")).toBe(false)
     expect(focused()).toBe("email-code")
     expect(find("[data-e2e=email-verify-card]").textContent).toContain("new@example.com")
   })
 
+  it("closes the change dialog when the address already waiting is asked for again", async () => {
+    // The API answers a repeated request with the same address and the same notice.
+    const waiting = { email: "ann@example.com", proven: true, pending: "new@example.com" }
+    const notices = { send: null, change: "Enter the code we mailed to new@example.com." }
+    const props = { ...emailDefaults, status: waiting, notices }
+    await mount(<EmailScreen {...props} />)
+    await click("[data-e2e=email-change-open]")
+
+    await rerender(<EmailScreen {...props} pending={changePending} />)
+    await rerender(<EmailScreen {...props} />)
+    expect(isOpen("email-change-dialog")).toBe(false)
+    expect(focused()).toBe("email-code")
+  })
+
   it("keeps the change dialog closed once the new address is proven", async () => {
     const proven = { email: "ann@example.com", proven: true, pending: null }
     await mount(<EmailScreen {...emailDefaults} status={proven} />)
     await click("[data-e2e=email-change-open]")
+    await rerender(<EmailScreen {...emailDefaults} status={proven} pending={changePending} />)
     await rerender(
       <EmailScreen {...emailDefaults} status={{ ...proven, pending: "new@example.com" }} />,
     )
@@ -527,6 +546,7 @@ describe("EmailScreen", () => {
     await click("[data-e2e=email-change-open]")
 
     const errors = { ...emailDefaults.errors, change: "Invalid password" }
+    await rerender(<EmailScreen {...emailDefaults} pending={changePending} />)
     await rerender(<EmailScreen {...emailDefaults} errors={errors} />)
 
     expect(isOpen("email-change-dialog")).toBe(true)

@@ -12,6 +12,7 @@ import { type EmailStatus, emailToVerify } from "@domain/identity"
 import { PageHeader } from "./page-header.tsx"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
+import { useSucceeded } from "./use-succeeded.ts"
 
 /** The messages shown when an action failed without a message of its own. */
 export const EMAIL_FAILURES = {
@@ -135,18 +136,19 @@ export function EmailScreen(
   const target = emailToVerify(status)
   const codeField = useFocusOnError(errors.verify)
   const emailField = useFocusOnError(errors.change)
-  // The dialog stays open while the address waiting for its code and the change's notice are the
-  // ones it opened with. A change that goes through alters one of them, so the dialog closes in the
-  // same render that shows the code, and focus can move on to it.
-  const [opened, setOpened] = useState<{ target: string | null; notice: string | null } | null>(
-    null,
-  )
-  const changing = opened !== null && opened.target === target && opened.notice === notices.change
-  const setChanging = (open: boolean) => setOpened(open ? { target, notice: notices.change } : null)
-  // Once closed that way, it forgets what it opened with, so a later return to the same address
-  // and notice, such as proving the new address, does not open it again.
+  // The change dialog closes once its request went through, even one that asks again for the
+  // address already waiting, where nothing else on the page changes. Focus then moves on to the
+  // code, after the dialog has handed it back to its opener.
+  const [changing, setChanging] = useState(false)
+  const focusCode = useRef(false)
+  useSucceeded(pending.change, Boolean(errors.change), () => {
+    focusCode.current = changing
+    setChanging(false)
+  })
   useEffect(() => {
-    if (opened !== null && !changing) setOpened(null)
+    if (changing || !focusCode.current) return
+    focusCode.current = false
+    codeField.current?.focus()
   }, [changing])
 
   // A change just asked for, or a code just used: focus moves on to the step that follows.

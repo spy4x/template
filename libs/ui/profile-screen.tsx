@@ -15,6 +15,7 @@ import type { EmailStatus, UserMFAStatus, UserPushTokenPublic } from "@domain/id
 import { PageHeader } from "./page-header.tsx"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
+import { useSucceeded } from "./use-succeeded.ts"
 import { TwoFactorStep, twoFactorStep } from "./two-factor.ts"
 
 /** The messages shown when an action failed without a message of its own. */
@@ -105,18 +106,6 @@ export interface ProfileScreenProps {
   onRegisterPush?: () => void
   onRemovePush?: (deviceId: string) => void
   navigate?: Navigate
-}
-
-/**
- * Calls `onDone` when an action that was pending ends without `failed`: how a dialog learns that
- * its form went through and it can close.
- */
-function useSucceeded(pending: boolean, failed: boolean, onDone: () => void) {
-  const was = useRef(pending)
-  useEffect(() => {
-    if (was.current && !pending && !failed) onDone()
-    was.current = pending
-  }, [pending, failed])
 }
 
 /**
