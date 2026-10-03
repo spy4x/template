@@ -42,11 +42,6 @@ export interface NoteEditorScreenProps {
   /** What the title and text show: what the person typed, or the note as saved. */
   value: NoteDraft
   onChange?: (value: NoteDraft) => void
-  /**
-   * The id a new note is created with. It is part of the create form, so a form sent twice (a
-   * double click, a retried post) creates one note.
-   */
-  draftId: string
   errors: NoteFormErrors
   saving: boolean
   /** Saves or creates. */
@@ -222,9 +217,6 @@ function Editor(props: WithGroup): JSX.Element {
         pending={saving}
         onSubmit={onSave}
       >
-        {note
-          ? <input type="hidden" name="version" value={String(note.version)} />
-          : <input type="hidden" name="id" value={props.draftId} />}
         <Stack>
           <NoteFields
             groupId={group.id}

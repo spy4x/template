@@ -73,10 +73,6 @@ export const NOTE_PATHS = {
   create: (groupId: string) => `/notes?${new URLSearchParams({ group: groupId })}`,
   /** One note's page, with its edit form; `POST` updates `{ title, body, version }`. */
   note: (noteId: string) => `/notes/${noteId}`,
-  /** `GET` asks "delete this note?" on a page of its own; `POST` deletes `{ version }`. */
-  delete: (noteId: string) => `/notes/${noteId}/delete`,
-  /** `POST` moves this one note to another group: `{ toGroupId }`. */
-  move: (noteId: string) => `/notes/${noteId}/move`,
   /**
    * `POST` moves the ticked notes of the list to another group, all or none: `{ toGroupId, noteIds }`.
    * It names the group the page showed, like {@link NOTE_PATHS.create}, and the server refuses the
