@@ -42,6 +42,7 @@ export interface NoteEditorScreenProps {
   elsewhere?: { name: string } | null
   /** Switches to the note's group, which then opens the note. Never called by the page load. */
   onSwitchGroup?: () => void
+  /** True while the switch to the note's group is under way; disables the button. */
   switching?: boolean
   /** The note being edited, or `null` on the create page. */
   note: NoteTarget | null

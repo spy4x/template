@@ -330,6 +330,27 @@ describe("notes store", () => {
     }
   })
 
+  it("ignores a late lookup for a note that is no longer the one being opened", async () => {
+    let answer!: (found: { groupId: string }) => void
+    const late = new Promise<{ groupId: string }>((resolve) => answer = resolve)
+    const { store } = harness({
+      pages: [{ notes: [item("a")], nextCursor: null }],
+      get: () => Promise.reject(notFound()),
+      locate: () => late,
+    })
+    await store.open(groupId, null)
+    const gone = store.open(groupId, "gone")
+    await new Promise((resolve) => setTimeout(resolve, 0)) // the lookup is now on its way
+    await store.open(groupId, "a")
+
+    answer({ groupId: "g-2" })
+    await gone
+
+    expect(store.editing.value?.id).toBe("a")
+    expect(store.missing.value).toBe(false)
+    expect(store.elsewhere.value).toBe(null)
+  })
+
   it("drops the other group when another note opens", async () => {
     const { store } = harness({
       pages: [{ notes: [item("a")], nextCursor: null }],
