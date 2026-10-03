@@ -39,6 +39,7 @@ const MIGRATIONS = [
   "2026_08_18_0002_personal_group_backfill.sql",
   "2026_10_07_0001_group_kind_removed.sql",
   "2026_10_08_0001_audit_outlives_group.sql",
+  "2026_10_18_0001_group_appearance.sql",
 ]
 
 Deno.test({
