@@ -69,6 +69,14 @@ export const NOTE_PATHS = {
   note: (noteId: string) => `/notes/${noteId}`,
   /** `GET` asks "delete this note?" on a page of its own; `POST` deletes `{ version }`. */
   delete: (noteId: string) => `/notes/${noteId}/delete`,
+  /** `POST` moves this one note to another group: `{ toGroupId }`. */
+  move: (noteId: string) => `/notes/${noteId}/move`,
+  /**
+   * `POST` moves the ticked notes of the list to another group, all or none: `{ toGroupId, noteIds }`.
+   * It names the group the page showed, like {@link NOTE_PATHS.create}, and the server refuses the
+   * post when that is no longer the selected group.
+   */
+  moveMany: (groupId: string) => `/notes/move?${new URLSearchParams({ group: groupId })}`,
 } as const
 
 /** The pages these screens link to. */
@@ -162,7 +170,8 @@ export function ScreenForm(
   { action, pending = false, onSubmit, class: className, children }: {
     action: string
     pending?: boolean
-    onSubmit?: () => void
+    /** Called with the form's fields, so a callback can read what the browser would have posted. */
+    onSubmit?: (data: FormData) => void
     class?: string
     children: ComponentChildren
   },
@@ -173,7 +182,7 @@ export function ScreenForm(
       method="post"
       status={pending ? "sending" : "idle"}
       labels={QUIET}
-      onSubmit={onSubmit && (() => onSubmit())}
+      onSubmit={onSubmit && ((data) => onSubmit(data))}
       // EnhancedForm spaces its fields from its status line, which stays empty here: space-y-0!
       // overrides its space-y-4 (the `!` is needed since preact-components 3), so the empty line
       // takes no room.

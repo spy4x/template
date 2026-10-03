@@ -6,11 +6,11 @@ import { ConfirmDialog } from "@spy4x/preact-ui/confirm-dialog"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
-import { Input, Textarea } from "@spy4x/preact-ui/input"
+import { Input, Select, Textarea } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { Link } from "@spy4x/preact-ui/link"
 import { NOTE_BODY_MAX_LENGTH, NOTE_TITLE_MAX_LENGTH } from "@domain/notes"
-import type { NoteDraft, NoteFormErrors, NotesGroup } from "./notes-screen.tsx"
+import type { MoveTarget, NoteDraft, NoteFormErrors, NotesGroup } from "./notes-screen.tsx"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
@@ -53,6 +53,16 @@ export interface NoteEditorScreenProps {
   onDelete?: () => void
   /** Show the "delete this note?" page instead of the editor (the page without JavaScript). */
   confirmingDelete?: boolean
+  /**
+   * The other groups the person may move this note to (editor or above there). Empty, or left
+   * out, hides the "Move to group" form.
+   */
+  moveTargets?: readonly MoveTarget[]
+  /** Moves the note to the chosen group. Without it, the browser posts the form. */
+  onMove?: (toGroupId: string) => void
+  moving?: boolean
+  /** The refusal of the last move, shown in the move form. */
+  moveError?: string | null
   navigate?: Navigate
 }
 
@@ -121,7 +131,13 @@ export function NoteEditorScreen(props: NoteEditorScreenProps): JSX.Element {
         ? <ReadOnlyNote {...props} />
         : props.confirmingDelete && props.note
         ? <ConfirmDeletePage {...props} group={group} note={props.note} />
-        : <EditorCard {...props} group={group} />}
+        : (
+          <>
+            <EditorCard {...props} group={group} />
+            {props.note && (props.moveTargets?.length ?? 0) > 0 &&
+              <MoveCard {...props} group={group} note={props.note} />}
+          </>
+        )}
     </Page>
   )
 }
@@ -221,6 +237,54 @@ function EditorCard(props: WithGroup): JSX.Element {
             </Button>
             {note && <DeleteControl {...props} note={note} />}
           </div>
+        </ScreenForm>
+      </CardBody>
+    </Card>
+  )
+}
+
+/**
+ * "Move to group": one note to another group the person writes to. A form of its own, so moving
+ * never sends the edit form's unsaved text; the note keeps its text and its address.
+ */
+function MoveCard(
+  { group, note, moveTargets = [], moving, moveError, onMove }: WithGroup & { note: NoteTarget },
+): JSX.Element {
+  return (
+    <Card>
+      <CardHeader>
+        <h2 class="text-lg font-semibold">Move to group</h2>
+      </CardHeader>
+      <CardBody>
+        <ScreenForm
+          action={NOTE_PATHS.move(note.id)}
+          pending={moving}
+          onSubmit={onMove && ((data) => onMove(String(data.get("toGroupId") ?? "")))}
+        >
+          <Stack>
+            <p class="text-sm text-muted">
+              Members of {group.name} stop seeing this note; members of the group you choose see it.
+            </p>
+            <Field id="note-move-to" label="Group">
+              <Select
+                name="toGroupId"
+                data-e2e="note-move-to"
+                options={moveTargets.map((target) => ({ value: target.id, label: target.name }))}
+              />
+            </Field>
+            <ErrorState message={moveError ?? null} />
+            <div>
+              <Button
+                type="submit"
+                variant="outline"
+                data-e2e="note-move"
+                busy={moving}
+                busyLabel="Moving..."
+              >
+                Move note
+              </Button>
+            </div>
+          </Stack>
         </ScreenForm>
       </CardBody>
     </Card>

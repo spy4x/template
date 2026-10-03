@@ -123,4 +123,14 @@ export const API_BODIES = {
     version: numberField(form, "version"),
   }),
   noteDelete: (form: FormData) => ({ version: numberField(form, "version") }),
+  /** The list's form: the group, and every ticked note. */
+  noteMoveMany: (form: FormData) => ({
+    toGroupId: field(form, "toGroupId"),
+    noteIds: form.getAll("noteIds").filter((id): id is string => typeof id === "string"),
+  }),
+  /** One note's page names no note in the form: the address does. */
+  noteMoveOne: (form: FormData, noteId: string) => ({
+    toGroupId: field(form, "toGroupId"),
+    noteIds: [noteId],
+  }),
 } as const
