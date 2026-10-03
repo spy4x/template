@@ -248,7 +248,7 @@ function Editor(props: WithGroup): JSX.Element {
             </p>
           )}
           <ErrorState message={props.moveError ?? null} />
-          <div class="sticky bottom-0 -mx-4 flex gap-3 border-t border-subtle bg-canvas px-4 py-3 sm:static sm:mx-0 sm:justify-end sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
+          <div class="sticky bottom-0 flex gap-3 border-t border-subtle bg-canvas py-3 sm:static sm:justify-end sm:border-0 sm:bg-transparent sm:py-0">
             <Button
               href={NOTE_PATHS.list}
               navigate={navigate}

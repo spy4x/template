@@ -356,18 +356,27 @@ function SelectionBar(
       class="sticky bottom-0 flex flex-col gap-3 rounded-lg border border-subtle bg-surface p-3 shadow-sm"
       data-e2e="notes-move"
     >
-      <div class="flex flex-wrap items-center gap-3">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
         <p class="min-w-0 flex-1 text-sm font-medium" aria-live="polite">
           {count === 0 ? "Tick the notes to move" : `${count} selected`}
         </p>
+        <Button
+          type="button"
+          variant="ghost"
+          class="sm:order-last"
+          onClick={onCancel}
+          data-e2e="notes-select-cancel"
+        >
+          Cancel
+        </Button>
         {count > 0 && (
-          <>
+          <div class="flex w-full items-center gap-3 sm:w-auto">
             <label class="sr-only" for="notes-move-to">Move to group</label>
             <Select
               id="notes-move-to"
               name="toGroupId"
               data-e2e="notes-move-to"
-              class="w-auto"
+              class="min-w-0 flex-1 sm:w-auto sm:flex-none"
               options={moveTargets.map((target) => ({ value: target.id, label: target.name }))}
             />
             <Button
@@ -378,11 +387,8 @@ function SelectionBar(
             >
               Move
             </Button>
-          </>
+          </div>
         )}
-        <Button type="button" variant="ghost" onClick={onCancel} data-e2e="notes-select-cancel">
-          Cancel
-        </Button>
       </div>
       <ErrorState message={moveError} />
     </div>
@@ -412,7 +418,7 @@ function NoteItem(
           checked={ticked}
           onChange={(event) => onTick(event.currentTarget.checked)}
           aria-label={`Tick ${note.title}`}
-          class="relative z-10"
+          class="relative z-1"
           data-e2e="note-select"
         />
       )}
@@ -422,7 +428,7 @@ function NoteItem(
             <Link
               href={NOTE_PATHS.note(note.id)}
               navigate={navigate}
-              class="text-foreground after:absolute after:inset-0 focus-visible:outline-hidden"
+              class="text-foreground after:absolute after:inset-0 focus-visible:outline-hidden focus-visible:after:ring-2 focus-visible:after:ring-focus focus-visible:after:ring-inset"
             >
               {note.title}
             </Link>
@@ -437,7 +443,7 @@ function NoteItem(
           <p class="truncate text-sm text-muted" data-e2e="note-item-body">{note.body}</p>
         )}
       </div>
-      {menu && <div class="relative z-10 -my-2 -mr-2 shrink-0">{menu}</div>}
+      {menu && <div class="relative -my-2 -mr-2 shrink-0">{menu}</div>}
     </li>
   )
 }
