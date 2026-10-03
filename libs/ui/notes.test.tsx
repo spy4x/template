@@ -351,7 +351,14 @@ const editing: NoteEditorScreenProps = {
 
 describe("NoteEditorScreen", () => {
   it("heads the page with a back button to the list and the group's name, and has no menu when creating", () => {
-    const html = renderToString(<NoteEditorScreen {...editorDefaults} moveTargets={targets} />)
+    const html = renderToString(
+      <NoteEditorScreen
+        {...editorDefaults}
+        moveTargets={targets}
+        onMove={() => {}}
+        onDelete={() => {}}
+      />,
+    )
 
     expect(html).toMatch(/<h1\b[^>]*>New note<\/h1>/)
     expect(html).toMatch(/data-e2e="notes-group"[^>]*>Team</)
