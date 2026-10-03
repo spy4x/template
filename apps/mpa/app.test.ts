@@ -1812,6 +1812,25 @@ describe("the subscription pages", () => {
     expect(await response.text()).toContain("This link has expired")
   })
 
+  it("shows whom an unsubscribe link names, sends no Referer and keeps the page out of caches", async () => {
+    const { apiCalls, fetch } = subscribersApi(() =>
+      Response.json({ state: "confirm", email: "ada@example.com" })
+    )
+
+    const response = await appWith(fetch)(
+      new Request(`${config.webAppOrigin}/unsubscribe?${tokenQuery}`),
+      info,
+    )
+
+    expect(apiCalls()).toEqual([
+      { method: "GET", url: `/api/subscribers/unsubscribe/preview?${tokenQuery}`, body: null },
+    ])
+    expect(response.status).toBe(200)
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer")
+    expect(response.headers.get("cache-control")).toBe("no-store")
+    expect(await response.text()).toContain("ada@example.com")
+  })
+
   it("unsubscribes with the token in the API call's query, then redirects without the token", async () => {
     const { apiCalls, fetch } = subscribersApi(() => Response.json({ state: "done" }))
 
