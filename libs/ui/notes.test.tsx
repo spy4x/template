@@ -510,6 +510,36 @@ describe("NoteEditorScreen", () => {
     expect(html).not.toContain("<form")
   })
 
+  it("names the other group of a note and switches only when the person presses the button", async () => {
+    const switched = spy<[]>()
+    await mount(
+      <NoteEditorScreen
+        {...editorDefaults}
+        notFound
+        elsewhere={{ name: "Family" }}
+        onSwitchGroup={switched.fn}
+      />,
+    )
+
+    expect(find("[data-e2e=note-elsewhere]").textContent).toContain("Family")
+    expect(find("h1").textContent).not.toContain("not found")
+    expect(count("[data-e2e=note-not-found]")).toBe(0)
+    expect(switched.calls).toHaveLength(0)
+    expect(find("[data-e2e=note-switch-group]").classList.contains("min-h-11")).toBe(true)
+
+    await click("[data-e2e=note-switch-group]")
+
+    expect(find("[data-e2e=note-switch-group]").textContent).toBe("Switch to Family")
+    expect(switched.calls).toHaveLength(1)
+  })
+
+  it("keeps the plain not-found page when no other group holds the note", () => {
+    const html = renderToString(<NoteEditorScreen {...editorDefaults} notFound elsewhere={null} />)
+
+    expect(html).toContain("There is no such note in Team")
+    expect(html).not.toContain("note-switch-group")
+  })
+
   it("shows the error of a refused read instead of claiming the note does not exist", () => {
     const html = renderToString(
       <NoteEditorScreen {...editorDefaults} notFound errors={{ title: null, form: "Offline" }} />,

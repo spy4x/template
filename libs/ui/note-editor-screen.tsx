@@ -35,6 +35,14 @@ export interface NoteEditorScreenProps {
   loading: boolean
   /** The note is not in this group: it is gone, it never existed, or it is in another group. */
   notFound: boolean
+  /**
+   * The note is in another group the person belongs to. Given with `notFound`, the page names that
+   * group and offers to switch to it, instead of saying the note does not exist.
+   */
+  elsewhere?: { name: string } | null
+  /** Switches to the note's group, which then opens the note. Never called by the page load. */
+  onSwitchGroup?: () => void
+  switching?: boolean
   /** The note being edited, or `null` on the create page. */
   note: NoteTarget | null
   /** What the title and text show: what the person typed, or the note as saved. */
@@ -86,6 +94,31 @@ export function NoteEditorScreen(props: NoteEditorScreenProps): JSX.Element {
             </Button>
           )}
         />
+      </EditorPage>
+    )
+  }
+  if (notFound && props.elsewhere) {
+    return (
+      <EditorPage>
+        <PageHeader back={BACK} navigate={navigate} title="Note in another group" />
+        <Stack gap="md">
+          <p class="text-sm text-muted" data-e2e="note-elsewhere">
+            This note is in {props.elsewhere.name}, another of your groups. You are in {group.name}.
+          </p>
+          <div>
+            <Button
+              type="button"
+              class="min-h-11 sm:min-h-9"
+              data-e2e="note-switch-group"
+              busy={props.switching}
+              busyLabel="Switching..."
+              disabled={!props.onSwitchGroup}
+              onClick={props.onSwitchGroup}
+            >
+              Switch to {props.elsewhere.name}
+            </Button>
+          </div>
+        </Stack>
       </EditorPage>
     )
   }

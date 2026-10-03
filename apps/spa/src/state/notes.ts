@@ -32,6 +32,12 @@ export interface NotesDependencies {
   fetchPage(groupId: string, cursor: string | null): Promise<NotePage>
   /** Reads one note over the socket. */
   get(groupId: string, id: string): Promise<{ note: NoteItem }>
+  /**
+   * The group of a note, found by its id alone. Rejects with `NOTE_NOT_FOUND` for a note that does
+   * not exist and for one in a group the person is not in. Reads only: it never changes the
+   * selected group.
+   */
+  locate?(id: string): Promise<{ groupId: string }>
   create(input: { groupId: string; id: string; title: string; body: string }): Promise<
     { note: NoteItem }
   >
@@ -134,6 +140,8 @@ export function createNotesStore(dependencies: NotesDependencies) {
   const moveError = signal<string | null>(null)
   /** The open note is not in the open group: it is gone, or it is in another group. */
   const missing = signal(false)
+  /** The open note is in another of the person's groups, with this id. Set with `missing`. */
+  const elsewhere = signal<string | null>(null)
   /** The person typed text that no save or create has taken yet. */
   const unsaved = computed(() => {
     const edit = editing.value
@@ -213,18 +221,30 @@ export function createNotesStore(dependencies: NotesDependencies) {
       editing.value = null
       editErrors.value = NO_ERRORS
       missing.value = false
+      elsewhere.value = null
       return
     }
     if (editing.value?.id === noteId) return
     editErrors.value = NO_ERRORS
     moveError.value = null
     missing.value = false
+    elsewhere.value = null
     const known = notes.value.find((note) => note.id === noteId)
     if (known) {
       editing.value = toEdit(known)
       return
     }
     await reloadLatest(noteId)
+  }
+
+  /** The person's other group that holds the note, or `null` when there is none or it cannot be told. */
+  async function locateElsewhere(noteId: string): Promise<string | null> {
+    try {
+      const found = await dependencies.locate?.(noteId)
+      return found && found.groupId !== groupId.value ? found.groupId : null
+    } catch (_error) {
+      return null
+    }
   }
 
   /** Rereads the edited note and starts the edit again from it, dropping what was typed. */
@@ -238,8 +258,13 @@ export function createNotesStore(dependencies: NotesDependencies) {
       notes.value = notes.value.map((existing) => existing.id === note.id ? note : existing)
     } catch (cause) {
       editing.value = null
-      if (noteCode(cause) === "NOTE_NOT_FOUND") missing.value = true
-      else listError.value = describe(cause, NOTE_MESSAGES.load)
+      if (noteCode(cause) === "NOTE_NOT_FOUND") {
+        const other = await locateElsewhere(noteId)
+        // The person moved on while the lookup ran: the answer belongs to the earlier page.
+        if (groupId.value !== forGroup) return
+        elsewhere.value = other
+        missing.value = true
+      } else listError.value = describe(cause, NOTE_MESSAGES.load)
     }
   }
 
@@ -410,6 +435,7 @@ export function createNotesStore(dependencies: NotesDependencies) {
     moving.value = false
     moveError.value = null
     missing.value = false
+    elsewhere.value = null
     inFlight = null
     queued = null
   }
@@ -430,6 +456,7 @@ export function createNotesStore(dependencies: NotesDependencies) {
     moving,
     moveError,
     missing,
+    elsewhere,
     unsaved,
     open,
     refresh,
@@ -464,6 +491,7 @@ const onlineNotes: NotesDependencies = {
     return result.data
   },
   get: (groupId, id) => realtimeQuery("note.get", { groupId, id }),
+  locate: (id) => realtimeQuery("note.locate", { id }),
   create: (input) => realtimeCommand("note.create", input),
   update: (input) => realtimeCommand("note.update", input),
   delete: (input) => realtimeCommand("note.delete", input),
