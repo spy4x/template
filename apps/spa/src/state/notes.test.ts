@@ -372,6 +372,19 @@ describe("notes store", () => {
       expect(store.notes.value).toHaveLength(3)
     })
 
+    it("refuses to move a note with unsaved changes, keeping the typed text", async () => {
+      const { store, calls } = harness({ pages })
+      await store.open(groupId, "a")
+      store.editing.value = { ...store.editing.value!, title: "Typed but not saved" }
+
+      expect(await store.move("g-2", ["a"])).toBe(false)
+
+      expect(store.moveError.value).toBe(NOTE_MESSAGES.moveUnsaved)
+      expect(calls.filter((call) => call.name === "move")).toEqual([])
+      expect(store.editing.value?.title).toBe("Typed but not saved")
+      expect(store.notes.value).toHaveLength(3)
+    })
+
     it("keeps the list and shows the server's refusal when the move is refused", async () => {
       const { store } = harness({
         pages,

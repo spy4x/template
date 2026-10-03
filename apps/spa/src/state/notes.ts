@@ -86,6 +86,7 @@ export const NOTE_MESSAGES = {
   move: "Could not move the notes",
   moveOffline: "Moving notes needs a connection. Try again when you are back online.",
   moveNone: "Tick the notes you want to move.",
+  moveUnsaved: "Save or discard your changes before moving the note.",
   moveGone: "A note you ticked is no longer here, so nothing was moved.",
 } as const
 
@@ -363,6 +364,11 @@ export function createNotesStore(dependencies: NotesDependencies) {
     if (!forGroup || moving.value) return false
     if (noteIds.length === 0) {
       moveError.value = NOTE_MESSAGES.moveNone
+      return false
+    }
+    // Moving closes the note's page, which would drop what was typed: the person decides first.
+    if (editing.value && unsaved.value && noteIds.includes(editing.value.id)) {
+      moveError.value = NOTE_MESSAGES.moveUnsaved
       return false
     }
     moving.value = true
