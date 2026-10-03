@@ -134,11 +134,11 @@ export class PostgresNoteRepository implements NoteRepository {
 
   async groupIdOf(id: string): Promise<string | null> {
     const row = (
-      await this.sql<{ group_id: string }[]>`
+      await this.sql<{ groupId: string }[]>`
         SELECT group_id FROM notes WHERE id = ${id} AND deleted_at IS NULL
       `
     )[0]
-    return row?.group_id ?? null
+    return row?.groupId ?? null
   }
 
   /**
