@@ -103,7 +103,11 @@ test.describe("group details", () => {
         .toHaveText("🏠")
       await expect(page.locator(`[data-e2e=group-${groupId}] [data-e2e=group-item-description]`))
         .toContainText("Rent, bills")
-      await expect(page.locator("#sidebar-group-picker")).toHaveValue("🏠 Flat")
+      await page.locator("#sidebar-group-picker").click()
+      await expect(
+        page.locator("#sidebar-group-picker-listbox [role=option]", { hasText: "Flat" })
+          .locator("[data-e2e=group-mark]"),
+      ).toHaveText("🏠")
 
       // The same edit, made through the API by a viewer, is refused.
       const refused = await memberPage.request.put(`${apiBase}/api/groups/${groupId}/details`, {
