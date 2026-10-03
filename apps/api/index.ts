@@ -40,6 +40,15 @@ import { createRedisRateLimitStore } from "@spy4x/server/kv"
 import { enqueuePasswordResetMail } from "@server/jobs/password-reset-mail.ts"
 import { enqueueEmailCodeMail } from "@server/jobs/email-code-mail.ts"
 import { mailOffWarning, readMailSetup } from "@server/mail/mail.ts"
+import { createSubscribersRoute } from "./routes/subscribers.ts"
+import { createSubscriberRateLimits } from "./middlewares/subscriber-rate-limits.ts"
+import {
+  enqueueSubscriberMail,
+  SUBSCRIBER_CONFIRM_MAIL_JOB,
+  SUBSCRIBER_WELCOME_MAIL_JOB,
+} from "@server/jobs/subscriber-mail.ts"
+import { readSubscribersSetup, subscribersOffWarning } from "@server/subscribers/subscribers.ts"
+import { createPostgresSubscriberStore } from "@spy4x/server/subscribers/postgres"
 import "./cqrs/+init.ts"
 
 const REALTIME_REVALIDATE_INTERVAL_MS = 15_000
@@ -170,6 +179,27 @@ app.route(
     passwordLimit: rateLimits.strictByUser,
     cursor: groupListCursor,
     expectedOrigin,
+  }),
+)
+// Visitors subscribe to mail. The worker signs and sends every mail; this checks the links.
+const subscribersSetup = readSubscribersSetup(Deno.env, config.isDev ? "dev" : "prod")
+const subscribersWarning = subscribersOffWarning(subscribersSetup)
+if (subscribersWarning) log(subscribersWarning)
+app.route(
+  "/subscribers",
+  createSubscribersRoute({
+    setup: subscribersSetup,
+    store: (list) => createPostgresSubscriberStore(sql, { listId: list }),
+    webAppUrl: config.webAppUrl,
+    rateLimits: createSubscriberRateLimits({
+      ...config.rateLimiter,
+      store: (keyPrefix) => createRedisRateLimitStore(kv, { keyPrefix }),
+    }),
+    requestConfirmMail: (list, email) =>
+      enqueueSubscriberMail(sql, SUBSCRIBER_CONFIRM_MAIL_JOB, list, email),
+    requestWelcomeMail: (list, email) =>
+      enqueueSubscriberMail(sql, SUBSCRIBER_WELCOME_MAIL_JOB, list, email),
+    log: console,
   }),
 )
 if (config.isDev) {
