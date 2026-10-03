@@ -28,11 +28,11 @@ group reads notes; an editor or above writes them.
 
 ### 1. Domain: `libs/domain/notes/`
 
-| File        | What it holds                                                                                                                                                                                                                                                                                                                                                       |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `+lib.ts`   | The `Note` shape; the arktype request schemas (the REST bodies, which are also the form field names, and the socket payloads); `NoteError` and `NoteVersionConflictError`; the commands (`NoteCreateCommand`, `NoteUpdateCommand`, `NoteDeleteCommand`, `NoteMoveCommand`) and queries (`NoteListQuery`, `NoteGetQuery`); the outbox event kinds; the authorization rule; the `NoteRepository` port. |
-| `+lib.test.ts` | The schemas and the authorization rule.                                                                                                                                                                                                                                                                                                                         |
-| `deno.json` | Makes it a workspace member.                                                                                                                                                                                                                                                                                                                                        |
+| File           | What it holds                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `+lib.ts`      | The `Note` shape; the arktype request schemas (the REST bodies, which are also the form field names, and the socket payloads); `NoteError` and `NoteVersionConflictError`; the commands (`NoteCreateCommand`, `NoteUpdateCommand`, `NoteDeleteCommand`, `NoteMoveCommand`) and queries (`NoteListQuery`, `NoteGetQuery`); the outbox event kinds; the authorization rule; the `NoteRepository` port. |
+| `+lib.test.ts` | The schemas and the authorization rule.                                                                                                                                                                                                                                                                                                                                                              |
+| `deno.json`    | Makes it a workspace member.                                                                                                                                                                                                                                                                                                                                                                         |
 
 Then register it in the root `deno.jsonc`: the `workspace` array (or its tests never run,
 `docs/handoff.md` trap 1) and an `@domain/notes` import alias. Add its `deno.json` to the `COPY`
@@ -44,10 +44,10 @@ so a stranger cannot learn that a group exists.
 
 ### 2. Database: `libs/server/db/`
 
-| File                                    | What it holds                                                                                                                                                                                  |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `migrations/2026_10_02_0001_notes.sql`  | The `notes` table: `group_id`, the fields, `version`, `change_sequence` (the group sequence the note was last written at), who created and updated it, and `deleted_at` (a delete keeps the row). |
-| `schema.sql`                            | The same table appended, so the snapshot matches the migrations.                                                                                                                                |
+| File                                   | What it holds                                                                                                                                                                                     |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `migrations/2026_10_02_0001_notes.sql` | The `notes` table: `group_id`, the fields, `version`, `change_sequence` (the group sequence the note was last written at), who created and updated it, and `deleted_at` (a delete keeps the row). |
+| `schema.sql`                           | The same table appended, so the snapshot matches the migrations.                                                                                                                                  |
 
 Add the table to `SNAPSHOT_TABLES` and apply the migration in
 `tests/integration/groups.integration.test.ts`, which compares the two. Compose applies migrations
@@ -55,11 +55,11 @@ on every start; nothing else is needed to deploy one.
 
 ### 3. Repository: `libs/server/notes/`
 
-| File                           | What it holds                                                                                                                                                                                                  |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `postgres-note-repository.ts`  | Reads and writes. Each write runs in a transaction that calls `recordGroupChange` (`libs/server/groups/group-change-log.ts`), which moves the group's sequence and writes the outbox row. It checks no role. |
-| `note-list-cursor.ts`          | The signed paging cursor, bound to the user and the group, so a cursor cannot be replayed by someone else or on another group.                                                                                  |
-| `deno.json`                    | Workspace member; register it and add an `@server/notes/` alias like the domain.                                                                                                                                |
+| File                          | What it holds                                                                                                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `postgres-note-repository.ts` | Reads and writes. Each write runs in a transaction that calls `recordGroupChange` (`libs/server/groups/group-change-log.ts`), which moves the group's sequence and writes the outbox row. It checks no role. |
+| `note-list-cursor.ts`         | The signed paging cursor, bound to the user and the group, so a cursor cannot be replayed by someone else or on another group.                                                                               |
+| `deno.json`                   | Workspace member; register it and add an `@server/notes/` alias like the domain.                                                                                                                             |
 
 The version check is the `WHERE version = ${expected}` of the `UPDATE`. When no row matches, the
 repository reads the note once more to tell "gone" (`NOTE_NOT_FOUND`) from "moved on"
@@ -83,13 +83,13 @@ carries an `idempotencyKey` runs once per user and key.
 
 ### 5. Transports: the socket for the SPA, REST beside it
 
-| File                                        | What it holds                                                                                                                                     |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/api/features/notes/list.ts`           | One page of the list, with its cursor. Both transports call it, so they cannot drift apart.                                                       |
-| `apps/api/features/notes/socket.ts`         | The socket requests `note.create`, `note.update`, `note.delete`, `note.move` (commands) and `note.list`, `note.get` (queries): parse the payload, dispatch.    |
-| `apps/api/features/notes/errors.ts`         | REST error codes and statuses. A version conflict answers 409 with `currentVersion`.                                                               |
-| `apps/api/routes/notes.ts`                  | `GET`, `POST`, `PATCH`, `DELETE` under `/api/groups/:groupId/notes`, with the same-origin guard on writes and an optional `Idempotency-Key` header. |
-| `apps/api/services/note-list-cursor.ts`     | The cursor codec, keyed from the cookie secret.                                                                                                   |
+| File                                    | What it holds                                                                                                                                               |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/api/features/notes/list.ts`       | One page of the list, with its cursor. Both transports call it, so they cannot drift apart.                                                                 |
+| `apps/api/features/notes/socket.ts`     | The socket requests `note.create`, `note.update`, `note.delete`, `note.move` (commands) and `note.list`, `note.get` (queries): parse the payload, dispatch. |
+| `apps/api/features/notes/errors.ts`     | REST error codes and statuses. A version conflict answers 409 with `currentVersion`.                                                                        |
+| `apps/api/routes/notes.ts`              | `GET`, `POST`, `PATCH`, `DELETE` under `/api/groups/:groupId/notes`, with the same-origin guard on writes and an optional `Idempotency-Key` header.         |
+| `apps/api/services/note-list-cursor.ts` | The cursor codec, keyed from the cookie secret.                                                                                                             |
 
 Then wire them: mount the route in `apps/api/index.ts` (before `/groups`), add the socket requests
 to the `Realtime` in `apps/api/services/realtimeHub.ts`, and map `NoteError` in `toRequestError`
@@ -105,13 +105,13 @@ An aggregate has two pages, a **list page** and an **editor page**, and each is 
 both. The list page only reads and links; everything that writes happens on the editor page, which
 has its own address, a back link to the list and room for a long text.
 
-| File                      | What it holds                                                                                                                                                                                                                                                                                                  |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `progressive.tsx`         | `NOTE_PATHS`: the pages the screens link to: `/notes`, `/notes/new` and `/notes/:id`. They carry no group id: the SPA acts on the person's selected group (see "How a group call travels", item 8, in `docs/handoff.md`).                                                       |
-| `notes-screen.tsx`        | The list page, `NotesScreen`: props in, links out, no form. "New note" and each note's title are links. A viewer gets the list and no "New note".                                                                                                                                                              |
-| `note-editor-screen.tsx`  | The editor page, `NoteEditorScreen`, for `/notes/new` (no note yet) and `/notes/:id`. The form posts the API's field names; "Save" and "Cancel" are the form's own. A viewer gets the note as text. A note that cannot be read is "Note not found". The version conflict link and message are part of the screen. |
-| `screens.test.tsx`        | Renders the newsletter screens on the server and checks that every action is a working form or link whose fields match the request schema.                                                                                                                                                                                |
-| `interactions.test.tsx`   | Drives each screen in a browser DOM: typing, submitting through the callback, and the delete dialog.                                                                                                                                                                                                |
+| File                     | What it holds                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `progressive.tsx`        | `NOTE_PATHS`: the pages the screens link to: `/notes`, `/notes/new` and `/notes/:id`. They carry no group id: the SPA acts on the person's selected group (see "How a group call travels", item 8, in `docs/handoff.md`).                                                                                                                                    |
+| `notes-screen.tsx`       | The list page, `NotesScreen`: props in, links and callbacks out. "New note" and each note's title are links; the only form is the move of selected notes. A viewer gets the list and no "New note".                                                                                                                                                          |
+| `note-editor-screen.tsx` | The editor page, `NoteEditorScreen`, for `/notes/new` (no note yet) and `/notes/:id`. Its fields carry the API's field names; "Save" and "Cancel" are the form's own, and the app's callbacks take the submit. A viewer gets the note as text. A note that cannot be read is "Note not found". The version conflict link and message are part of the screen. |
+| `screens.test.tsx`       | Renders the newsletter screens on the server and checks that every action is a working form or link whose fields match the request schema.                                                                                                                                                                                                                   |
+| `interactions.test.tsx`  | Drives each screen in a browser DOM: typing, submitting through the callback, and the delete dialog.                                                                                                                                                                                                                                                         |
 
 Deleting asks first. With the app's `onDelete`, "Delete" in the page's menu opens
 preact-components' `ConfirmDialog`; without it, the menu has no delete.
@@ -123,14 +123,14 @@ found" page, which tells the person to switch group. The group picker is the one
 
 ### 7. SPA wiring: `apps/spa/src/`
 
-| File                      | What it holds                                                                                                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `state/notes.ts`          | The store: reads a group's notes over REST, writes over the socket with `realtimeCommand` (which adds the idempotency key), and turns a version conflict into the conflict UI. |
-| `state/notes.test.ts`     | The store against fake calls.                                                                                                                                                  |
-| `views/NotesView.tsx`     | Passes the store and the group's role to `NotesScreen`.                                                                                                                        |
-| `views/NoteEditorView.tsx` | Passes the store and the group's role to `NoteEditorScreen` for `/notes/new` and `/notes/:id`, with the offline conflict state above it.                                      |
-| `views/spa-paths.ts`      | Lists the paths the router owns, for preact-components' `UnsavedGuard` in `NoteEditorView.tsx`, which asks before the person leaves the editor page with text that is not saved: on closing the tab, and on a click on any link in the app.             |
-| `app.tsx`                 | The routes, and the pull: a hint for the open group reads its notes again.                                                                                                     |
+| File                       | What it holds                                                                                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state/notes.ts`           | The store: reads a group's notes over REST, writes over the socket with `realtimeCommand` (which adds the idempotency key), and turns a version conflict into the conflict UI.                                                              |
+| `state/notes.test.ts`      | The store against fake calls.                                                                                                                                                                                                               |
+| `views/NotesView.tsx`      | Passes the store and the group's role to `NotesScreen`.                                                                                                                                                                                     |
+| `views/NoteEditorView.tsx` | Passes the store and the group's role to `NoteEditorScreen` for `/notes/new` and `/notes/:id`, with the offline conflict state above it.                                                                                                    |
+| `views/spa-paths.ts`       | Lists the paths the router owns, for preact-components' `UnsavedGuard` in `NoteEditorView.tsx`, which asks before the person leaves the editor page with text that is not saved: on closing the tab, and on a click on any link in the app. |
+| `app.tsx`                  | The routes, and the pull: a hint for the open group reads its notes again.                                                                                                                                                                  |
 
 The store does not move the group's cursor on its own writes: another member's change may have
 taken the sequence just before, and moving past it would drop that change's hint. Its own hint costs
@@ -138,14 +138,14 @@ one extra read instead.
 
 ### 8. Tests
 
-| File                                                        | What it proves                                                                                        |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `apps/api/features/notes/transports.test.ts`                | Both transports on real buses and handlers: a viewer's writes are refused; a stale version conflicts. |
-| `apps/api/features/notes/socket.test.ts`, `routes/notes.test.ts` | Parsing and dispatch of each transport.                                                          |
-| `tests/integration/notes.integration.test.ts`               | Postgres: one sequence step and one outbox row per write, conflicts, viewers, paging.                 |
-| `e2e/notes.e2e.ts`                                          | Two members: one creates, edits and deletes on the note pages; the other's open tab follows without a reload; a viewer sees a note without edit controls. |
-| `e2e/notes-move.e2e.ts`                                     | Moving one note and ticked notes, with members of both groups watching. |
-| `tests/integration/note-move-push.integration.test.ts`      | Members of both groups get a hint for a move; a stranger gets none.                                   |
+| File                                                             | What it proves                                                                                                                                            |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/api/features/notes/transports.test.ts`                     | Both transports on real buses and handlers: a viewer's writes are refused; a stale version conflicts.                                                     |
+| `apps/api/features/notes/socket.test.ts`, `routes/notes.test.ts` | Parsing and dispatch of each transport.                                                                                                                   |
+| `tests/integration/notes.integration.test.ts`                    | Postgres: one sequence step and one outbox row per write, conflicts, viewers, paging.                                                                     |
+| `e2e/notes.e2e.ts`                                               | Two members: one creates, edits and deletes on the note pages; the other's open tab follows without a reload; a viewer sees a note without edit controls. |
+| `e2e/notes-move.e2e.ts`                                          | Moving one note and ticked notes, with members of both groups watching.                                                                                   |
+| `tests/integration/note-move-push.integration.test.ts`           | Members of both groups get a hint for a move; a stranger gets none.                                                                                       |
 
 The product cannot add a member yet, so tests seed one: the integration test inserts the row, and
 the e2e spec calls `POST /api/test/add-member` (`apps/api/routes/dev.ts`, mounted only in

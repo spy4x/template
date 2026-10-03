@@ -260,7 +260,11 @@ describe("PublicFrame", () => {
 
   it("follows the brand link through navigate instead of loading the page", async () => {
     const navigate = spy<[string]>()
-    await mount(<PublicFrame canSignOut={false} navigate={navigate.fn}>page</PublicFrame>)
+    await mount(
+      <PublicFrame canSignOut={false} onSignOut={() => {}} navigate={navigate.fn}>
+        page
+      </PublicFrame>,
+    )
 
     expect(await click('a[href="/"]')).toBe(true)
     expect(navigate.calls).toEqual([["/"]])
@@ -291,6 +295,7 @@ const device = {
 } as unknown as UserPushTokenPublic
 
 const profileDefaults: ProfileScreenProps = {
+  onRemovePush: () => {},
   user: { mfa: UserMFAStatus.NOT_CONFIGURED, ...ada },
   isMfaRequired: false,
   email: { email: "ada@example.com", proven: true, pending: null },

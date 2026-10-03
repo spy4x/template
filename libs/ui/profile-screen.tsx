@@ -109,7 +109,7 @@ export interface ProfileScreenProps {
    * device" button.
    */
   onRegisterPush?: () => void
-  onRemovePush?: (deviceId: string) => void
+  onRemovePush: (deviceId: string) => void
   navigate?: Navigate
 }
 

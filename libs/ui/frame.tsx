@@ -166,7 +166,7 @@ export function AppFrame(
 }
 
 /** "Sign out" as a form that posts to its route; with `onSignOut`, the app takes it over. */
-function SignOutForm({ onSignOut }: { onSignOut?: () => void }): JSX.Element {
+function SignOutForm({ onSignOut }: { onSignOut: () => void }): JSX.Element {
   return (
     <ScreenForm onSubmit={onSignOut}>
       <Button type="submit" variant="ghost" data-e2e="signout">
@@ -184,7 +184,7 @@ function SignOutForm({ onSignOut }: { onSignOut?: () => void }): JSX.Element {
 export function PublicFrame(
   { canSignOut, onSignOut, navigate, children }: {
     canSignOut: boolean
-    onSignOut?: () => void
+    onSignOut: () => void
     navigate?: Navigate
     children: ComponentChildren
   },
