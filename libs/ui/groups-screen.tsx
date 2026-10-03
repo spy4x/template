@@ -11,7 +11,8 @@ import { Input } from "@spy4x/preact-ui/input"
 import { Cluster, Section, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
 import { GROUP_RESTORE_DAYS, GroupRole } from "@domain/groups"
-import { PageAction, PageHeader, useClosesWhenDone } from "./group-page.tsx"
+import { useClosesWhenDone } from "./group-page.tsx"
+import { PageAction, PageHeader } from "./page-header.tsx"
 import { GROUP_PATHS, type Navigate, ScreenForm } from "./progressive.tsx"
 
 /** One group as the screen shows it. */

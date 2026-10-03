@@ -10,11 +10,11 @@ import { assignableRoles, canRemoveMember, type GroupRole } from "@domain/groups
 import { ROLE_TEXT } from "./groups-screen.tsx"
 import {
   FocusedError,
-  MoreMenu,
   useClosesWhenDone,
   useFocusAfterRemoval,
   useFreshError,
 } from "./group-page.tsx"
+import { MoreMenu } from "./page-header.tsx"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import type { Navigate } from "./progressive.tsx"
 

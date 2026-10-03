@@ -10,6 +10,8 @@ export const TOUCH_TARGET = "min-h-11 min-w-11 justify-center sm:min-h-9 sm:min-
 export interface PageHeaderProps {
   /** The page's `h1`. It stays on one line and truncates; the full text is its tooltip. */
   title: string
+  /** Drawn inside the `h1` in place of `title`, such as a field that renames in place. */
+  heading?: ComponentChildren
   /** One quiet line under the title, such as the group a list belongs to. */
   subtitle?: ComponentChildren
   /** A link back to the parent page, drawn as an arrow before the title. `label` is its name. */
@@ -29,6 +31,8 @@ export interface PageHeaderProps {
   menuDataE2E?: string
   /** `data-e2e` of the `h1`. */
   titleDataE2E?: string
+  /** `data-e2e` of the subtitle. */
+  subtitleDataE2E?: string
 }
 
 /**
@@ -38,8 +42,19 @@ export interface PageHeaderProps {
  * it.
  */
 export function PageHeader(
-  { title, subtitle, back, navigate, action, menu, menuLabel, menuDataE2E, titleDataE2E }:
-    PageHeaderProps,
+  {
+    title,
+    heading,
+    subtitle,
+    back,
+    navigate,
+    action,
+    menu,
+    menuLabel,
+    menuDataE2E,
+    titleDataE2E,
+    subtitleDataE2E,
+  }: PageHeaderProps,
 ): JSX.Element {
   return (
     <header class="flex min-w-0 items-center gap-3" data-e2e="page-header">
@@ -62,27 +77,38 @@ export function PageHeader(
           title={title}
           data-e2e={titleDataE2E}
         >
-          {title}
+          {heading ?? title}
         </h1>
-        {subtitle && <p class="truncate text-sm text-muted">{subtitle}</p>}
+        {subtitle && (
+          <p class="truncate text-sm text-muted" data-e2e={subtitleDataE2E}>{subtitle}</p>
+        )}
       </div>
       {(action || menu) && (
         <div class="flex shrink-0 items-center gap-2">
           {action}
           {menu && (
-            <Dropdown
-              triggerLabel={menuLabel ?? "More actions"}
-              menuLabel={menuLabel ?? "More actions"}
-              triggerDataE2E={menuDataE2E}
-              triggerClasses={`inline-flex items-center rounded-md text-muted hover:bg-hover hover:text-foreground ${TOUCH_TARGET}`}
-              trigger={<IconEllipsisVertical class="size-5" aria-hidden="true" />}
-            >
-              {menu}
-            </Dropdown>
+            <MoreMenu label={menuLabel ?? "More actions"} dataE2E={menuDataE2E}>{menu}</MoreMenu>
           )}
         </div>
       )}
     </header>
+  )
+}
+
+/** A three-dots button that opens a menu of `DropdownItem`s, named by `label`. */
+export function MoreMenu(
+  { label, dataE2E, children }: { label: string; dataE2E?: string; children: ComponentChildren },
+): JSX.Element {
+  return (
+    <Dropdown
+      triggerLabel={label}
+      menuLabel={label}
+      triggerDataE2E={dataE2E}
+      triggerClasses={`inline-flex items-center rounded-md text-muted hover:bg-hover hover:text-foreground ${TOUCH_TARGET}`}
+      trigger={<IconEllipsisVertical class="size-5" aria-hidden="true" />}
+    >
+      {children}
+    </Dropdown>
   )
 }
 

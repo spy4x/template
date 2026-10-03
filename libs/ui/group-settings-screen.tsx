@@ -19,13 +19,8 @@ import {
 } from "@domain/groups"
 import { type GroupRow, ROLE_TEXT } from "./groups-screen.tsx"
 import { type GroupMemberRow, GroupMembersSection, type MemberError } from "./group-members.tsx"
-import {
-  FocusedError,
-  PageAction,
-  PageHeader,
-  useClosesWhenDone,
-  useFreshError,
-} from "./group-page.tsx"
+import { FocusedError, useClosesWhenDone, useFreshError } from "./group-page.tsx"
+import { PageAction, PageHeader } from "./page-header.tsx"
 import { transferCandidates } from "./group-transfer.tsx"
 import { type Navigate, SCREEN_PATHS } from "./progressive.tsx"
 
