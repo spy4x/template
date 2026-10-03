@@ -32,7 +32,7 @@ parts live here and in the published [`@spy4x/*`](https://jsr.io/@spy4x) package
 stay out.
 
 **Status:** in migration. Sign-up, sign-in with TOTP, groups, notes (the reference aggregate),
-the outbox worker and the MPA's pages work today, and the SPA works offline
+the outbox worker and the MPA's newsletter pages work today, and the SPA works offline
 ([docs/offline.md](docs/offline.md)); group administration does not yet. Details in
 [docs/architecture.md](docs/architecture.md#migration-status) and
 [ADR 001](docs/decisions/001-deno-platform-template.md).
@@ -50,7 +50,7 @@ The screenshots and the GIF use a throw-away database and a made-up user;
 <details>
 <summary>How the parts fit together</summary>
 
-<img src="docs/architecture.svg" alt="Architecture diagram. Clients: apps/spa, a Preact and Vite PWA with sign-up, sign-in, TOTP and profile, talks to apps/api over REST and WebSocket; a Dexie offline store keeps the last notes and groups and queues writes made offline. apps/mpa is a Fresh page shell with /health; its REST calls are planned. Servers: apps/api on Hono (auth, groups, CQRS dispatch, web push) and apps/worker, which drains outbox_events. Data: Postgres is authoritative and Valkey is the API cache; Docker Compose also runs Traefik, MinIO, Loki, Prometheus and Grafana. Shared code: libs/domain, libs/server, libs/client and the @spy4x packages on JSR." width="860">
+<img src="docs/architecture.svg" alt="Architecture diagram. Clients: apps/spa, a Preact and Vite PWA with sign-up, sign-in, TOTP and profile, talks to apps/api over REST and WebSocket; a Dexie offline store keeps the last notes and groups and queues writes made offline. apps/mpa is the public website on Fresh, server-rendered, calling the API only for the newsletter. Servers: apps/api on Hono (auth, groups, CQRS dispatch, web push) and apps/worker, which drains outbox_events. Data: Postgres is authoritative and Valkey is the API cache; Docker Compose also runs Traefik, MinIO, Loki, Prometheus and Grafana. Shared code: libs/domain, libs/server, libs/client and the @spy4x packages on JSR." width="860">
 
 </details>
 
@@ -84,36 +84,30 @@ The screenshots and the GIF use a throw-away database and a made-up user;
 settled before the first feature. **Skip it if** you deploy to serverless functions rather than a server
 you run.
 
-## SPA or MPA
+## The SPA and the MPA
 
-The template ships two web clients over the same API. A product picks one and serves it at
-`DOMAIN`; both render the same screens from `libs/ui` and reach the same command and query
-handlers, so no business rule lives in either client.
+The template ships two web apps over the same API, with different jobs.
 
-- **Pick the SPA** (`apps/spa`, Preact and Vite) when people should see each other's changes live,
-  or when the app should work offline ([docs/offline.md](docs/offline.md)). It keeps a WebSocket open for groups and notes, as
-  [ADR 002](docs/decisions/002-realtime-transport-and-sync.md) decides.
-- **Pick the MPA** (`apps/mpa`, Fresh) when a page that reloads after each form is enough: an admin
-  area, a back office, a product for people on old phones or behind strict script policies. Every
-  page is rendered on the server and every action is a plain form post, so it works with
-  JavaScript turned off. There is no socket; a change shows on the next page load.
+- **The SPA** (`apps/spa`, Preact and Vite) is the product. Everything a signed-in person does
+  happens there: sign-up and sign-in, notes, groups, billing, the profile. People see each other's
+  changes live over a WebSocket ([ADR 002](docs/decisions/002-realtime-transport-and-sync.md)), and
+  it works offline ([docs/offline.md](docs/offline.md)). Compose serves it at `DOMAIN`.
+- **The MPA** (`apps/mpa`, Fresh) is the product's public website. Today it holds the newsletter
+  pages and a placeholder home page; the landing, pricing and legal pages are being built
+  (https://github.com/spy4x/template/issues/265). Every page is rendered on the server and works with JavaScript turned
+  off. It has no session; its sign-in and sign-up links open the SPA at `DOMAIN`.
 
-The MPA calls the API over HTTP from the server, with the browser's session cookie, and never
-touches the database itself. It needs `ENV` and `DOMAIN` (the same values as the API) and
-`API_URL`, the address the MPA's server reaches the API at, such as `http://api:8000`. Compose
-serves the SPA at `DOMAIN` by default. To serve the MPA instead, set `COMPOSE_PROFILES=mpa` in the
-env file (join it with other profiles by commas) and run `deno task deploy` as usual: Compose then
-builds the `mpa` service from `apps/mpa/dockerfile.prod`, and its Traefik router outranks the SPA's
-for `DOMAIN`, leaving `/api` and `/ws` to the API. The SPA container still runs, unused. To run both
-side by side on one API and one database, also set `MPA_DOMAIN` to the MPA's own host: the MPA
-then serves that host and the SPA keeps `DOMAIN`. The API accepts a form only from
-`http(s)://DOMAIN`, so the MPA, after refusing any post that does not come from its own pages,
-presents its posts to the API with `DOMAIN`'s origin. A change made in the MPA reaches the SPA live
-over its socket; the MPA shows the SPA's changes on the next page load. Each host has its own
-sign-in, and links the API builds (checkout returns, invitation and newsletter emails) still open
-the SPA at `DOMAIN`. `MPA_DOMAIN` needs a DNS record pointing at the server; Traefik gets its
-certificate as for `DOMAIN`. Without the profile nothing
-about the deploy changes. The MPA's end-to-end test runs in CI on every pull
+The MPA calls the API over HTTP from the server, only for the newsletter, and never touches the
+database itself. It needs `ENV` and `DOMAIN` (the same values as the API), its own host
+`MPA_DOMAIN`, and `API_URL`, the address the MPA's server reaches the API at, such as
+`http://api:8000`; it refuses to start without any of them. To deploy it, set
+`COMPOSE_PROFILES=mpa` in the env file (join it with other profiles by commas) and `MPA_DOMAIN` to
+the website's own host, then run `deno task deploy` as usual: Compose builds the `mpa` service from
+`apps/mpa/dockerfile.prod` and serves it at `MPA_DOMAIN`, next to the SPA at `DOMAIN`. The API
+accepts a form only from `http(s)://DOMAIN`, so the MPA, after refusing any post that does not come
+from its own pages, presents its posts to the API with `DOMAIN`'s origin. `MPA_DOMAIN` needs a DNS
+record pointing at the server; Traefik gets its certificate as for `DOMAIN`. Without the profile
+nothing about the deploy changes. The MPA's end-to-end test runs in CI on every pull
 request, and locally with `e2e/mpa/run.sh` against a running Postgres and Valkey (see the header
 of that script).
 
@@ -137,7 +131,7 @@ deno task dev                # Postgres, Valkey, MinIO, API, worker, SPA, Loki, 
 Promtail, node-exporter and cAdvisor watch the whole host, so they are off by default. Set
 `COMPOSE_PROFILES=host-monitoring` in the env file to start them too.
 
-To try the MPA in Compose, see "SPA or MPA". Stop the proxy with
+To try the MPA in Compose, see "The SPA and the MPA". Stop the proxy with
 `deno task proxy:stop`. Compose applies pending migrations on every start, in the one-shot
 `migrate` service that the API and the worker wait for; a failed migration stops the start. To apply
 them from the host instead, for an API run outside Compose, use the values from your `.env` and the

@@ -17,41 +17,46 @@ repo needs stays here.
 
 Every piece of UI has one home:
 
-| Layer               | Home                                               | Examples                                                       |
-| ------------------- | -------------------------------------------------- | -------------------------------------------------------------- |
-| Generic primitives  | `spy4x/preact-components` (JSR)                    | `Button`, `Field`, `Card`, `EnhancedForm`, `AuthForm`, `Shell` |
-| Product screens     | `libs/ui` (workspace member, alias `@ui/`)         | `AuthScreen`, `ProfileScreen`, `AppFrame`, `PublicFrame`       |
-| State and transport | each app (`apps/spa/src/views`, `apps/mpa/routes`) | stores, `fetch`, WebSocket, the router, Fresh handlers         |
+| Layer               | Home                                       | Examples                                                       |
+| ------------------- | ------------------------------------------ | -------------------------------------------------------------- |
+| Generic primitives  | `spy4x/preact-components` (JSR)            | `Button`, `Field`, `Card`, `EnhancedForm`, `AuthForm`, `Shell` |
+| Product screens     | `libs/ui` (workspace member, alias `@ui/`) | `AuthScreen`, `ProfileScreen`, `AppFrame`, `PublicFrame`       |
+| State and transport | the SPA (`apps/spa/src/views`)             | stores, `fetch`, WebSocket, the router                         |
 
 Anything a future product could use goes to preact-components first. `libs/ui` keeps only what
 names this template's features. An app's view is wiring: it holds state, calls the API and passes
 both to a screen.
 
+The two apps have different jobs. The SPA (`apps/spa`) is the product: everything a signed-in
+person does happens there. The MPA (`apps/mpa`, Fresh) is the product's public website: the home
+page, pricing, the legal pages and the newsletter. It has no session, links to the SPA for sign-in
+and sign-up, and renders no `libs/ui` screen except the newsletter's (`subscribe-screen.tsx`).
+
+**The MPA's pages work without JavaScript.** Every page is rendered on the server, and every action
+is a real `<form method="post" action="…">` or `<a href="…">`. The newsletter screens keep that
+rule because the MPA renders them; their form actions are listed in `FORM_ACTIONS`
+(`libs/ui/progressive.tsx`).
+
 Every `libs/ui` component follows this contract. A part marked **open** is not met yet; its issue
 says what is missing. Do not copy the gap into a new screen.
 
+- **For the SPA, and allowed to rely on JavaScript.** Menus, dialogs and disclosures are fine; a
+  screen need not render every form open. The exception is the newsletter screens above.
 - **Pure.** Props in, callbacks out. No store, no `fetch`, no router, no `window`, `document` or
-  `location` at render, no import from an app. Output is the same under Fresh server rendering and
-  in the browser. Links take an optional `navigate` port instead of a router.
-  `tests/ui-boundary.test.ts` walks `libs/ui` and runs preact-components' rule
+  `location` at render, no import from an app. Links take an optional `navigate` port instead of a
+  router. `tests/ui-boundary.test.ts` walks `libs/ui` and runs preact-components' rule
   (`@spy4x/preact-system/boundary`) over every module, with this repository's app aliases.
-- **Works without JavaScript.** Every action is a real `<form method="post" action="…">` or
-  `<a href="…">`, with field `name`s matching the API schema of the same action. Form actions are
-  listed in `FORM_ACTIONS` (`libs/ui/progressive.tsx`). With its callback, the app takes the submit
-  over; without it, the browser posts. Push registration needs the browser's push manager, so it is
-  the one action without a native form. The mode switch of `AuthForm` is a link (`modeHrefs`).
 - **Built on preact-components' `EnhancedForm`.** Every form here is `ScreenForm`
   (`libs/ui/progressive.tsx`): `EnhancedForm` with its status taken from the screen's `pending`
   prop, so a pending form is disabled and refuses a second submit.
 - **State comes in as props:** `value`, `errors`, `pending`, `items`, `cursor`. Error and pending
-  display is part of the component, so both apps show the same messages.
+  display is part of the component, so every screen shows the same messages.
 - **Accessible by construction.** Every control has a label. Error text is tied to its field with
   `aria-describedby`. Focus moves to the first error, and to the next control after a step change.
   A message the API ties to no field stays under its form.
-- **`data-e2e` hooks stay**, so one e2e page object covers both apps.
-- **Tested.** Each component has a server-render test that finds a working form or link for every
-  action (`libs/ui/screens.test.tsx`), and an interaction test that types, submits with and without
-  the app's callback and checks where focus goes, in a happy-dom page
+- **`data-e2e` hooks stay**, so the e2e page objects keep working.
+- **Tested.** Each component has a server-render test (`libs/ui/screens.test.tsx`), and an
+  interaction test that types, submits and checks where focus goes, in a happy-dom page
   (`libs/ui/interactions.test.tsx`).
 
 ## Adding a feature

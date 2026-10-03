@@ -13,7 +13,7 @@ import {
 } from "@ui/subscribe-screen.tsx"
 import { type ApiAnswer, errorMessage, isRecord } from "./api.ts"
 import { API_BODIES, readForm } from "./forms.ts"
-import { Frame, readSession } from "./session.tsx"
+import { SiteFrame } from "./site.tsx"
 import { define, type State } from "./utils.ts"
 
 /**
@@ -161,13 +161,12 @@ function headersOf(page: PageStatus, extra: Record<string, string> = {}) {
   return page.retryAfter ? { ...extra, "retry-after": page.retryAfter } : extra
 }
 
-async function renderSubscribe(
+function renderSubscribe(
   ctx: FreshContext<State>,
   page: PageStatus & { email: string; sent: boolean; error: string | null },
-): Promise<Response> {
-  const session = await readSession(ctx.state.api)
+): Response | Promise<Response> {
   return ctx.render(
-    <Frame session={session} path={ctx.url.pathname}>
+    <SiteFrame spaOrigin={ctx.state.spaOrigin}>
       <SubscribeForm
         email={page.email}
         onEmailChange={() => {}}
@@ -176,12 +175,12 @@ async function renderSubscribe(
         error={page.error}
         pending={false}
       />
-    </Frame>,
+    </SiteFrame>,
     { status: page.status, headers: headersOf(page) },
   )
 }
 
-async function renderConfirm(
+function renderConfirm(
   ctx: FreshContext<State>,
   page: PageStatus & {
     state: SubscriptionConfirmState
@@ -189,10 +188,9 @@ async function renderConfirm(
     list: string
     token: string
   },
-): Promise<Response> {
-  const session = await readSession(ctx.state.api)
+): Response | Promise<Response> {
   return ctx.render(
-    <Frame session={session} path={ctx.url.pathname}>
+    <SiteFrame spaOrigin={ctx.state.spaOrigin}>
       <SubscriptionConfirmScreen
         state={page.state}
         email={page.email}
@@ -201,18 +199,17 @@ async function renderConfirm(
         error={null}
         pending={false}
       />
-    </Frame>,
+    </SiteFrame>,
     { status: page.status, headers: headersOf(page, NO_REFERRER) },
   )
 }
 
-async function renderUnsubscribe(
+function renderUnsubscribe(
   ctx: FreshContext<State>,
   page: PageStatus & { state: UnsubscribeState; email?: string; list: string; token: string },
-): Promise<Response> {
-  const session = await readSession(ctx.state.api)
+): Response | Promise<Response> {
   return ctx.render(
-    <Frame session={session} path={ctx.url.pathname}>
+    <SiteFrame spaOrigin={ctx.state.spaOrigin}>
       <UnsubscribeScreen
         state={page.state}
         email={page.email}
@@ -221,7 +218,7 @@ async function renderUnsubscribe(
         error={null}
         pending={false}
       />
-    </Frame>,
+    </SiteFrame>,
     { status: page.status, headers: headersOf(page, NO_REFERRER) },
   )
 }

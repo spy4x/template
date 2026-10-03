@@ -8,7 +8,7 @@ them. The diagram in the README, [`architecture.svg`](architecture.svg), shows w
 
 > **Migration status: WIP.** App boundaries, group core persistence, signup personal groups,
 > basic group REST/CQRS, the notes reference aggregate ([aggregates.md](aggregates.md)), the
-> REST-only MPA (`apps/mpa`, server-rendered, works without JavaScript), the offline SPA
+> public website (`apps/mpa`, server-rendered, works without JavaScript), the offline SPA
 > ([offline.md](offline.md)) and the `libs/shared` split into `libs/platform` and `libs/domain` now
 > exist. Group administration and worker behavior stay incomplete. Target architecture below and
 > ADR 001
@@ -29,7 +29,8 @@ Target apps:
 
 - `apps/api`: REST, auth, authorization, CQRS dispatch, and sync transport.
 - `apps/spa`: offline-capable Preact/Vite client backed by Dexie.
-- `apps/mpa`: server-rendered multipage client for flows that do not need offline state.
+- `apps/mpa`: the product's public website, server-rendered: home page, pricing, legal pages and
+  the newsletter. It has no session; the product itself is the SPA.
 - `apps/worker`: asynchronous event handlers, projections, and integrations.
 
 Target libraries:
@@ -66,7 +67,8 @@ job, and only the worker signs links and sends.
   (comma-separated, optional) still verifies links signed before a rotation. Each list signs with
   its own key, derived from the secret. In production without a secret the routes answer 503 and the
   worker drops subscriber jobs; in development a fixed, public dev secret is used.
-- **Pages.** `/subscribe`, `/subscribe/confirm` and `/unsubscribe` exist in the SPA and the MPA.
+- **Pages.** `/subscribe`, `/subscribe/confirm` and `/unsubscribe` exist in the SPA and the MPA (the
+  public website).
   Token pages answer `Cache-Control: no-store` and send no `Referer`, and a finished step leaves the
   token out of the address (the MPA answers 303 to the page without it).
 - **One-click unsubscribe.** `POST /api/subscribers/unsubscribe` is the RFC 8058 target: a mail

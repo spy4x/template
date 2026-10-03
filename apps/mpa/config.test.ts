@@ -7,39 +7,37 @@ function env(values: Record<string, string>) {
 }
 
 describe("readMpaConfig", () => {
-  it("expects the browser at https outside development, as the API does", () => {
-    expect(
-      readMpaConfig(env({ ENV: "prod", DOMAIN: "app.example.com", API_URL: "http://api:8000" })),
-    )
-      .toEqual({
-        apiUrl: "http://api:8000",
-        webAppOrigin: "https://app.example.com",
-        apiOrigin: "https://app.example.com",
-      })
+  const prod = {
+    ENV: "prod",
+    DOMAIN: "app.example.com",
+    MPA_DOMAIN: "www.example.com",
+    API_URL: "http://api:8000",
+  }
+
+  it("serves MPA_DOMAIN over https outside development, and keeps DOMAIN's origin for the API", () => {
+    expect(readMpaConfig(env(prod))).toEqual({
+      apiUrl: "http://api:8000",
+      webAppOrigin: "https://www.example.com",
+      apiOrigin: "https://app.example.com",
+    })
   })
 
   it("expects the browser at plain http in development", () => {
-    expect(
-      readMpaConfig(env({ ENV: "dev", DOMAIN: "app.localhost:8080", API_URL: "http://api:8000" }))
-        .webAppOrigin,
-    ).toBe("http://app.localhost:8080")
+    const config = readMpaConfig(
+      env({ ...prod, ENV: "dev", DOMAIN: "app.localhost:8080", MPA_DOMAIN: "www.localhost:8080" }),
+    )
+    expect(config.webAppOrigin).toBe("http://www.localhost:8080")
+    expect(config.apiOrigin).toBe("http://app.localhost:8080")
   })
 
-  it("serves its own domain when MPA_DOMAIN is set, and keeps the API's origin for the API", () => {
-    const config = readMpaConfig(
-      env({
-        ENV: "prod",
-        DOMAIN: "app.example.com",
-        MPA_DOMAIN: "www.example.com",
-        API_URL: "http://api:8000",
-      }),
-    )
-    expect(config.webAppOrigin).toBe("https://www.example.com")
-    expect(config.apiOrigin).toBe("https://app.example.com")
+  it("refuses to start without its own host instead of taking the SPA's", () => {
+    const { MPA_DOMAIN: _, ...withoutHost } = prod
+    expect(() => readMpaConfig(env(withoutHost))).toThrow("MPA_DOMAIN is required")
+    expect(() => readMpaConfig(env({ ...prod, MPA_DOMAIN: "" }))).toThrow("MPA_DOMAIN is required")
   })
 
   it("refuses to start without the API's address", () => {
-    expect(() => readMpaConfig(env({ ENV: "prod", DOMAIN: "app.example.com" })))
-      .toThrow("API_URL is required")
+    const { API_URL: _, ...withoutApi } = prod
+    expect(() => readMpaConfig(env(withoutApi))).toThrow("API_URL is required")
   })
 })

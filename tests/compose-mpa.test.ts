@@ -1,9 +1,9 @@
 /// <reference lib="deno.ns" />
 /**
  * Holds the optional `mpa` service in `infra/compose/compose.shared.yml` to what the README's
- * "SPA or MPA" section promises: it exists only under the `mpa` profile, so the default deploy
- * stays the SPA alone, and when it runs it takes `MPA_DOMAIN`, or else `DOMAIN` except `/api` and
- * `/ws`, ahead of the SPA's router (spy4x/template#122).
+ * "The SPA and the MPA" section promises: it exists only under the `mpa` profile, so the default
+ * deploy stays the SPA alone, and when it runs it serves `MPA_DOMAIN` only, never the SPA's
+ * `DOMAIN` (spy4x/template#122, #265).
  */
 
 import { expect } from "@std/expect"
@@ -39,19 +39,13 @@ Deno.test("the MPA is in the mpa profile only, and the SPA is in no profile", as
   expect(all.spa?.profiles, "the default deploy keeps serving the SPA").toBeUndefined()
 })
 
-Deno.test("without MPA_DOMAIN the MPA takes the SPA's traffic but leaves /api and /ws to the API", async () => {
-  const { mpa, spa } = await services()
-  const rule = label(mpa, "traefik.http.routers.mpa-${PROJECT}.rule")
-  expect(rule).toContain("Host(`${MPA_DOMAIN:-${DOMAIN}}`)")
-  // Compose resolves the host to DOMAIN when MPA_DOMAIN is unset or empty: the SPA's own rule.
-  expect(rule?.replace("${MPA_DOMAIN:-${DOMAIN}}", "${DOMAIN}"))
-    .toBe(label(spa, "traefik.http.routers.spa-${PROJECT}.rule"))
-  expect(rule).toContain("!PathPrefix(`/api`)")
-  expect(rule).toContain("!PathPrefix(`/ws`)")
-  // Traefik's default priority is the rule's length; the SPA's router has none set.
-  expect(Number(label(mpa, "traefik.http.routers.mpa-${PROJECT}.priority"))).toBeGreaterThan(
-    (rule ?? "").length,
-  )
+Deno.test("the MPA serves MPA_DOMAIN only and never takes the SPA's DOMAIN", async () => {
+  const { mpa } = await services()
+  const router = "traefik.http.routers.mpa-${PROJECT}"
+  // `:-` and never a fallback to DOMAIN: Compose interpolates profiled services too, so `:?` would
+  // break the default deploy, and the MPA itself refuses to start without MPA_DOMAIN.
+  expect(label(mpa, `${router}.rule`)).toBe("Host(`${MPA_DOMAIN:-}`)")
+  expect(label(mpa, `${router}.priority`), "nothing to outrank on its own host").toBeUndefined()
 })
 
 Deno.test("the MPA learns its own host, or it would refuse its own forms", async () => {
