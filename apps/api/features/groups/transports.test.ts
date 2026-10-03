@@ -1055,6 +1055,8 @@ describe("editing a group's details over REST", () => {
         { ...DETAILS, color: "#ff0000" },
         { ...DETAILS, emoji: "🏕️🏕️" },
         { ...DETAILS, emoji: "a" },
+        // One grapheme, but 41 characters: the column holds 32, so it must be a 400, not a 500.
+        { ...DETAILS, emoji: `🙂${"\u0301".repeat(40)}` },
         { ...DETAILS, description: "x".repeat(501) },
         { ...DETAILS, name: "Trip" },
         { description: "", color: null },
@@ -1124,6 +1126,17 @@ describe("editing a group's details over the socket", () => {
     const ws = socket(buses, OWNER)
 
     const frame = await ws.command("group.updateDetails", { groupId, ...DETAILS, color: "pink" })
+
+    expect(frame).toMatchObject({ kind: "server.error" })
+    expect(groups.writes).toBe(0)
+    ws.shutdown()
+  })
+
+  it("refuses a field the command does not have, such as a name, and changes nothing", async () => {
+    const { groups, buses } = stack()
+    const ws = socket(buses, OWNER)
+
+    const frame = await ws.command("group.updateDetails", { groupId, ...DETAILS, name: "Trip" })
 
     expect(frame).toMatchObject({ kind: "server.error" })
     expect(groups.writes).toBe(0)

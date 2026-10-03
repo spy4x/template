@@ -20,6 +20,9 @@ export const GROUP_RESTORE_DAYS = 30
 /** Longest group description, in characters. */
 export const GROUP_DESCRIPTION_MAX = 500
 
+/** The longest emoji a group may carry, in characters: a family or a flag is under ten. */
+export const GROUP_EMOJI_MAX = 16
+
 /**
  * The colours a group can carry: names of the design tokens' palette, never a hex value, so the
  * theme decides the shade in light and dark. Adding a name here and in `group-appearance.tsx`
@@ -667,7 +670,12 @@ export function parseGroupEmoji(value: unknown): string | null {
   const emoji = value.trim()
   if (emoji === "") return null
   const graphemes = Array.from(GRAPHEMES.segment(emoji))
-  if (graphemes.length !== 1 || !EMOJI_PATTERN.test(emoji)) {
+  // One grapheme can still be unbounded (an emoji plus endless combining marks); the column holds
+  // 32 characters, so refuse here what the database would refuse with a 500.
+  if (
+    graphemes.length !== 1 || !EMOJI_PATTERN.test(emoji) ||
+    Array.from(emoji).length > GROUP_EMOJI_MAX
+  ) {
     throw new GroupError("INVALID_REQUEST", "Group emoji must be a single emoji")
   }
   return emoji

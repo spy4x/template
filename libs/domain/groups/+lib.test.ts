@@ -17,6 +17,7 @@ import {
   canRead,
   canRename,
   canTransfer,
+  GROUP_EMOJI_MAX,
   GroupError,
   GroupRole,
   parseCreateGroupRequest,
@@ -376,6 +377,11 @@ describe("a group's emoji", () => {
       expect(() => parseGroupEmoji(value)).toThrow(GroupError)
     }
   })
+
+  it("refuses one grapheme that is longer than the column holds", () => {
+    expect(() => parseGroupEmoji(`🙂${"\u0301".repeat(40)}`)).toThrow(GroupError)
+    expect(parseGroupEmoji(`🙂${"\u0301".repeat(GROUP_EMOJI_MAX - 1)}`)).not.toBeNull()
+  })
 })
 
 describe("a group's details request", () => {
@@ -399,6 +405,9 @@ describe("a group's details request", () => {
   it("refuses a missing field, an extra one and a bad group id", () => {
     expect(() => parseGroupDetailsBody({ description: "", color: null })).toThrow(GroupError)
     expect(() => parseGroupDetailsBody({ ...details, name: "Trip" })).toThrow(GroupError)
+    expect(() => parseGroupDetailsRequest({ groupId, ...details, name: "Trip" })).toThrow(
+      GroupError,
+    )
     expect(() => parseGroupDetailsRequest({ ...details })).toThrow(GroupError)
     expect(() => parseGroupDetailsRequest({ groupId: "nope", ...details })).toThrow(GroupError)
   })
