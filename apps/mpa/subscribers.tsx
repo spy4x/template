@@ -22,6 +22,13 @@ import { define, type State } from "./utils.ts"
  */
 const NO_REFERRER = { "referrer-policy": "no-referrer" }
 
+/** The pages a mailed link opens: no search engine lists them. */
+const TOKEN_PAGE_HEAD = {
+  title: "Newsletter",
+  description: "Confirm or end your subscription to the Template newsletter.",
+  noindex: true,
+}
+
 /** The query a finished step redirects to: the page again, with no token in it. */
 const DONE_QUERY = "?state=done"
 
@@ -166,15 +173,36 @@ function renderSubscribe(
   page: PageStatus & { email: string; sent: boolean; error: string | null },
 ): Response | Promise<Response> {
   return ctx.render(
-    <SiteFrame spaOrigin={ctx.state.spaOrigin}>
-      <SubscribeForm
-        email={page.email}
-        onEmailChange={() => {}}
-        list={DEFAULT_SUBSCRIBER_LIST}
-        sent={page.sent}
-        error={page.error}
-        pending={false}
-      />
+    <SiteFrame
+      state={ctx.state}
+      path={FORM_ACTIONS.subscribe}
+      head={{
+        title: "News by e-mail",
+        description: "Get a short e-mail when something new ships in Template. Double opt-in, " +
+          "one-click unsubscribe.",
+      }}
+    >
+      <div class="grid items-start gap-8 lg:grid-cols-2">
+        <section class="flex flex-col gap-4" aria-label="About the newsletter">
+          <p class="text-lg">
+            I build Template in public. Subscribe and I write when something new ships: a feature, a
+            release, or what I learned on the way.
+          </p>
+          <ul class="list-disc space-y-2 pl-6 text-muted">
+            <li>You confirm by a link first, so nobody can sign you up.</li>
+            <li>Every mail has a link that unsubscribes you in one click.</li>
+            <li>Your address is used for this newsletter and nothing else.</li>
+          </ul>
+        </section>
+        <SubscribeForm
+          email={page.email}
+          onEmailChange={() => {}}
+          list={DEFAULT_SUBSCRIBER_LIST}
+          sent={page.sent}
+          error={page.error}
+          pending={false}
+        />
+      </div>
     </SiteFrame>,
     { status: page.status, headers: headersOf(page) },
   )
@@ -190,7 +218,7 @@ function renderConfirm(
   },
 ): Response | Promise<Response> {
   return ctx.render(
-    <SiteFrame spaOrigin={ctx.state.spaOrigin}>
+    <SiteFrame state={ctx.state} path={FORM_ACTIONS.subscribeConfirm} head={TOKEN_PAGE_HEAD}>
       <SubscriptionConfirmScreen
         state={page.state}
         email={page.email}
@@ -209,7 +237,7 @@ function renderUnsubscribe(
   page: PageStatus & { state: UnsubscribeState; email?: string; list: string; token: string },
 ): Response | Promise<Response> {
   return ctx.render(
-    <SiteFrame spaOrigin={ctx.state.spaOrigin}>
+    <SiteFrame state={ctx.state} path={FORM_ACTIONS.unsubscribe} head={TOKEN_PAGE_HEAD}>
       <UnsubscribeScreen
         state={page.state}
         email={page.email}

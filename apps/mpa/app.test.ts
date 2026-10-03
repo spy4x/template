@@ -278,15 +278,17 @@ describe("an MPA on its own domain", () => {
     expect(seen).toEqual([])
   })
 
-  it(`links "Open the app" to the SPA at DOMAIN, not to the website's own host`, async () => {
+  it(`links "Try the demo" to the SPA's sign-up at DOMAIN, not to the website's own host`, async () => {
     const response = await new App<State>()
       .use(pageMiddleware(ownDomain, fakeApi(() => Response.json({})).fetch))
       .get("/subscribe", subscribe.GET!)
       .handler()(new Request(`${ownDomain.webAppOrigin}/subscribe`), info)
 
     const page = await response.text()
-    expect(page).toMatch(new RegExp(`<a [^>]*href="${ownDomain.apiOrigin}/"[^>]*>Open the app</a>`))
-    expect(page).not.toContain(`href="${ownDomain.webAppOrigin}/"`)
+    expect(page).toMatch(
+      new RegExp(`<a [^>]*href="${ownDomain.apiOrigin}/sign-up"[^>]*>Try the demo</a>`),
+    )
+    expect(page).not.toContain(`href="${ownDomain.webAppOrigin}/sign-up"`)
   })
 
   it("passes an origin of null on unchanged for the API to judge", async () => {

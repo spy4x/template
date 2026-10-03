@@ -6,7 +6,7 @@ export default define.page(function App({ Component }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>App Template</title>
+        <title>Template</title>
       </head>
       <body class="theme-base min-h-full">
         <Component />
