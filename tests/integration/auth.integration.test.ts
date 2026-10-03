@@ -40,6 +40,8 @@ const KIND_MIGRATION = "2026_10_07_0001_group_kind_removed.sql"
 const EMAIL_MIGRATION = "2026_10_08_0002_email_verification.sql"
 /** Widens the audit row's address to the longest one a form accepts (#191). */
 const AUDIT_IDENTIFIER_MIGRATION = "2026_10_10_0001_auth_audit_identifier_320.sql"
+/** Adds the group's description, colour and emoji, which every group read and write names. */
+const APPEARANCE_MIGRATION = "2026_10_18_0001_group_appearance.sql"
 const MASTER_MIGRATIONS = [
   "2026_01_26_0001_init.sql",
   "2026_01_26_0002_auth_profiles_audit.sql",
@@ -73,6 +75,7 @@ async function withSchema(
   try {
     await admin`CREATE SCHEMA ${admin(schema)}`
     for (const migration of migrations) await applyMigration(sql, migration)
+    await applyMigration(sql, APPEARANCE_MIGRATION)
     await body(sql)
   } finally {
     await sql.end({ timeout: 5 })
