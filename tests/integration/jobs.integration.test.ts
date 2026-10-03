@@ -408,6 +408,39 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
       },
     )
 
+    await t.step(
+      "the nightly cleanup removes an invitation dead over 30 days and keeps a recent one",
+      async () => {
+        const [{ userId }] = await sql<{ userId: number }[]>`
+          WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id)
+          INSERT INTO users (id) SELECT id FROM auth_user RETURNING id AS user_id
+        `
+        const groupId = crypto.randomUUID()
+        await sql`
+          INSERT INTO groups (id, name, owner_user_id, created_by_user_id)
+          VALUES (${groupId}, 'invitation fixture', ${userId}, ${userId})
+        `
+        const insertExpired = async (days: number) => {
+          const id = crypto.randomUUID()
+          await sql`
+            INSERT INTO group_invitations (id, group_id, token_hash, role, created_by_user_id, expires_at)
+            VALUES (${id}, ${groupId}, ${id.replaceAll("-", "").repeat(2)}, 1, ${userId},
+              now() - make_interval(days => ${days}))
+          `
+          return id
+        }
+        await insertExpired(31)
+        const recent = await insertExpired(29)
+
+        await advanceClock(sql, 25 * 60)
+        const result = await createOutboxProcessor(sql, mailOff(sql)).drainOnce()
+        expect(result.failed).toBe(0)
+
+        const left = await sql<{ id: string }[]>`SELECT id FROM group_invitations`
+        expect(left).toEqual([{ id: recent }])
+      },
+    )
+
     await t.step("a row names both its group and its actor, or neither", async () => {
       const [{ groupId, userId }] = await sql<{ groupId: string; userId: number }[]>`
         WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id),
