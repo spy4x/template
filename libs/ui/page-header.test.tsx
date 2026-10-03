@@ -60,4 +60,11 @@ describe("PageAction", () => {
     expect(html).toContain(`<span class="sr-only sm:not-sr-only">New note</span>`)
     expect(html.match(/<button [^>]*>/)?.[0]).toContain(`data-e2e="note-new"`)
   })
+
+  it("draws a mark before the title, and nothing when there is none", () => {
+    const withMark = renderToString(<PageHeader title="Trip" mark={<span id="m">🏠</span>} />)
+    expect(withMark.indexOf(`id="m"`)).toBeGreaterThan(-1)
+    expect(withMark.indexOf(`id="m"`)).toBeLessThan(withMark.indexOf("<h1"))
+    expect(renderToString(<PageHeader title="Trip" />)).not.toContain(`id="m"`)
+  })
 })

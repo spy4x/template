@@ -1,13 +1,17 @@
 import type { JSX } from "preact"
 import { IconCheck } from "@spy4x/preact-icons"
 import { Combobox } from "@spy4x/preact-ui/combobox"
-import type { GroupRole } from "@domain/groups"
+import type { GroupColor, GroupRole } from "@domain/groups"
+import { groupLabel, GroupMark } from "./group-appearance.tsx"
 import { ROLE_TEXT } from "./groups-screen.tsx"
 
 /** One group of the picker: its name, and the person's role in it. */
 export interface PickerGroup {
   id: string
   name: string
+  /** The group's colour and emoji, when it has them. */
+  color?: GroupColor | null
+  emoji?: string | null
   role: GroupRole
 }
 
@@ -41,13 +45,14 @@ export function GroupPicker({ groups, selectedId, onSelect }: GroupPickerData): 
         aria-labelledby={labelId}
         items={groups}
         value={selected}
-        getLabel={(group) => group.name}
+        getLabel={groupLabel}
         onChange={(group) => group && onSelect(group.id)}
         renderOption={(group, state) => (
           <span class="flex min-w-0 flex-1 items-center gap-2">
             <span class="flex size-4 shrink-0" aria-hidden="true">
               {state.selected && <IconCheck class="size-4" />}
             </span>
+            <GroupMark color={group.color} emoji={group.emoji} size="sm" />
             <span class="min-w-0 flex-1 truncate">{group.name}</span>
             <span class="shrink-0 text-xs text-muted">{ROLE_TEXT[group.role]}</span>
           </span>

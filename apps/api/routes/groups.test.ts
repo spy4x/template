@@ -67,6 +67,9 @@ function dependencies(): GroupsRouteDependencies & {
         group: {
           id: command.data.id,
           name: command.data.name,
+          description: "",
+          color: null,
+          emoji: null,
           role: GroupRole.OWNER,
           authorizationRevision: "1",
           changeSequence: "1",
@@ -80,6 +83,9 @@ function dependencies(): GroupsRouteDependencies & {
         group: {
           id: query.data.groupId,
           name: "Team",
+          description: "",
+          color: null,
+          emoji: null,
           role: GroupRole.OWNER,
           authorizationRevision: "1",
           changeSequence: "1",
@@ -88,6 +94,7 @@ function dependencies(): GroupsRouteDependencies & {
       })
     },
     rename: () => Promise.reject(new Error("not used")),
+    updateDetails: () => Promise.reject(new Error("not used")),
     delete: () => Promise.reject(new Error("not used")),
     restore: () => Promise.reject(new Error("not used")),
     deleted: () => Promise.reject(new Error("not used")),
@@ -265,6 +272,9 @@ describe("groups route", () => {
             ? {
               id: ownGroup,
               name: "Team",
+              description: "",
+              color: null,
+              emoji: null,
               role: GroupRole.OWNER,
               authorizationRevision: "1",
               changeSequence: "1",

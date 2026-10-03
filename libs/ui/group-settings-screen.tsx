@@ -15,8 +15,10 @@ import {
   canManageInvitations,
   canRename,
   GROUP_RESTORE_DAYS,
+  type GroupDetails,
   GroupRole,
 } from "@domain/groups"
+import { GroupDetailsForm, GroupMark } from "./group-appearance.tsx"
 import { type GroupRow, ROLE_TEXT } from "./groups-screen.tsx"
 import { type GroupMemberRow, GroupMembersSection, type MemberError } from "./group-members.tsx"
 import { FocusedError, useClosesWhenDone, useFreshError } from "./group-page.tsx"
@@ -42,6 +44,12 @@ export interface GroupSettingsScreenProps {
    * rejection keeps the field open with the error's message under it.
    */
   onRename?: (name: string) => Promise<void>
+  /**
+   * Saves the group's description, colour and emoji, from the "Edit details" dialog in the header
+   * menu, which whoever may rename the group sees. A rejection keeps the dialog open with the
+   * error's message in it.
+   */
+  onUpdateDetails?: (details: GroupDetails) => Promise<void>
   /**
    * This is the only group the person has, so they can neither leave nor delete it: the menu says
    * so beside the disabled item. The server refuses both too.
@@ -99,6 +107,7 @@ enum Dialog {
   TRANSFER = 1,
   LEAVE = 2,
   DELETE = 3,
+  DETAILS = 4,
 }
 
 /**
@@ -116,6 +125,7 @@ export function GroupSettingsScreen(
     navigate,
     onOpen,
     onRename,
+    onUpdateDetails,
     isLastGroup = false,
     hasSubscription = false,
     deleting = false,
@@ -168,6 +178,14 @@ export function GroupSettingsScreen(
 
   const menu = (
     <>
+      {canRename(group.role) && onUpdateDetails && (
+        <DropdownItem
+          dataE2E="group-details-open"
+          onClick={() => setDialog(Dialog.DETAILS)}
+        >
+          Edit details
+        </DropdownItem>
+      )}
       {canHandOver && (
         <DropdownItem
           disabled={subscriptionBlocks !== null}
@@ -232,6 +250,7 @@ export function GroupSettingsScreen(
             />
           )
           : undefined}
+        mark={<GroupMark color={group.color} emoji={group.emoji} />}
         subtitle={
           <>
             <span data-e2e="group-general-role">{ROLE_TEXT[group.role]}</span>
@@ -252,6 +271,12 @@ export function GroupSettingsScreen(
         menu={menu}
         menuDataE2E="group-menu"
       />
+
+      {group.description && (
+        <p class="whitespace-pre-line text-sm" data-e2e="group-general-description">
+          {group.description}
+        </p>
+      )}
 
       <GroupMembersSection
         groupId={group.id}
@@ -293,6 +318,30 @@ export function GroupSettingsScreen(
           dataE2E="invite-dialog"
         >
           {invite(() => setInviting(false))}
+        </Modal>
+      )}
+
+      {dialog === Dialog.DETAILS && onUpdateDetails && (
+        <Modal
+          open
+          title="Edit details"
+          cancelLabel="Close"
+          closeOnBackdrop={false}
+          onClose={close}
+          dataE2E="group-details-dialog"
+        >
+          <GroupDetailsForm
+            initial={{
+              description: group.description ?? "",
+              color: group.color ?? null,
+              emoji: group.emoji ?? null,
+            }}
+            onSave={async (details) => {
+              await onUpdateDetails(details)
+              close()
+            }}
+            onCancel={close}
+          />
         </Modal>
       )}
 

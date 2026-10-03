@@ -188,6 +188,39 @@ same steps; copy the notes files that mention `move`:
 Moving all of a group's data before the group is deleted is not built (spy4x/template#260); it
 would call this command with every id of the group.
 
+## Adding a setting to a group
+
+A setting is a property of the group itself, such as its description, colour and emoji. It is not
+a new aggregate: the group already has the table, the repository, the transports and the change
+event. Follow the details command (`group.updateDetails`, spy4x/template#134) file by file.
+
+1. **Migration.** One file in `libs/server/db/migrations/` adds the column, with a default or a
+   nullable type so existing rows stay valid, and a `CHECK` for a limit the database can hold.
+   Mirror the same lines in `libs/server/db/schema.sql`; `groups.integration.test.ts` compares the
+   snapshot with the migrations. Tests that apply a hand-written list of migrations
+   (`auth.integration.test.ts`, `valkey-outage.integration.test.ts`, `groups.integration.test.ts`,
+   `db-group-transaction.integration.test.ts`)
+   need the new file added.
+2. **Domain.** Add the field to `Group` and `GroupSummary` in `libs/domain/groups/+lib.ts`, one
+   parser per field that throws `GroupError` with `INVALID_REQUEST`, and a limit constant the screen
+   can import. A colour is stored as a palette name and checked against `GROUP_COLORS`, never a hex
+   value. Settings that change together share one command so one request is one audit row.
+3. **Repository.** Add the column to the selects and to `toGroup` and `toSummary`. The write locks
+   the member's row, checks the role, updates, then calls `audit()` and `recordChange()` in the
+   same transaction. That outbox row is the change event.
+4. **Command and handler.** The handler judges the role again (`assertCanEditDetails` reuses the
+   rename rule), so REST and the socket enforce it alike. Register the command in
+   `apps/api/cqrs/+init.ts`, `apps/api/index.ts` and `apps/api/services/realtimeHub.ts`.
+5. **Transports.** A REST route (`PUT /api/groups/:groupId/details`) and the socket command
+   (`group.updateDetails`), with the same bad-input and role tests as the other group commands.
+6. **Screen.** An "Edit details" item in the settings menu opens a dialog; the form is never open
+   by default. Hide the item when the role may not edit. New fields on `GroupRow`, `PickerGroup`
+   and the SPA's `GroupItem` are optional, because the offline store may hold groups saved before
+   the field existed.
+7. **Other members.** Nothing to add: `recordChange()` makes the worker send a hint to every
+   member's socket, and their pages read the group again. Test it with two pages and a count of
+   page loads, as `e2e/groups-details.e2e.ts` does.
+
 ## What is left to the next aggregate
 
 - The SPA creates a note in the group it shows, over the socket, so a note never lands in a group

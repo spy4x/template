@@ -51,6 +51,72 @@ Deno.test("rename: only an admin or the owner changes the name", async () => {
   })
 })
 
+Deno.test("details: only an admin or the owner sets them, and every member reads them", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner, admin, editor, viewer, stranger } = await team(sql)
+    const details = { description: "Our trips", color: "blue" as const, emoji: "🏕️" }
+
+    for (const who of [viewer, editor, stranger]) {
+      expect(await repository.updateDetails(groupId, details, who)).toBeNull()
+    }
+    const untouched = await repository.getSummaryForMember(groupId, viewer)
+    expect([untouched?.description, untouched?.color, untouched?.emoji]).toEqual(["", null, null])
+
+    const byAdmin = await repository.updateDetails(groupId, details, admin, "req-details")
+    expect(byAdmin).toMatchObject(details)
+    const seen = await repository.getSummaryForMember(groupId, viewer)
+    expect(seen).toMatchObject(details)
+    const listed = (await repository.listForUser(viewer, { limit: 10 })).groups[0]
+    expect(listed).toMatchObject(details)
+
+    const cleared = await repository.updateDetails(
+      groupId,
+      { description: "", color: null, emoji: null },
+      owner,
+    )
+    expect(cleared).toMatchObject({ description: "", color: null, emoji: null })
+    expect(cleared!.changeSequence > byAdmin!.changeSequence).toBe(true)
+  })
+})
+
+Deno.test("details: an edit writes an audit row and moves the group's change sequence", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner } = await team(sql)
+
+    await repository.updateDetails(
+      groupId,
+      { description: "x", color: "red", emoji: null },
+      owner,
+      "req-details",
+    )
+
+    const audit = await sql<{ kind: string; request: string }[]>`
+      SELECT event_kind AS kind, request_id AS request
+      FROM audit_events WHERE group_id = ${groupId} AND event_kind = 'group.details_updated'
+    `
+    expect(audit).toEqual([{ kind: "group.details_updated", request: "req-details" }])
+    const outbox = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM outbox_events
+      WHERE aggregate_id = ${groupId} AND event_kind = 'group.details_updated'
+    `
+    expect(outbox[0].n).toBe(1)
+  })
+})
+
+Deno.test("details: the database refuses a description over 500 characters", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner } = await team(sql)
+
+    await expect(
+      repository.updateDetails(
+        groupId,
+        { description: "x".repeat(501), color: null, emoji: null },
+        owner,
+      ),
+    ).rejects.toThrow(`groups_description_check`)
+  })
+})
+
 Deno.test("delete: only the owner deletes, and a refused attempt changes nothing", async () => {
   await withSchema(async (sql) => {
     const { repository, groupId, owner, admin, editor, viewer, stranger } = await team(sql)

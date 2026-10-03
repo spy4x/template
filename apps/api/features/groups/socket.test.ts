@@ -27,6 +27,7 @@ const signal = new AbortController().signal
 /** The rename, delete, restore and member requests, which these tests never call. */
 const UNUSED_GROUP_CHANGES = {
   rename: () => Promise.reject(new Error("not used")),
+  updateDetails: () => Promise.reject(new Error("not used")),
   delete: () => Promise.reject(new Error("not used")),
   restore: () => Promise.reject(new Error("not used")),
   deleted: () => Promise.reject(new Error("not used")),
@@ -58,6 +59,9 @@ function harness() {
         group: {
           id,
           name: command.data.name,
+          description: "",
+          color: null,
+          emoji: null,
           role: GroupRole.OWNER,
           authorizationRevision: "1",
           changeSequence: "1",
@@ -71,6 +75,9 @@ function harness() {
         group: {
           id: query.data.groupId,
           name: "Team",
+          description: "",
+          color: null,
+          emoji: null,
           role: GroupRole.VIEWER,
           authorizationRevision: "1",
           changeSequence: "1",
@@ -180,6 +187,9 @@ describe("group socket requests", () => {
             ? {
               id: ownGroup,
               name: "Team",
+              description: "",
+              color: null,
+              emoji: null,
               role: GroupRole.OWNER,
               authorizationRevision: "1",
               changeSequence: "1",
@@ -335,6 +345,9 @@ describe("group changes over the socket", () => {
         group: {
           id,
           name: "Team",
+          description: "",
+          color: null,
+          emoji: null,
           role: GroupRole.OWNER,
           authorizationRevision: "1",
           changeSequence: "1",
@@ -354,6 +367,7 @@ describe("group changes over the socket", () => {
         decode: () => Promise.reject(),
       },
       rename: record("rename"),
+      updateDetails: record("updateDetails"),
       delete: record("delete"),
       restore: record("restore"),
       deleted: () => Promise.resolve({ groups: [] }),

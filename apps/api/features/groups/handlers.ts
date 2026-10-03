@@ -4,6 +4,7 @@ import { GroupOwnershipTransferredEvent, GroupSelectedEvent } from "../../cqrs/e
 import {
   assertCanChangeRole,
   assertCanDelete,
+  assertCanEditDetails,
   assertCanLeave,
   assertCanRemoveMember,
   assertCanRename,
@@ -24,6 +25,7 @@ import {
   GroupSelectCommand,
   GroupSelectedQuery,
   GroupTransferCommand,
+  GroupUpdateDetailsCommand,
 } from "@domain/groups"
 
 /**
@@ -94,6 +96,28 @@ export function createGroupRenameHandler(
     const group = await repository.rename(
       data.groupId,
       data.name,
+      data.actor.userId,
+      data.requestId,
+    )
+    if (!group) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+    return { group }
+  }
+}
+
+/**
+ * Sets a group's description, colour and emoji. The rule is the rename rule: an admin or the owner
+ * may, a viewer or editor is refused, and a person who is not a member is told the group does not
+ * exist. The repository writes and announces the change like a rename.
+ */
+export function createGroupUpdateDetailsHandler(
+  repository: GroupRepository,
+): CommandHandler<GroupUpdateDetailsCommand> {
+  return async ({ data }) => {
+    const access = await repository.getForMember(data.groupId, data.actor.userId)
+    assertCanEditDetails(access?.role ?? null)
+    const group = await repository.updateDetails(
+      data.groupId,
+      { description: data.description, color: data.color, emoji: data.emoji },
       data.actor.userId,
       data.requestId,
     )

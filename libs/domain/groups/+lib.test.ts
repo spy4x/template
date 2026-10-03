@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd"
 import {
   assertCanChangeRole,
   assertCanDelete,
+  assertCanEditDetails,
   assertCanLeave,
   assertCanRemoveMember,
   assertCanRename,
@@ -16,9 +17,15 @@ import {
   canRead,
   canRename,
   canTransfer,
+  GROUP_EMOJI_MAX,
   GroupError,
   GroupRole,
   parseCreateGroupRequest,
+  parseGroupColor,
+  parseGroupDescription,
+  parseGroupDetailsBody,
+  parseGroupDetailsRequest,
+  parseGroupEmoji,
   parseGroupIdRequest,
   parseMemberRequest,
   parseMemberRoleBody,
@@ -316,5 +323,100 @@ describe("transferring ownership", () => {
     for (const value of bad) {
       expect(codeOf(() => parseTransferBody(value))).toBe("INVALID_REQUEST")
     }
+  })
+})
+
+describe("a group's description", () => {
+  it("is trimmed and may be empty", () => {
+    expect(parseGroupDescription("  Our trips \n")).toBe("Our trips")
+    expect(parseGroupDescription("   ")).toBe("")
+  })
+
+  it("holds 500 characters and refuses the 501st, counting an emoji as one", () => {
+    expect(parseGroupDescription("x".repeat(500))).toHaveLength(500)
+    expect(Array.from(parseGroupDescription("🏕".repeat(500)))).toHaveLength(500)
+    expect(() => parseGroupDescription("x".repeat(501))).toThrow(GroupError)
+  })
+
+  it("refuses what is not text", () => {
+    expect(() => parseGroupDescription(null)).toThrow(GroupError)
+    expect(() => parseGroupDescription(4)).toThrow(GroupError)
+  })
+})
+
+describe("a group's colour", () => {
+  it("is a palette name or null", () => {
+    for (const color of ["red", "orange", "green", "blue", "purple", "gray"]) {
+      expect(parseGroupColor(color)).toBe(color)
+    }
+    expect(parseGroupColor(null)).toBeNull()
+  })
+
+  it("refuses a hex value, an unknown name and a missing value", () => {
+    for (const value of ["#ff0000", "pink", "RED", "", undefined, 3]) {
+      expect(() => parseGroupColor(value)).toThrow(GroupError)
+    }
+  })
+})
+
+describe("a group's emoji", () => {
+  it("accepts one emoji, however many code points it takes", () => {
+    for (const emoji of ["🏕️", "🏠", "👨‍👩‍👧", "🇳🇱", "👍🏽", "⭐"]) {
+      expect(parseGroupEmoji(emoji)).toBe(emoji)
+    }
+  })
+
+  it("reads an empty string or null as none", () => {
+    expect(parseGroupEmoji("")).toBeNull()
+    expect(parseGroupEmoji("  ")).toBeNull()
+    expect(parseGroupEmoji(null)).toBeNull()
+  })
+
+  it("refuses two emoji, letters, digits and an emoji with text", () => {
+    for (const value of ["🏕️🏠", "a", "1", "🏠a", "ab", 5, undefined]) {
+      expect(() => parseGroupEmoji(value)).toThrow(GroupError)
+    }
+  })
+
+  it("refuses one grapheme that is longer than the column holds", () => {
+    expect(() => parseGroupEmoji(`🙂${"\u0301".repeat(40)}`)).toThrow(GroupError)
+    expect(parseGroupEmoji(`🙂${"\u0301".repeat(GROUP_EMOJI_MAX - 1)}`)).not.toBeNull()
+  })
+})
+
+describe("a group's details request", () => {
+  const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
+  const details = { description: " Trips ", color: "green", emoji: "🏕️" }
+
+  it("carries exactly the three fields, cleaned", () => {
+    expect(parseGroupDetailsBody(details)).toEqual({
+      description: "Trips",
+      color: "green",
+      emoji: "🏕️",
+    })
+    expect(parseGroupDetailsRequest({ groupId, ...details })).toEqual({
+      groupId,
+      description: "Trips",
+      color: "green",
+      emoji: "🏕️",
+    })
+  })
+
+  it("refuses a missing field, an extra one and a bad group id", () => {
+    expect(() => parseGroupDetailsBody({ description: "", color: null })).toThrow(GroupError)
+    expect(() => parseGroupDetailsBody({ ...details, name: "Trip" })).toThrow(GroupError)
+    expect(() => parseGroupDetailsRequest({ groupId, ...details, name: "Trip" })).toThrow(
+      GroupError,
+    )
+    expect(() => parseGroupDetailsRequest({ ...details })).toThrow(GroupError)
+    expect(() => parseGroupDetailsRequest({ groupId: "nope", ...details })).toThrow(GroupError)
+  })
+
+  it("lets an admin and the owner edit and refuses an editor, a viewer and a stranger", () => {
+    expect(codeOf(() => assertCanEditDetails(GroupRole.ADMIN))).toBeUndefined()
+    expect(codeOf(() => assertCanEditDetails(GroupRole.OWNER))).toBeUndefined()
+    expect(codeOf(() => assertCanEditDetails(GroupRole.EDITOR))).toBe("ROLE_INSUFFICIENT")
+    expect(codeOf(() => assertCanEditDetails(GroupRole.VIEWER))).toBe("ROLE_INSUFFICIENT")
+    expect(codeOf(() => assertCanEditDetails(null))).toBe("GROUP_NOT_FOUND")
   })
 })

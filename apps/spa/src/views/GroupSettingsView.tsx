@@ -3,7 +3,12 @@ import { useLocation } from "wouter-preact"
 import { GroupSettingsScreen } from "@ui/group-settings-screen.tsx"
 import { InviteForm, PendingInvitations } from "@ui/group-invitations.tsx"
 import { GroupTransferForm } from "@ui/group-transfer.tsx"
-import { canManageInvitations, type GroupRole, type InvitationErrorCode } from "@domain/groups"
+import {
+  canManageInvitations,
+  type GroupDetails,
+  type GroupRole,
+  type InvitationErrorCode,
+} from "@domain/groups"
 import { entitlementsOf } from "@domain/billing"
 import type { GroupRow } from "@ui/groups-screen.tsx"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
@@ -44,6 +49,24 @@ export async function renameGroup(
     failure?.groupId === groupId && failure.action === "rename"
       ? failure.message
       : "Could not rename the group.",
+  )
+}
+
+/**
+ * Saves the group's description, colour and emoji through the store. Rejects with the store's
+ * message when the server refused, so the dialog stays open with it.
+ */
+export async function updateGroupDetails(
+  groups: Pick<typeof groupsStore, "updateDetails" | "actionError">,
+  groupId: string,
+  details: GroupDetails,
+): Promise<void> {
+  if (await groups.updateDetails(groupId, details)) return
+  const failure = groups.actionError.value
+  throw new Error(
+    failure?.groupId === groupId && failure.action === "details"
+      ? failure.message
+      : "Could not save the details.",
   )
 }
 
@@ -165,6 +188,7 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
         navigate(NOTE_PATHS.list)
       }}
       onRename={(name) => renameGroup(store, groupId, name)}
+      onUpdateDetails={(details) => updateGroupDetails(store, groupId, details)}
       isLastGroup={store.groups.value.length <= 1}
       hasSubscription={billingOurs?.subscribed ?? false}
       members={ours ? team.members.value : null}

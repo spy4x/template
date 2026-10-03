@@ -123,7 +123,11 @@ CREATE TABLE groups (
     created_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMPTZ,
+    description VARCHAR(2000) DEFAULT '' NOT NULL,
+    color VARCHAR(16),
+    emoji VARCHAR(32),
     CONSTRAINT groups_name_check CHECK (length(btrim(name)) BETWEEN 1 AND 100),
+    CONSTRAINT groups_description_check CHECK (char_length(description) <= 500),
     CONSTRAINT groups_authorization_revision_check CHECK (authorization_revision >= 1),
     CONSTRAINT groups_next_change_sequence_check CHECK (next_change_sequence >= 1)
 );

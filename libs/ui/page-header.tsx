@@ -14,6 +14,8 @@ export interface PageHeaderProps {
   heading?: ComponentChildren
   /** One quiet line under the title, such as the group a list belongs to. */
   subtitle?: ComponentChildren
+  /** A small picture before the title, such as a group's mark. Decoration: name it in `title`. */
+  mark?: ComponentChildren
   /** A link back to the parent page, drawn as an arrow before the title. `label` is its name. */
   back?: { href: string; label: string }
   /** Follows `back` without a page load. */
@@ -46,6 +48,7 @@ export function PageHeader(
     title,
     heading,
     subtitle,
+    mark,
     back,
     navigate,
     action,
@@ -71,6 +74,7 @@ export function PageHeader(
           <IconArrowLeft class="size-5" aria-hidden="true" />
         </Button>
       )}
+      {mark}
       <div class="flex min-w-0 flex-1 flex-col gap-1">
         <h1
           class="truncate text-xl font-semibold sm:text-2xl"

@@ -15,6 +15,7 @@ import {
   GroupTransfer,
   renameGroup,
   transferAndRefresh,
+  updateGroupDetails,
 } from "./GroupSettingsView.tsx"
 
 const known = {
@@ -317,5 +318,47 @@ describe("renameGroup", () => {
 
     await expect(renameGroup(groups, known.id, "Crew")).rejects
       .toThrow("Could not rename the group.")
+  })
+})
+
+describe("updateGroupDetails", () => {
+  const details = { description: "Flat", color: "green" as const, emoji: "🏠" }
+  const store = (saved: boolean, failure: typeof groupsStore.actionError.value = null) => {
+    const sent: unknown[] = []
+    return {
+      sent,
+      groups: {
+        updateDetails: (groupId: string, d: unknown) => {
+          sent.push({ groupId, d })
+          return Promise.resolve(saved)
+        },
+        actionError: { value: failure },
+      } as unknown as Parameters<typeof updateGroupDetails>[0],
+    }
+  }
+
+  it("hands the details to the store and resolves when the server saved them", async () => {
+    const { sent, groups } = store(true)
+
+    await updateGroupDetails(groups, known.id, details)
+
+    expect(sent).toEqual([{ groupId: known.id, d: details }])
+  })
+
+  it("rejects with the server's message when it refused this group's details", async () => {
+    const { groups } = store(false, {
+      groupId: known.id,
+      action: "details",
+      message: "Not allowed.",
+    })
+
+    await expect(updateGroupDetails(groups, known.id, details)).rejects.toThrow("Not allowed.")
+  })
+
+  it("rejects with a general message when the refusal held is another group's", async () => {
+    const { groups } = store(false, { groupId: strangerId, action: "details", message: "Theirs." })
+
+    await expect(updateGroupDetails(groups, known.id, details)).rejects
+      .toThrow("Could not save the details.")
   })
 })

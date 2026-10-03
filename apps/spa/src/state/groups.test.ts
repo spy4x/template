@@ -1,7 +1,7 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { RealtimeRequestError } from "@spy4x/realtime"
-import { GroupRole } from "@domain/groups"
+import { type GroupDetails, GroupRole } from "@domain/groups"
 import {
   createGroupsStore,
   type DeletedGroupItem,
@@ -29,6 +29,7 @@ function deleted(id: string, name = id): DeletedGroupItem {
 const UNUSED = {
   fetchDeleted: () => Promise.resolve({ groups: [] }),
   rename: () => Promise.reject(new Error("unused")),
+  updateDetails: () => Promise.reject(new Error("unused")),
   remove: () => Promise.reject(new Error("unused")),
   restore: () => Promise.reject(new Error("unused")),
 }
@@ -46,6 +47,9 @@ function harness(
     read?: () => Promise<GroupPage>
     fetchDeleted?: () => Promise<{ groups: DeletedGroupItem[] }>
     rename?: (input: { groupId: string; name: string }) => Promise<{ group: GroupItem }>
+    updateDetails?: (
+      input: { groupId: string } & GroupDetails,
+    ) => Promise<{ group: GroupItem }>
     remove?: (input: { groupId: string }) => Promise<{ group: DeletedGroupItem }>
     restore?: (input: { groupId: string }) => Promise<{ group: GroupItem }>
   },
@@ -58,6 +62,7 @@ function harness(
     ...UNUSED,
     ...(overrides.fetchDeleted && { fetchDeleted: overrides.fetchDeleted }),
     ...(overrides.rename && { rename: overrides.rename }),
+    ...(overrides.updateDetails && { updateDetails: overrides.updateDetails }),
     ...(overrides.remove && { remove: overrides.remove }),
     ...(overrides.restore && { restore: overrides.restore }),
     fetchPage(cursor, via) {
@@ -266,6 +271,47 @@ describe("groups store", () => {
       message: "Only an admin can",
     })
     expect(store.renameDraft.value).toEqual({ groupId: "a", name: "New" })
+  })
+
+  it("shows a group's new details at once and keeps its other fields", async () => {
+    const sent: unknown[] = []
+    const { store } = harness({
+      pages: [{ groups: [item("a", "1"), item("b", "1")], nextCursor: null }],
+      updateDetails: (input) => {
+        sent.push(input)
+        return Promise.resolve({
+          group: { ...item("a", "2"), description: "Flat", color: "green", emoji: "🏠" },
+        })
+      },
+    })
+    await store.refresh()
+
+    const done = await store.updateDetails("a", {
+      description: "Flat",
+      color: "green",
+      emoji: "🏠",
+    })
+
+    expect(done).toBe(true)
+    expect(sent).toEqual([{ groupId: "a", description: "Flat", color: "green", emoji: "🏠" }])
+    const [a, b] = store.groups.value
+    expect(a).toMatchObject({ id: "a", description: "Flat", color: "green", emoji: "🏠" })
+    expect(b.color).toBeUndefined()
+  })
+
+  it("shows the server's reason when saving details is refused", async () => {
+    const { store } = harness({
+      updateDetails: () => Promise.reject(new RealtimeRequestError("forbidden", "Not allowed")),
+    })
+
+    const done = await store.updateDetails("a", { description: "", color: null, emoji: null })
+
+    expect(done).toBe(false)
+    expect(store.actionError.value).toEqual({
+      groupId: "a",
+      action: "details",
+      message: "Not allowed",
+    })
   })
 
   it("does not send a rename that has no name, or one typed for another group", async () => {

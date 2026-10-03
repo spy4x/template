@@ -30,6 +30,9 @@ const now = new Date("2026-08-18T10:00:00.000Z")
 const summary: GroupSummary = {
   id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001",
   name: "Team",
+  description: "",
+  color: null,
+  emoji: null,
   role: GroupRole.OWNER,
   authorizationRevision: "1",
   changeSequence: "1",
@@ -97,6 +100,10 @@ class FakeGroupRepository implements GroupRepository {
   }
 
   rename(): Promise<GroupSummary | null> {
+    throw new Error("Not used")
+  }
+
+  updateDetails(): Promise<GroupSummary | null> {
     throw new Error("Not used")
   }
 

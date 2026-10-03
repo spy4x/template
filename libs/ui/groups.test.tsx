@@ -8,6 +8,7 @@ import { expect } from "@std/expect"
 import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd"
 import { Window } from "happy-dom"
 import { render, type VNode } from "preact"
+import { renderToString } from "preact-render-to-string"
 import { act } from "preact/test-utils"
 import type { PlanRefusal } from "@domain/billing"
 import { GroupRole } from "@domain/groups"
@@ -31,6 +32,8 @@ import {
   GroupMembersSection,
   type GroupMembersSectionProps,
 } from "./group-members.tsx"
+import { GroupDetailsForm, groupLabel, GroupMark } from "./group-appearance.tsx"
+import { GroupPicker } from "./group-picker.tsx"
 import { GroupSettingsScreen, type GroupSettingsScreenProps } from "./group-settings-screen.tsx"
 import {
   EMPTY_TRANSFER_DRAFT,
@@ -1048,5 +1051,224 @@ describe("MyInvitationsSection", () => {
   it("draws nothing when there are none", async () => {
     await mount(<MyInvitationsSection invitations={[]} />)
     expect(root!.innerHTML).toBe("")
+  })
+})
+
+describe("group details", () => {
+  const owned = { ...team, description: "Our flat", color: "green" as const, emoji: "🏠" }
+  const settings: GroupSettingsScreenProps = {
+    group: owned,
+    selected: true,
+    loading: false,
+    members: [],
+    transfer: () => <p>transfer</p>,
+  }
+
+  it("shows the description, and the emoji on its colour, in the settings header", async () => {
+    await mount(<GroupSettingsScreen {...settings} />)
+    expect(find("[data-e2e=group-general-description]").textContent).toBe("Our flat")
+    expect(find("[data-e2e=group-mark]").textContent).toBe("🏠")
+    expect(find("[data-e2e=group-mark]").getAttribute("data-color")).toBe("green")
+  })
+
+  it("draws no mark and no description for a group that has neither", async () => {
+    await mount(<GroupSettingsScreen {...settings} group={team} />)
+    expect(has("[data-e2e=group-mark]")).toBe(false)
+    expect(has("[data-e2e=group-general-description]")).toBe(false)
+  })
+
+  it("offers Edit details to the owner and an admin, and to no editor or viewer", async () => {
+    const onUpdateDetails = () => Promise.resolve()
+    for (
+      const [role, offered] of [
+        [GroupRole.OWNER, true],
+        [GroupRole.ADMIN, true],
+        [GroupRole.EDITOR, false],
+        [GroupRole.VIEWER, false],
+      ] as const
+    ) {
+      await mount(
+        <GroupSettingsScreen
+          {...settings}
+          group={{ ...owned, role }}
+          onUpdateDetails={onUpdateDetails}
+        />,
+      )
+      expect(has("[data-e2e=group-details-open]")).toBe(offered)
+      await act(() => render(null, root!))
+    }
+  })
+
+  it("opens the dialog with the saved details and saves what the person changed", async () => {
+    const calls = spy<[unknown]>()
+    await mount(
+      <GroupSettingsScreen
+        {...settings}
+        onUpdateDetails={(details) => {
+          calls.fn(details)
+          return Promise.resolve()
+        }}
+      />,
+    )
+    expect(has("[data-e2e=group-details-dialog]")).toBe(false)
+    await click("[data-e2e=group-details-open]")
+    expect(find<HTMLTextAreaElement>("[data-e2e=group-description]").value).toBe("Our flat")
+    expect(find<HTMLInputElement>("[data-e2e=group-color-green]").checked).toBe(true)
+    expect(find<HTMLInputElement>("[data-e2e=group-emoji]").value).toBe("🏠")
+
+    await type("[data-e2e=group-description]", "  Our new flat  ")
+    await click("[data-e2e=group-color-blue]")
+    await type("[data-e2e=group-emoji]", "🏕️")
+    await submit("[data-e2e=group-details-save]")
+
+    expect(calls.calls).toEqual([[{ description: "Our new flat", color: "blue", emoji: "🏕️" }]])
+  })
+
+  it("clears the colour and the emoji when the person picks None and empties the field", async () => {
+    const calls = spy<[unknown]>()
+    await mount(
+      <GroupSettingsScreen
+        {...settings}
+        onUpdateDetails={(details) => {
+          calls.fn(details)
+          return Promise.resolve()
+        }}
+      />,
+    )
+    await click("[data-e2e=group-details-open]")
+    await click("[data-e2e=group-color-none]")
+    await type("[data-e2e=group-emoji]", "")
+    await submit("[data-e2e=group-details-save]")
+    expect(calls.calls).toEqual([[{ description: "Our flat", color: null, emoji: null }]])
+  })
+
+  it("tells a second emoji or a word at the emoji field, and saves nothing", async () => {
+    const calls = spy<[unknown]>()
+    await mount(
+      <GroupSettingsScreen
+        {...settings}
+        onUpdateDetails={(details) => {
+          calls.fn(details)
+          return Promise.resolve()
+        }}
+      />,
+    )
+    await click("[data-e2e=group-details-open]")
+    for (const bad of ["🏠🏕️", "ab"]) {
+      await type("[data-e2e=group-emoji]", bad)
+      await submit("[data-e2e=group-details-save]")
+      expect(find("[data-e2e=group-details-dialog]").textContent).toContain("single emoji")
+      expect(find("[data-e2e=group-emoji]").getAttribute("aria-invalid")).toBe("true")
+      expect(focused()).toBe("group-emoji")
+    }
+    expect(calls.calls).toEqual([])
+  })
+
+  it("counts the description's characters, and refuses more than 500 of them when saving", async () => {
+    const calls = spy<[unknown]>()
+    await mount(
+      <GroupSettingsScreen
+        {...settings}
+        onUpdateDetails={(details) => {
+          calls.fn(details)
+          return Promise.resolve()
+        }}
+      />,
+    )
+    await click("[data-e2e=group-details-open]")
+    expect(find("[data-e2e=group-details-dialog]").textContent).toContain("8 of 500 characters")
+
+    // Each emoji is two UTF-16 units but one character, as the counter and the server count it.
+    await type("[data-e2e=group-description]", "🏠".repeat(501))
+    await submit("[data-e2e=group-details-save]")
+    expect(calls.calls).toEqual([])
+    expect(find("[data-e2e=group-details-dialog]").textContent).toContain("at most 500")
+    expect(focused()).toBe("group-description")
+
+    await type("[data-e2e=group-description]", "🏠".repeat(500))
+    await submit("[data-e2e=group-details-save]")
+    expect(calls.calls.length).toBe(1)
+  })
+
+  it("keeps the dialog open with the message of a refused save", async () => {
+    await mount(
+      <GroupSettingsScreen
+        {...settings}
+        onUpdateDetails={() => Promise.reject(new Error("Not allowed."))}
+      />,
+    )
+    await click("[data-e2e=group-details-open]")
+    await submit("[data-e2e=group-details-save]")
+    expect(find("[data-e2e=group-details-dialog]").textContent).toContain("Not allowed.")
+    expect(focused()).toBe("group-details-error")
+  })
+
+  it("closes the dialog once the save worked", async () => {
+    await mount(<GroupSettingsScreen {...settings} onUpdateDetails={() => Promise.resolve()} />)
+    await click("[data-e2e=group-details-open]")
+    await submit("[data-e2e=group-details-save]")
+    expect(has("[data-e2e=group-details-dialog]")).toBe(false)
+  })
+
+  it("shows each group's mark and description in the groups list", async () => {
+    await mount(
+      <GroupsScreen
+        groups={[owned, { id: "g-2", name: "Family", role: GroupRole.VIEWER }]}
+        selectedId={groupId}
+        name=""
+        creating={false}
+        loading={false}
+        error={null}
+      />,
+    )
+    expect(texts(`[data-e2e=group-${groupId}] [data-e2e=group-mark]`)).toEqual(["🏠"])
+    expect(texts(`[data-e2e=group-${groupId}] [data-e2e=group-item-description]`)[0])
+      .toContain("Our flat")
+    expect(has("[data-e2e=group-g-2] [data-e2e=group-mark]")).toBe(false)
+    expect(has("[data-e2e=group-g-2] [data-e2e=group-item-description]")).toBe(false)
+  })
+
+  it("puts the emoji before the name in the picker's field", async () => {
+    await mount(
+      <GroupPicker
+        groups={[owned, { id: "g-2", name: "Family", role: GroupRole.VIEWER }]}
+        selectedId={groupId}
+        onSelect={() => {}}
+      />,
+    )
+    expect(find<HTMLInputElement>("input").value).toBe("🏠 Team")
+  })
+
+  it("draws no mark without a colour or an emoji, and a gray one for an emoji alone", async () => {
+    await mount(<GroupMark />)
+    expect(has("[data-e2e=group-mark]")).toBe(false)
+    await rerender(<GroupMark emoji="🏠" />)
+    expect(find("[data-e2e=group-mark]").hasAttribute("data-color")).toBe(false)
+    await rerender(<GroupMark color="red" />)
+    expect(find("[data-e2e=group-mark]").getAttribute("data-color")).toBe("red")
+    expect(groupLabel({ name: "Team", emoji: "🏠" })).toBe("🏠 Team")
+    expect(groupLabel({ name: "Team", emoji: null })).toBe("Team")
+  })
+})
+
+describe("group details, as the server draws them", () => {
+  it("hides the mark and names each colour for a screen reader in one radio group", () => {
+    const mark = renderToString(<GroupMark color="green" emoji="🏠" />)
+    expect(mark).toMatch(/<span [^>]*aria-hidden="true"[^>]*>🏠<\/span>/)
+
+    const form = renderToString(
+      <GroupDetailsForm
+        initial={{ description: "", color: "blue", emoji: null }}
+        onSave={() => Promise.resolve()}
+        onCancel={() => {}}
+      />,
+    )
+    const radios = form.match(/<input [^>]*type="radio"[^>]*>/g) ?? []
+    // None and the six palette names.
+    expect(radios.length).toBe(7)
+    for (const radio of radios) expect(radio).toContain(`name="color"`)
+    for (const name of ["Red", "Orange", "Green", "Blue", "Purple", "Gray"]) {
+      expect(form).toMatch(new RegExp(`<span class="sr-only">${name}</span>`))
+    }
   })
 })

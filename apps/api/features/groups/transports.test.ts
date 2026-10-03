@@ -14,6 +14,7 @@ import {
   GroupRestoreCommand,
   GroupRole,
   GroupTransferCommand,
+  GroupUpdateDetailsCommand,
 } from "@domain/groups"
 import { FREE_PLAN_ID, PRO_PLAN_ID } from "@domain/billing"
 import { createSessionGate } from "../../cqrs/session-gate.ts"
@@ -34,6 +35,7 @@ import {
   createGroupRenameHandler,
   createGroupRestoreHandler,
   createGroupTransferHandler,
+  createGroupUpdateDetailsHandler,
 } from "./handlers.ts"
 import { createGroupSocketRequests } from "./socket.ts"
 
@@ -72,6 +74,7 @@ function stack(plan = PRO_PLAN_ID) {
     },
   }, ENTITLEMENT_NEEDS))
   commands.register(GroupRenameCommand, createGroupRenameHandler(groups))
+  commands.register(GroupUpdateDetailsCommand, createGroupUpdateDetailsHandler(groups))
   commands.register(GroupDeleteCommand, createGroupDeleteHandler(groups))
   commands.register(GroupRestoreCommand, createGroupRestoreHandler(groups))
   commands.register(GroupMemberRoleCommand, createGroupMemberRoleHandler(groups))
@@ -105,6 +108,7 @@ function stack(plan = PRO_PLAN_ID) {
     selected: unused,
     cursor: { encode: unused, decode: unused },
     rename: (command: GroupRenameCommand) => commands.execute(command),
+    updateDetails: (command: GroupUpdateDetailsCommand) => commands.execute(command),
     delete: (command: GroupDeleteCommand) => commands.execute(command),
     restore: (command: GroupRestoreCommand) => commands.execute(command),
     deleted: (query: GroupDeletedListQuery) => queries.execute(query),
@@ -1003,6 +1007,149 @@ describe("transferring ownership over REST", () => {
 
     expect(frame).toMatchObject({ kind: "server.error" })
     expect(groups.writes).toBe(0)
+    ws.shutdown()
+  })
+})
+
+const DETAILS = { description: "Our trips", color: "blue", emoji: "🏕️" }
+
+describe("editing a group's details over REST", () => {
+  for (const person of PEOPLE) {
+    it(`${person.rename ? "lets" : "refuses"} ${person.name} edit the details`, async () => {
+      const { groups, buses } = stack()
+
+      const response = await rest(buses, person.user)("PUT", `/${groupId}/details`, DETAILS)
+
+      if (person.rename) {
+        expect(response.status).toBe(200)
+        expect((await response.json()).group).toMatchObject(DETAILS)
+        expect([groups.description, groups.color, groups.emoji]).toEqual([
+          "Our trips",
+          "blue",
+          "🏕️",
+        ])
+      } else {
+        expect(response.status).toBe(403)
+        expect((await response.json()).error.code).toBe("ROLE_INSUFFICIENT")
+        expect(groups.writes).toBe(0)
+      }
+    })
+  }
+
+  it("tells a non-member the group does not exist and changes nothing", async () => {
+    const { groups, buses } = stack()
+
+    const response = await rest(buses, STRANGER)("PUT", `/${groupId}/details`, DETAILS)
+
+    expect(response.status).toBe(404)
+    expect((await response.json()).error.code).toBe("GROUP_NOT_FOUND")
+    expect(groups.writes).toBe(0)
+  })
+
+  it("refuses a colour outside the palette, a second emoji, a long description or an extra field", async () => {
+    const { groups, buses } = stack()
+    const send = rest(buses, OWNER)
+
+    for (
+      const body of [
+        { ...DETAILS, color: "#ff0000" },
+        { ...DETAILS, emoji: "🏕️🏕️" },
+        { ...DETAILS, emoji: "a" },
+        // One grapheme, but 41 characters: the column holds 32, so it must be a 400, not a 500.
+        { ...DETAILS, emoji: `🙂${"\u0301".repeat(40)}` },
+        { ...DETAILS, description: "x".repeat(501) },
+        { ...DETAILS, name: "Trip" },
+        { description: "", color: null },
+      ]
+    ) {
+      const response = await send("PUT", `/${groupId}/details`, body)
+      expect(response.status).toBe(400)
+    }
+    expect(groups.writes).toBe(0)
+  })
+
+  it("clears the details when they are sent empty", async () => {
+    const { groups, buses } = stack()
+    groups.description = "Old"
+    groups.color = "red"
+    groups.emoji = "🔥"
+
+    const response = await rest(buses, OWNER)("PUT", `/${groupId}/details`, {
+      description: "",
+      color: null,
+      emoji: null,
+    })
+
+    expect(response.status).toBe(200)
+    expect([groups.description, groups.color, groups.emoji]).toEqual(["", null, null])
+  })
+
+  it("is refused from another site, and changes nothing", async () => {
+    const { groups, buses } = stack()
+    const crossSite = { origin: "https://evil.example.net", "sec-fetch-site": "cross-site" }
+
+    const response = await rest(buses, OWNER)("PUT", `/${groupId}/details`, DETAILS, crossSite)
+
+    expect(response.status).toBe(403)
+    expect(groups.writes).toBe(0)
+  })
+})
+
+describe("editing a group's details over the socket", () => {
+  for (const person of PEOPLE) {
+    it(`${person.rename ? "lets" : "refuses"} ${person.name} edit the details`, async () => {
+      const { groups, buses } = stack()
+      const ws = socket(buses, person.user)
+
+      const frame = await ws.command("group.updateDetails", { groupId, ...DETAILS })
+
+      if (person.rename) {
+        expect(frame).toMatchObject({
+          kind: "server.result",
+          payload: { group: DETAILS },
+        })
+        expect(groups.emoji).toBe("🏕️")
+      } else {
+        expect(frame).toMatchObject({
+          kind: "server.error",
+          code: "forbidden",
+          details: { code: "ROLE_INSUFFICIENT" },
+        })
+        expect(groups.writes).toBe(0)
+      }
+      ws.shutdown()
+    })
+  }
+
+  it("refuses a colour outside the palette and changes nothing", async () => {
+    const { groups, buses } = stack()
+    const ws = socket(buses, OWNER)
+
+    const frame = await ws.command("group.updateDetails", { groupId, ...DETAILS, color: "pink" })
+
+    expect(frame).toMatchObject({ kind: "server.error" })
+    expect(groups.writes).toBe(0)
+    ws.shutdown()
+  })
+
+  it("refuses a field the command does not have, such as a name, and changes nothing", async () => {
+    const { groups, buses } = stack()
+    const ws = socket(buses, OWNER)
+
+    const frame = await ws.command("group.updateDetails", { groupId, ...DETAILS, name: "Trip" })
+
+    expect(frame).toMatchObject({ kind: "server.error" })
+    expect(groups.writes).toBe(0)
+    ws.shutdown()
+  })
+
+  it("reaches the audit trail with the frame's request id", async () => {
+    const { groups, buses } = stack()
+    const ws = socket(buses, OWNER)
+
+    await ws.command("group.updateDetails", { groupId, ...DETAILS }, "frame-details")
+
+    expect(groups.requestIds).toEqual(["frame-details"])
     ws.shutdown()
   })
 })
