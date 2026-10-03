@@ -103,8 +103,9 @@ test.describe("notes at /notes with a group picker", () => {
       await expect(heading(page, "Team B")).toBeVisible()
       await expect(titles).toHaveText(["Only in team"])
 
-      // The cog next to the picker opens the groups page, by keyboard.
-      await page.getByRole("link", { name: "Manage groups" }).first().focus()
+      // The Groups entry of the navigation opens the groups page, by keyboard.
+      await page.getByRole("navigation", { name: "Main navigation" })
+        .getByRole("link", { name: "Groups" }).focus()
       await page.keyboard.press("Enter")
       await expect(page).toHaveURL("/groups")
     } finally {
