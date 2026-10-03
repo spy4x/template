@@ -45,6 +45,12 @@ Deno.test("the worker container receives the billing variables but not the webho
   expect(names).not.toContain("STRIPE_WEBHOOK_SECRET")
 })
 
+// Without the secret in its container, a worker that asked for webhooks would refuse to start.
+Deno.test("the worker reads the billing setup without webhooks", async () => {
+  const worker = await Deno.readTextFile(new URL("../apps/worker/+main.ts", import.meta.url))
+  expect(worker).toMatch(/webhooks: false,/)
+})
+
 for (const service of ["api", "worker"]) {
   Deno.test(`the ${service} container receives both subscriber secrets`, async () => {
     const names = await environmentOf(service)
