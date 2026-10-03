@@ -7,7 +7,7 @@ export interface State {
   api: Api
   /** The origin the browser sees this app at, as `MpaConfig.webAppOrigin`: links start with it. */
   webAppOrigin: string
-  /** The origin of the SPA, the product itself, as `MpaConfig.apiOrigin`: the app's links start with it. */
+  /** The origin of the SPA, the product itself, as `MpaConfig.apiOrigin`: links to the app use it. */
   spaOrigin: string
 }
 

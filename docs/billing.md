@@ -259,7 +259,7 @@ a role refusal (403):
 `code` is `PLAN_FEATURE_MISSING` or `PLAN_LIMIT_REACHED`. `canUpgrade` is true only for the owner,
 the one person who can change the plan. The socket's error codes are a closed set, so over the
 socket the refusal is `forbidden`, with the same fields in `details`. `readPlanRefusal` reads either
-one back. Both apps then show `UpgradePrompt`: the owner gets a link to the group's pricing page,
+one back. The SPA then shows `UpgradePrompt`: the owner gets a link to the group's pricing page,
 and anyone else is told to ask the owner.
 
 **Counted in the write's transaction.** The gate counts before the handler runs, outside any

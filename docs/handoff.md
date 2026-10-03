@@ -93,7 +93,7 @@ ADR 002 is recent and reverses part of ADR 001. In short:
   contiguous with its cursor; on any gap it discards the payload and pulls.
 - The governing test: **delete every line of WebSocket code and the app must
   still converge to correct state.**
-- Bootstrap is REST for both apps.
+- Bootstrap is REST.
 - Idempotency key on every command, expected version on updates, keys kept 7 days.
 - `Origin` is validated at the WebSocket upgrade. Handshakes are not governed by
   CORS, and `SameSite=Lax` still admits a same-site subdomain.
@@ -219,7 +219,7 @@ These cost real time to find. Do not rediscover them.
    (request row in `email_code_requests`, never the code). The worker issues an
    8-character code with `@spy4x/server/auth/email-code` (only a hash is stored,
    10 minutes, single use, 5 guesses per code) and mails it. Until the code is
-   entered, every signed-in page of both apps shows a banner linking to `/email`.
+   entered, every signed-in page of the SPA shows a banner linking to `/email`.
    `GET /api/auth/email` answers `{ email, proven, pending }`; `POST
    /api/auth/email/verify` takes `{ code }`; `POST /api/auth/email/send` asks for
    a new code (3 mails an hour per address, `ratelimit-email-code` in Valkey);
@@ -404,9 +404,9 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    `/groups` lists the groups as cards (the person's role, a "Selected" badge, a settings link
    and an "Open notes" form). `/groups/:groupId` is the settings page: `GroupSettingsScreen` in
    `libs/ui`, one `<section>` per concern. General shows the name and the role, and a rename form
-   for an admin or the owner (`PATCH /api/groups/:id`, `group.rename`). A "Delete group" section, for the owner only, holds the confirmation
-   text and the delete (`DELETE /api/groups/:id`, `group.delete`). Each
-   later issue (members, roles and leaving #130; invitations #131; ownership #132; moving notes
+   for an admin or the owner (`PATCH /api/groups/:id`, `group.rename`). A "Delete group"
+   section, for the owner only, holds the confirmation text and the delete
+   (`DELETE /api/groups/:id`, `group.delete`). Each later issue (members, roles and leaving #130; invitations #131; ownership #132; moving notes
    #133; the extra fields #134) adds its own section to that screen, shown only to the roles that
    may use it.
 9. **Deleting a group.** A delete is soft: `groups.deleted_at` is set and the row, its members and
@@ -482,8 +482,8 @@ owner and admins (`canSeeMemberEmails`); other members get no `email` field.
 
 Invitations (#131): only `sha256(token)` is stored (`group_invitations.token_hash`), so a link
 is shown once, in the answer to its create, and never again: the create sends no
-`Idempotency-Key`, since the idempotency store would keep the token. The link is `/invite/:token`; the API takes the
-token only in a JSON body, never in a URL it logs, and the SPA sends no referrer from the
+`Idempotency-Key`, since the idempotency store would keep the token. The link is
+`/invite/:token`; the API takes the token only in a JSON body, never in a URL it logs, and the SPA sends no referrer from the
 invitation page. Pending invitations take no seat: the create is refused by the entitlement gate
 when the members alone fill the plan's `maxMembers`, and the accept counts the members again
 under the group row's lock (`PostgresInvitationRepository.accept`). An address-bound invitation is
