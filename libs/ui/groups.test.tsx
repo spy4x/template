@@ -547,6 +547,11 @@ describe("GroupMembersSection", () => {
     expect(focused()).toBe("group-member-error")
   })
 
+  it("draws no error box under a row while nothing was refused", async () => {
+    await mount(<GroupMembersSection {...props} />)
+    expect(has("[data-e2e=group-member-error]")).toBe(false)
+  })
+
   it("shows a plan's refusal under the member's row in place of the message", async () => {
     const plan: PlanRefusal = {
       code: "PLAN_FEATURE_MISSING",

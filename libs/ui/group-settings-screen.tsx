@@ -217,7 +217,7 @@ export function GroupSettingsScreen(
               savingLabel="Renaming..."
               errorMessage={(reason) =>
                 reason instanceof Error ? reason.message : "Could not rename the group."}
-              class="-ml-2 align-middle text-xl font-semibold sm:text-2xl [&_button]:text-inherit [&_input]:text-base"
+              class="-ml-2 align-middle [&>button]:text-xl [&>button]:font-semibold sm:[&>button]:text-2xl"
             />
           )
           : undefined}

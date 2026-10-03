@@ -155,11 +155,13 @@ export function useClosesWhenDone(pending: boolean, failed: boolean, onDone: () 
  */
 export function FocusedError(
   { message, dataE2E }: { message: string | null; dataE2E?: string },
-): JSX.Element {
+): JSX.Element | null {
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (message) box.current?.focus()
   }, [message])
+  // Nothing is drawn without a message, so an empty box adds no gap to the layout around it.
+  if (!message) return null
   return (
     <div ref={box} tabIndex={-1} data-e2e={dataE2E}>
       <ErrorState message={message} />
