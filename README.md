@@ -109,7 +109,10 @@ side by side on one API and one database, also set `MPA_DOMAIN` to the MPA's own
 then serves that host and the SPA keeps `DOMAIN`. The API accepts a form only from
 `http(s)://DOMAIN`, so the MPA, after refusing any post that does not come from its own pages,
 presents its posts to the API with `DOMAIN`'s origin. A change made in the MPA reaches the SPA live
-over its socket; the MPA shows the SPA's changes on the next page load. Without the profile nothing
+over its socket; the MPA shows the SPA's changes on the next page load. Each host has its own
+sign-in, and links the API builds (checkout returns, invitation and newsletter emails) still open
+the SPA at `DOMAIN`. `MPA_DOMAIN` needs a DNS record pointing at the server; Traefik gets its
+certificate as for `DOMAIN`. Without the profile nothing
 about the deploy changes. The MPA's end-to-end test runs in CI on every pull
 request, and locally with `e2e/mpa/run.sh` against a running Postgres and Valkey (see the header
 of that script).

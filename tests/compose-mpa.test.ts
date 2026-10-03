@@ -15,6 +15,7 @@ const COMPOSE = fromFileUrl(new URL("../infra/compose/compose.shared.yml", impor
 interface ComposeService {
   profiles?: string[]
   labels?: string[]
+  environment?: string[]
 }
 
 const COMPOSE_PROD = fromFileUrl(new URL("../infra/compose/compose.prod.yml", import.meta.url))
@@ -51,6 +52,11 @@ Deno.test("without MPA_DOMAIN the MPA takes the SPA's traffic but leaves /api an
   expect(Number(label(mpa, "traefik.http.routers.mpa-${PROJECT}.priority"))).toBeGreaterThan(
     (rule ?? "").length,
   )
+})
+
+Deno.test("the MPA learns its own host, or it would refuse its own forms", async () => {
+  const { mpa } = await services()
+  expect(mpa?.environment).toContain("MPA_DOMAIN=${MPA_DOMAIN:-}")
 })
 
 Deno.test("in production the MPA is served over HTTPS on the port its image listens on", async () => {
