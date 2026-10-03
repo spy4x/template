@@ -170,7 +170,8 @@ same steps; copy the notes files that mention `move`:
    history stay: a move is an update, not a copy and a delete.
 3. **Handler and gate.** The handler asks for edit rights in the source, then in the target. The
    entitlement gate judges the target group (`needsRoom` with `toGroupId`), so a move into a full
-   group is refused; the repository counts all moved rows, the gate only reserves room for one.
+   group is refused, but only for someone who can write in the source too (its `judges` reads the
+   source role through `roleIn`), so a viewer of the source gets 403, not 402; the repository counts all moved rows, the gate only reserves room for one.
 4. **Transports.** `POST /move` (registered before `POST /`) and the socket command `<kind>.move`.
 5. **Screens.** The list gets a tick box per row and one form posting `{ toGroupId, noteIds }`; the
    item page gets a form posting `{ toGroupId }`. Targets are the person's groups where they may
@@ -182,9 +183,14 @@ same steps; copy the notes files that mention `move`:
    sequence step and one audit row per group, rights in both groups, opposite moves), the hint for
    members of both groups (`tests/integration/note-move-push.integration.test.ts`), the screens and
    an e2e spec in each app.
+8. **Entities tied to their group.** Notes reference nothing, so a note moves alone. An aggregate
+   whose rows point at other rows of the same group (in Financy, a transaction's account and
+   category) must decide before it becomes movable: the references move with it in the same
+   transaction, or the move is refused with a clear error when a reference would be left behind.
+   Never move the row and leave its references in the old group.
 
-Moving all of a group's data before the group is deleted is not built; it would call this command
-with every id of the group.
+Moving all of a group's data before the group is deleted is not built (spy4x/template#260); it
+would call this command with every id of the group.
 
 ## What is left to the next aggregate
 
