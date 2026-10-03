@@ -81,7 +81,7 @@ checked the session's strength.
 the bus. The idempotency middleware on the command bus needs nothing from you: a command whose data
 carries an `idempotencyKey` runs once per user and key.
 
-### 5. Transports: the socket for the SPA, REST for the MPA
+### 5. Transports: the socket for the SPA, REST beside it
 
 | File                                        | What it holds                                                                                                                                     |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -131,7 +131,7 @@ found" page, which tells the person to switch group. The group picker is the one
 | `state/notes.test.ts`     | The store against fake calls.                                                                                                                                                  |
 | `views/NotesView.tsx`     | Passes the store and the group's role to `NotesScreen`.                                                                                                                        |
 | `views/NoteEditorView.tsx` | Passes the store and the group's role to `NoteEditorScreen` for `/notes/new` and `/notes/:id`, with the offline conflict state above it.                                      |
-| `views/spa-paths.ts`      | Lists the paths the router owns, for preact-components' `UnsavedGuard` in `NoteEditorView.tsx`, which asks before the person leaves the editor page with text that is not saved: on closing the tab, and on a click on any link in the app. The MPA has no such guard.             |
+| `views/spa-paths.ts`      | Lists the paths the router owns, for preact-components' `UnsavedGuard` in `NoteEditorView.tsx`, which asks before the person leaves the editor page with text that is not saved: on closing the tab, and on a click on any link in the app.             |
 | `app.tsx`                 | The routes, and the pull: a hint for the open group reads its notes again.                                                                                                     |
 
 The store does not move the group's cursor on its own writes: another member's change may have
@@ -146,8 +146,7 @@ one extra read instead.
 | `apps/api/features/notes/socket.test.ts`, `routes/notes.test.ts` | Parsing and dispatch of each transport.                                                          |
 | `tests/integration/notes.integration.test.ts`               | Postgres: one sequence step and one outbox row per write, conflicts, viewers, paging.                 |
 | `e2e/notes.e2e.ts`                                          | Two members: one creates, edits and deletes on the note pages; the other's open tab follows without a reload; a viewer sees a note without edit controls. |
-| `e2e/mpa/notes.mpa.ts`                                      | The same pages with JavaScript off: create, edit, delete after the confirm page, and a viewer.        |
-| `e2e/notes-move.e2e.ts`, `e2e/mpa/notes-move.mpa.ts`        | Moving one note and ticked notes, in the SPA (with members of both groups watching) and without JavaScript. |
+| `e2e/notes-move.e2e.ts`                                     | Moving one note and ticked notes, with members of both groups watching. |
 | `tests/integration/note-move-push.integration.test.ts`      | Members of both groups get a hint for a move; a stranger gets none.                                   |
 
 The product cannot add a member yet, so tests seed one: the integration test inserts the row, and
@@ -175,14 +174,13 @@ same steps; copy the notes files that mention `move`:
 4. **Transports.** `POST /move` (registered before `POST /`) and the socket command `<kind>.move`.
 5. **Screens.** The list gets a tick box per row and one form posting `{ toGroupId, noteIds }`; the
    item page gets a form posting `{ toGroupId }`. Targets are the person's groups where they may
-   write (`moveTargetsOf`). The MPA posts to `/notes/move?group=<id>` (refused when another device
-   changed the selected group) and `/notes/:id/move`.
+   write (`moveTargetsOf`).
 6. **SPA and offline.** The store sends the command over the socket and never queues it. A queued
    write for a moved item becomes a conflict (`docs/offline.md`).
 7. **Tests.** Both transports (viewer, stranger, same group, all-or-nothing, cap), Postgres (one
    sequence step and one audit row per group, rights in both groups, opposite moves), the hint for
    members of both groups (`tests/integration/note-move-push.integration.test.ts`), the screens and
-   an e2e spec in each app.
+   an e2e spec.
 8. **Entities tied to their group.** Notes reference nothing, so a note moves alone. An aggregate
    whose rows point at other rows of the same group (in Financy, a transaction's account and
    category) must decide before it becomes movable: the references move with it in the same
@@ -194,9 +192,8 @@ would call this command with every id of the group.
 
 ## What is left to the next aggregate
 
-- A create posts to `/notes?group=<id>`, naming the group the page showed. The MPA refuses it when
-  that is no longer the selected group (another device switched), so a note never lands in a group
-  other than the one on screen. The SPA creates in the group it shows over the socket.
+- The SPA creates a note in the group it shows, over the socket, so a note never lands in a group
+  other than the one on screen.
 - The role check and the write are two steps, not one transaction. Membership cannot change
   through the product yet; when it can, the check moves into the write's transaction.
 - The SPA reads the whole list again on every hint. A pull of only the notes changed after the

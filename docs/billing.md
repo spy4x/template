@@ -260,7 +260,7 @@ a role refusal (403):
 the one person who can change the plan. The socket's error codes are a closed set, so over the
 socket the refusal is `forbidden`, with the same fields in `details`. `readPlanRefusal` reads either
 one back. Both apps then show `UpgradePrompt`: the owner gets a link to the group's pricing page,
-and anyone else is told to ask the owner. The MPA draws it from the 402 body, with no script.
+and anyone else is told to ask the owner.
 
 **Counted in the write's transaction.** The gate counts before the handler runs, outside any
 transaction, so two requests can both pass it for the last free slot. The gate therefore passes

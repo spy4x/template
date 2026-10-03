@@ -34,15 +34,15 @@ across real projects, a CLI last.
 
 Green: `deno task check` (205 tests in nine runs), `deno task test:integration` (39 tests, 91
 steps, needs Postgres), `deno task spa:build`, `deno task mpa:check`, the Playwright e2e suite
-(28 tests) and the MPA's browser test (`e2e/mpa/run.sh`, 4 tests).
+(28 tests) and the MPA's browser test (`e2e/mpa/run.sh`, 1 test).
 
 ```
 apps/api      REST, the /api/ws socket, auth, CQRS dispatch. The only app with real behaviour.
 apps/spa      Preact + Vite PWA. Wires the libs/ui auth, profile and groups screens;
               group commands and queries go over the socket.
-apps/mpa      Fresh. REST-only, server-rendered client: auth, profile, groups and notes,
-              every action a form post that works without JavaScript. Calls the API
-              over HTTP (API_URL); in compose under the `mpa` profile.
+apps/mpa      Fresh. The public website: server-rendered, works without JavaScript, no
+              session. Calls the API over HTTP (API_URL) for the newsletter only; in
+              compose under the `mpa` profile.
 apps/worker   Drains outbox_events and announces group changes (pg_notify); sweeps
               expired idempotency keys; runs delayed and repeating jobs (below). Runs in compose
               as `worker`, from the API's image.
@@ -57,8 +57,8 @@ libs/server    db (migrations and schema.sql only), groups (Postgres repository,
                request logging, sign-in and auth come from @spy4x/server/*.
 libs/client    vite. Icons, useUrlFilters and the signed-in Shell come from
                @spy4x/preact-icons, @spy4x/preact-signals and @spy4x/preact-system.
-libs/ui        Product screens shared by the SPA and the MPA (alias @ui/): auth,
-               profile and the two frames. Props in, callbacks out; see AGENTS.md.
+libs/ui        The SPA's product screens (alias @ui/): auth, profile, groups, notes and
+               the frames; the MPA renders only the newsletter's. See AGENTS.md.
 ```
 
 What genuinely works end to end: sign-up creates the auth user and password key
@@ -73,9 +73,9 @@ ADR 002 is recent and reverses part of ADR 001. In short:
 - `apps/spa` speaks **WebSocket** for mutations, queries and realtime. It uses
   REST only for bootstrap and the auth endpoints that must exist before a socket
   can open.
-- `apps/mpa` speaks **REST only**, request/response, no realtime. Being strictly
-  synchronous is what makes it a distinct reference architecture.
-- Both are thin adapters over **one set of CQRS handlers**. A transport parses,
+- `apps/mpa` is the public website, not a second client of the product (#265). It speaks
+  REST only, for the newsletter, and has no session.
+- Every transport is a thin adapter over **one set of CQRS handlers**. A transport parses,
   authenticates and dispatches; it holds no business rule.
 - **Session strength is checked on the buses, not in a transport.** Every
   command and query carries an `Actor` (`libs/domain/identity`), which a
@@ -332,7 +332,7 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 ## What is not built yet
 
 - The password and two-factor calls are still REST: they change the session the socket is bound
-  to. The MPA has no socket, so the profile and push REST routes stay for it.
+  to. The profile and push REST routes stay; the MPA no longer uses them.
 - Invitations (#131) are the only way into a group through the product; tests may still seed a
   member with `POST /api/test/add-member`. The nightly cleanup deletes invitations that have been
   dead (expired, revoked, declined or used up) for over 30 days.
@@ -345,7 +345,7 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 
 `profile.get`, `profile.update`, `push.register`, `push.remove` and `push.list` are served from
 `apps/api/features/profile/socket.ts` and `features/push/socket.ts` and dispatched on the same buses
-as the REST routes (`/api/users/me`, `/api/push`), which the MPA still uses. The two commands that
+as the REST routes (`/api/users/me`, `/api/push`). The two commands that
 change devices carry an idempotency key. Every change emits `UserProfileUpdatedEvent` or
 `PushDevicesUpdatedEvent`, whether it came over REST or the socket, and an event handler calls
 `Realtime.notifyUserChange`, which sends a `change.hint` (group id `user:<id>`, aggregate `user`,
@@ -396,19 +396,16 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    devices use (cursor `user:<id>`), and the SPA answers that hint by reading the profile and the
    selection again. The event bus is in-process, so only the API instance that took the `select`
    reaches the person's sockets; another instance's sockets catch up on their next reconnect.
-   Notes live at `/notes`, in the SPA and the MPA: both show the selected group's notes, and the
-   MPA changes the choice with `POST /groups/select`. An old `/groups/:groupId/notes` link only
-   redirects, in both apps: to `/notes` when that group is already the selected one, otherwise to
+   Notes live at `/notes` and show the selected group's notes. An old `/groups/:groupId/notes`
+   link only redirects: to `/notes` when that group is already the selected one, otherwise to
    `/groups`. It never selects, because a link another site controls must not switch a person's
    group (the API refuses a select that is not a post from the app's own page). The create form
-   names the group on screen (`/notes?group=<id>`); the MPA refuses the post when that is no longer
-   the selected group.
+   names the group on screen.
    `/groups` lists the groups as cards (the person's role, a "Selected" badge, a settings link
    and an "Open notes" form). `/groups/:groupId` is the settings page: `GroupSettingsScreen` in
    `libs/ui`, one `<section>` per concern. General shows the name and the role, and a rename form
-   for an admin or the owner (`PATCH /api/groups/:id`, `group.rename`, the MPA's
-   `POST /groups/:id/rename`). A "Delete group" section, for the owner only, holds the confirmation
-   text and the delete (`DELETE /api/groups/:id`, `group.delete`, `POST /groups/:id/delete`). Each
+   for an admin or the owner (`PATCH /api/groups/:id`, `group.rename`). A "Delete group" section, for the owner only, holds the confirmation
+   text and the delete (`DELETE /api/groups/:id`, `group.delete`). Each
    later issue (members, roles and leaving #130; invitations #131; ownership #132; moving notes
    #133; the extra fields #134) adds its own section to that screen, shown only to the roles that
    may use it.
@@ -485,9 +482,8 @@ owner and admins (`canSeeMemberEmails`); other members get no `email` field.
 
 Invitations (#131): only `sha256(token)` is stored (`group_invitations.token_hash`), so a link
 is shown once, in the answer to its create, and never again: the create sends no
-`Idempotency-Key`, since the idempotency store would keep the token, and the MPA draws the link
-in the create's answer instead of redirecting. The link is `/invite/:token`; the API takes the
-token only in a JSON body, never in a URL it logs, and both apps send no referrer from the
+`Idempotency-Key`, since the idempotency store would keep the token. The link is `/invite/:token`; the API takes the
+token only in a JSON body, never in a URL it logs, and the SPA sends no referrer from the
 invitation page. Pending invitations take no seat: the create is refused by the entitlement gate
 when the members alone fill the plan's `maxMembers`, and the accept counts the members again
 under the group row's lock (`PostgresInvitationRepository.accept`). An address-bound invitation is
