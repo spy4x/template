@@ -11,7 +11,8 @@ import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
 import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
-import type { EmailStatus, UserMFAStatus, UserPushTokenPublic } from "@domain/identity"
+import { type EmailStatus, UserMFAStatus, type UserPushTokenPublic } from "@domain/identity"
+import { AccountDelete, type AccountDeleteProps } from "./account-delete.tsx"
 import { ACCOUNT_COLUMN } from "./frame.tsx"
 import { PageHeader, TOUCH_TARGET } from "./page-header.tsx"
 import { type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
@@ -110,6 +111,11 @@ export interface ProfileScreenProps {
    */
   onRegisterPush?: () => void
   onRemovePush: (deviceId: string) => void
+  /**
+   * The "Danger zone" with "Delete my account", at the bottom. Without it the page has none.
+   * `twoFactor` and `navigate` come from this screen's own props.
+   */
+  accountDeletion?: Omit<AccountDeleteProps, "twoFactor" | "navigate">
   navigate?: Navigate
 }
 
@@ -117,6 +123,7 @@ export interface ProfileScreenProps {
  * The profile page as a list of settings: name and e-mail address, then password and two-factor
  * sign-in, then push devices. Each row shows its value and one action; a form opens in a dialog
  * only when asked, and closes once its change went through. Turning two-factor off asks first.
+ * Deleting the account sits last, in a closed "Danger zone".
  */
 export function ProfileScreen(
   {
@@ -139,6 +146,7 @@ export function ProfileScreen(
     onDisableTotp,
     onRegisterPush,
     onRemovePush,
+    accountDeletion,
     navigate,
   }: ProfileScreenProps,
 ): JSX.Element {
@@ -395,6 +403,14 @@ export function ProfileScreen(
             </>
           )}
       </SettingGroup>
+
+      {accountDeletion && (
+        <AccountDelete
+          {...accountDeletion}
+          twoFactor={user.mfa === UserMFAStatus.CONFIGURED}
+          navigate={navigate}
+        />
+      )}
 
       <Modal
         open={editingName}

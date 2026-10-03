@@ -11,8 +11,13 @@ import { Window } from "happy-dom"
 import { render, type VNode } from "preact"
 import { act } from "preact/test-utils"
 import { renderToString } from "preact-render-to-string"
-import { UserMFAStatus, type UserPushTokenPublic } from "@domain/identity"
+import {
+  AccountDeletionBlockReason,
+  UserMFAStatus,
+  type UserPushTokenPublic,
+} from "@domain/identity"
 import { GroupRole } from "@domain/groups"
+import { type AccountDeleteProps, BLOCKER_HINTS } from "./account-delete.tsx"
 import { AuthScreen } from "./auth-screen.tsx"
 import {
   EMAIL_FAILURES,
@@ -23,7 +28,7 @@ import {
 } from "./email-screen.tsx"
 import { ACCOUNT_COLUMN, AppFrame, navKey, PublicFrame } from "./frame.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
-import { NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
+import { GROUP_PATHS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
 const own = { document: globalThis.document, FormData: globalThis.FormData }
@@ -503,6 +508,151 @@ describe("ProfileScreen", () => {
     expect(signedOut).toContain(`href="/sign-in"`)
     expect(renderToString(<ProfileScreen {...profileDefaults} isMfaRequired />))
       .toContain(`href="/totp"`)
+  })
+})
+
+const deletionDefaults: Omit<AccountDeleteProps, "twoFactor" | "navigate"> = {
+  blockers: [],
+  values: { password: "", otp: "" },
+  onValueChange: () => {},
+  errors: { form: null },
+  pending: false,
+}
+
+/** The profile page with its danger zone, built from `deletion` over the defaults. */
+function withDeletion(
+  deletion: Partial<AccountDeleteProps> = {},
+  props: Partial<ProfileScreenProps> = {},
+): VNode {
+  return (
+    <ProfileScreen
+      {...profileDefaults}
+      {...props}
+      accountDeletion={{ ...deletionDefaults, ...deletion }}
+    />
+  )
+}
+
+/** Opens the danger zone's disclosure and then the deletion dialog. */
+async function openDeletion(): Promise<void> {
+  find<HTMLDetailsElement>("[data-e2e=danger-zone]").open = true
+  await click("[data-e2e=account-delete-open]")
+}
+
+describe("deleting the account from the profile", () => {
+  it("keeps the danger zone closed, last on the page, and leaves it out without the app's wiring", async () => {
+    await mount(withDeletion())
+
+    const zone = find<HTMLDetailsElement>("[data-e2e=danger-zone]")
+    expect(zone.open).toBe(false)
+    expect(zone.querySelector("summary")?.textContent).toBe("Danger zone")
+    const blocks = [...zone.parentElement!.children].filter((child) => child.tagName !== "DIALOG")
+    expect(blocks[blocks.length - 1]).toBe(zone)
+    expect(isOpen("account-delete-dialog")).toBe(false)
+
+    await rerender(<ProfileScreen {...profileDefaults} />)
+    expect(document.querySelector("[data-e2e=danger-zone]")).toBeNull()
+  })
+
+  it("names the delete button for a screen reader and gives it a 44 px touch target", async () => {
+    await mount(withDeletion())
+
+    const button = find("[data-e2e=account-delete-open]")
+    expect(button.textContent).toBe("Delete my account")
+    expect(button.classList.contains("min-h-11")).toBe(true)
+    expect(find("[data-e2e=danger-zone] summary").classList.contains("min-h-11")).toBe(true)
+  })
+
+  it("asks the app for the blockers on opening and says it is checking until they arrive", async () => {
+    const opened = spy<[]>()
+    await mount(withDeletion({ blockers: null, onOpen: opened.fn }))
+
+    await openDeletion()
+
+    expect(opened.calls).toHaveLength(1)
+    expect(isOpen("account-delete-dialog")).toBe(true)
+    expect(find("[data-e2e=account-delete-dialog] [role=status]").textContent)
+      .toBe("Checking your groups...")
+    expect(document.querySelector("[data-e2e=account-delete-password]")).toBeNull()
+  })
+
+  it("lists each blocking group as a link to its settings with what it needs, and asks for no password", async () => {
+    const navigate = spy<[string]>()
+    const blockers = [
+      { groupId: "g-1", name: "Family", reason: AccountDeletionBlockReason.Members },
+      { groupId: "g-2", name: "Shop", reason: AccountDeletionBlockReason.Subscription },
+    ]
+    await mount(withDeletion({ blockers }, { navigate: navigate.fn }))
+    await openDeletion()
+
+    const items = [...document.querySelectorAll("[data-e2e=account-delete-blockers] li")]
+    expect(items.map((item) => item.querySelector("a")?.getAttribute("href"))).toEqual([
+      GROUP_PATHS.settings("g-1"),
+      GROUP_PATHS.settings("g-2"),
+    ])
+    expect(items.map((item) => item.textContent)).toEqual([
+      `Family${BLOCKER_HINTS[AccountDeletionBlockReason.Members]}`,
+      `Shop${BLOCKER_HINTS[AccountDeletionBlockReason.Subscription]}`,
+    ])
+    expect(document.querySelector("[data-e2e=account-delete-password]")).toBeNull()
+    expect(document.querySelector("[data-e2e=account-delete-submit]")).toBeNull()
+
+    expect(await click("[data-e2e=account-delete-blocker-g-1]")).toBe(true)
+    expect(navigate.calls).toEqual([[GROUP_PATHS.settings("g-1")]])
+  })
+
+  it("asks for the password alone while two-factor is off, and for the code as well once it is on", async () => {
+    await mount(withDeletion())
+    await openDeletion()
+    expect(find<HTMLInputElement>("[data-e2e=account-delete-password]").name).toBe("password")
+    expect(document.querySelector("[data-e2e=account-delete-otp]")).toBeNull()
+
+    const on = { ...profileDefaults.user!, mfa: UserMFAStatus.CONFIGURED }
+    await rerender(withDeletion({}, { user: on }))
+    expect(find<HTMLInputElement>("[data-e2e=account-delete-otp]").name).toBe("otp")
+  })
+
+  it("hands what is typed and the submit to the app, and refuses a second submit while pending", async () => {
+    const change = spy<[string, string]>()
+    const remove = spy<[]>()
+    await mount(withDeletion({ onValueChange: change.fn, onDelete: remove.fn }))
+    await openDeletion()
+
+    await type("[data-e2e=account-delete-password]", "secret-pass")
+    expect(change.calls).toEqual([["password", "secret-pass"]])
+    expect(await submit("[data-e2e=account-delete-password]")).toBe(true)
+    expect(remove.calls).toHaveLength(1)
+
+    await rerender(withDeletion({ onDelete: remove.fn, pending: true }))
+    expect(await submit("[data-e2e=account-delete-password]")).toBe(true)
+    expect(remove.calls).toHaveLength(1)
+  })
+
+  it("ties a refused code to its field and moves focus there, and keeps a message for no field under the form", async () => {
+    const on = { ...profileDefaults.user!, mfa: UserMFAStatus.CONFIGURED }
+    await mount(withDeletion({}, { user: on }))
+    await openDeletion()
+
+    await rerender(withDeletion({ errors: { form: null, otp: "Enter the code" } }, { user: on }))
+    const field = find("[data-e2e=account-delete-otp]")
+    const describedBy = field.getAttribute("aria-describedby") ?? ""
+    expect(describedBy.split(" ").map((id) => document.getElementById(id)?.textContent))
+      .toContain("Enter the code")
+    expect(focused()).toBe("account-delete-otp")
+
+    await rerender(withDeletion({ errors: { form: "Invalid password" } }, { user: on }))
+    expect(find("[data-e2e=account-delete-dialog] form").textContent).toContain("Invalid password")
+  })
+
+  it("tells the app to drop what was typed when the dialog is closed", async () => {
+    const cancel = spy<[]>()
+    await mount(withDeletion({ onCancel: cancel.fn }))
+    await openDeletion()
+
+    await clickInDialog("account-delete-dialog", "Cancel")
+
+    expect(isOpen("account-delete-dialog")).toBe(false)
+    expect(cancel.calls).toHaveLength(1)
   })
 })
 
