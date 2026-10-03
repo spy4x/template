@@ -165,8 +165,8 @@ export function GroupSettingsScreen(
     )
   }
 
-  const isOwner = group.role === GroupRole.OWNER
-  const canHandOver = isOwner && transfer !== undefined &&
+  // Only the owner has candidates: `transferCandidates` asks `canTransfer`, which needs the owner.
+  const canHandOver = transfer !== undefined &&
     transferCandidates(group.role, members).length > 0
   const subscriptionBlocks = hasSubscription ? "Cancel its subscription first" : null
   const deleteBlocked = isLastGroup ? "It is your only group" : subscriptionBlocks
