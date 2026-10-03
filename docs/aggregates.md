@@ -30,7 +30,7 @@ group reads notes; an editor or above writes them.
 
 | File        | What it holds                                                                                                                                                                                                                                                                                                                                                       |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `+lib.ts`   | The `Note` shape; the arktype request schemas (the REST bodies, which are also the form field names, and the socket payloads); `NoteError` and `NoteVersionConflictError`; the commands (`NoteCreateCommand`, `NoteUpdateCommand`, `NoteDeleteCommand`) and queries (`NoteListQuery`, `NoteGetQuery`); the outbox event kinds; the authorization rule; the `NoteRepository` port. |
+| `+lib.ts`   | The `Note` shape; the arktype request schemas (the REST bodies, which are also the form field names, and the socket payloads); `NoteError` and `NoteVersionConflictError`; the commands (`NoteCreateCommand`, `NoteUpdateCommand`, `NoteDeleteCommand`, `NoteMoveCommand`) and queries (`NoteListQuery`, `NoteGetQuery`); the outbox event kinds; the authorization rule; the `NoteRepository` port. |
 | `+lib.test.ts` | The schemas and the authorization rule.                                                                                                                                                                                                                                                                                                                         |
 | `deno.json` | Makes it a workspace member.                                                                                                                                                                                                                                                                                                                                        |
 
@@ -86,7 +86,7 @@ carries an `idempotencyKey` runs once per user and key.
 | File                                        | What it holds                                                                                                                                     |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/api/features/notes/list.ts`           | One page of the list, with its cursor. Both transports call it, so they cannot drift apart.                                                       |
-| `apps/api/features/notes/socket.ts`         | The socket requests `note.create`, `note.update`, `note.delete` (commands) and `note.list`, `note.get` (queries): parse the payload, dispatch.    |
+| `apps/api/features/notes/socket.ts`         | The socket requests `note.create`, `note.update`, `note.delete`, `note.move` (commands) and `note.list`, `note.get` (queries): parse the payload, dispatch.    |
 | `apps/api/features/notes/errors.ts`         | REST error codes and statuses. A version conflict answers 409 with `currentVersion`.                                                               |
 | `apps/api/routes/notes.ts`                  | `GET`, `POST`, `PATCH`, `DELETE` under `/api/groups/:groupId/notes`, with the same-origin guard on writes and an optional `Idempotency-Key` header. |
 | `apps/api/services/note-list-cursor.ts`     | The cursor codec, keyed from the cookie secret.                                                                                                   |
@@ -147,10 +147,44 @@ one extra read instead.
 | `tests/integration/notes.integration.test.ts`               | Postgres: one sequence step and one outbox row per write, conflicts, viewers, paging.                 |
 | `e2e/notes.e2e.ts`                                          | Two members: one creates, edits and deletes on the note pages; the other's open tab follows without a reload; a viewer sees a note without edit controls. |
 | `e2e/mpa/notes.mpa.ts`                                      | The same pages with JavaScript off: create, edit, delete after the confirm page, and a viewer.        |
+| `e2e/notes-move.e2e.ts`, `e2e/mpa/notes-move.mpa.ts`        | Moving one note and ticked notes, in the SPA (with members of both groups watching) and without JavaScript. |
+| `tests/integration/note-move-push.integration.test.ts`      | Members of both groups get a hint for a move; a stranger gets none.                                   |
 
 The product cannot add a member yet, so tests seed one: the integration test inserts the row, and
 the e2e spec calls `POST /api/test/add-member` (`apps/api/routes/dev.ts`, mounted only in
 development). Teach `POST /api/test/cleanup-user` to delete the new table's rows too.
+
+## Making an aggregate movable
+
+A note can move to another group (`NoteMoveCommand`). An aggregate becomes movable by following the
+same steps; copy the notes files that mention `move`:
+
+1. **Domain.** A request schema (`toGroupId` and 1 to `NOTE_MOVE_MAX` ids), a socket payload schema
+   that adds `groupId` (the source), `parseNoteMoveRequest` (refuses repeats and a move into the
+   same group with `SAME_GROUP`), the command, and `<kind>.moved_out` and `<kind>.moved_in` events.
+2. **Repository.** One transaction that locks both groups in id order (so two opposite moves wait
+   for each other instead of deadlocking), checks the actor's role on both locked membership rows,
+   updates `group_id`, raises the version, refuses with `NOT_FOUND` and rolls back when any id is not
+   in the source, counts the cap on the target, records one change per group (`moved_out` on the
+   source, `moved_in` on the target) and writes one `audit_events` row per group. The id and the
+   history stay: a move is an update, not a copy and a delete.
+3. **Handler and gate.** The handler asks for edit rights in the source, then in the target. The
+   entitlement gate judges the target group (`needsRoom` with `toGroupId`), so a move into a full
+   group is refused; the repository counts all moved rows, the gate only reserves room for one.
+4. **Transports.** `POST /move` (registered before `POST /`) and the socket command `<kind>.move`.
+5. **Screens.** The list gets a tick box per row and one form posting `{ toGroupId, noteIds }`; the
+   item page gets a form posting `{ toGroupId }`. Targets are the person's groups where they may
+   write (`moveTargetsOf`). The MPA posts to `/notes/move?group=<id>` (refused when another device
+   changed the selected group) and `/notes/:id/move`.
+6. **SPA and offline.** The store sends the command over the socket and never queues it. A queued
+   write for a moved item becomes a conflict (`docs/offline.md`).
+7. **Tests.** Both transports (viewer, stranger, same group, all-or-nothing, cap), Postgres (one
+   sequence step and one audit row per group, rights in both groups, opposite moves), the hint for
+   members of both groups (`tests/integration/note-move-push.integration.test.ts`), the screens and
+   an e2e spec in each app.
+
+Moving all of a group's data before the group is deleted is not built; it would call this command
+with every id of the group.
 
 ## What is left to the next aggregate
 
