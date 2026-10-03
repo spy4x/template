@@ -63,7 +63,7 @@ export function createNotesOutbox(ports: NotesOutboxPorts): NotesOutbox {
     classify: classifyNoteError,
     messages: {
       version: "Someone changed this note while you were offline.",
-      gone: "This note was deleted while you were offline.",
+      gone: "This note was deleted, or moved to another group, while you were offline.",
     },
     cache: {
       put: (note) => store.putNote(note),

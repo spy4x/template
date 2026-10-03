@@ -1,7 +1,7 @@
 import { useEffect } from "preact/hooks"
 import { useLocation } from "wouter-preact"
 import { canMutateNotes } from "@domain/groups"
-import { NotesScreen } from "@ui/notes-screen.tsx"
+import { moveTargetsOf, NotesScreen } from "@ui/notes-screen.tsx"
 import { groupsStore } from "../state/groups.ts"
 import { notesStore } from "../state/notes.ts"
 import { selectionStore } from "../state/selection.ts"
@@ -39,6 +39,12 @@ export function NotesView() {
         loading={store.loading.value || groupsStore.loading.value || groupId === null}
         listError={store.listError.value}
         nextPageHref={null}
+        moveTargets={membership && canMutateNotes(membership.role)
+          ? moveTargetsOf(groupsStore.groups.value, membership.id)
+          : []}
+        onMove={({ toGroupId, noteIds }) => void store.move(toGroupId, noteIds)}
+        moving={store.moving.value}
+        moveError={store.moveError.value}
         navigate={navigate}
       />
     </>

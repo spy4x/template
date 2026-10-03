@@ -430,6 +430,30 @@ describe("outbox conflicts found after a reconnect", () => {
     expect(h.outbox.entries()[0].conflict?.server).toBe(null)
   })
 
+  it("keeps an edit of a note moved to another group as a conflict that says so", async () => {
+    const h = harness()
+    h.offline()
+    await h.outbox.submit({
+      kind: "update",
+      entityId: "n",
+      payload: { groupId, title: "Mine", body: "my body" },
+      version: 1,
+    })
+    // The server answers "not found in this group" for a moved note, and the old group has none.
+    h.state.server = () => {
+      throw refused("NOTE_NOT_FOUND")
+    }
+    h.state.current = null
+    h.state.online = true
+
+    await h.outbox.flush()
+
+    const [entry] = h.outbox.entries()
+    expect(entry.conflict?.reason).toBe("gone")
+    expect(entry.conflict?.message).toContain("moved to another group")
+    expect(entry.payload).toMatchObject({ title: "Mine", body: "my body" })
+  })
+
   it("treats a delete of a note already gone as done", async () => {
     const h = harness()
     h.offline()

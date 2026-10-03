@@ -39,6 +39,10 @@ export interface NotesDependencies {
     input: { groupId: string; id: string; title: string; body: string; version: number },
   ): Promise<{ note: NoteItem }>
   delete(input: { groupId: string; id: string; version: number }): Promise<unknown>
+  /** Moves the notes to another group, all or none. Needs the server: it is never queued. */
+  move(input: { groupId: string; toGroupId: string; noteIds: string[] }): Promise<
+    { notes: NoteItem[] }
+  >
   newId(): string
   /** What the device already holds of a group's notes, shown before the read answers. */
   readLocal?(groupId: string): Promise<readonly NoteItem[]>
@@ -79,6 +83,10 @@ export const NOTE_MESSAGES = {
   create: "Could not add the note",
   save: "Could not save the note",
   delete: "Could not delete the note",
+  move: "Could not move the notes",
+  moveOffline: "Moving notes needs a connection. Try again when you are back online.",
+  moveNone: "Tick the notes you want to move.",
+  moveGone: "A note you ticked is no longer here, so nothing was moved.",
 } as const
 
 function describe(error: unknown, fallback: string): string {
@@ -120,6 +128,9 @@ export function createNotesStore(dependencies: NotesDependencies) {
   const editErrors = signal<FormErrors>(NO_ERRORS)
   const saving = signal(false)
   const deleting = signal<string | null>(null)
+  const moving = signal(false)
+  /** The refusal of the last move, shown beside the move button. */
+  const moveError = signal<string | null>(null)
   /** The open note is not in the open group: it is gone, or it is in another group. */
   const missing = signal(false)
   /** The person typed text that no save or create has taken yet. */
@@ -205,6 +216,7 @@ export function createNotesStore(dependencies: NotesDependencies) {
     }
     if (editing.value?.id === noteId) return
     editErrors.value = NO_ERRORS
+    moveError.value = null
     missing.value = false
     const known = notes.value.find((note) => note.id === noteId)
     if (known) {
@@ -341,6 +353,41 @@ export function createNotesStore(dependencies: NotesDependencies) {
     }
   }
 
+  /**
+   * Moves notes of the open group to another, all or none. Resolves `true` once moved, `false` when
+   * it was refused or failed (the reason is in `moveError`). It needs the server and is never
+   * queued: a move made offline would be a write the person cannot see settle.
+   */
+  async function move(toGroupId: string, noteIds: readonly string[]): Promise<boolean> {
+    const forGroup = groupId.value
+    if (!forGroup || moving.value) return false
+    if (noteIds.length === 0) {
+      moveError.value = NOTE_MESSAGES.moveNone
+      return false
+    }
+    moving.value = true
+    moveError.value = null
+    try {
+      await dependencies.move({ groupId: forGroup, toGroupId, noteIds: [...noteIds] })
+      const moved = new Set(noteIds)
+      notes.value = notes.value.filter((existing) => !moved.has(existing.id))
+      if (editing.value && moved.has(editing.value.id)) editing.value = null
+      return true
+    } catch (cause) {
+      const code = noteCode(cause)
+      moveError.value = code === "NOTE_NOT_FOUND"
+        ? NOTE_MESSAGES.moveGone
+        : cause instanceof RealtimeRequestError
+        ? describe(cause, NOTE_MESSAGES.move)
+        : NOTE_MESSAGES.moveOffline
+      // The list is stale: another member changed it first.
+      if (code === "NOTE_NOT_FOUND") await refresh().catch(() => {})
+      return false
+    } finally {
+      moving.value = false
+    }
+  }
+
   function reset(): void {
     groupId.value = null
     notes.value = []
@@ -354,6 +401,8 @@ export function createNotesStore(dependencies: NotesDependencies) {
     editErrors.value = NO_ERRORS
     saving.value = false
     deleting.value = null
+    moving.value = false
+    moveError.value = null
     missing.value = false
     inFlight = null
     queued = null
@@ -372,6 +421,8 @@ export function createNotesStore(dependencies: NotesDependencies) {
     editErrors,
     saving,
     deleting,
+    moving,
+    moveError,
     missing,
     unsaved,
     open,
@@ -381,6 +432,7 @@ export function createNotesStore(dependencies: NotesDependencies) {
     discardDraft,
     save,
     remove,
+    move,
     reset,
   }
 }
@@ -409,6 +461,7 @@ const onlineNotes: NotesDependencies = {
   create: (input) => realtimeCommand("note.create", input),
   update: (input) => realtimeCommand("note.update", input),
   delete: (input) => realtimeCommand("note.delete", input),
+  move: (input) => realtimeCommand("note.move", input),
   newId: () => crypto.randomUUID(),
 }
 

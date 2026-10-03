@@ -2,6 +2,7 @@ import { useEffect } from "preact/hooks"
 import { useLocation } from "wouter-preact"
 import { canMutateNotes } from "@domain/groups"
 import { NoteEditorScreen } from "@ui/note-editor-screen.tsx"
+import { moveTargetsOf } from "@ui/notes-screen.tsx"
 import { NOTE_PATHS } from "@ui/progressive.tsx"
 import { groupsStore } from "../state/groups.ts"
 import { notesStore } from "../state/notes.ts"
@@ -68,6 +69,14 @@ export function NoteEditorView({ noteId = null }: { noteId?: string | null }) {
         onDelete={async () => {
           if (editing && await store.remove(editing)) navigate(NOTE_PATHS.list)
         }}
+        moveTargets={membership && canMutateNotes(membership.role)
+          ? moveTargetsOf(groupsStore.groups.value, membership.id)
+          : []}
+        onMove={async (toGroupId) => {
+          if (editing && await store.move(toGroupId, [editing.id])) navigate(NOTE_PATHS.list)
+        }}
+        moving={store.moving.value}
+        moveError={store.moveError.value}
         navigate={navigate}
       />
       <UnsavedGuard
