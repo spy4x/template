@@ -415,10 +415,11 @@ export interface NoteRepository {
   list(groupId: string, page: NoteListPage): Promise<NoteListResult>
   get(groupId: string, id: string): Promise<Note | null>
   /**
-   * The group a live note is in, whoever asks: the caller must check the actor's membership of that
-   * group before it tells anyone. `null` when no live note has the id.
+   * The group a live note is in, when the user is an active member of that group. `null` for a
+   * note that does not exist, a deleted one and one in a group the user is not in alike, found by
+   * one lookup in every case so that no case is slower than another.
    */
-  groupIdOf(id: string): Promise<string | null>
+  groupIdOfForMember(id: string, userId: number): Promise<string | null>
   /**
    * Throws `ID_ALREADY_EXISTS` when the id holds a different note, and a `PlanError` when the group
    * already holds `allowance` notes (`null` for no cap), counted in the write's own transaction.

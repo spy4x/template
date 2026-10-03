@@ -50,17 +50,15 @@ const OWNER = 1
 const VIEWER = 2
 
 function stack(plan = FREE_PLAN_ID, plans: Record<string, string> = {}) {
-  const notes = new MemoryNoteRepository()
-  const dependencies = {
-    notes,
-    groups: roles({
-      [`${groupId}:${OWNER}`]: GroupRole.OWNER,
-      [`${groupId}:${VIEWER}`]: GroupRole.VIEWER,
-      [`${editableGroupId}:${OWNER}`]: GroupRole.EDITOR,
-      [`${editableGroupId}:${VIEWER}`]: GroupRole.EDITOR,
-      [`${readOnlyGroupId}:${OWNER}`]: GroupRole.VIEWER,
-    }),
-  }
+  const groups = roles({
+    [`${groupId}:${OWNER}`]: GroupRole.OWNER,
+    [`${groupId}:${VIEWER}`]: GroupRole.VIEWER,
+    [`${editableGroupId}:${OWNER}`]: GroupRole.EDITOR,
+    [`${editableGroupId}:${VIEWER}`]: GroupRole.EDITOR,
+    [`${readOnlyGroupId}:${OWNER}`]: GroupRole.VIEWER,
+  })
+  const notes = new MemoryNoteRepository(groups)
+  const dependencies = { notes, groups }
   const commands = new CommandBus()
   commands.use(createSessionGate([]))
   commands.use(createEntitlementGate({

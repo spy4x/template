@@ -132,10 +132,16 @@ export class PostgresNoteRepository implements NoteRepository {
     return row ? toNote(row) : null
   }
 
-  async groupIdOf(id: string): Promise<string | null> {
+  async groupIdOfForMember(id: string, userId: number): Promise<string | null> {
     const row = (
       await this.sql<{ groupId: string }[]>`
-        SELECT group_id FROM notes WHERE id = ${id} AND deleted_at IS NULL
+        SELECT notes.group_id
+        FROM notes
+        INNER JOIN groups ON groups.id = notes.group_id AND groups.deleted_at IS NULL
+        INNER JOIN group_members
+          ON group_members.group_id = notes.group_id AND group_members.user_id = ${userId}
+        INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+        WHERE notes.id = ${id} AND notes.deleted_at IS NULL
       `
     )[0]
     return row?.groupId ?? null

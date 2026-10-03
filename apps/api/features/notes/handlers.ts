@@ -132,12 +132,12 @@ export function createNoteGetHandler(
  * an id is taken.
  */
 export function createNoteLocateHandler(
-  { notes, groups }: NoteHandlerDependencies,
+  { notes }: NoteHandlerDependencies,
 ): QueryHandler<NoteLocateQuery> {
   return async ({ data }) => {
-    const groupId = await notes.groupIdOf(data.id)
-    const role = groupId ? await groups.roleOf(groupId, data.actor.userId) : null
-    if (!groupId || role === null) throw new NoteError("NOTE_NOT_FOUND", "Note not found")
+    // One lookup that includes membership: every refusal costs the same, so timing tells nothing.
+    const groupId = await notes.groupIdOfForMember(data.id, data.actor.userId)
+    if (!groupId) throw new NoteError("NOTE_NOT_FOUND", "Note not found")
     return { groupId }
   }
 }
