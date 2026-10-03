@@ -7,6 +7,7 @@ import { Checkbox } from "@spy4x/preact-ui/checkbox"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
+import { Notice } from "@spy4x/preact-ui/notice"
 import { Link } from "@spy4x/preact-ui/link"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { formatMoney } from "@spy4x/platform/universal/money"
@@ -45,6 +46,8 @@ const PRICING_PLANS = PAID_PLANS.map((plan) => ({
   interval: BillingInterval.Month,
   description: plan.description,
   features: plan.features,
+  /** A per-member plan shows "per member / month" after its price. */
+  unit: plan.perSeat ? `member` : undefined,
 }))
 
 function planName(planId: string): string {
@@ -84,14 +87,14 @@ export function BillingNoticeBanner(
 ): JSX.Element | null {
   if (!notice) return null
   return (
-    <div
-      role="status"
-      class="mb-4 rounded-lg border border-amber-500 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+    <Notice
+      tone="warning"
+      class="mb-4"
       data-e2e="billing-notice"
       data-kind={notice.kind}
     >
-      <p>{billingNoticeText(notice, planName)}</p>
-    </div>
+      {billingNoticeText(notice, planName)}
+    </Notice>
   )
 }
 
