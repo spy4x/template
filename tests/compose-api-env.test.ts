@@ -3,7 +3,8 @@
  * The api and worker services in `infra/compose/compose.shared.yml` pass their environment by name
  * and have no `env_file`, so a variable a process reads reaches its container only when it is
  * listed there. This holds the billing variables (`docs/billing.md`, "Configuration") to both lists:
- * the worker reads the same billing setup to change a per-member subscription's quantity.
+ * the worker reads the same billing setup to change a per-member subscription's quantity. The
+ * subscriber secrets too: the worker signs the links the API checks.
  */
 
 import { expect } from "@std/expect"
@@ -33,5 +34,19 @@ for (const service of ["api", "worker"]) {
     ) {
       expect(names, name).toContain(name)
     }
+  })
+}
+
+for (const service of ["api", "worker"]) {
+  Deno.test(`the ${service} container receives both subscriber secrets`, async () => {
+    const compose = parse(await Deno.readTextFile(COMPOSE)) as {
+      services?: Record<string, { environment?: string[] }>
+    }
+    const environment = compose.services?.[service]?.environment
+    if (!Array.isArray(environment)) throw new Error(`the ${service} service has no environment`)
+    const names = environment.map((entry) => entry.split("=")[0])
+
+    expect(names).toContain("SUBSCRIBERS_SECRET")
+    expect(names).toContain("SUBSCRIBERS_PREVIOUS_SECRETS")
   })
 }

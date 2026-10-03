@@ -29,6 +29,16 @@ import {
   removeStalePasswordResetRequests,
 } from "./password-reset-mail.ts"
 import {
+  removeStaleSubscriptionRequests,
+  SUBSCRIBER_CONFIRM_MAIL_JOB,
+  SUBSCRIBER_SEND_ISSUE_JOB,
+  SUBSCRIBER_WELCOME_MAIL_JOB,
+  subscriberConfirmMailJob,
+  subscriberSendIssueJob,
+  subscriberWelcomeMailJob,
+} from "./subscriber-mail.ts"
+import type { SubscribersSetup } from "../subscribers/subscribers.ts"
+import {
   JOB_AGGREGATE,
   JOB_AGGREGATE_ID,
   type JobHandler,
@@ -54,11 +64,15 @@ const NIGHTLY_HOUR_UTC = 3
  * per-member subscription's quantity to the member count, and the nightly cleanup queues one for
  * every group whose stored quantity has drifted. Without one, a seat sync left in the table does
  * nothing.
+ *
+ * With `subscribers`, the subscriber jobs sign and mail confirm links, welcomes and issues. Without
+ * it, they drop what they find.
  */
 export function createOutboxProcessor(
   sql: postgres.Sql,
   mail: Omit<PasswordResetMailDeps, "sql">,
   provider: BillingProvider | null = null,
+  subscribers: SubscribersSetup | null = null,
 ): OutboxProcessor {
   const notifier = new GroupChangeNotifier(sql)
   return new OutboxProcessor(
@@ -71,6 +85,8 @@ export function createOutboxProcessor(
         if (stale > 0) console.log(`Removed ${stale} unsent password reset request(s)`)
         const staleCodes = await removeStaleEmailCodeRequests(sql)
         if (staleCodes > 0) console.log(`Removed ${staleCodes} unsent e-mail code request(s)`)
+        const staleSubs = await removeStaleSubscriptionRequests(sql)
+        if (staleSubs > 0) console.log(`Removed ${staleSubs} unsent subscription request(s)`)
         const groups = await purgeDeletedGroups(sql)
         if (groups.removed > 0) console.log(`Removed ${groups.removed} deleted group(s) for good`)
         if (groups.kept > 0) {
@@ -89,6 +105,9 @@ export function createOutboxProcessor(
       [PASSWORD_RESET_MAIL_JOB]: passwordResetMailJob({ sql, ...mail }),
       [EMAIL_CODE_MAIL_JOB]: emailCodeMailJob({ sql, ...mail }),
       ...billingNoticeJobs(sql, mail),
+      [SUBSCRIBER_CONFIRM_MAIL_JOB]: subscriberConfirmMailJob({ sql, ...mail, setup: subscribers }),
+      [SUBSCRIBER_WELCOME_MAIL_JOB]: subscriberWelcomeMailJob({ sql, ...mail, setup: subscribers }),
+      [SUBSCRIBER_SEND_ISSUE_JOB]: subscriberSendIssueJob({ sql, ...mail, setup: subscribers }),
     }, provider ? new SeatSyncPublisher(sql, notifier) : notifier),
     { repeatEveryMs: { [OUTBOX_CLEANUP_JOB]: DAY_MS } },
   )
