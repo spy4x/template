@@ -364,6 +364,32 @@ describe("NotesScreen in the browser", () => {
     expect(focused()).toBe("note-menu")
   })
 
+  it("leaves focus where the person put it when a refused delete's note leaves the list later", async () => {
+    await mount(<NotesScreen {...listDefaults} />)
+    await click(`${row(trip)} [data-e2e=note-menu]`)
+    await click(`${row(trip)} [data-e2e=note-delete]`)
+    await clickText("Delete", "[data-e2e=note-delete-dialog]")
+    await rerender(<NotesScreen {...listDefaults} listError="Could not delete the note" />)
+
+    find<HTMLElement>("[data-e2e=note-new]").focus()
+    // Someone else deletes it, and the live update drops it from the list.
+    await rerender(<NotesScreen {...listDefaults} notes={[groceries]} />)
+
+    expect(focused()).toBe("note-new")
+  })
+
+  it("leaves focus where the person put it when a refused move's note leaves the list later", async () => {
+    await mount(<NotesScreen {...listDefaults} />)
+    await click(`${row(groceries)} [data-e2e=note-menu]`)
+    await clickText("Move to Work", row(groceries))
+    await rerender(<NotesScreen {...listDefaults} moveError="Could not move the note" />)
+
+    find<HTMLElement>("[data-e2e=note-new]").focus()
+    await rerender(<NotesScreen {...listDefaults} notes={[trip]} />)
+
+    expect(focused()).toBe("note-new")
+  })
+
   it("moves focus to More actions when the selection ends by Cancel or by a move", async () => {
     await mount(<NotesScreen {...listDefaults} />)
     await click("[data-e2e=notes-menu]")

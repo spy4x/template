@@ -180,7 +180,8 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
   // Focus goes to the next row's menu, else the previous row's, else the header's "More actions".
   useEffect(() => {
     if (!focusAfter) return
-    if (props.moveError) return setFocusAfter(null)
+    // A refused delete or move keeps the note; a later live change must not pull focus to it.
+    if (props.moveError || props.listError) return setFocusAfter(null)
     if (focusAfter.id && notes.some((note) => note.id === focusAfter.id)) return
     const root = page.current
     const menus = root?.querySelectorAll<HTMLElement>("[data-e2e=note-menu]")
@@ -189,7 +190,7 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
       : undefined
     ;(row ?? root?.querySelector<HTMLElement>("[data-e2e=notes-menu]"))?.focus()
     setFocusAfter(null)
-  }, [focusAfter, notes, props.moveError])
+  }, [focusAfter, notes, props.moveError, props.listError])
 
   if (!group) {
     return (
