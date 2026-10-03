@@ -461,7 +461,7 @@ CREATE TABLE group_invitation_acceptances (
     PRIMARY KEY (invitation_id, user_id)
 );
 
--- Mail subscriptions for visitors. See migration 2026_10_15_0001_subscribers.sql.
+-- Mail subscriptions for visitors. See migration 2026_10_17_0001_subscribers.sql.
 CREATE TABLE subscribers (
   list_id text NOT NULL,
   email text NOT NULL,
