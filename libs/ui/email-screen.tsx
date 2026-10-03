@@ -5,13 +5,13 @@ import { Button } from "@spy4x/preact-ui/button"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
-import { Cluster, Section, Stack } from "@spy4x/preact-ui/layout"
+import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
 import { Notice } from "@spy4x/preact-ui/notice"
 import { type EmailStatus, emailToVerify } from "@domain/identity"
 import { PageHeader } from "./page-header.tsx"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
-import { SettingList, SettingRow } from "./setting-row.tsx"
+import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
 
 /** The messages shown when an action failed without a message of its own. */
 export const EMAIL_FAILURES = {
@@ -192,7 +192,7 @@ export function EmailScreen(
       </SettingList>
 
       {target && (
-        <Section
+        <SettingGroup
           title="Enter the code"
           description={
             <>
@@ -202,7 +202,7 @@ export function EmailScreen(
                 " Your address changes once you enter it."}
             </>
           }
-          data-e2e="email-verify-card"
+          e2e="email-verify-card"
         >
           {notices.change && (
             <p class="text-sm" role="status" data-e2e="email-change-notice">{notices.change}</p>
@@ -259,7 +259,7 @@ export function EmailScreen(
               )}
             </Stack>
           </ScreenForm>
-        </Section>
+        </SettingGroup>
       )}
 
       <Modal

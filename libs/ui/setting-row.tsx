@@ -42,15 +42,16 @@ export function SettingRow(
  * page title stays the one large heading on a settings page.
  */
 export function SettingGroup(
-  { title, description, children }: {
+  { title, description, e2e, children }: {
     title: string
-    description?: string
+    description?: ComponentChildren
+    e2e?: string
     children: ComponentChildren
   },
 ): JSX.Element {
   const headingId = `setting-group-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
   return (
-    <section class="flex flex-col gap-3" aria-labelledby={headingId}>
+    <section class="flex flex-col gap-3" aria-labelledby={headingId} data-e2e={e2e}>
       <header class="flex flex-col gap-1">
         <h2 id={headingId} class="text-sm font-semibold">{title}</h2>
         {description && <p class="text-sm text-muted">{description}</p>}
