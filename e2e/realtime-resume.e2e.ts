@@ -35,7 +35,14 @@ const statusTexts = (page: Page) =>
 async function signedIn(
   { page, request }: { page: Page; request: import("@playwright/test").APIRequestContext },
   email: string,
+  backoff?: { baseMs: number; maxMs: number; jitterRatio: number },
 ) {
+  // Slows the app's reconnect timer (see `testBackoff` in apps/spa/src/state/realtime.ts).
+  if (backoff) {
+    await page.addInitScript((value) => {
+      ;(globalThis as { __REALTIME_BACKOFF__?: unknown }).__REALTIME_BACKOFF__ = value
+    }, backoff)
+  }
   const cleanup = async ({ soft = false } = {}) => {
     const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
       data: { login: email },
@@ -67,6 +74,9 @@ test.describe("realtime when the app returns", () => {
     const { cleanup, dropSockets } = await signedIn(
       { page, request },
       "e2e_resume_pull@example.com",
+      // The first retry comes a minute after the drop, with no jitter: the spec is over long
+      // before, so only `resume()` can reconnect it.
+      { baseMs: 60_000, maxMs: 60_000, jitterRatio: 0 },
     )
     try {
       const names = page.locator("[data-e2e=group-item-name]")

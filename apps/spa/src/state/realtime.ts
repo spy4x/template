@@ -1,4 +1,5 @@
 import {
+  type BackoffConfig,
   ClientTransport,
   ConnectionLostError,
   createSystemClock,
@@ -21,6 +22,16 @@ const STATUS_TEXT: Record<TransportStatus, ConnectionStatus> = {
   [TransportStatus.Open]: "open",
   [TransportStatus.Reconnecting]: "closed",
   [TransportStatus.Stopped]: "closed",
+}
+
+/**
+ * Reconnect backoff for tests. An e2e spec sets `globalThis.__REALTIME_BACKOFF__` before the app
+ * script runs (Playwright's `addInitScript`) to make the retry timer slower than the spec's
+ * window, so only an explicit `resume()` can reconnect inside it. Production sets nothing and
+ * keeps the transport's default.
+ */
+function testBackoff() {
+  return (globalThis as { __REALTIME_BACKOFF__?: Partial<BackoffConfig> }).__REALTIME_BACKOFF__
 }
 
 /** How long after the app returns a reconnect is expected without a word to the person. */
@@ -134,6 +145,7 @@ export function connectRealtime(userId: number, pull: (gap?: GapReport) => void 
     cursors,
     pull,
     gate: sessionGate(userId),
+    backoff: testBackoff(),
   })
   // The socket receives hints only once the server has adopted it, so a change made after the
   // start-up read and before that moment reaches this page by no hint. The transport pulls after a
