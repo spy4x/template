@@ -137,7 +137,7 @@ describe("GroupSettingsView", () => {
     expect(html).not.toMatch(/<option[^>]*>Olga Owner<\/option>/)
   })
 
-  it("tells the owner the subscription moves and stays on their card, for the open group's plan only", () => {
+  it("tells the owner the old card is not charged again after a transfer, for the open group's plan only", () => {
     groupsStore.groups.value = [{ ...known, role: GroupRole.OWNER }]
     membersStore.groupId.value = known.id
     membersStore.members.value = [

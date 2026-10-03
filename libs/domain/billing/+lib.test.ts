@@ -193,6 +193,8 @@ describe("billing domain", () => {
     expect(handoverTrialDays(cancelled({ status: BillingStatus.Canceled }), at(-DAY), 7))
       .toBeNull()
     expect(handoverTrialDays(cancelled({ cancelAtPeriodEnd: false }), at(-DAY), 7)).toBeNull()
+    // A trial that converts at its end charges the card then: it renews, though it has an end.
+    expect(handoverTrialDays(trial(), at(-2 * DAY), 7)).toBeNull()
     expect(handoverTrialDays(null, at(-DAY), 7)).toBeNull()
   })
 

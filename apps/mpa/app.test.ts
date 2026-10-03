@@ -1228,7 +1228,7 @@ describe("the groups pages", () => {
       memberCount: 2,
     })
 
-  it("tells the owner of a subscribed group that the subscription moves and stays on their card", async () => {
+  it("tells the owner of a subscribed group that the old card is not charged again after a transfer", async () => {
     const billing = (subscribed: boolean) => ({
       enabled: true,
       planId: "pro",
