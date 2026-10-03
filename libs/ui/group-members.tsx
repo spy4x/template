@@ -1,5 +1,5 @@
 import type { ComponentChildren, JSX } from "preact"
-import { useState } from "preact/hooks"
+import { useRef, useState } from "preact/hooks"
 import { Avatar } from "@spy4x/preact-ui/avatar"
 import { Card } from "@spy4x/preact-ui/card"
 import { ConfirmDialog } from "@spy4x/preact-ui/confirm-dialog"
@@ -8,7 +8,13 @@ import { ErrorState } from "@spy4x/preact-ui/error-state"
 import type { PlanRefusal } from "@domain/billing"
 import { assignableRoles, canRemoveMember, type GroupRole } from "@domain/groups"
 import { ROLE_TEXT } from "./groups-screen.tsx"
-import { FocusedError, MoreMenu, useClosesWhenDone } from "./group-page.tsx"
+import {
+  FocusedError,
+  MoreMenu,
+  useClosesWhenDone,
+  useFocusAfterRemoval,
+  useFreshError,
+} from "./group-page.tsx"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import type { Navigate } from "./progressive.tsx"
 
@@ -93,14 +99,24 @@ export function GroupMembersSection(
   }: GroupMembersSectionProps,
 ): JSX.Element {
   const total = members ? Math.max(memberCount ?? 0, members.length) : null
+  const header = useRef<HTMLDivElement>(null)
+  const list = useRef<HTMLUListElement>(null)
+  // A removed member's menu goes with their row: focus moves to the next row's menu, else to the
+  // section's action ("Invite people"), else to the heading.
+  useFocusAfterRemoval(
+    list,
+    members?.map((member) => member.userId) ?? null,
+    pendingUserId,
+    () => header.current?.querySelector("button") ?? header.current?.querySelector("h2"),
+  )
   return (
     <section
       aria-labelledby="group-members"
       class="flex flex-col gap-4"
       data-e2e="group-section-members"
     >
-      <div class="flex min-h-11 items-center justify-between gap-3">
-        <h2 id="group-members" class="text-base font-semibold">
+      <div ref={header} class="flex min-h-11 items-center justify-between gap-3">
+        <h2 id="group-members" class="text-base font-semibold" tabIndex={-1}>
           Members{total === null ? "" : ` (${total})`}
         </h2>
         {action}
@@ -115,7 +131,7 @@ export function GroupMembersSection(
         )
         : (
           <Card>
-            <ul class="divide-y divide-subtle">
+            <ul ref={list} class="divide-y divide-subtle">
               {members.map((member) => (
                 <MemberItem
                   key={member.userId}
@@ -161,6 +177,7 @@ function MemberItem(
   const removable = canRemoveMember(actorRole, member.role)
   const [removing, setRemoving] = useState(false)
   useClosesWhenDone(pending, error !== null, () => setRemoving(false))
+  const [removeError, opened] = useFreshError(error, pending)
 
   return (
     <li
@@ -202,7 +219,10 @@ function MemberItem(
                   danger
                   disabled={pending}
                   dataE2E="group-member-remove-open"
-                  onClick={() => setRemoving(true)}
+                  onClick={() => {
+                    opened()
+                    setRemoving(true)
+                  }}
                 >
                   Remove from group
                 </DropdownItem>
@@ -234,7 +254,7 @@ function MemberItem(
               this is their only group, they get a new empty one named "Personal". A team link they
               still hold lets them back in from another account, so revoke such links too.
             </p>
-            <FocusedError message={error} dataE2E="group-member-remove-error" />
+            <FocusedError message={removeError} dataE2E="group-member-remove-error" />
           </div>
         </ConfirmDialog>
       )}

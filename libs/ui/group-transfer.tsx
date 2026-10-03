@@ -40,8 +40,6 @@ export interface GroupTransferFormProps {
   role: GroupRole
   /** The members, oldest first; `null` while they are read. The owner is left out of the picker. */
   members: readonly GroupMemberRow[] | null
-  /** The group has a live subscription, which must be cancelled first: the form says so. */
-  hasSubscription?: boolean
   draft: TransferDraft
   onDraftChange?: (draft: TransferDraft) => void
   /** A transfer is in flight. */
@@ -64,7 +62,6 @@ export function GroupTransferForm(
     groupName,
     role,
     members,
-    hasSubscription = false,
     draft,
     onDraftChange,
     transferring = false,
@@ -108,8 +105,6 @@ export function GroupTransferForm(
           They become the owner and you become an admin. Only the owner can delete the group, manage
           its plan or transfer it again. Before you can delete your account, transfer every group
           you share with others.
-          {hasSubscription &&
-            " A subscription that renews blocks the transfer: cancel it under Manage billing first. The group keeps its plan until the paid period ends and your card is not charged again. The new owner subscribes with their own card and does not see your billing details."}
         </p>
         <Field id="group-transfer-member" label="New owner">
           <Select

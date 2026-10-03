@@ -1,4 +1,4 @@
-import type { ComponentChildren, JSX } from "preact"
+import type { ComponentChildren, JSX, RefObject } from "preact"
 import { useEffect, useRef, useState } from "preact/hooks"
 import { IconLink, IconMail } from "@spy4x/preact-icons"
 import { Avatar } from "@spy4x/preact-ui/avatar"
@@ -25,7 +25,13 @@ import {
   INVITATION_MAX_USES,
 } from "@domain/groups"
 import { ROLE_TEXT } from "./groups-screen.tsx"
-import { FocusedError, MoreMenu, useClosesWhenDone } from "./group-page.tsx"
+import {
+  FocusedError,
+  MoreMenu,
+  useClosesWhenDone,
+  useFocusAfterRemoval,
+  useFreshError,
+} from "./group-page.tsx"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import { type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
@@ -198,7 +204,11 @@ export function InviteForm(
             autocomplete="off"
             maxLength={254}
             value={draft.email}
-            onInput={(e) => change({ email: e.currentTarget.value })}
+            onInput={(e) => {
+              const email = e.currentTarget.value
+              // A cleared address hides the "send the link" box, so its tick goes with it.
+              change(email.trim() === "" ? { email, sendEmail: false } : { email })
+            }}
           />
         </Field>
         {draft.email.trim() !== "" && (
@@ -281,9 +291,41 @@ export function PendingInvitations(
   { actorRole, invitations, error = null, revokingId = null, revokeError = null, onRevoke }:
     PendingInvitationsProps,
 ): JSX.Element | null {
+  const wrapper = useRef<HTMLDivElement>(null)
+  const list = useRef<HTMLUListElement>(null)
+  // A revoked invitation's menu goes with its row: focus moves to the next row's menu, else to the
+  // main button of the section around this one ("Invite people" of the members).
+  useFocusAfterRemoval(
+    list,
+    invitations?.map((invitation) => invitation.id) ?? null,
+    revokingId,
+    () => wrapper.current?.parentElement?.closest("section")?.querySelector("button"),
+  )
   if (!canManageInvitations(actorRole)) return null
-  if (error) return <ErrorState message={error} />
-  if (!invitations || invitations.length === 0) return null
+  // The wrapper draws no box of its own, and stays when the last row goes, for the focus above.
+  return (
+    <div ref={wrapper} class="contents">
+      {error
+        ? <ErrorState message={error} />
+        : invitations && invitations.length > 0 && (
+          <InvitationList
+            list={list}
+            actorRole={actorRole}
+            invitations={invitations}
+            revokingId={revokingId}
+            revokeError={revokeError}
+            onRevoke={onRevoke}
+          />
+        )}
+    </div>
+  )
+}
+
+function InvitationList(
+  { list, actorRole, invitations, revokingId, revokeError, onRevoke }:
+    & Pick<PendingInvitationsProps, "actorRole" | "revokingId" | "revokeError" | "onRevoke">
+    & { list: RefObject<HTMLUListElement>; invitations: readonly InvitationRow[] },
+): JSX.Element {
   return (
     <section
       aria-labelledby="group-invitations"
@@ -292,7 +334,7 @@ export function PendingInvitations(
     >
       <h3 id="group-invitations" class="text-sm font-medium text-muted">Pending invitations</h3>
       <Card>
-        <ul class="divide-y divide-subtle">
+        <ul ref={list} class="divide-y divide-subtle">
           {invitations.map((invitation) => (
             <InvitationItem
               key={invitation.id}
@@ -321,6 +363,7 @@ function InvitationItem(
 ): JSX.Element {
   const [revoking, setRevoking] = useState(false)
   useClosesWhenDone(pending, error !== null, () => setRevoking(false))
+  const [revokeError, opened] = useFreshError(error, pending)
   const who = invitation.email ?? "Anyone with the link"
   return (
     <li
@@ -354,7 +397,10 @@ function InvitationItem(
               danger
               disabled={pending}
               dataE2E="invitation-revoke-open"
-              onClick={() => setRevoking(true)}
+              onClick={() => {
+                opened()
+                setRevoking(true)
+              }}
             >
               Revoke
             </DropdownItem>
@@ -377,7 +423,7 @@ function InvitationItem(
             <p class="text-sm text-muted">
               The link for {who} stops working right away. People who joined with it stay.
             </p>
-            <FocusedError message={error} dataE2E="invitation-error" />
+            <FocusedError message={revokeError} dataE2E="invitation-error" />
           </div>
         </ConfirmDialog>
       )}

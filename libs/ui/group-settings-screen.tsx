@@ -19,7 +19,13 @@ import {
 } from "@domain/groups"
 import { type GroupRow, ROLE_TEXT } from "./groups-screen.tsx"
 import { type GroupMemberRow, GroupMembersSection, type MemberError } from "./group-members.tsx"
-import { FocusedError, PageAction, PageHeader, useClosesWhenDone } from "./group-page.tsx"
+import {
+  FocusedError,
+  PageAction,
+  PageHeader,
+  useClosesWhenDone,
+  useFreshError,
+} from "./group-page.tsx"
 import { transferCandidates } from "./group-transfer.tsx"
 import { type Navigate, SCREEN_PATHS } from "./progressive.tsx"
 
@@ -47,8 +53,8 @@ export interface GroupSettingsScreenProps {
    */
   isLastGroup?: boolean
   /**
-   * The group has a subscription that is not cancelled, so it cannot be deleted until the owner
-   * cancels it in the billing portal: the menu says so beside the disabled item.
+   * The group has a subscription that is not cancelled, so it can be neither deleted nor transferred
+   * until the owner cancels it in the billing portal: the menu says so beside the disabled items.
    */
   hasSubscription?: boolean
   /** A delete is in flight. */
@@ -141,6 +147,8 @@ export function GroupSettingsScreen(
   const close = () => setDialog(null)
   useClosesWhenDone(leaving, leaveError !== null, close)
   useClosesWhenDone(deleting, deleteError !== null, close)
+  const [freshLeaveError, leaveOpened] = useFreshError(leaveError, leaving)
+  const [freshDeleteError, deleteOpened] = useFreshError(deleteError, deleting)
 
   const back = { href: SCREEN_PATHS.groups, label: "Back to groups" }
   if (!group) {
@@ -160,20 +168,22 @@ export function GroupSettingsScreen(
   const isOwner = group.role === GroupRole.OWNER
   const canHandOver = isOwner && transfer !== undefined &&
     transferCandidates(group.role, members).length > 0
-  const deleteBlocked = isLastGroup
-    ? "It is your only group"
-    : hasSubscription
-    ? "Cancel its subscription first"
-    : null
+  const subscriptionBlocks = hasSubscription ? "Cancel its subscription first" : null
+  const deleteBlocked = isLastGroup ? "It is your only group" : subscriptionBlocks
 
   const menu = (
     <>
       {canHandOver && (
         <DropdownItem
+          disabled={subscriptionBlocks !== null}
           dataE2E="group-transfer-open"
           onClick={() => setDialog(Dialog.TRANSFER)}
         >
-          Transfer ownership
+          <MenuText
+            text="Transfer ownership"
+            hint={subscriptionBlocks}
+            hintDataE2E="group-transfer-why"
+          />
         </DropdownItem>
       )}
       {canLeave(group.role) && (
@@ -181,7 +191,10 @@ export function GroupSettingsScreen(
           danger
           disabled={isLastGroup}
           dataE2E="group-leave-open"
-          onClick={() => setDialog(Dialog.LEAVE)}
+          onClick={() => {
+            leaveOpened()
+            setDialog(Dialog.LEAVE)
+          }}
         >
           <MenuText
             text="Leave group"
@@ -195,7 +208,10 @@ export function GroupSettingsScreen(
           danger
           disabled={deleteBlocked !== null}
           dataE2E="group-delete-open"
-          onClick={() => setDialog(Dialog.DELETE)}
+          onClick={() => {
+            deleteOpened()
+            setDialog(Dialog.DELETE)
+          }}
         >
           <MenuText text="Delete group" hint={deleteBlocked} hintDataE2E="group-delete-why" />
         </DropdownItem>
@@ -315,7 +331,7 @@ export function GroupSettingsScreen(
               You lose access right away, on every device. What you wrote stays in the group. To
               come back, someone must add you again.
             </p>
-            <FocusedError message={leaveError} dataE2E="group-leave-error" />
+            <FocusedError message={freshLeaveError} dataE2E="group-leave-error" />
           </div>
         </ConfirmDialog>
       )}
@@ -340,7 +356,7 @@ export function GroupSettingsScreen(
               {GROUP_RESTORE_DAYS}{" "}
               days. After that it and all its notes are deleted for good and cannot be recovered.
             </p>
-            <FocusedError message={deleteError} dataE2E="group-delete-error" />
+            <FocusedError message={freshDeleteError} dataE2E="group-delete-error" />
           </div>
         </ConfirmDialog>
       )}

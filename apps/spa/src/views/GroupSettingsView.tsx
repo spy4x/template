@@ -111,7 +111,6 @@ export function GroupTransfer(
       groupName={group.name}
       role={group.role}
       members={ours ? team.members.value : null}
-      hasSubscription={billingOf(groupId)?.subscribed ?? false}
       draft={team.transferDraft.value}
       onDraftChange={(next) => (team.transferDraft.value = next)}
       transferring={team.transferring.value}

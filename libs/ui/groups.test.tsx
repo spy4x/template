@@ -11,7 +11,7 @@ import { render, type VNode } from "preact"
 import { act } from "preact/test-utils"
 import type { PlanRefusal } from "@domain/billing"
 import { GroupRole } from "@domain/groups"
-import { BILLING_PATHS } from "./billing-screen.tsx"
+import { BILLING_PATHS, SeatPriceConfirm } from "./billing-screen.tsx"
 import {
   type CreatedInvitation,
   EMPTY_INVITATION_DRAFT,
@@ -23,9 +23,14 @@ import {
   type InviteFormProps,
   MyInvitationsSection,
   PendingInvitations,
+  type PendingInvitationsProps,
   VIEWERS_ONLY_HINT,
 } from "./group-invitations.tsx"
-import { type GroupMemberRow, GroupMembersSection } from "./group-members.tsx"
+import {
+  type GroupMemberRow,
+  GroupMembersSection,
+  type GroupMembersSectionProps,
+} from "./group-members.tsx"
 import { GroupSettingsScreen, type GroupSettingsScreenProps } from "./group-settings-screen.tsx"
 import {
   EMPTY_TRANSFER_DRAFT,
@@ -403,6 +408,15 @@ describe("GroupSettingsScreen header", () => {
     expect(find("[data-e2e=group-leave-why]").textContent).toBe("It is your only group")
   })
 
+  it("disables Transfer ownership with the reason while the group has a subscription", async () => {
+    await mount(<GroupSettingsScreen {...defaults} hasSubscription />)
+    expect(find<HTMLButtonElement>("[data-e2e=group-transfer-open]").disabled).toBe(true)
+    expect(find("[data-e2e=group-transfer-why]").textContent).toBe("Cancel its subscription first")
+    await rerender(<GroupSettingsScreen {...defaults} />)
+    expect(find<HTMLButtonElement>("[data-e2e=group-transfer-open]").disabled).toBe(false)
+    expect(has("[data-e2e=group-transfer-why]")).toBe(false)
+  })
+
   it("asks before deleting, deletes on confirm, and keeps the dialog open with a refused delete's message focused", async () => {
     const remove = spy<[]>()
     await mount(<GroupSettingsScreen {...defaults} onDelete={remove.fn} />)
@@ -428,6 +442,23 @@ describe("GroupSettingsScreen header", () => {
     expect(remove.calls).toHaveLength(0)
   })
 
+  it("opens the delete dialog again without the message of an earlier refused delete", async () => {
+    const screen = (props: Partial<GroupSettingsScreenProps>) => (
+      <GroupSettingsScreen {...defaults} {...props} />
+    )
+    await mount(screen({}))
+    await click("[data-e2e=group-delete-open]")
+    await rerender(screen({ deleting: true }))
+    await rerender(screen({ deleteError: "It has a plan." }))
+    await clickText("[data-e2e=group-delete-dialog]", "Cancel")
+
+    await click("[data-e2e=group-delete-open]")
+    expect(has("[data-e2e=group-delete-error]")).toBe(false)
+    await rerender(screen({ deleting: true, deleteError: "It has a plan." }))
+    await rerender(screen({ deleteError: "It has a plan." }))
+    expect(find("[data-e2e=group-delete-error]").textContent).toContain("It has a plan.")
+  })
+
   it("asks before leaving and leaves on confirm", async () => {
     const leave = spy<[]>()
     const admin = { ...defaults, group: { ...team, role: GroupRole.ADMIN } }
@@ -439,6 +470,34 @@ describe("GroupSettingsScreen header", () => {
     await rerender(<GroupSettingsScreen {...admin} onLeave={leave.fn} leaving />)
     await rerender(<GroupSettingsScreen {...admin} onLeave={leave.fn} leaveError="No." />)
     expect(focused()).toBe("group-leave-error")
+  })
+
+  it("closes the leave dialog once the leave worked", async () => {
+    const admin = { ...defaults, group: { ...team, role: GroupRole.ADMIN } }
+    await mount(<GroupSettingsScreen {...admin} />)
+    await click("[data-e2e=group-leave-open]")
+    await rerender(<GroupSettingsScreen {...admin} leaving />)
+    expect(has("[data-e2e=group-leave-dialog]")).toBe(true)
+    await rerender(<GroupSettingsScreen {...admin} />)
+    expect(has("[data-e2e=group-leave-dialog]")).toBe(false)
+  })
+
+  it("opens the leave dialog again without the message of an earlier refused leave", async () => {
+    const admin = { ...defaults, group: { ...team, role: GroupRole.ADMIN } }
+    const screen = (props: Partial<GroupSettingsScreenProps>) => (
+      <GroupSettingsScreen {...admin} {...props} />
+    )
+    await mount(screen({}))
+    await click("[data-e2e=group-leave-open]")
+    await rerender(screen({ leaving: true }))
+    await rerender(screen({ leaveError: "No." }))
+    await clickText("[data-e2e=group-leave-dialog]", "Cancel")
+
+    await click("[data-e2e=group-leave-open]")
+    expect(has("[data-e2e=group-leave-error]")).toBe(false)
+    await rerender(screen({ leaving: true, leaveError: "No." }))
+    await rerender(screen({ leaveError: "No." }))
+    expect(find("[data-e2e=group-leave-error]").textContent).toContain("No.")
   })
 
   it("draws the transfer form in a dialog that the form can close", async () => {
@@ -535,6 +594,48 @@ describe("GroupMembersSection", () => {
       .toContain("Remove vic@example.com?")
     await clickText("[data-e2e=group-member-remove-dialog]", "Remove member")
     expect(remove.calls).toEqual([[3]])
+  })
+
+  it("shows a refused removal's message in its dialog, and not again when the dialog reopens", async () => {
+    const section = (over: Partial<GroupMembersSectionProps>) => (
+      <GroupMembersSection {...props} {...over} />
+    )
+    await mount(section({}))
+    await click('[data-user-id="3"] [data-e2e=group-member-remove-open]')
+    await rerender(section({ pendingUserId: 3 }))
+    await rerender(section({ memberError: { userId: 3, message: "Not allowed." } }))
+    expect(
+      find("[data-e2e=group-member-remove-dialog] [data-e2e=group-member-remove-error]")
+        .textContent,
+    ).toContain("Not allowed.")
+    expect(focused()).toBe("group-member-remove-error")
+
+    await clickText("[data-e2e=group-member-remove-dialog]", "Cancel")
+    await click('[data-user-id="3"] [data-e2e=group-member-remove-open]')
+    expect(has("[data-e2e=group-member-remove-error]")).toBe(false)
+  })
+
+  it("moves focus to the next row's menu once a member is removed, else to the section's button", async () => {
+    const kim: GroupMemberRow = { ...viewer, userId: 4, email: "kim@example.com" }
+    const invite = <button type="button" data-e2e="invite-open">Invite people</button>
+    const section = (over: Partial<GroupMembersSectionProps>) => (
+      <GroupMembersSection
+        {...props}
+        members={[owner, editor, viewer, kim]}
+        action={invite}
+        {...over}
+      />
+    )
+    await mount(section({}))
+    await rerender(section({ pendingUserId: 3 }))
+    await rerender(section({ members: [owner, editor, kim] }))
+    expect(focused()).toBe("group-member-menu")
+    expect(document.activeElement?.closest("li")?.getAttribute("data-user-id")).toBe("4")
+
+    // The last row has no next one: focus skips the earlier rows for the section's button.
+    await rerender(section({ members: [owner, editor, kim], pendingUserId: 4 }))
+    await rerender(section({ members: [owner, editor] }))
+    expect(focused()).toBe("invite-open")
   })
 
   it("moves focus to a refused change's message under the member's row", async () => {
@@ -643,6 +744,14 @@ describe("InviteForm", () => {
     expect(has("[data-e2e=invitation-send-email]")).toBe(true)
   })
 
+  it("drops the tick to mail the link when the address is cleared", async () => {
+    const drafts = spy<[InvitationDraft]>()
+    const draft = { ...EMPTY_INVITATION_DRAFT, email: "a@b.c", sendEmail: true }
+    await mount(<InviteForm {...defaults} draft={draft} onDraftChange={drafts.fn} />)
+    await type("[data-e2e=invitation-email]", "")
+    expect(drafts.calls).toEqual([[{ ...draft, email: "", sendEmail: false }]])
+  })
+
   it("moves focus to the address on a refused create, and shows a plan's refusal in its place", async () => {
     await mount(<InviteForm {...defaults} />)
     await rerender(<InviteForm {...defaults} createError="Not a valid address." />)
@@ -708,7 +817,8 @@ describe("PendingInvitations", () => {
 
   it("draws nothing while there are none, or for a member who may not invite", async () => {
     await mount(<PendingInvitations actorRole={GroupRole.OWNER} invitations={[]} />)
-    expect(root!.innerHTML).toBe("")
+    expect(root!.textContent).toBe("")
+    expect(has("[data-e2e=group-section-invitations]")).toBe(false)
     await rerender(<PendingInvitations actorRole={GroupRole.EDITOR} invitations={rows} />)
     expect(root!.innerHTML).toBe("")
   })
@@ -724,10 +834,67 @@ describe("PendingInvitations", () => {
     expect(revoke.calls).toEqual([["i-1"]])
   })
 
+  it("shows a refused revoke's message in its dialog, and not again when the dialog reopens", async () => {
+    const list = (props: Partial<PendingInvitationsProps>) => (
+      <PendingInvitations actorRole={GroupRole.OWNER} invitations={rows} {...props} />
+    )
+    await mount(list({}))
+    await click('[data-invitation-id="i-1"] [data-e2e=invitation-revoke-open]')
+    await rerender(list({ revokingId: "i-1" }))
+    await rerender(list({ revokeError: { invitationId: "i-1", message: "Already used." } }))
+    expect(find("[data-e2e=invitation-revoke-dialog] [data-e2e=invitation-error]").textContent)
+      .toContain("Already used.")
+    expect(focused()).toBe("invitation-error")
+
+    await clickText("[data-e2e=invitation-revoke-dialog]", "Cancel")
+    await click('[data-invitation-id="i-1"] [data-e2e=invitation-revoke-open]')
+    expect(has("[data-e2e=invitation-error]")).toBe(false)
+  })
+
+  it("moves focus to the next invitation's menu once one is revoked, else to the button of the section around it", async () => {
+    const page = (props: Partial<PendingInvitationsProps>) => (
+      <section>
+        <button type="button" data-e2e="invite-open">Invite people</button>
+        <PendingInvitations actorRole={GroupRole.OWNER} invitations={rows} {...props} />
+      </section>
+    )
+    await mount(page({}))
+    await rerender(page({ revokingId: "i-1" }))
+    await rerender(page({ invitations: [rows[1]] }))
+    expect(focused()).toBe("invitation-menu")
+    expect(document.activeElement?.closest("li")?.getAttribute("data-invitation-id")).toBe("i-2")
+
+    await rerender(page({ invitations: [rows[1]], revokingId: "i-2" }))
+    await rerender(page({ invitations: [] }))
+    expect(focused()).toBe("invite-open")
+  })
+
   it("gives no revoke for an invitation with a role above the person's", async () => {
     await mount(<PendingInvitations actorRole={GroupRole.ADMIN} invitations={rows} />)
     expect(has('[data-invitation-id="i-1"] [data-e2e=invitation-menu]')).toBe(true)
     expect(has('[data-invitation-id="i-2"] [data-e2e=invitation-menu]')).toBe(false)
+  })
+})
+
+describe("SeatPriceConfirm", () => {
+  const seatPrice = { seats: 2, amount: 900, currency: "EUR" }
+
+  it("hands the price tick to the app", async () => {
+    const ticks = spy<[boolean]>()
+    await mount(<SeatPriceConfirm seatPrice={seatPrice} checked={false} onChange={ticks.fn} />)
+    await click("[data-e2e=seat-price-accept]")
+    expect(ticks.calls).toEqual([[true]])
+  })
+
+  it("moves focus to the price box when a create is refused for the price", async () => {
+    await mount(<SeatPriceConfirm seatPrice={seatPrice} checked={false} />)
+    expect(focused()).not.toBe("seat-price-accept")
+    await rerender(
+      <SeatPriceConfirm seatPrice={seatPrice} checked={false} error="Confirm the price" />,
+    )
+    expect(focused()).toBe("seat-price-accept")
+    expect(find("[data-e2e=seat-price-accept]").getAttribute("aria-describedby"))
+      .toContain("invitation-seat-price-error")
   })
 })
 

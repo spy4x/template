@@ -157,7 +157,7 @@ describe("GroupSettingsView", () => {
     expect(html).not.toMatch(/<option[^>]*>Olga Owner<\/option>/)
   })
 
-  it("tells the owner the old card is not charged again after a transfer, for the open group's plan only", () => {
+  it("disables Transfer ownership while the open group's subscription renews, and for no other group's", () => {
     groupsStore.groups.value = [{ ...known, role: GroupRole.OWNER }]
     membersStore.groupId.value = known.id
     membersStore.members.value = [
@@ -191,13 +191,14 @@ describe("GroupSettingsView", () => {
       notice: null,
       seatPrice: null,
     }
-    const sentence = "your card is not charged again"
+    const blocked = "group-transfer-why"
 
-    expect(renderTransfer()).not.toContain(sentence)
+    expect(render(known.id)).toContain("group-transfer-open")
+    expect(render(known.id)).not.toContain(blocked)
     billingStore.current.value = { groupId: strangerId, billing: subscribed }
-    expect(renderTransfer()).not.toContain(sentence)
+    expect(render(known.id)).not.toContain(blocked)
     billingStore.current.value = { groupId: known.id, billing: subscribed }
-    expect(renderTransfer()).toContain(sentence)
+    expect(render(known.id)).toContain(blocked)
   })
 
   it("shows a create refused for the price at the price box, and any other refusal under the form", () => {

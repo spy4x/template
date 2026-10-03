@@ -1,5 +1,5 @@
-import type { ComponentChildren, ComponentType, JSX } from "preact"
-import { useEffect, useRef } from "preact/hooks"
+import type { ComponentChildren, ComponentType, JSX, RefObject } from "preact"
+import { useEffect, useRef, useState } from "preact/hooks"
 import { IconArrowLeft, IconEllipsisVertical, type IconProps } from "@spy4x/preact-icons"
 import { Button, type ButtonVariant } from "@spy4x/preact-ui/button"
 import { Dropdown } from "@spy4x/preact-ui/dropdown"
@@ -147,6 +147,52 @@ export function useClosesWhenDone(pending: boolean, failed: boolean, onDone: () 
     if (was.current && !pending && !failed) onDone()
     was.current = pending
   }, [pending, failed])
+}
+
+/**
+ * Hides an error left from an earlier attempt when its dialog opens again. Call the returned
+ * function when the dialog opens: the error that is there then stays hidden until the next attempt
+ * starts (`pending` turns true), so a dialog never opens on an old refusal.
+ */
+export function useFreshError(
+  error: string | null,
+  pending: boolean,
+): [string | null, () => void] {
+  const [stale, setStale] = useState<string | null>(null)
+  useEffect(() => {
+    if (pending) setStale(null)
+  }, [pending])
+  return [error !== null && error === stale ? null : error, () => setStale(error)]
+}
+
+/**
+ * Keeps focus on the page when a row leaves a list after its own removal (`pendingId`) was in
+ * flight: it moves to the menu of the row that took its place, else of a later row, else to
+ * `fallback()`. Without this, focus falls to the page's body with the row's menu.
+ *
+ * `list` is the list element whose `li` children are the rows, in the order of `ids`.
+ */
+export function useFocusAfterRemoval(
+  list: RefObject<HTMLElement>,
+  ids: readonly (string | number)[] | null,
+  pendingId: string | number | null,
+  fallback: () => HTMLElement | null | undefined,
+): void {
+  const awaited = useRef<{ id: string | number; index: number } | null>(null)
+  const known = useRef(ids)
+  if (pendingId !== null && awaited.current?.id !== pendingId) {
+    awaited.current = { id: pendingId, index: known.current?.indexOf(pendingId) ?? -1 }
+  }
+  const key = ids?.join(",") ?? null
+  useEffect(() => {
+    known.current = ids
+    const gone = awaited.current
+    if (!gone || ids === null || ids.includes(gone.id)) return
+    awaited.current = null
+    const rows = Array.from(list.current?.children ?? []).slice(Math.max(gone.index, 0))
+    const menu = rows.map((row) => row.querySelector("button")).find((button) => button !== null)
+    ;(menu ?? fallback())?.focus()
+  }, [key])
 }
 
 /**
