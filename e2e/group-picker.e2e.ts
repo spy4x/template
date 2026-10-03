@@ -65,7 +65,7 @@ async function pickWithKeyboard(page: Page, groupName: string): Promise<void> {
   const picker = page.locator("#sidebar-group-picker")
   await picker.focus()
   await page.keyboard.press("ArrowDown")
-  await expect(page.getByRole("option", { name: new RegExp(groupName) })).toBeVisible()
+  await expect(page.locator("li[role=option]", { hasText: new RegExp(groupName) })).toBeVisible()
   await page.keyboard.type(groupName)
   await page.keyboard.press("Enter")
 }
