@@ -618,11 +618,12 @@ services:
       timeout: 5s
       retries: 5
 
-  # The MPA (apps/mpa) in place of the SPA: `COMPOSE_PROFILES=mpa` in the env file starts it, and
-  # `deno task deploy` then deploys it. Without the profile it does not exist, and nothing else
-  # changes. It takes DOMAIN's traffic except `/api` and `/ws`, which still reach the API. Its
-  # router outranks the SPA's (priority below), so the SPA container keeps running but gets no
-  # requests. Built into the image: no bind mounts.
+  # The MPA (apps/mpa): `COMPOSE_PROFILES=mpa` in the env file starts it, and `deno task deploy`
+  # then deploys it. Without the profile it does not exist, and nothing else changes. With
+  # `MPA_DOMAIN` set it serves that host next to the SPA. Without it, it takes DOMAIN's traffic in
+  # place of the SPA, except `/api` and `/ws`, which still reach the API: its router outranks the
+  # SPA's (priority below), so the SPA container keeps running but gets no requests. Built into
+  # the image: no bind mounts.
   mpa:
     container_name: ${PROJECT}-mpa
     profiles: [mpa]
@@ -635,6 +636,7 @@ services:
     environment:
       - ENV=${ENV}
       - DOMAIN=${DOMAIN}
+      - MPA_DOMAIN=${MPA_DOMAIN:-}
       - API_URL=http://api:${API_PORT}
       - DENO_LOG=${DENO_LOG}
     user: "1000:1000"
@@ -654,7 +656,7 @@ services:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.mpa-${PROJECT}.rule=Host(`${DOMAIN}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`)"
+      - "traefik.http.routers.mpa-${PROJECT}.rule=Host(`${MPA_DOMAIN:-${DOMAIN}}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`)"
       - "traefik.http.routers.mpa-${PROJECT}.priority=1000"
       - "traefik.http.routers.mpa-${PROJECT}.entrypoints=web"
       - "traefik.http.routers.mpa-${PROJECT}.service=mpa-${PROJECT}"

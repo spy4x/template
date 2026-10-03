@@ -100,14 +100,17 @@ handlers, so no business rule lives in either client.
 
 The MPA calls the API over HTTP from the server, with the browser's session cookie, and never
 touches the database itself. It needs `ENV` and `DOMAIN` (the same values as the API) and
-`API_URL`, the address the MPA's server reaches the API at, such as `http://api:8000`. The browser
-must reach the MPA at `DOMAIN`, with `/api` still going to the API: the API accepts a form only
-from `http(s)://DOMAIN`, and the MPA passes the browser's `Origin` on unchanged. Compose serves
-the SPA there by default. To serve the MPA instead, set `COMPOSE_PROFILES=mpa` in the env file
-(join it with other profiles by commas) and run `deno task deploy` as usual: Compose then builds
-the `mpa` service from `apps/mpa/dockerfile.prod`, and its Traefik router outranks the SPA's for
-`DOMAIN`, leaving `/api` and `/ws` to the API. The SPA container still runs, unused. Without the
-profile nothing about the deploy changes. The MPA's end-to-end test runs in CI on every pull
+`API_URL`, the address the MPA's server reaches the API at, such as `http://api:8000`. Compose
+serves the SPA at `DOMAIN` by default. To serve the MPA instead, set `COMPOSE_PROFILES=mpa` in the
+env file (join it with other profiles by commas) and run `deno task deploy` as usual: Compose then
+builds the `mpa` service from `apps/mpa/dockerfile.prod`, and its Traefik router outranks the SPA's
+for `DOMAIN`, leaving `/api` and `/ws` to the API. The SPA container still runs, unused. To run both
+side by side on one API and one database, also set `MPA_DOMAIN` to the MPA's own host: the MPA
+then serves that host and the SPA keeps `DOMAIN`. The API accepts a form only from
+`http(s)://DOMAIN`, so the MPA, after refusing any post that does not come from its own pages,
+presents its posts to the API with `DOMAIN`'s origin. A change made in the MPA reaches the SPA live
+over its socket; the MPA shows the SPA's changes on the next page load. Without the profile nothing
+about the deploy changes. The MPA's end-to-end test runs in CI on every pull
 request, and locally with `e2e/mpa/run.sh` against a running Postgres and Valkey (see the header
 of that script).
 
