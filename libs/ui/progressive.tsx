@@ -89,9 +89,6 @@ export const GROUP_PATHS = {
   settings: (groupId: string) => `/groups/${encodeURIComponent(groupId)}`,
   /** The group's activity log, for its admins and owner. */
   activity: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/activity`,
-  /** One note of the group, opened in the group. */
-  note: (groupId: string, noteId: string) =>
-    `/groups/${encodeURIComponent(groupId)}/notes/${encodeURIComponent(noteId)}`,
 } as const
 
 /** `EnhancedForm` announces nothing itself: each screen shows its own busy button and error. */

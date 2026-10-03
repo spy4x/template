@@ -7,7 +7,7 @@ import { Link } from "@spy4x/preact-ui/link"
 import { timeAgo } from "@spy4x/platform/universal/time"
 import { type ActivityEvent, describeActivity } from "@domain/groups"
 import { PageHeader } from "./page-header.tsx"
-import { GROUP_PATHS, type Navigate } from "./progressive.tsx"
+import { GROUP_PATHS, type Navigate, NOTE_PATHS } from "./progressive.tsx"
 
 /** One event as the API sends it: `at` is an ISO timestamp. */
 export type ActivityRow = Omit<ActivityEvent, "at"> & { at: string }
@@ -103,7 +103,6 @@ export function GroupActivityScreen(props: GroupActivityScreenProps): JSX.Elemen
                       <ActivityItem
                         key={event.id}
                         event={event}
-                        groupId={group.id}
                         navigate={navigate}
                       />
                     ))}
@@ -130,7 +129,7 @@ export function GroupActivityScreen(props: GroupActivityScreenProps): JSX.Elemen
 }
 
 function ActivityItem(
-  { event, groupId, navigate }: { event: ActivityRow; groupId: string; navigate?: Navigate },
+  { event, navigate }: { event: ActivityRow; navigate?: Navigate },
 ): JSX.Element {
   const note = event.entity?.type === "note" && event.entity.exists ? event.entity.id : null
   return (
@@ -141,7 +140,7 @@ function ActivityItem(
           <>
             {" "}
             <Link
-              href={GROUP_PATHS.note(groupId, note)}
+              href={NOTE_PATHS.note(note)}
               navigate={navigate}
               data-e2e="activity-note-link"
             >

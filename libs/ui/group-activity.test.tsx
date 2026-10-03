@@ -77,7 +77,7 @@ describe("group activity screen", () => {
         }),
       ],
     })
-    expect(page).toContain(`href="/groups/g-1/notes/${noteId}"`)
+    expect(page).toContain(`href="/notes/${noteId}"`)
     expect(page).not.toContain(`/notes/other`)
     expect(page.match(/activity-note-link/g)?.length).toBe(1)
   })
