@@ -47,7 +47,7 @@ const strangerGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111005"
 const OWNER = 1
 const VIEWER = 2
 
-function stack(plan = FREE_PLAN_ID) {
+function stack(plan = FREE_PLAN_ID, plans: Record<string, string> = {}) {
   const notes = new MemoryNoteRepository()
   const dependencies = {
     notes,
@@ -62,7 +62,7 @@ function stack(plan = FREE_PLAN_ID) {
   commands.use(createSessionGate([]))
   commands.use(createEntitlementGate({
     billingEnabled: true,
-    planOf: () => Promise.resolve(plan),
+    planOf: (group) => Promise.resolve(plans[group] ?? plan),
     roleOf: (group, user) => dependencies.groups.roleOf(group, user),
     usage: {
       maxNotes: (group) =>
@@ -432,6 +432,26 @@ describe("notes over both transports", () => {
       expect(notes.writes).toBe(0)
     })
 
+    it("refuses a move into the same group over the socket", async () => {
+      const { notes, buses } = stack()
+      await seedTwo(notes)
+      const ws = socket(buses, OWNER)
+
+      const frame = await ws.command("note.move", {
+        groupId,
+        toGroupId: groupId,
+        noteIds: [noteId],
+      })
+
+      expect(frame).toMatchObject({
+        kind: "server.error",
+        code: "bad_request",
+        details: { code: "SAME_GROUP" },
+      })
+      expect(notes.writes).toBe(0)
+      ws.shutdown()
+    })
+
     it("moves none when one of the notes is not in the source group", async () => {
       const { notes, buses } = stack()
       await seedTwo(notes)
@@ -443,6 +463,39 @@ describe("notes over both transports", () => {
 
       expect(response.status).toBe(404)
       expect(groupsOf(notes)).toEqual([[noteId, groupId], [second, groupId]])
+    })
+
+    it("lets a move into a group on Pro past the free source group's cap", async () => {
+      const { notes, buses } = stack(FREE_PLAN_ID, { [editableGroupId]: PRO_PLAN_ID })
+      await fillFreePlan(notes)
+
+      const response = await rest(buses, OWNER)("POST", "/move", {
+        toGroupId: editableGroupId,
+        noteIds: [(await notes.list(groupId, { limit: 1 })).notes[0].id],
+      })
+
+      expect(response.status).toBe(200)
+    })
+
+    it("refuses a move into a full free group when the source group is on Pro", async () => {
+      const { notes, buses } = stack(FREE_PLAN_ID, { [groupId]: PRO_PLAN_ID })
+      await seedTwo(notes)
+      for (let i = 0; i < 10; i++) {
+        await notes.create(
+          { groupId: editableGroupId, id: crypto.randomUUID(), title: `T${i}`, body: "" },
+          OWNER,
+          null,
+        )
+      }
+      notes.writes = 0
+
+      const response = await rest(buses, OWNER)("POST", "/move", {
+        toGroupId: editableGroupId,
+        noteIds: [noteId],
+      })
+
+      expect(response.status).toBe(402)
+      expect(notes.writes).toBe(0)
     })
 
     it("refuses a move that would take the target group over the free plan's cap", async () => {

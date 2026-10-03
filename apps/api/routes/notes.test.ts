@@ -1,7 +1,12 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { Hono } from "hono"
-import type { NoteCreateCommand, NoteListQuery, NoteUpdateCommand } from "@domain/notes"
+import type {
+  NoteCreateCommand,
+  NoteListQuery,
+  NoteMoveCommand,
+  NoteUpdateCommand,
+} from "@domain/notes"
 import type { APIContext } from "../_types.ts"
 import { buildAuthData } from "../_testing/fake-auth.ts"
 import { createNotesRoute, type NotesRouteDependencies } from "./notes.ts"
@@ -30,7 +35,8 @@ function harness(
     create: NoteCreateCommand | null
     update: NoteUpdateCommand | null
     list: NoteListQuery | null
-  } = { create: null, update: null, list: null }
+    move: NoteMoveCommand | null
+  } = { create: null, update: null, list: null, move: null }
   const dependencies: NotesRouteDependencies = {
     create(command) {
       seen.create = command
@@ -42,7 +48,10 @@ function harness(
     },
     delete: () =>
       Promise.resolve({ note: { id: noteId, groupId, version: 2, changeSequence: "3" } }),
-    move: () => Promise.resolve({ notes: [note] }),
+    move(command) {
+      seen.move = command
+      return Promise.resolve({ notes: [note] })
+    },
     get: () => Promise.resolve({ note }),
     list(query) {
       seen.list = query
@@ -94,6 +103,29 @@ describe("notes route", () => {
       idempotencyKey: "key-1",
       actor: { userId: 7 },
     })
+  })
+
+  it("moves with the path's group as the source, the request id and the idempotency key", async () => {
+    const { request, seen } = harness()
+    const toGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111003"
+
+    const response = await request(
+      "POST",
+      `${groupId}/notes/move`,
+      { toGroupId, noteIds: [noteId] },
+      { "idempotency-key": "key-2" },
+    )
+
+    expect(response.status).toBe(200)
+    expect(seen.move?.data).toMatchObject({
+      groupId,
+      toGroupId,
+      noteIds: [noteId],
+      requestId: "req-notes",
+      idempotencyKey: "key-2",
+      actor: { userId: 7 },
+    })
+    expect(seen.create).toBe(null)
   })
 
   it("answers 200 to a create that found the same note already there", async () => {
