@@ -2,11 +2,11 @@ import { UserMFAStatus } from "@domain/identity"
 
 /** The one two-factor control the profile page shows at a time. */
 export enum TwoFactorStep {
-  /** No authenticator app yet: offer "Enable 2FA". */
+  /** No authenticator app yet: offer "Turn on". */
   Enable = 1,
   /** A QR code is on screen: ask for the first code to finish enabling. */
   Confirm = 2,
-  /** An authenticator app is connected: offer "Disable 2FA". */
+  /** An authenticator app is connected: offer "Turn off". */
   Disable = 3,
 }
 

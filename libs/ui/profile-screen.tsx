@@ -1,17 +1,20 @@
 import type { JSX } from "preact"
-import { useEffect, useRef } from "preact/hooks"
+import { useEffect, useRef, useState } from "preact/hooks"
 import { encodeBase64 } from "@std/encoding"
+import { IconBell, IconLockClosed } from "@spy4x/preact-icons"
+import { Badge } from "@spy4x/preact-ui/badge"
 import { Button } from "@spy4x/preact-ui/button"
-import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
+import { ConfirmDialog } from "@spy4x/preact-ui/confirm-dialog"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
-import { Grid, Stack } from "@spy4x/preact-ui/layout"
-import { Link } from "@spy4x/preact-ui/link"
-import type { UserMFAStatus, UserPushTokenPublic } from "@domain/identity"
-import type { ConnectionStatus } from "./frame.tsx"
+import { Cluster, Section, Stack } from "@spy4x/preact-ui/layout"
+import { Modal } from "@spy4x/preact-ui/modal"
+import type { EmailStatus, UserMFAStatus, UserPushTokenPublic } from "@domain/identity"
+import { PageHeader } from "./page-header.tsx"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
+import { SettingList, SettingRow } from "./setting-row.tsx"
 import { TwoFactorStep, twoFactorStep } from "./two-factor.ts"
 
 /** The messages shown when an action failed without a message of its own. */
@@ -77,11 +80,11 @@ export interface TotpEnrolment {
 
 export interface ProfileScreenProps {
   /** The signed-in user, or `null` when nobody is signed in. */
-  user: { mfa: UserMFAStatus } | null
+  user: { mfa: UserMFAStatus; firstName: string; lastName: string } | null
   /** The session owes its one-time code: the screen points to it instead. */
   isMfaRequired: boolean
-  /** The live connection, for an app that has one. */
-  connection?: ConnectionStatus
+  /** The person's e-mail address and whether it is proven, or `null` while it is not known. */
+  email?: EmailStatus | null
   values: ProfileValues
   onValueChange: (field: keyof ProfileValues, value: string) => void
   errors: ProfileErrors
@@ -92,10 +95,12 @@ export interface ProfileScreenProps {
   onChangePassword?: () => void
   onStartTotp?: () => void
   onFinishTotp?: () => void
+  /** Drops an enrolment under way, when the person closes the set-up dialog. */
+  onCancelTotp?: () => void
   onDisableTotp?: () => void
   /**
-   * Registering a push device needs the browser's push manager, so it has no native form. Without
-   * it there is no "Add device" button.
+   * Registering a push device needs the browser's push manager. Without it there is no "Add
+   * device" button.
    */
   onRegisterPush?: () => void
   onRemovePush?: (deviceId: string) => void
@@ -103,14 +108,27 @@ export interface ProfileScreenProps {
 }
 
 /**
- * The profile page: name, password, two-factor auth and push devices. Every action but "Add
- * device" is a real form that posts to its route; with its callback the app takes the submit over.
+ * Calls `onDone` when an action that was pending ends without `failed`: how a dialog learns that
+ * its form went through and it can close.
+ */
+function useSucceeded(pending: boolean, failed: boolean, onDone: () => void) {
+  const was = useRef(pending)
+  useEffect(() => {
+    if (was.current && !pending && !failed) onDone()
+    was.current = pending
+  }, [pending, failed])
+}
+
+/**
+ * The profile page as a list of settings: name and e-mail address, then password and two-factor
+ * sign-in, then push devices. Each row shows its value and one action; a form opens in a dialog
+ * only when asked, and closes once its change went through. Turning two-factor off asks first.
  */
 export function ProfileScreen(
   {
     user,
     isMfaRequired,
-    connection,
+    email,
     values,
     onValueChange,
     errors,
@@ -121,6 +139,7 @@ export function ProfileScreen(
     onChangePassword,
     onStartTotp,
     onFinishTotp,
+    onCancelTotp,
     onDisableTotp,
     onRegisterPush,
     onRemovePush,
@@ -137,6 +156,20 @@ export function ProfileScreen(
   }
   const enableButton = useRef<HTMLButtonElement>(null)
   const disableButton = useRef<HTMLButtonElement>(null)
+  const [editingName, setEditingName] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
+  const [confirmingDisable, setConfirmingDisable] = useState(false)
+
+  useSucceeded(
+    pending.profile,
+    Boolean(errors.profile || errors.fields.firstName || errors.fields.lastName),
+    () => setEditingName(false),
+  )
+  useSucceeded(
+    pending.password,
+    Boolean(errors.password || errors.fields.currentPassword || errors.fields.newPassword),
+    () => setChangingPassword(false),
+  )
 
   // A failed submit lands the person on the field to fix.
   useEffect(() => {
@@ -144,8 +177,8 @@ export function ProfileScreen(
     if (first) fieldRefs[first].current?.focus()
   }, [errors.fields])
 
-  // The two-factor card shows one control per step; when the step changes, focus moves to the new
-  // control instead of being lost with the old one. The first render moves nothing.
+  // Two-factor shows one control per step; when the step changes, focus moves to the new control
+  // instead of being lost with the old one. The first render moves nothing.
   const shownStep = useRef(step)
   useEffect(() => {
     if (shownStep.current === step) return
@@ -157,109 +190,252 @@ export function ProfileScreen(
 
   if (isMfaRequired) {
     return (
-      <Card class="mx-auto max-w-xl">
-        <CardHeader>
-          <h1 class="text-lg font-semibold">Finish MFA</h1>
-        </CardHeader>
-        <CardBody>
-          <Stack>
-            <p>Verify OTP to access profile.</p>
-            <Link href={SCREEN_PATHS.oneTimeCode} navigate={navigate} class="pc-link">
-              Go to OTP
-            </Link>
-          </Stack>
-        </CardBody>
-      </Card>
+      <EmptyState
+        icon={<IconLockClosed class="size-6" />}
+        title="Enter your one-time code"
+        headingLevel={1}
+        description="Your profile opens once you enter the code from your authenticator app."
+        action={
+          <Button href={SCREEN_PATHS.oneTimeCode} navigate={navigate}>
+            Enter the code
+          </Button>
+        }
+      />
     )
   }
 
   if (!user || step === null) {
     return (
-      <Card data-e2e="signin-required" class="mx-auto max-w-xl">
-        <CardHeader>
-          <h1 class="text-lg font-semibold">Sign in required</h1>
-        </CardHeader>
-        <CardBody>
-          <Stack>
-            <p>Access your profile after sign in.</p>
-            <div class="flex flex-col gap-3 sm:flex-row">
-              <Button
-                href={SCREEN_PATHS.signIn}
-                navigate={navigate}
-                variant="primary"
-                size="md"
-                class="text-center"
-              >
-                Sign in
+      <div data-e2e="signin-required">
+        <EmptyState
+          icon={<IconLockClosed class="size-6" />}
+          title="Sign in to see your profile"
+          headingLevel={1}
+          description="Your name, password and devices are here once you sign in."
+          action={
+            <Cluster justify="center">
+              <Button href={SCREEN_PATHS.signIn} navigate={navigate}>Sign in</Button>
+              <Button href={SCREEN_PATHS.signUp} navigate={navigate} variant="outline">
+                Create an account
               </Button>
-              <Button
-                href={SCREEN_PATHS.signUp}
-                navigate={navigate}
-                variant="outline"
-                size="md"
-                class="text-center"
-              >
-                Sign up
-              </Button>
-            </div>
-          </Stack>
-        </CardBody>
-      </Card>
+            </Cluster>
+          }
+        />
+      </div>
     )
   }
 
+  const name = `${user.firstName} ${user.lastName}`.trim()
   const qrSrc = enrolment?.qrcode ? svgToDataUrl(enrolment.qrcode) : null
 
   return (
-    <Stack gap="lg">
-      <Card>
-        <CardHeader>
-          <h1 class="text-lg font-semibold">Profile</h1>
-          {connection && (
-            <span data-e2e="ws-status" class="text-xs text-muted">WS: {connection}</span>
+    <Stack gap="xl" class="w-full max-w-2xl">
+      <PageHeader title="Profile" />
+
+      <Section title="Account">
+        <SettingList>
+          <SettingRow
+            label="Name"
+            value={<span data-e2e="profile-name">{name || "Not set"}</span>}
+            action={
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-e2e="profile-edit"
+                onClick={() => setEditingName(true)}
+              >
+                Edit
+              </Button>
+            }
+          />
+          <SettingRow
+            label="E-mail address"
+            value={<EmailValue email={email} />}
+            action={
+              <Button
+                href={SCREEN_PATHS.email}
+                navigate={navigate}
+                variant="secondary"
+                size="sm"
+                data-e2e="profile-email-link"
+              >
+                {email?.email === null ? "Add" : "Change"}
+              </Button>
+            }
+          />
+        </SettingList>
+      </Section>
+
+      <Section title="Security">
+        <SettingList>
+          <SettingRow
+            label="Password"
+            value="Asked for when you sign in on a new device."
+            action={
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-e2e="password-open"
+                onClick={() => setChangingPassword(true)}
+              >
+                Change
+              </Button>
+            }
+          />
+          <SettingRow
+            label="Two-factor sign-in"
+            e2e="totp-row"
+            value={step === TwoFactorStep.Disable
+              ? (
+                <span class="flex flex-wrap items-center gap-2">
+                  <Badge text="On" color="green" type="outline" />
+                  Sign-in also asks for a code from your authenticator app.
+                </span>
+              )
+              : "Off. Add a code from an authenticator app to every sign-in."}
+            action={step === TwoFactorStep.Disable
+              ? (
+                <Button
+                  ref={disableButton}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  data-e2e="totp-disable"
+                  disabled={pending.totp}
+                  onClick={() => setConfirmingDisable(true)}
+                >
+                  Turn off
+                </Button>
+              )
+              : (
+                <ScreenForm
+                  action={FORM_ACTIONS.totpStart}
+                  pending={pending.totp}
+                  onSubmit={onStartTotp}
+                >
+                  <Button
+                    ref={enableButton}
+                    type="submit"
+                    variant="secondary"
+                    size="sm"
+                    data-e2e="totp-start"
+                    busy={pending.totp && step === TwoFactorStep.Enable}
+                    busyLabel="Preparing..."
+                  >
+                    Turn on
+                  </Button>
+                </ScreenForm>
+              )}
+          />
+        </SettingList>
+        {step !== TwoFactorStep.Confirm && <ErrorState message={errors.totp} />}
+      </Section>
+
+      <Section
+        title="Push devices"
+        description="Devices that get a notification when something changes."
+      >
+        <ErrorState message={errors.push} />
+        {pushDevices.length === 0
+          ? (
+            <EmptyState
+              icon={<IconBell class="size-6" />}
+              title="No devices yet"
+              headingLevel={3}
+              description="Add this browser to get notifications on it."
+              action={onRegisterPush && <AddDevice onClick={onRegisterPush} busy={pending.push} />}
+            />
+          )
+          : (
+            <>
+              <SettingList>
+                {pushDevices.map((device) => (
+                  <SettingRow
+                    key={device.id}
+                    e2e={`push-device-${device.deviceId}`}
+                    label={`Device ${device.deviceId.slice(0, 8)}`}
+                    value={`Added ${new Date(device.createdAt).toLocaleString()}`}
+                    action={
+                      <ScreenForm
+                        action={FORM_ACTIONS.pushRemove}
+                        pending={pending.push}
+                        onSubmit={onRemovePush && (() => onRemovePush(device.deviceId))}
+                      >
+                        <input type="hidden" name="deviceId" value={device.deviceId} />
+                        <Button
+                          type="submit"
+                          variant="ghost"
+                          size="sm"
+                          data-e2e={`push-remove-${device.deviceId}`}
+                          disabled={pending.push}
+                        >
+                          Remove
+                        </Button>
+                      </ScreenForm>
+                    }
+                  />
+                ))}
+              </SettingList>
+              {onRegisterPush && (
+                <div>
+                  <AddDevice onClick={onRegisterPush} busy={pending.push} />
+                </div>
+              )}
+            </>
           )}
-        </CardHeader>
-        <CardBody>
-          <ScreenForm
-            action={FORM_ACTIONS.profile}
-            pending={pending.profile}
-            onSubmit={onSaveProfile}
-          >
-            <Stack>
-              <Field
-                id="profile-first-name"
-                label="First name"
-                error={errors.fields.firstName}
+      </Section>
+
+      <Modal
+        open={editingName}
+        onClose={() => setEditingName(false)}
+        title="Edit name"
+        cancelLabel="Close"
+        dataE2E="profile-dialog"
+      >
+        <ScreenForm
+          action={FORM_ACTIONS.profile}
+          pending={pending.profile}
+          onSubmit={onSaveProfile}
+        >
+          <Stack>
+            <Field
+              id="profile-first-name"
+              label="First name"
+              error={errors.fields.firstName}
+              required
+            >
+              <Input
+                ref={fieldRefs.firstName}
+                data-e2e="profile-first-name"
+                name="firstName"
+                autocomplete="given-name"
+                value={values.firstName}
+                onInput={(e) => onValueChange("firstName", e.currentTarget.value)}
                 required
-              >
-                <Input
-                  ref={fieldRefs.firstName}
-                  data-e2e="profile-first-name"
-                  name="firstName"
-                  autocomplete="given-name"
-                  value={values.firstName}
-                  onInput={(e) => onValueChange("firstName", e.currentTarget.value)}
-                  required
-                />
-              </Field>
-              <Field
-                id="profile-last-name"
-                label="Last name"
-                error={errors.fields.lastName}
+              />
+            </Field>
+            <Field
+              id="profile-last-name"
+              label="Last name"
+              error={errors.fields.lastName}
+              required
+            >
+              <Input
+                ref={fieldRefs.lastName}
+                data-e2e="profile-last-name"
+                name="lastName"
+                autocomplete="family-name"
+                value={values.lastName}
+                onInput={(e) => onValueChange("lastName", e.currentTarget.value)}
                 required
-              >
-                <Input
-                  ref={fieldRefs.lastName}
-                  data-e2e="profile-last-name"
-                  name="lastName"
-                  autocomplete="family-name"
-                  value={values.lastName}
-                  onInput={(e) => onValueChange("lastName", e.currentTarget.value)}
-                  required
-                />
-              </Field>
-              <ErrorState message={errors.profile} />
-              <div>
+              />
+            </Field>
+            <ErrorState message={errors.profile} />
+            <DialogButtons
+              onCancel={() => setEditingName(false)}
+              submit={
                 <Button
                   type="submit"
                   data-e2e="profile-save"
@@ -268,234 +444,197 @@ export function ProfileScreen(
                 >
                   Save
                 </Button>
-              </div>
-            </Stack>
-          </ScreenForm>
-          <p class="mt-4 text-sm">
-            <Link
-              href={SCREEN_PATHS.email}
-              navigate={navigate}
-              class="pc-link"
-              data-e2e="profile-email-link"
-            >
-              E-mail address
-            </Link>
-          </p>
-        </CardBody>
-      </Card>
+              }
+            />
+          </Stack>
+        </ScreenForm>
+      </Modal>
 
-      <Grid gap="lg" minColumnWidth="lg">
-        <Card>
-          <CardHeader title="Change password" headingLevel={2} />
-          <CardBody>
-            <ScreenForm
-              action={FORM_ACTIONS.password}
-              pending={pending.password}
-              onSubmit={onChangePassword}
+      <Modal
+        open={changingPassword}
+        onClose={() => setChangingPassword(false)}
+        title="Change password"
+        cancelLabel="Close"
+        dataE2E="password-dialog"
+      >
+        <ScreenForm
+          action={FORM_ACTIONS.password}
+          pending={pending.password}
+          onSubmit={onChangePassword}
+        >
+          <Stack>
+            <Field
+              id="password-current"
+              label="Current password"
+              error={errors.fields.currentPassword}
+              required
             >
-              <Stack>
-                <Field
-                  id="password-current"
-                  label="Current password"
-                  error={errors.fields.currentPassword}
-                  required
+              <Input
+                ref={fieldRefs.currentPassword}
+                data-e2e="password-current"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                value={values.currentPassword}
+                onInput={(e) => onValueChange("currentPassword", e.currentTarget.value)}
+                required
+              />
+            </Field>
+            <Field
+              id="password-new"
+              label="New password"
+              error={errors.fields.newPassword}
+              required
+            >
+              <Input
+                ref={fieldRefs.newPassword}
+                data-e2e="password-new"
+                name="newPassword"
+                type="password"
+                autocomplete="new-password"
+                value={values.newPassword}
+                onInput={(e) => onValueChange("newPassword", e.currentTarget.value)}
+                required
+              />
+            </Field>
+            <ErrorState message={errors.password} />
+            <DialogButtons
+              onCancel={() => setChangingPassword(false)}
+              submit={
+                <Button
+                  type="submit"
+                  data-e2e="password-save"
+                  busy={pending.password}
+                  busyLabel="Updating..."
                 >
-                  <Input
-                    ref={fieldRefs.currentPassword}
-                    data-e2e="password-current"
-                    name="password"
-                    type="password"
-                    autocomplete="current-password"
-                    value={values.currentPassword}
-                    onInput={(e) => onValueChange("currentPassword", e.currentTarget.value)}
-                    required
-                  />
-                </Field>
-                <Field
-                  id="password-new"
-                  label="New password"
-                  error={errors.fields.newPassword}
-                  required
-                >
-                  <Input
-                    ref={fieldRefs.newPassword}
-                    data-e2e="password-new"
-                    name="newPassword"
-                    type="password"
-                    autocomplete="new-password"
-                    value={values.newPassword}
-                    onInput={(e) => onValueChange("newPassword", e.currentTarget.value)}
-                    required
-                  />
-                </Field>
-                <ErrorState message={errors.password} />
-                <div>
+                  Change password
+                </Button>
+              }
+            />
+          </Stack>
+        </ScreenForm>
+      </Modal>
+
+      {step === TwoFactorStep.Confirm && (
+        <Modal
+          open
+          onClose={() => onCancelTotp?.()}
+          title="Turn on two-factor sign-in"
+          cancelLabel="Close"
+          dataE2E="totp-dialog"
+        >
+          <ScreenForm
+            action={FORM_ACTIONS.totpFinish}
+            pending={pending.totp}
+            onSubmit={onFinishTotp}
+          >
+            <Stack>
+              <p class="text-sm text-muted">
+                Scan the code with your authenticator app, then enter the six digits it shows.
+              </p>
+              {qrSrc && (
+                <div class="self-center rounded-lg border border-subtle bg-white p-3">
+                  <img src={qrSrc} alt="QR code for your authenticator app" class="size-40" />
+                </div>
+              )}
+              <p class="text-xs text-muted break-all">
+                Cannot scan it? Enter this key:{" "}
+                <code class="font-mono" data-e2e="totp-secret">{enrolment?.secret}</code>
+              </p>
+              <Field
+                id="totp-connect-otp"
+                label="Code from your app"
+                error={errors.fields.otp}
+                required
+              >
+                <Input
+                  ref={fieldRefs.otp}
+                  data-e2e="totp-connect-otp"
+                  name="otp"
+                  inputMode="numeric"
+                  autocomplete="one-time-code"
+                  value={values.otp}
+                  onInput={(e) => onValueChange("otp", e.currentTarget.value)}
+                />
+              </Field>
+              <ErrorState message={errors.totp} />
+              <DialogButtons
+                onCancel={() => onCancelTotp?.()}
+                submit={
                   <Button
                     type="submit"
-                    variant="secondary"
-                    data-e2e="password-save"
-                    busy={pending.password}
-                    busyLabel="Updating..."
+                    data-e2e="totp-connect-finish"
+                    busy={pending.totp}
+                    busyLabel="Turning on..."
                   >
-                    Update password
+                    Turn on
                   </Button>
-                </div>
-              </Stack>
-            </ScreenForm>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardHeader title="Two-factor auth" headingLevel={2} />
-          <CardBody>
-            <Stack>
-              <p class="text-sm">Use an authenticator app.</p>
-              <ErrorState message={errors.totp} />
-              {step === TwoFactorStep.Enable
-                ? (
-                  <ScreenForm
-                    action={FORM_ACTIONS.totpStart}
-                    pending={pending.totp}
-                    onSubmit={onStartTotp}
-                  >
-                    <Button
-                      ref={enableButton}
-                      type="submit"
-                      variant="outline"
-                      data-e2e="totp-start"
-                      busy={pending.totp}
-                      busyLabel="Preparing..."
-                    >
-                      Enable 2FA
-                    </Button>
-                  </ScreenForm>
-                )
-                : null}
-              {step === TwoFactorStep.Confirm
-                ? (
-                  <ScreenForm
-                    action={FORM_ACTIONS.totpFinish}
-                    pending={pending.totp}
-                    onSubmit={onFinishTotp}
-                  >
-                    <Stack>
-                      {qrSrc
-                        ? (
-                          <div class="max-w-full overflow-auto rounded-primary border border-control bg-white p-4">
-                            <img src={qrSrc} alt="TOTP QR code" class="mx-auto" />
-                          </div>
-                        )
-                        : null}
-                      <div class="text-xs text-muted">Secret: {enrolment?.secret}</div>
-                      <Field
-                        id="totp-connect-otp"
-                        label="Code from your app"
-                        error={errors.fields.otp}
-                        required
-                      >
-                        <Input
-                          ref={fieldRefs.otp}
-                          data-e2e="totp-connect-otp"
-                          name="otp"
-                          inputMode="numeric"
-                          autocomplete="one-time-code"
-                          placeholder="Enter 6-digit code"
-                          value={values.otp}
-                          onInput={(e) => onValueChange("otp", e.currentTarget.value)}
-                        />
-                      </Field>
-                      <div>
-                        <Button
-                          type="submit"
-                          data-e2e="totp-connect-finish"
-                          busy={pending.totp}
-                          busyLabel="Enabling..."
-                        >
-                          Finish enable
-                        </Button>
-                      </div>
-                    </Stack>
-                  </ScreenForm>
-                )
-                : null}
-              {step === TwoFactorStep.Disable
-                ? (
-                  <ScreenForm
-                    action={FORM_ACTIONS.totpDisable}
-                    pending={pending.totp}
-                    onSubmit={onDisableTotp}
-                  >
-                    <Button
-                      ref={disableButton}
-                      type="submit"
-                      variant="danger"
-                      data-e2e="totp-disable"
-                      disabled={pending.totp}
-                    >
-                      Disable 2FA
-                    </Button>
-                  </ScreenForm>
-                )
-                : null}
+                }
+              />
             </Stack>
-          </CardBody>
-        </Card>
-      </Grid>
+          </ScreenForm>
+        </Modal>
+      )}
 
-      <Card>
-        <CardHeader
-          title="Push devices"
-          headingLevel={2}
-          action={onRegisterPush && (
-            <Button
-              data-e2e="push-register"
-              onClick={onRegisterPush}
-              busy={pending.push}
-              busyLabel="Working..."
-            >
-              Add device
-            </Button>
-          )}
+      {confirmingDisable && (
+        <ConfirmDialog
+          title="Turn off two-factor sign-in?"
+          message="Sign-in will ask only for your password. You can turn it on again at any time."
+          confirmLabel="Turn off"
+          cancelLabel="Keep it on"
+          tone="danger"
+          dataE2E="totp-disable-confirm"
+          onCancel={() => setConfirmingDisable(false)}
+          onConfirm={() => {
+            setConfirmingDisable(false)
+            onDisableTotp?.()
+          }}
         />
-        <CardBody>
-          <Stack>
-            <ErrorState message={errors.push} />
-            {pushDevices.length === 0 ? <EmptyState title="No devices registered." /> : (
-              pushDevices.map((device) => (
-                <div
-                  key={device.id}
-                  class="flex flex-col gap-2 rounded-primary border border-subtle px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
-                  data-e2e={`push-device-${device.deviceId}`}
-                >
-                  <div>
-                    <div class="font-medium">Device {device.deviceId.slice(0, 8)}</div>
-                    <div class="text-xs text-muted">
-                      {new Date(device.createdAt).toLocaleString()}
-                    </div>
-                  </div>
-                  <ScreenForm
-                    action={FORM_ACTIONS.pushRemove}
-                    pending={pending.push}
-                    onSubmit={onRemovePush && (() => onRemovePush(device.deviceId))}
-                  >
-                    <input type="hidden" name="deviceId" value={device.deviceId} />
-                    <Button
-                      type="submit"
-                      variant="outline"
-                      size="sm"
-                      class="w-full sm:w-auto"
-                      data-e2e={`push-remove-${device.deviceId}`}
-                      disabled={pending.push}
-                    >
-                      Remove
-                    </Button>
-                  </ScreenForm>
-                </div>
-              ))
-            )}
-          </Stack>
-        </CardBody>
-      </Card>
+      )}
     </Stack>
+  )
+}
+
+/** The address and whether it is proven, or a placeholder while it is not known. */
+function EmailValue({ email }: { email?: EmailStatus | null }): JSX.Element {
+  if (!email) return <span>…</span>
+  if (email.email === null) return <span>None. You sign in with your username.</span>
+  return (
+    <span class="flex flex-wrap items-center gap-2">
+      <span class="break-all">{email.email}</span>
+      <Badge
+        text={email.proven ? "Verified" : "Not verified"}
+        color={email.proven ? "green" : "orange"}
+        type="outline"
+      />
+    </span>
+  )
+}
+
+/** Cancel and the form's submit, at the end of a dialog's form. */
+function DialogButtons(
+  { onCancel, submit }: { onCancel: () => void; submit: JSX.Element },
+): JSX.Element {
+  return (
+    <Cluster justify="end">
+      <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
+      {submit}
+    </Cluster>
+  )
+}
+
+function AddDevice({ onClick, busy }: { onClick: () => void; busy: boolean }): JSX.Element {
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      data-e2e="push-register"
+      onClick={onClick}
+      busy={busy}
+      busyLabel="Working..."
+    >
+      Add this device
+    </Button>
   )
 }
 
