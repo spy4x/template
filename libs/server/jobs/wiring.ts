@@ -17,6 +17,13 @@ import { GroupChangeNotifier } from "../groups/group-change-notify.ts"
 import { purgeDeadInvitations } from "../groups/purge-dead-invitations.ts"
 import { purgeDeletedGroups } from "../groups/purge-deleted-groups.ts"
 import { purgeOldAuditEvents } from "../groups/purge-audit-events.ts"
+import { hardDeleteDueAccounts } from "../auth/account-deletion.ts"
+import {
+  ACCOUNT_DELETION_MAIL_JOB,
+  ACCOUNT_HARD_DELETE_JOB,
+  accountDeletionMailJob,
+  accountHardDeleteJob,
+} from "./account-deletion.ts"
 import { billingNoticeMailJob } from "./billing-notice-mail.ts"
 import {
   EMAIL_CODE_MAIL_JOB,
@@ -58,9 +65,10 @@ const NIGHTLY_HOUR_UTC = 3
  * The worker's outbox processor: group changes go to the notifier, jobs to their handlers, and the
  * nightly cleanup is one row that writes its next run, a day later, once it has succeeded. The
  * cleanup also drops password reset and e-mail code requests whose mail gave up, and removes for
- * good the groups whose 30 days for restoring are over, the invitations dead for over 30 days and
- * the audit events older than a year. Every mail job, the owner's billing notices included, shares
- * one sender and brand.
+ * good the groups whose 30 days for restoring are over, the invitations dead for over 30 days,
+ * the audit events older than a year and the accounts whose 7 days of waiting are over (a backstop
+ * for their own jobs). Every mail job, the owner's billing notices included, shares one sender and
+ * brand.
  *
  * With a billing `provider`, a change to a group's members queues a seat sync, which sets a
  * per-member subscription's quantity to the member count, and the nightly cleanup queues one for
@@ -100,6 +108,13 @@ export function createOutboxProcessor(
         if (invitations > 0) console.log(`Removed ${invitations} dead group invitation(s)`)
         const audit = await purgeOldAuditEvents(sql)
         if (audit > 0) console.log(`Removed ${audit} audit event(s) past their retention`)
+        const accounts = await hardDeleteDueAccounts(sql)
+        if (accounts.deleted > 0) console.log(`Deleted ${accounts.deleted} account(s) for good`)
+        if (accounts.blocked > 0) {
+          console.warn(
+            `Kept ${accounts.blocked} account(s) due for deletion: a shared or paid group`,
+          )
+        }
         if (provider) {
           const drifted = await queueSeatDrift(sql)
           if (drifted > 0) console.log(`Queued a seat sync for ${drifted} group(s)`)
@@ -108,6 +123,8 @@ export function createOutboxProcessor(
       [SEAT_SYNC_JOB]: provider ? seatSyncJob({ sql, provider }) : async () => {},
       [PASSWORD_RESET_MAIL_JOB]: passwordResetMailJob({ sql, ...mail }),
       [EMAIL_CODE_MAIL_JOB]: emailCodeMailJob({ sql, ...mail }),
+      [ACCOUNT_DELETION_MAIL_JOB]: accountDeletionMailJob({ sql, ...mail }),
+      [ACCOUNT_HARD_DELETE_JOB]: accountHardDeleteJob({ sql, log: mail.log }),
       ...billingNoticeJobs(sql, mail),
       [SUBSCRIBER_CONFIRM_MAIL_JOB]: subscriberConfirmMailJob({ sql, ...mail, setup: subscribers }),
       [SUBSCRIBER_WELCOME_MAIL_JOB]: subscriberWelcomeMailJob({ sql, ...mail, setup: subscribers }),
