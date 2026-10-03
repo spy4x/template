@@ -159,6 +159,7 @@ describe("billing configuration", () => {
           pastDueSince: new Date(Date.now() - days * DAY),
           trialEnd: null,
           quantity: 1,
+          everActive: true,
         }),
     })
     const setup = (graceDays?: string) =>
@@ -230,6 +231,7 @@ describe("billing configuration", () => {
       pastDueSince: null,
       trialEnd: null,
       quantity: 2,
+      everActive: true,
     })
     const seatPriced = (
       stored: StoredSubscription | null,

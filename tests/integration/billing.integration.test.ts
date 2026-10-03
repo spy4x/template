@@ -505,6 +505,189 @@ Deno.test("billing events against Postgres", async (t) => {
     )
 
     await t.step(
+      "a trial whose first charge fails is on the free plan from the trial's end, with no grace",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const trialEnd = new Date(T0.getTime() + 14 * 24 * 60 * 60_000)
+        const trial = (
+          id: string,
+          type: SubscriptionEvent["type"],
+          status: SubscriptionStatus,
+          at: Date,
+        ) =>
+          billing.applyEvent(
+            event({ id, reference: groupId, customerId: "cus_tf", type, status, at, trialEnd }),
+          )
+        await trial(
+          "evt_tf1",
+          BillingEventType.SubscriptionCreated,
+          SubscriptionStatus.Trialing,
+          T0,
+        )
+        const planAt = async (now: Date) => effectivePlanId(await billing.get(groupId), now, 7)
+        const duringTrial = await planAt(new Date(trialEnd.getTime() - 1))
+
+        // Stripe charges at the trial's end; the charge fails and the subscription goes past due.
+        await trial(
+          "evt_tf2",
+          BillingEventType.SubscriptionUpdated,
+          SubscriptionStatus.PastDue,
+          trialEnd,
+        )
+
+        expect(duringTrial).toBe(PRO_PLAN_ID)
+        expect(await billing.get(groupId)).toMatchObject({
+          status: SubscriptionStatus.PastDue,
+          pastDueSince: trialEnd,
+          everActive: false,
+        })
+        expect(await planAt(trialEnd)).toBe(FREE_PLAN_ID)
+        expect(await planAt(new Date(trialEnd.getTime() + 24 * 60 * 60_000))).toBe(FREE_PLAN_ID)
+      },
+    )
+
+    await t.step(
+      "a subscription that was active and then goes past due keeps the grace period",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const day = (n: number) => new Date(T0.getTime() + n * 24 * 60 * 60_000)
+        const trialEnd = day(14)
+        const update = (id: string, status: SubscriptionStatus, at: Date) =>
+          billing.applyEvent(
+            event({
+              id,
+              reference: groupId,
+              customerId: "cus_ta",
+              type: BillingEventType.SubscriptionUpdated,
+              status,
+              at,
+              trialEnd,
+            }),
+          )
+        await billing.applyEvent(
+          event({
+            id: "evt_ta1",
+            reference: groupId,
+            customerId: "cus_ta",
+            status: SubscriptionStatus.Trialing,
+            trialEnd,
+          }),
+        )
+        // The trial converts: the first charge goes through. The next month's renewal fails.
+        await update("evt_ta2", SubscriptionStatus.Active, trialEnd)
+        await update("evt_ta3", SubscriptionStatus.PastDue, day(44))
+        const planAt = async (now: Date) => effectivePlanId(await billing.get(groupId), now, 7)
+
+        expect(await billing.get(groupId)).toMatchObject({
+          status: SubscriptionStatus.PastDue,
+          everActive: true,
+        })
+        expect(await planAt(new Date(day(51).getTime() - 1))).toBe(PRO_PLAN_ID)
+        expect(await planAt(day(51))).toBe(FREE_PLAN_ID)
+      },
+    )
+
+    await t.step(
+      "an active event delivered after a newer past-due one still earns the grace period",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const day = (n: number) => new Date(T0.getTime() + n * 24 * 60 * 60_000)
+        const update = (id: string, status: SubscriptionStatus, at: Date) =>
+          billing.applyEvent(
+            event({
+              id,
+              reference: groupId,
+              customerId: "cus_tl",
+              type: BillingEventType.SubscriptionUpdated,
+              status,
+              at,
+            }),
+          )
+        await billing.applyEvent(
+          event({
+            id: "evt_tl1",
+            reference: groupId,
+            customerId: "cus_tl",
+            status: SubscriptionStatus.Trialing,
+          }),
+        )
+        await update("evt_tl3", SubscriptionStatus.PastDue, day(44))
+
+        const late = await update("evt_tl2", SubscriptionStatus.Active, day(14))
+
+        expect(late).toBe("stale")
+        expect(await billing.get(groupId)).toMatchObject({
+          status: SubscriptionStatus.PastDue,
+          pastDueSince: day(44),
+          everActive: true,
+        })
+        expect(effectivePlanId(await billing.get(groupId), day(50), 7)).toBe(PRO_PLAN_ID)
+      },
+    )
+
+    await t.step(
+      "a new subscription does not inherit the old one's payment: its failed trial gets no grace",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const day = (n: number) => new Date(T0.getTime() + n * 24 * 60 * 60_000)
+        const apply = (
+          id: string,
+          subscriptionId: string,
+          type: SubscriptionEvent["type"],
+          status: SubscriptionStatus,
+          at: Date,
+        ) =>
+          billing.applyEvent(
+            event({
+              id,
+              reference: groupId,
+              customerId: "cus_ti",
+              subscriptionId,
+              type,
+              status,
+              at,
+            }),
+          )
+        await apply(
+          "evt_ti1",
+          "sub_ti_a",
+          BillingEventType.SubscriptionCreated,
+          SubscriptionStatus.Active,
+          T0,
+        )
+        await apply(
+          "evt_ti2",
+          "sub_ti_a",
+          BillingEventType.SubscriptionCanceled,
+          SubscriptionStatus.Canceled,
+          day(30),
+        )
+        await apply(
+          "evt_ti3",
+          "sub_ti_b",
+          BillingEventType.SubscriptionCreated,
+          SubscriptionStatus.Trialing,
+          day(40),
+        )
+
+        await apply(
+          "evt_ti4",
+          "sub_ti_b",
+          BillingEventType.SubscriptionUpdated,
+          SubscriptionStatus.PastDue,
+          day(54),
+        )
+
+        expect(await billing.get(groupId)).toMatchObject({
+          providerSubscriptionId: "sub_ti_b",
+          status: SubscriptionStatus.PastDue,
+          everActive: false,
+        })
+        expect(effectivePlanId(await billing.get(groupId), day(54), 7)).toBe(FREE_PLAN_ID)
+      },
+    )
+
+    await t.step(
       "a new subscription that follows a past-due one does not inherit its grace start",
       async () => {
         const { groupId } = await seedGroup(sql)
@@ -833,6 +1016,7 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
         const trial = await seedOwnerWithAddress(sql, "trial@example.com")
         const ending = await seedOwnerWithAddress(sql, "ending@example.com")
         const failed = await seedOwnerWithAddress(sql, "failed@example.com")
+        const renewal = await seedOwnerWithAddress(sql, "renewal@example.com")
         const undone = await seedOwnerWithAddress(sql, "undone@example.com")
         const moved = await seedOwnerWithAddress(sql, "moved@example.com")
         const silent = await seedOwnerWithAddress(sql, "silent@example.com", false)
@@ -840,7 +1024,11 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
         const trialEnd = new Date(start.getTime() + 10 * DAY)
         await apply(trial.groupId, { status: SubscriptionStatus.Trialing, trialEnd })
         await apply(ending.groupId, { cancelAtPeriodEnd: true })
-        await apply(failed.groupId, { status: SubscriptionStatus.PastDue })
+        // A trial whose first charge fails never was active; a renewal that fails was.
+        await apply(failed.groupId, { status: SubscriptionStatus.Trialing, trialEnd })
+        await apply(failed.groupId, { status: SubscriptionStatus.PastDue, trialEnd })
+        await apply(renewal.groupId, { status: SubscriptionStatus.Active })
+        await apply(renewal.groupId, { status: SubscriptionStatus.PastDue })
         await apply(undone.groupId, { cancelAtPeriodEnd: true })
         await apply(undone.groupId, { cancelAtPeriodEnd: false })
         // The trial is cut short by a day: both jobs are due, and only the one for the new end mails.
@@ -872,6 +1060,7 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
           ["ending@example.com", "Your Pro plan ends on " + longDate(start.getTime() + 20 * DAY)],
           ["failed@example.com", "A payment for Pro failed"],
           ["moved@example.com", "Your Pro trial ends on " + longDate(movedEnd.getTime())],
+          ["renewal@example.com", "A payment for Pro failed"],
           ["trial@example.com", "Your Pro trial ends on " + longDate(trialEnd.getTime())],
         ])
         expect(sender.sent.find((mail) => mail.to === "trial@example.com")?.text)
