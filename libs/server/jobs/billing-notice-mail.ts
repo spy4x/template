@@ -30,7 +30,8 @@ interface OwnerRow extends postgres.Row {
 }
 
 /**
- * Mails one notice of `kind` to the owner of the group the job names, when that notice is still in
+ * Mails one notice of `kind` to the owner who pays for the group the job names (after a transfer of
+ * ownership, the previous owner while their subscription runs out), when that notice is still in
  * force as the job runs: a trial that was converted, a payment that went through or a cancellation
  * that was undone sends nothing. A trial's notice is sent only by the job queued for the trial's
  * current end, so a trial whose end moved is told once. The owner's first proven address gets it.
@@ -50,15 +51,25 @@ export function billingNoticeMailJob(
     const runAt = Number(event.aggregateVersion)
     const subscription = await billing.get(groupId)
     if (!inForce(kind, subscription, new Date(Math.max(now().getTime(), runAt)), runAt)) return
+    // The owner who pays: after a transfer of ownership (#250) the old owner's subscription stays
+    // theirs until it ends, so its notices go to them and never to the new owner.
     const [owner] = await sql<OwnerRow[]>`
-      SELECT groups.name, (
+      WITH payer AS (
+        SELECT groups.id, groups.name, CASE WHEN handed.provider_customer_id IS NULL
+          THEN groups.owner_user_id ELSE handed.previous_owner_user_id END AS user_id
+        FROM groups
+        LEFT JOIN subscriptions ON subscriptions.group_id = groups.id
+        LEFT JOIN billing_handed_over_customers AS handed
+          ON handed.provider_customer_id = subscriptions.provider_customer_id
+        WHERE groups.id = ${groupId} AND groups.deleted_at IS NULL
+      )
+      SELECT payer.name, (
         SELECT auth_keys.proven_email FROM auth_keys
-        WHERE auth_keys.user_id = groups.owner_user_id AND auth_keys.proven_email IS NOT NULL
+        WHERE auth_keys.user_id = payer.user_id AND auth_keys.proven_email IS NOT NULL
         ORDER BY auth_keys.id
         LIMIT 1
       ) AS email
-      FROM groups
-      WHERE groups.id = ${groupId} AND groups.deleted_at IS NULL
+      FROM payer
     `
     if (!owner) return
     if (!owner.email) {

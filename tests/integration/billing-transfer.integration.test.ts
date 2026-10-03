@@ -9,16 +9,21 @@ import {
   type SubscriptionEvent,
   SubscriptionStatus,
 } from "@spy4x/billing"
+import type { EmailMessage } from "@spy4x/email/message"
+import type { EmailSender } from "@spy4x/email/sender"
 import {
   BillingCheckoutCommand,
   BillingError,
   BillingGetQuery,
+  BillingNoticeKind,
   BillingPortalCommand,
   PRO_PLAN_ID,
 } from "@domain/billing"
 import { GroupError } from "@domain/groups"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
 import { queueSeatDrift, queueSeatSync, SEAT_SYNC_JOB } from "@server/billing/seat-sync.ts"
+import { billingNoticeMailJob } from "@server/jobs/billing-notice-mail.ts"
+import type { JobHandler } from "@server/jobs/jobs.ts"
 import { createOutboxProcessor } from "@server/jobs/wiring.ts"
 import {
   type BillingHandlerDependencies,
@@ -271,5 +276,128 @@ Deno.test("transfer of a subscribed group moves its billing to the new owner", a
         expect(await billing.customerOf(groupId)).toBe("cus_new")
       },
     )
+
+    await t.step(
+      "a late paid event of the old subscription never takes the group back",
+      async () => {
+        // A past-due invoice paid on retry, or an edit in the provider's dashboard.
+        const late = await billing.applyEvent(subscriptionEvent(groupId, {
+          ...old,
+          status: SubscriptionStatus.Active,
+          cancelAtPeriodEnd: true,
+        }))
+
+        expect(late).toBe("stale")
+        expect((await billing.get(groupId))?.providerSubscriptionId).toBe("sub_new")
+        expect(await billing.customerOf(groupId)).toBe("cus_new")
+        expect(await billing.handedOver(groupId)).toBe(false)
+        await portalAs(admin)
+        expect(portals.map((request) => request.customerId)).toEqual(["cus_new"])
+        // The old subscription bills five seats, the group has four members: nothing to correct.
+        expect(await queueSeatDrift(sql, NOW)).toBe(0)
+      },
+    )
+  })
+})
+
+/** The billing handlers over a real repository, with the provider that records. */
+function handlers(sql: postgres.Sql, groups: Awaited<ReturnType<typeof team>>["repository"]) {
+  const recorded = recordingProvider()
+  const dependencies: BillingHandlerDependencies = {
+    billing: new PostgresBillingRepository(sql),
+    groups: {
+      roleOf: async (id, userId) => (await groups.getForMember(id, userId))?.role ?? null,
+    },
+    provider: recorded.provider,
+    webAppUrl: "https://app.example.com",
+    log: () => {},
+    graceDays: 7,
+    trialRequiresCard: true,
+    now: () => NOW,
+  }
+  const checkout = createBillingCheckoutHandler(dependencies)
+  return {
+    ...recorded,
+    checkoutAs: (groupId: string, userId: number) =>
+      checkout(
+        new BillingCheckoutCommand({
+          groupId,
+          actor: { userId } as BillingGetQuery["data"]["actor"],
+          planId: PRO_PLAN_ID,
+        }),
+      ),
+  }
+}
+
+Deno.test("a group whose subscription has ended is transferred and starts afresh", async () => {
+  await withSchema(async (sql) => {
+    const billing = new PostgresBillingRepository(sql)
+    const { repository, groupId, owner, admin } = await team(sql)
+    const { checkoutAs, checkouts } = handlers(sql, repository)
+    const ended = { subscriptionId: "sub_ended", customerId: "cus_ended", quantity: 5 }
+    await billing.applyEvent(
+      subscriptionEvent(groupId, { ...ended, type: BillingEventType.SubscriptionCreated }),
+    )
+    // Cancelled at once, or ended unpaid: not "at the period's end".
+    await billing.applyEvent(subscriptionEvent(groupId, {
+      ...ended,
+      type: BillingEventType.SubscriptionCanceled,
+      status: SubscriptionStatus.Canceled,
+      cancelAtPeriodEnd: false,
+    }))
+
+    expect(await repository.transferOwnership(groupId, admin, owner)).toBe(true)
+
+    expect(await ownerOf(sql, groupId)).toBe(admin)
+    expect(await billing.customerOf(groupId)).toBeNull()
+    await checkoutAs(groupId, admin)
+    expect(checkouts).toHaveLength(1)
+    expect(checkouts[0]).not.toHaveProperty("customerId")
+    expect(checkouts[0]).not.toHaveProperty("trialDays")
+  })
+})
+
+Deno.test("a billing notice about the old owner's subscription reaches the old owner", async () => {
+  await withSchema(async (sql) => {
+    const billing = new PostgresBillingRepository(sql)
+    const { repository, groupId, owner, admin } = await team(sql)
+    for (
+      const [userId, email] of [[owner, "old@example.com"], [admin, "new@example.com"]] as const
+    ) {
+      await sql`INSERT INTO auth_email_owners (email, user_id) VALUES (${email}, ${userId})`
+      await sql`
+        INSERT INTO auth_keys (user_id, method, subject, email, secret, proven_at)
+        VALUES (${userId}, 'password', ${email}, ${email}, 'hash', ${NOW})
+      `
+    }
+    const old = { subscriptionId: "sub_mail", customerId: "cus_mail", quantity: 5 }
+    await billing.applyEvent(
+      subscriptionEvent(groupId, { ...old, type: BillingEventType.SubscriptionCreated }),
+    )
+    // The cancellation queues a "plan ending" notice; the transfer happens before it is sent.
+    await billing.applyEvent(subscriptionEvent(groupId, { ...old, cancelAtPeriodEnd: true }))
+    expect(await repository.transferOwnership(groupId, admin, owner)).toBe(true)
+    const sent: EmailMessage[] = []
+    const sender = {
+      send(message: EmailMessage) {
+        sent.push(message)
+        return Promise.resolve({ ok: true as const, id: String(sent.length) })
+      },
+    } as unknown as EmailSender
+    const mail = billingNoticeMailJob(BillingNoticeKind.PlanEnding, {
+      sql,
+      sender,
+      brand: { webAppUrl: "http://app.localhost" },
+      log: () => {},
+      now: () => NOW,
+    })
+
+    await mail(
+      { aggregateId: groupId, aggregateVersion: String(NOW.getTime()) } as Parameters<
+        JobHandler
+      >[0],
+    )
+
+    expect(sent.map((message) => message.to)).toEqual(["old@example.com"])
   })
 })

@@ -122,7 +122,10 @@ export class PostgresBillingRepository implements BillingRepository {
     const row = (
       await this.sql<CustomerRow[]>`
         SELECT provider_customer_id FROM billing_customers
-        WHERE group_id = ${groupId} AND handed_over_at IS NULL
+        WHERE group_id = ${groupId} AND NOT EXISTS (
+          SELECT 1 FROM billing_handed_over_customers AS handed
+          WHERE handed.provider_customer_id = billing_customers.provider_customer_id
+        )
       `
     )[0]
     return row?.providerCustomerId ?? null
@@ -130,7 +133,15 @@ export class PostgresBillingRepository implements BillingRepository {
 
   async handedOver(groupId: string): Promise<boolean> {
     const rows = await this.sql`
-      SELECT 1 FROM billing_customers WHERE group_id = ${groupId} AND handed_over_at IS NOT NULL
+      SELECT 1 FROM billing_handed_over_customers AS handed
+      WHERE handed.group_id = ${groupId} AND (
+        handed.provider_customer_id IN (
+          SELECT provider_customer_id FROM billing_customers WHERE group_id = ${groupId}
+        )
+        OR handed.provider_customer_id IN (
+          SELECT provider_customer_id FROM subscriptions WHERE group_id = ${groupId}
+        )
+      )
     `
     return rows.length > 0
   }
@@ -176,6 +187,12 @@ export class PostgresBillingRepository implements BillingRepository {
       // Only a subscription that has paid gets the grace period (#247): `ever_active` turns true at
       // its first active event and stays true while the same subscription is held.
       const active = subscription.status === SubscriptionStatus.Active
+      // A customer handed over by a transfer of ownership (#250) only runs out the subscription
+      // the group holds: none of its subscriptions takes the group back, even one that pays.
+      const handedOver = (await transaction`
+        SELECT 1 FROM billing_handed_over_customers
+        WHERE provider_customer_id = ${subscription.customerId}
+      `).length > 0
       const before = (
         await transaction<HeldRow[]>`
           SELECT plan_id, status, cancel_at_period_end, trial_end
@@ -195,7 +212,8 @@ export class PostgresBillingRepository implements BillingRepository {
           past_due_since,
           trial_end,
           quantity,
-          ever_active
+          ever_active,
+          provider_customer_id
         ) VALUES (
           ${group.id},
           ${subscription.id},
@@ -208,7 +226,8 @@ export class PostgresBillingRepository implements BillingRepository {
           ${pastDue ? event.occurredAt : null},
           ${subscription.trialEnd},
           ${subscription.quantity},
-          ${active}
+          ${active},
+          ${subscription.customerId}
         )
         ON CONFLICT (group_id) DO UPDATE SET
           provider_subscription_id = EXCLUDED.provider_subscription_id,
@@ -230,12 +249,13 @@ export class PostgresBillingRepository implements BillingRepository {
             subscriptions.ever_active
             AND subscriptions.provider_subscription_id = EXCLUDED.provider_subscription_id
           ),
+          provider_customer_id = EXCLUDED.provider_customer_id,
           updated_at = CURRENT_TIMESTAMP
         WHERE (subscriptions.provider_event_at, subscriptions.provider_event_rank)
             <= (EXCLUDED.provider_event_at, EXCLUDED.provider_event_rank)
           AND (subscriptions.provider_subscription_id = EXCLUDED.provider_subscription_id
-            OR subscriptions.status = ${SubscriptionStatus.Canceled}
-            OR ${paying})
+            OR (NOT ${handedOver}
+              AND (subscriptions.status = ${SubscriptionStatus.Canceled} OR ${paying})))
         RETURNING group_id
       `
       if (written.length === 0) {
@@ -252,8 +272,8 @@ export class PostgresBillingRepository implements BillingRepository {
 
       // One customer pays for one group. A customer another group already holds stays with it, so
       // an event naming it is still applied instead of failing on the unique index forever. A
-      // customer handed over by a transfer of ownership stays handed over while its own events
-      // arrive; the new owner's customer replaces it and clears the stamp (#250).
+      // handed-over customer written back here stays handed over: `customerOf` reads through
+      // `billing_handed_over_customers` (#250).
       await transaction`
         INSERT INTO billing_customers (group_id, provider_customer_id)
         SELECT ${group.id}, ${subscription.customerId}
@@ -261,12 +281,7 @@ export class PostgresBillingRepository implements BillingRepository {
           SELECT 1 FROM billing_customers
           WHERE provider_customer_id = ${subscription.customerId} AND group_id <> ${group.id}
         )
-        ON CONFLICT (group_id) DO UPDATE SET
-          provider_customer_id = EXCLUDED.provider_customer_id,
-          handed_over_at = CASE
-            WHEN billing_customers.provider_customer_id = EXCLUDED.provider_customer_id
-              THEN billing_customers.handed_over_at
-          END
+        ON CONFLICT (group_id) DO UPDATE SET provider_customer_id = EXCLUDED.provider_customer_id
       `
       await scheduleNotices(transaction, group.id, event.occurredAt, before, subscription)
       // A per-member subscription that bills another count than the group has, such as a checkout
