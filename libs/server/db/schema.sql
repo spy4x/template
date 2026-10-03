@@ -117,7 +117,7 @@ CREATE TABLE groups (
     id UUID PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     owner_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    created_by_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_by_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
     authorization_revision BIGINT DEFAULT 1 NOT NULL,
     next_change_sequence BIGINT DEFAULT 1 NOT NULL,
     created_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -141,7 +141,7 @@ CREATE TABLE group_members (
     group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     user_id INT4 NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     role INT2 NOT NULL,
-    added_by_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    added_by_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (group_id, user_id),
@@ -282,8 +282,8 @@ CREATE TABLE notes (
     body TEXT DEFAULT '' NOT NULL,
     version INT4 DEFAULT 1 NOT NULL,
     change_sequence BIGINT NOT NULL,
-    created_by_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    updated_by_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_by_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
+    updated_by_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMPTZ(3),
@@ -533,3 +533,13 @@ CREATE TABLE subscriber_issue_content (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
   CONSTRAINT subscriber_issue_content_list_issue_unique UNIQUE (list_id, issue_id)
 );
+
+-- A person's request to delete their account (#144). See migration 2026_10_19_0001.
+CREATE TABLE account_deletions (
+    id UUID PRIMARY KEY,
+    user_id INT4 NOT NULL UNIQUE REFERENCES auth_users(id) ON DELETE CASCADE,
+    requested_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    delete_after TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_account_deletions_delete_after ON account_deletions (delete_after);
