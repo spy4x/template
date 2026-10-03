@@ -8,7 +8,7 @@ export default define.page(function Privacy({ state }) {
       state={state}
       path="/privacy"
       title="Privacy"
-      description={"What the Template demo stores about you, which cookie it sets, and how to have " +
+      description={"What the Template demo stores about you, which cookies it sets, and how to have " +
         "your data deleted."}
     >
       <p>
@@ -24,7 +24,10 @@ export default define.page(function Privacy({ state }) {
           you turn it on.
         </li>
         <li>What you create: groups, who is in them, invitations and notes.</li>
-        <li>A record of sign-ins and changes, with the time, so problems can be traced.</li>
+        <li>
+          A record of each sign-in, with the time, your IP address and your browser's user agent,
+          and a record of changes with the time, so problems and break-ins can be traced.
+        </li>
         <li>
           Your browser's push address, only if you allow notifications. Turning them off removes it.
         </li>
@@ -39,10 +42,21 @@ export default define.page(function Privacy({ state }) {
         an e-mail provider. The servers keep request logs to run and fix the service.
       </p>
       <h2>Cookies and your browser</h2>
+      <p>The demo sets two cookies when you sign in, and only for the session:</p>
+      <ul>
+        <li>
+          A signed session cookie that scripts cannot read. It keeps you signed in.
+        </li>
+        <li>
+          <code>user_id</code>, which holds your account number and which the app's scripts can
+          read, so the app knows who is signed in before it asks the server.
+        </li>
+      </ul>
       <p>
-        The demo sets one cookie, when you sign in, and uses it only to keep you signed in. There
-        are no advertising cookies, no analytics and no tracking. So that the app opens without a
-        network, it also keeps a copy of your notes and groups in your browser's own storage.
+        There are no advertising cookies, no analytics and no tracking. So that the app opens
+        without a network, it also keeps in your browser's own storage: who is signed in, a copy of
+        your notes and groups, the group you last selected, and the position the realtime connection
+        reached, so it picks up where it left off.
       </p>
       <h2>What it does not do</h2>
       <p>It does not sell or share your data, and shows no ads.</p>
