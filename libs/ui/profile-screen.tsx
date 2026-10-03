@@ -370,7 +370,7 @@ export function ProfileScreen(
                     action={
                       <ScreenForm
                         pending={pending.push}
-                        onSubmit={onRemovePush && (() => onRemovePush(device.deviceId))}
+                        onSubmit={() => onRemovePush(device.deviceId)}
                       >
                         <Button
                           type="submit"

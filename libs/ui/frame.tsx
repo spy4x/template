@@ -165,7 +165,7 @@ export function AppFrame(
   )
 }
 
-/** "Sign out" as a form that posts to its route; with `onSignOut`, the app takes it over. */
+/** "Sign out" as a form whose submit the app takes through `onSignOut`. */
 function SignOutForm({ onSignOut }: { onSignOut: () => void }): JSX.Element {
   return (
     <ScreenForm onSubmit={onSignOut}>

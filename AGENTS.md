@@ -50,8 +50,8 @@ says what is missing. Do not copy the gap into a new screen.
   (`libs/ui/progressive.tsx`): `EnhancedForm` with its status taken from the screen's `pending`
   prop, so a pending form is disabled and refuses a second submit. A form takes its submit over
   with `onSubmit`; only the newsletter's pass `action` too.
-- **One page header.** Every signed-in page starts with `PageHeader` (`libs/ui/page-header.tsx`): the title,
-  the primary action and one "More actions" menu. Do not draw a second one.
+- **One page header.** Every signed-in page starts with `PageHeader` (`libs/ui/page-header.tsx`):
+  the title, the primary action and one "More actions" menu. Do not draw a second one.
 - **State comes in as props:** `value`, `errors`, `pending`, `items`, `cursor`. Error and pending
   display is part of the component, so every screen shows the same messages.
 - **Accessible by construction.** Every control has a label. Error text is tied to its field with
