@@ -39,12 +39,14 @@ export function createNoteSocketRequests(dependencies: NoteSocketDependencies): 
   return {
     "note.create": {
       kind: "command",
-      handle: async ({ actor, payload, idempotencyKey }) => {
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
         const input = parseNoteRequest(
           noteCreatePayloadSchema,
           payload,
         )
-        return await dependencies.create(new NoteCreateCommand({ actor, ...input, idempotencyKey }))
+        return await dependencies.create(
+          new NoteCreateCommand({ actor, ...input, requestId, idempotencyKey }),
+        )
       },
     },
     "note.update": {
@@ -56,12 +58,14 @@ export function createNoteSocketRequests(dependencies: NoteSocketDependencies): 
     },
     "note.delete": {
       kind: "command",
-      handle: async ({ actor, payload, idempotencyKey }) => {
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
         const input = parseNoteRequest(
           noteDeletePayloadSchema,
           payload,
         )
-        return await dependencies.delete(new NoteDeleteCommand({ actor, ...input, idempotencyKey }))
+        return await dependencies.delete(
+          new NoteDeleteCommand({ actor, ...input, requestId, idempotencyKey }),
+        )
       },
     },
     "note.move": {

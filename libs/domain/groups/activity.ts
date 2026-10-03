@@ -1,0 +1,225 @@
+import type { Query } from "@spy4x/platform/cqrs"
+import type { Actor } from "@domain/identity"
+import { canRead, GroupError, GroupRole } from "./+lib.ts"
+
+/**
+ * How long the worker keeps a group's activity: events older than this many days are deleted. A
+ * product that must keep its log longer passes its own number to `purgeOldAuditEvents`.
+ */
+export const AUDIT_RETENTION_DAYS = 365
+
+/** The most events one page of the activity log holds, and the default. */
+export const ACTIVITY_PAGE_MAX = 100
+export const ACTIVITY_PAGE_DEFAULT = 50
+
+/** What an audit event can point at besides a member: the thing the event is about. */
+export type AuditEntityType = "note" | "invitation"
+
+/** Short facts an event keeps for its sentence: names, roles, a count. Never a body or an address. */
+export type AuditDetails = Record<string, string | number>
+
+/**
+ * The kinds of event the activity log writes, as they are stored in `audit_events.event_kind`.
+ * The server's writers use these strings; `describeActivity` has a sentence for each.
+ */
+export const ACTIVITY_KINDS = [
+  "group.created",
+  "group.renamed",
+  "group.details_updated",
+  "group.deleted",
+  "group.restored",
+  "group.member_role_changed",
+  "group.member_removed",
+  "group.member_left",
+  "group.ownership_transferred",
+  "group.invitation_created",
+  "group.invitation_accepted",
+  "group.invitation_revoked",
+  "group.invitation_declined",
+  "note.created",
+  "note.deleted",
+  "note.moved_out",
+  "note.moved_in",
+] as const
+
+/** A person named in the log. `userId` is `null` once the account is gone. */
+export interface ActivityPerson {
+  userId: number | null
+  /** Their name; empty when they set none or the account is gone. */
+  name: string
+}
+
+/** What an event points at, and whether it can still be opened. */
+export interface ActivityEntity {
+  type: AuditEntityType
+  id: string
+  /** The note is still in the group; it is gone after a delete or a move. */
+  exists: boolean
+}
+
+/** One line of a group's activity log. */
+export interface ActivityEvent {
+  /** A decimal string: the database's bigint is larger than a JavaScript number is exact for. */
+  id: string
+  kind: string
+  at: Date
+  actor: ActivityPerson
+  /** The member a role change, removal or transfer is about. */
+  target: ActivityPerson | null
+  entity: ActivityEntity | null
+  details: AuditDetails
+}
+
+/** Where the next page starts: after this event id, going back in time. */
+export interface ActivityPageKey {
+  id: string
+}
+
+export interface ActivityPage {
+  limit: number
+  after?: ActivityPageKey
+}
+
+export interface ActivityResult {
+  events: ActivityEvent[]
+  nextPageKey: ActivityPageKey | null
+}
+
+export interface GroupActivityPayload {
+  actor: Actor
+  groupId: string
+  page: ActivityPage
+}
+
+/**
+ * A page of the group's activity, newest first. Only an admin or the owner may read it: an editor
+ * or a viewer is told `ROLE_INSUFFICIENT`, and a person who is not a member is told the group does
+ * not exist.
+ */
+export class GroupActivityQuery implements Query<GroupActivityPayload, ActivityResult> {
+  __resultType?: ActivityResult
+  constructor(public data: GroupActivityPayload) {}
+}
+
+/** The read side of the log. The access check is the handler's, before it calls this. */
+export interface GroupActivityRepository {
+  list(groupId: string, page: ActivityPage): Promise<ActivityResult>
+}
+
+/** Whether `role` may read the group's activity: an admin or the owner. */
+export function canViewActivity(role: GroupRole): boolean {
+  return canRead(role) && role >= GroupRole.ADMIN
+}
+
+/**
+ * Throws unless `role` may read the group's activity. `null` means the actor is not a member,
+ * which answers "group not found" so a stranger cannot tell a group exists.
+ */
+export function assertCanViewActivity(role: GroupRole | null): void {
+  if (role === null || !canRead(role)) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+  if (!canViewActivity(role)) {
+    throw new GroupError("ROLE_INSUFFICIENT", "Only an admin or the owner can see the activity")
+  }
+}
+
+/** A function, not a table: this module and `+lib.ts` import each other, so `GroupRole` is not set yet at load. */
+function roleWord(role: unknown): string {
+  switch (role) {
+    case GroupRole.VIEWER:
+      return "viewer"
+    case GroupRole.EDITOR:
+      return "editor"
+    case GroupRole.ADMIN:
+      return "admin"
+    case GroupRole.OWNER:
+      return "owner"
+    default:
+      return "member"
+  }
+}
+
+function article(word: string): string {
+  return /^[aeiou]/.test(word) ? "an" : "a"
+}
+
+function notes(count: unknown): string {
+  return count === 1 ? "1 note" : `${typeof count === "number" ? count : "some"} notes`
+}
+
+function quoted(value: unknown): string {
+  return typeof value === "string" && value !== "" ? `“${value}”` : ""
+}
+
+/**
+ * One event in plain language, such as "Ada moved 3 notes to Family". A person with no name reads
+ * "Someone". An event whose facts were not kept (one written before the log existed) gets the
+ * shortest true sentence; a kind this code does not know still reads as an event, never as a code.
+ */
+export function describeActivity(
+  event: Pick<ActivityEvent, "kind" | "actor" | "target" | "details">,
+): string {
+  const who = event.actor.name || "Someone"
+  const target = event.target?.name || "a member"
+  const { details } = event
+  switch (event.kind) {
+    case "group.created":
+      return `${who} created the group`
+    case "group.renamed": {
+      const from = quoted(details.from)
+      const to = quoted(details.to)
+      return from && to
+        ? `${who} renamed the group from ${from} to ${to}`
+        : `${who} renamed the group`
+    }
+    case "group.details_updated":
+      return `${who} changed the group's description, colour or emoji`
+    case "group.deleted":
+      return `${who} deleted the group`
+    case "group.restored":
+      return `${who} restored the group`
+    case "group.member_role_changed": {
+      const to = roleWord(details.to)
+      return typeof details.from === "number"
+        ? `${who} changed ${target} from ${article(roleWord(details.from))} ${
+          roleWord(details.from)
+        } to ${article(to)} ${to}`
+        : `${who} changed the role of ${target}`
+    }
+    case "group.member_removed":
+      return `${who} removed ${target} from the group`
+    case "group.member_left":
+      return `${who} left the group`
+    case "group.ownership_transferred":
+      return `${who} made ${target} the owner of the group`
+    case "group.invitation_created": {
+      const role = roleWord(details.role)
+      return typeof details.role === "number"
+        ? `${who} invited someone to join as ${article(role)} ${role}`
+        : `${who} invited someone to join`
+    }
+    case "group.invitation_accepted":
+      return `${who} joined the group`
+    case "group.invitation_revoked":
+      return `${who} withdrew an invitation`
+    case "group.invitation_declined":
+      return `${who} declined an invitation`
+    case "note.created": {
+      const title = quoted(details.title)
+      return title ? `${who} added the note ${title}` : `${who} added a note`
+    }
+    case "note.deleted": {
+      const title = quoted(details.title)
+      return title ? `${who} deleted the note ${title}` : `${who} deleted a note`
+    }
+    case "note.moved_out": {
+      const to = typeof details.groupName === "string" && details.groupName !== ""
+        ? details.groupName
+        : "another group"
+      return `${who} moved ${notes(details.count)} to ${to}`
+    }
+    case "note.moved_in":
+      return `${who} moved ${notes(details.count)} here from another group`
+    default:
+      return `${who} changed something in the group`
+  }
+}

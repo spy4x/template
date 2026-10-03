@@ -250,6 +250,8 @@ export interface NoteCreatePayload {
   id: string
   title: string
   body: string
+  /** The request's id, kept on the audit event. */
+  requestId?: string
   /** Makes a retry of this command safe; see the idempotency middleware on the command bus. */
   idempotencyKey?: string
 }
@@ -292,6 +294,8 @@ export interface NoteDeletePayload {
   groupId: string
   id: string
   version: number
+  /** The request's id, kept on the audit event. */
+  requestId?: string
   idempotencyKey?: string
 }
 
@@ -383,6 +387,7 @@ export interface NoteCreateInput {
   id: string
   title: string
   body: string
+  requestId?: string
 }
 
 export interface NoteUpdateInput {
@@ -397,6 +402,7 @@ export interface NoteDeleteInput {
   groupId: string
   id: string
   expectedVersion: number
+  requestId?: string
 }
 
 export interface NoteMoveInput {

@@ -22,6 +22,10 @@ import {
   lockActorRole,
   recordGroupChange,
 } from "@server/groups/group-change-log.ts"
+import { writeAuditEvent } from "@server/groups/audit.ts"
+
+/** The longest note title an audit event keeps, so the log never holds more than a line of text. */
+const AUDIT_TITLE_MAX = 100
 
 interface NoteRow extends postgres.Row, Note {}
 
@@ -33,6 +37,7 @@ interface DeletedRow extends postgres.Row {
   id: string
   groupId: string
   version: number
+  title: string
 }
 
 /**
@@ -185,6 +190,15 @@ export class PostgresNoteRepository implements NoteRepository {
           actorId,
           NOTE_EVENTS.created,
         )
+        await writeAuditEvent(transaction, {
+          eventKind: NOTE_EVENTS.created,
+          actorId,
+          groupId: input.groupId,
+          requestId: input.requestId,
+          entityType: "note",
+          entityId: input.id,
+          details: { title: input.title.slice(0, AUDIT_TITLE_MAX) },
+        })
         return { note, created: true }
       }
 
@@ -245,10 +259,19 @@ export class PostgresNoteRepository implements NoteRepository {
             AND group_id = ${input.groupId}
             AND deleted_at IS NULL
             AND version = ${input.expectedVersion}
-          RETURNING id, group_id, version
+          RETURNING id, group_id, version, title
         `
       )[0]
       if (!deleted) return await repository.refuseStaleWrite(input.groupId, input.id)
+      await writeAuditEvent(transaction, {
+        eventKind: NOTE_EVENTS.deleted,
+        actorId,
+        groupId: input.groupId,
+        requestId: input.requestId,
+        entityType: "note",
+        entityId: input.id,
+        details: { title: deleted.title.slice(0, AUDIT_TITLE_MAX) },
+      })
       const sequence = await recordNoteChange(
         transaction,
         input.groupId,
@@ -302,16 +325,26 @@ export class PostgresNoteRepository implements NoteRepository {
         actorId,
         NOTE_EVENTS.movedIn,
       )
+      // The log of the group the notes left names where they went; the other says only how many.
+      const target = (
+        await transaction<{ name: string }[]>`SELECT name FROM groups WHERE id = ${input.toGroupId}`
+      )[0]
       for (
-        const [groupId, kind] of [
-          [input.fromGroupId, NOTE_EVENTS.movedOut],
-          [input.toGroupId, NOTE_EVENTS.movedIn],
+        const [groupId, kind, details] of [
+          [input.fromGroupId, NOTE_EVENTS.movedOut, {
+            count: moved.length,
+            groupName: target.name,
+          }],
+          [input.toGroupId, NOTE_EVENTS.movedIn, { count: moved.length }],
         ] as const
       ) {
-        await transaction`
-          INSERT INTO audit_events (event_kind, actor_user_id, group_id, request_id)
-          VALUES (${kind}, ${actorId}, ${groupId}, ${input.requestId || null})
-        `
+        await writeAuditEvent(transaction, {
+          eventKind: kind,
+          actorId,
+          groupId,
+          requestId: input.requestId,
+          details,
+        })
       }
       const rows = await transaction<NoteRow[]>`
         UPDATE notes SET change_sequence = ${sequence}::bigint

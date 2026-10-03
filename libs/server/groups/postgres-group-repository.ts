@@ -34,6 +34,7 @@ import {
   recordAccessChange,
   recordGroupChange,
 } from "./group-change-log.ts"
+import { type AuditEventInput, writeAuditEvent } from "./audit.ts"
 import { revokeInvitationsOf } from "./invitation-revocation.ts"
 
 interface GroupRow extends postgres.Row {
@@ -423,15 +424,7 @@ export class PostgresGroupRepository implements GroupRepository {
     const inserted = await this.insertGroup(input, actorId, true)
 
     if (inserted) {
-      await this.sql`
-        INSERT INTO audit_events (event_kind, actor_user_id, group_id, request_id)
-        VALUES (
-          ${GROUP_CREATED_EVENT},
-          ${actorId},
-          ${inserted.id},
-          ${input.requestId || null}
-        )
-      `
+      await this.audit(inserted.id, actorId, GROUP_CREATED_EVENT, input.requestId)
       const sequence = await this.recordChange(inserted.id, actorId, GROUP_CREATED_EVENT)
       return {
         group: toSummary(withStampedSequence(inserted, sequence), GroupRole.OWNER),
@@ -473,6 +466,9 @@ export class PostgresGroupRepository implements GroupRepository {
         throw error
       })
       if (role === null || !canRename(role)) return null
+      const before = (
+        await transaction<{ name: string }[]>`SELECT name FROM groups WHERE id = ${groupId}`
+      )[0]
       const renamed = (
         await transaction<RenamedRow[]>`
           UPDATE groups
@@ -490,7 +486,9 @@ export class PostgresGroupRepository implements GroupRepository {
         `
       )[0]
       if (!renamed) return null
-      await repository.audit(groupId, actorId, GROUP_RENAMED_EVENT, requestId)
+      await repository.audit(groupId, actorId, GROUP_RENAMED_EVENT, requestId, {
+        details: { from: before.name.slice(0, 100), to: renamed.name.slice(0, 100) },
+      })
       const sequence = await repository.recordChange(groupId, actorId, GROUP_RENAMED_EVENT)
       return { ...renamed, role, changeSequence: sequence }
     })
@@ -808,7 +806,10 @@ export class PostgresGroupRepository implements GroupRepository {
           SET role = ${role}, updated_at = CURRENT_TIMESTAMP
           WHERE group_id = ${groupId} AND user_id = ${userId}
         `
-        await repository.audit(groupId, actorId, MEMBER_ROLE_CHANGED_EVENT, requestId)
+        await repository.audit(groupId, actorId, MEMBER_ROLE_CHANGED_EVENT, requestId, {
+          targetUserId: userId,
+          details: { from: roles.get(userId)!, to: role },
+        })
         // A demoted member's links must not let anyone in above what they may now invite with.
         await revokeInvitationsOf(transaction, groupId, userId, role, actorId, requestId)
         // A demoted member can still read the group, so nobody loses access: the raised revision
@@ -835,7 +836,9 @@ export class PostgresGroupRepository implements GroupRepository {
       const roles = await repository.lockMemberRoles(groupId, [actorId, userId])
       assertCanRemoveMember(roles.get(actorId) ?? null, roles.get(userId) ?? null)
       await repository.dropMember(groupId, userId)
-      await repository.audit(groupId, actorId, MEMBER_REMOVED_EVENT, requestId)
+      await repository.audit(groupId, actorId, MEMBER_REMOVED_EVENT, requestId, {
+        targetUserId: userId,
+      })
       // Their own links would let them back in.
       await revokeInvitationsOf(transaction, groupId, userId, null, actorId, requestId)
       await recordAccessChange(transaction, groupId, actorId, MEMBER_REMOVED_EVENT, [userId])
@@ -876,7 +879,9 @@ export class PostgresGroupRepository implements GroupRepository {
       await transaction`
         UPDATE groups SET owner_user_id = ${userId} WHERE id = ${groupId}
       `
-      await repository.audit(groupId, actorId, OWNERSHIP_TRANSFERRED_EVENT, requestId)
+      await repository.audit(groupId, actorId, OWNERSHIP_TRANSFERRED_EVENT, requestId, {
+        targetUserId: userId,
+      })
       // The old owner is now an admin: their admin links go, their viewer and editor links stay.
       // The new owner may invite with every role, so their links all stay.
       await revokeInvitationsOf(transaction, groupId, actorId, GroupRole.ADMIN, actorId, requestId)
@@ -1014,11 +1019,9 @@ export class PostgresGroupRepository implements GroupRepository {
     actorId: number,
     eventKind: string,
     requestId: string | undefined,
+    facts: Pick<AuditEventInput, "targetUserId" | "details"> = {},
   ): Promise<void> {
-    await this.sql`
-      INSERT INTO audit_events (event_kind, actor_user_id, group_id, request_id)
-      VALUES (${eventKind}, ${actorId}, ${groupId}, ${requestId || null})
-    `
+    await writeAuditEvent(this.sql, { eventKind, actorId, groupId, requestId, ...facts })
   }
 
   /** Records a change on a group in the current transaction; see {@link recordGroupChange}. */

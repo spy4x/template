@@ -102,6 +102,7 @@ export function createNotesRoute(dependencies: NotesRouteDependencies): Hono<API
           actor: actorOf(c),
           groupId: groupIdOf(c),
           ...input,
+          requestId: c.get("requestId"),
           idempotencyKey: c.req.header("idempotency-key"),
         }),
       )
@@ -134,6 +135,7 @@ export function createNotesRoute(dependencies: NotesRouteDependencies): Hono<API
           groupId: groupIdOf(c),
           id: noteIdOf(c),
           version: input.version,
+          requestId: c.get("requestId"),
           idempotencyKey: c.req.header("idempotency-key"),
         }),
       )

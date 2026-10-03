@@ -17,6 +17,7 @@ import {
   type InvitationState,
 } from "@domain/groups"
 import { recordAccessChange } from "./group-change-log.ts"
+import { type AuditEventInput, writeAuditEvent } from "./audit.ts"
 import { INVITATION_EVENTS } from "./invitation-revocation.ts"
 import { storeSelection } from "./postgres-group-repository.ts"
 
@@ -152,7 +153,11 @@ export class PostgresInvitationRepository {
           CURRENT_TIMESTAMP + make_interval(days => ${record.expiresInDays})
         )
       `
-      await audit(tx, record.groupId, actorId, INVITATION_EVENTS.created, record.requestId)
+      await audit(tx, record.groupId, actorId, INVITATION_EVENTS.created, record.requestId, {
+        entityType: "invitation",
+        entityId: id,
+        details: { role: record.role },
+      })
       return { invitation: (await listInvitations(tx, record.groupId, { id }))[0], groupName }
     })
   }
@@ -194,7 +199,11 @@ export class PostgresInvitationRepository {
       assertCanInvite(actorRole, invitation.role)
       if (invitationRefusal(invitation, new Date()) === null) {
         await tx`UPDATE group_invitations SET revoked_at = CURRENT_TIMESTAMP WHERE id = ${invitationId}`
-        await audit(tx, groupId, actorId, INVITATION_EVENTS.revoked, requestId)
+        await audit(tx, groupId, actorId, INVITATION_EVENTS.revoked, requestId, {
+          entityType: "invitation",
+          entityId: invitationId,
+          details: { role: invitation.role },
+        })
       }
       return true
     })
@@ -332,7 +341,11 @@ export class PostgresInvitationRepository {
         VALUES (${invitation.id}, ${userId})
       `
       await tx`UPDATE group_invitations SET uses = uses + 1 WHERE id = ${invitation.id}`
-      await audit(tx, invitation.groupId, userId, INVITATION_EVENTS.accepted, requestId)
+      await audit(tx, invitation.groupId, userId, INVITATION_EVENTS.accepted, requestId, {
+        entityType: "invitation",
+        entityId: invitation.id,
+        details: { role: invitation.role },
+      })
       // Nobody loses access; the raised revision and the group's hint tell its open pages.
       await recordAccessChange(tx, invitation.groupId, userId, INVITATION_EVENTS.memberJoined, [])
       const selected = await storeSelection(tx, userId, invitation.groupId)
@@ -354,7 +367,10 @@ export class PostgresInvitationRepository {
       if (!await ownsAddress(tx, invitation.email, userId)) throw wrongAccount()
       if (invitationRefusal(invitation, new Date()) !== null) return
       await tx`UPDATE group_invitations SET declined_at = CURRENT_TIMESTAMP WHERE id = ${invitation.id}`
-      await audit(tx, invitation.groupId, userId, INVITATION_EVENTS.declined, requestId)
+      await audit(tx, invitation.groupId, userId, INVITATION_EVENTS.declined, requestId, {
+        entityType: "invitation",
+        entityId: invitation.id,
+      })
     })
   }
 }
@@ -520,9 +536,7 @@ async function audit(
   actorId: number,
   eventKind: string,
   requestId: string | undefined,
+  facts: Pick<AuditEventInput, "entityType" | "entityId" | "details"> = {},
 ): Promise<void> {
-  await sql`
-    INSERT INTO audit_events (event_kind, actor_user_id, group_id, request_id)
-    VALUES (${eventKind}, ${actorId}, ${groupId}, ${requestId || null})
-  `
+  await writeAuditEvent(sql, { eventKind, actorId, groupId, requestId, ...facts })
 }

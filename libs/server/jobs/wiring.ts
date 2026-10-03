@@ -16,6 +16,7 @@ import {
 import { GroupChangeNotifier } from "../groups/group-change-notify.ts"
 import { purgeDeadInvitations } from "../groups/purge-dead-invitations.ts"
 import { purgeDeletedGroups } from "../groups/purge-deleted-groups.ts"
+import { purgeOldAuditEvents } from "../groups/purge-audit-events.ts"
 import { billingNoticeMailJob } from "./billing-notice-mail.ts"
 import {
   EMAIL_CODE_MAIL_JOB,
@@ -57,8 +58,9 @@ const NIGHTLY_HOUR_UTC = 3
  * The worker's outbox processor: group changes go to the notifier, jobs to their handlers, and the
  * nightly cleanup is one row that writes its next run, a day later, once it has succeeded. The
  * cleanup also drops password reset and e-mail code requests whose mail gave up, and removes for
- * good the groups whose 30 days for restoring are over, and the invitations dead for over 30
- * days. Every mail job, the owner's billing notices included, shares one sender and brand.
+ * good the groups whose 30 days for restoring are over, the invitations dead for over 30 days and
+ * the audit events older than a year. Every mail job, the owner's billing notices included, shares
+ * one sender and brand.
  *
  * With a billing `provider`, a change to a group's members queues a seat sync, which sets a
  * per-member subscription's quantity to the member count, and the nightly cleanup queues one for
@@ -96,6 +98,8 @@ export function createOutboxProcessor(
         }
         const invitations = await purgeDeadInvitations(sql)
         if (invitations > 0) console.log(`Removed ${invitations} dead group invitation(s)`)
+        const audit = await purgeOldAuditEvents(sql)
+        if (audit > 0) console.log(`Removed ${audit} audit event(s) past their retention`)
         if (provider) {
           const drifted = await queueSeatDrift(sql)
           if (drifted > 0) console.log(`Queued a seat sync for ${drifted} group(s)`)
