@@ -9,8 +9,10 @@ import {
   BillingPortalCommand,
   type BillingRepository,
   type GroupRoleLookup,
+  handoverTrialDays,
   hasLiveSubscription,
   PAID_PLANS,
+  type StoredSubscription,
   toGroupBilling,
 } from "@domain/billing"
 
@@ -43,13 +45,14 @@ export function createBillingGetHandler(
   return async ({ data }) => {
     const role = await groups.roleOf(data.groupId, data.actor.userId)
     assertCanReadBilling(role)
-    const [subscription, customerId, members] = provider
+    const [subscription, customerId, members, handedOver] = provider
       ? await Promise.all([
         billing.get(data.groupId),
         billing.customerOf(data.groupId),
         billing.membersOf(data.groupId),
+        billing.handedOver(data.groupId),
       ])
-      : [null, null, 0]
+      : [null, null, 0, false]
     return {
       billing: toGroupBilling(
         subscription,
@@ -59,6 +62,7 @@ export function createBillingGetHandler(
         now(),
         graceDays,
         members,
+        handedOver,
       ),
     }
   }
@@ -73,12 +77,17 @@ export function createBillingCheckoutHandler(
     if (!plan) throw new BillingError("UNKNOWN_PLAN", "No such plan")
     // A second checkout would start a second subscription and charge twice; the portal changes the
     // plan of the one the group has. Any subscription that is not cancelled counts, even a paused,
-    // incomplete or unknown-price one that shows as the free plan.
-    const current = await dependencies.billing.get(data.groupId)
-    if (hasLiveSubscription(current)) {
+    // incomplete or unknown-price one that shows as the free plan. The one exception is a
+    // subscription the previous owner pays after a transfer and has cancelled at its period's end:
+    // the new owner checks out with a customer of their own, first charged when it ends (#250).
+    const [current, customerId, handedOver] = await Promise.all([
+      dependencies.billing.get(data.groupId),
+      dependencies.billing.customerOf(data.groupId),
+      dependencies.billing.handedOver(data.groupId),
+    ])
+    if (hasLiveSubscription(current) && !(handedOver && current!.cancelAtPeriodEnd)) {
       throw new BillingError("ALREADY_SUBSCRIBED", "The group already has a subscription")
     }
-    const customerId = await dependencies.billing.customerOf(data.groupId)
     const result = await provider.createCheckout({
       planId: data.planId,
       successUrl: appUrl(dependencies, `/groups/${data.groupId}`),
@@ -87,8 +96,13 @@ export function createBillingCheckoutHandler(
       // A per-member plan starts with a seat for every member; the worker keeps it in step after.
       ...(plan.perSeat ? { quantity: await dependencies.billing.membersOf(data.groupId) } : {}),
       // Only a group's first checkout starts with a trial: a group that ever paid, or tried, has a
-      // customer already.
-      ...(customerId ? { customerId } : trialOf(plan.trialDays, dependencies.trialRequiresCard)),
+      // customer already. After a transfer the new owner gets no customer of the old owner's, and
+      // a trial only for the plan time the old owner already paid for, with a card always asked.
+      ...(customerId
+        ? { customerId }
+        : handedOver
+        ? handoverTrial(current, dependencies)
+        : trialOf(plan.trialDays, dependencies.trialRequiresCard)),
       // The client's key is scoped to the group and the person, so one person's key can never
       // replay a checkout the provider made for another group or person.
       ...(data.idempotencyKey
@@ -101,6 +115,15 @@ export function createBillingCheckoutHandler(
     }
     return { url: result.value.url }
   }
+}
+
+/** The new owner's trial after a transfer: the old owner's remaining plan time, or none. */
+function handoverTrial(
+  current: StoredSubscription | null,
+  { now, graceDays }: BillingHandlerDependencies,
+): { trialDays?: number } {
+  const days = handoverTrialDays(current, now(), graceDays)
+  return days === null ? {} : { trialDays: days }
 }
 
 /** The checkout's trial fields: none for a plan without trial days. */

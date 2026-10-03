@@ -175,6 +175,7 @@ describe("billing configuration", () => {
           lockedRoleOf: () => Promise.resolve(null),
           customerOf: () => Promise.resolve("cus_1"),
           membersOf: () => Promise.resolve(1),
+          handedOver: () => Promise.resolve(false),
         },
         groups: { roleOf: () => Promise.resolve(GroupRole.OWNER) },
         provider: configured.provider,

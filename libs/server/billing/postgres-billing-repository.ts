@@ -121,10 +121,18 @@ export class PostgresBillingRepository implements BillingRepository {
   async customerOf(groupId: string): Promise<string | null> {
     const row = (
       await this.sql<CustomerRow[]>`
-        SELECT provider_customer_id FROM billing_customers WHERE group_id = ${groupId}
+        SELECT provider_customer_id FROM billing_customers
+        WHERE group_id = ${groupId} AND handed_over_at IS NULL
       `
     )[0]
     return row?.providerCustomerId ?? null
+  }
+
+  async handedOver(groupId: string): Promise<boolean> {
+    const rows = await this.sql`
+      SELECT 1 FROM billing_customers WHERE group_id = ${groupId} AND handed_over_at IS NOT NULL
+    `
+    return rows.length > 0
   }
 
   /** Counted by the invitations' own count, so a seat and the `maxMembers` cap never disagree. */
@@ -243,7 +251,9 @@ export class PostgresBillingRepository implements BillingRepository {
       }
 
       // One customer pays for one group. A customer another group already holds stays with it, so
-      // an event naming it is still applied instead of failing on the unique index forever.
+      // an event naming it is still applied instead of failing on the unique index forever. A
+      // customer handed over by a transfer of ownership stays handed over while its own events
+      // arrive; the new owner's customer replaces it and clears the stamp (#250).
       await transaction`
         INSERT INTO billing_customers (group_id, provider_customer_id)
         SELECT ${group.id}, ${subscription.customerId}
@@ -251,7 +261,12 @@ export class PostgresBillingRepository implements BillingRepository {
           SELECT 1 FROM billing_customers
           WHERE provider_customer_id = ${subscription.customerId} AND group_id <> ${group.id}
         )
-        ON CONFLICT (group_id) DO UPDATE SET provider_customer_id = EXCLUDED.provider_customer_id
+        ON CONFLICT (group_id) DO UPDATE SET
+          provider_customer_id = EXCLUDED.provider_customer_id,
+          handed_over_at = CASE
+            WHEN billing_customers.provider_customer_id = EXCLUDED.provider_customer_id
+              THEN billing_customers.handed_over_at
+          END
       `
       await scheduleNotices(transaction, group.id, event.occurredAt, before, subscription)
       // A per-member subscription that bills another count than the group has, such as a checkout
@@ -322,6 +337,11 @@ function isSubscriptionEvent(event: BillingEvent): event is SubscriptionEvent {
   return "subscription" in event
 }
 
+/**
+ * The group an event is about, with its row locked. The group is locked before the subscription and
+ * the customer, the order a transfer of ownership takes them in (`handOverBilling`), so the two
+ * never wait on each other.
+ */
 async function findGroup(
   sql: postgres.Sql,
   event: SubscriptionEvent,
@@ -329,7 +349,9 @@ async function findGroup(
   const reference = event.subscription.reference
   if (reference !== null && UUID.test(reference)) {
     const row = (
-      await sql<GroupOwnerRow[]>`SELECT id, owner_user_id FROM groups WHERE id = ${reference}`
+      await sql<GroupOwnerRow[]>`
+        SELECT id, owner_user_id FROM groups WHERE id = ${reference} FOR NO KEY UPDATE
+      `
     )[0]
     if (row) return row
   }
@@ -339,6 +361,7 @@ async function findGroup(
       FROM billing_customers
       JOIN groups ON groups.id = billing_customers.group_id
       WHERE billing_customers.provider_customer_id = ${event.subscription.customerId}
+      FOR NO KEY UPDATE OF groups
     `
   )[0]
   return row ?? null

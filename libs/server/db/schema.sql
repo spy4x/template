@@ -358,7 +358,8 @@ CREATE TABLE email_code_failures (
 CREATE TABLE billing_customers (
     group_id UUID PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
     provider_customer_id VARCHAR(255) NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    handed_over_at TIMESTAMPTZ
 );
 
 CREATE UNIQUE INDEX idx_billing_customers_provider_customer_id

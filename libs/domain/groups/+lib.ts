@@ -35,6 +35,7 @@ export type GroupErrorCode =
   | "NAME_MISMATCH"
   | "PASSWORD_INVALID"
   | "ROLE_INSUFFICIENT"
+  | "SUBSCRIPTION_RENEWS"
   | "USER_NOT_ACTIVE"
 
 export class GroupError extends Error {

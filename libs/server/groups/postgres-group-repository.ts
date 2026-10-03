@@ -25,6 +25,7 @@ import {
   SelectedGroup,
 } from "@domain/groups"
 import { BillingStatus } from "@domain/billing"
+import { handOverBilling } from "@server/billing/handover.ts"
 import {
   GroupNotActiveError,
   lockActorRole,
@@ -780,6 +781,8 @@ export class PostgresGroupRepository implements GroupRepository {
       if (!await repository.lockActiveGroup(groupId)) return false
       const roles = await repository.lockMemberRoles(groupId, [actorId, userId])
       assertCanTransfer(roles.get(actorId) ?? null, roles.get(userId) ?? null)
+      // A renewing subscription refuses the transfer; the old owner's customer is handed over.
+      await handOverBilling(transaction, groupId)
       await transaction`
         UPDATE group_members
         SET role = ${GroupRole.ADMIN}, updated_at = CURRENT_TIMESTAMP

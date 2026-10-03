@@ -309,6 +309,32 @@ export function hasLiveSubscription(subscription: StoredSubscription | null): bo
 }
 
 /**
+ * The trial a new owner's checkout starts with after a transfer of ownership: the whole days, rounded
+ * up, that the old owner's subscription still gives the group its plan, so the new owner is first
+ * charged when the old owner's plan ends and the two never bill the same days. `null` when the
+ * group is not on a paid plan at `now` (the old subscription has ended, or is past due beyond its
+ * grace), or when that subscription still renews and so has no end to wait for.
+ */
+export function handoverTrialDays(
+  subscription: StoredSubscription | null,
+  now: Date,
+  graceDays: number,
+): number | null {
+  if (
+    subscription === null || !subscription.cancelAtPeriodEnd ||
+    effectivePlanId(subscription, now, graceDays) === FREE_PLAN_ID
+  ) {
+    return null
+  }
+  // A past-due subscription keeps the plan only for its grace, whatever period it was billing.
+  const ends = [accessEndsAt(subscription), graceEndsAt(subscription, graceDays)]
+    .filter((date): date is Date => date !== null)
+  if (ends.length === 0) return null
+  const end = Math.min(...ends.map((date) => date.getTime()))
+  return Math.ceil((end - now.getTime()) / DAY_MS)
+}
+
+/**
  * Whether the provider bills the group per member: its subscription is live and its plan is
  * {@link Plan.perSeat}. A past-due subscription past its grace still counts, since the provider
  * keeps charging it; the subscription's quantity then follows the member count.
@@ -357,7 +383,11 @@ export interface GroupBilling {
   notice: BillingNotice | null
   /** Whether the person asking may open checkout or the portal: billing is on and they own it. */
   canManage: boolean
-  /** The group has a subscription that is not cancelled, so it cannot check out again. */
+  /**
+   * The group has a subscription that is not cancelled and that its owner pays, so it cannot check
+   * out again. A subscription the previous owner still pays after a transfer of ownership does not
+   * count: the new owner may check out (see {@link handoverTrialDays}).
+   */
   subscribed: boolean
   /** The group has a provider customer, so its portal (invoices, card, plan) can be opened. */
   hasCustomer: boolean
@@ -368,6 +398,9 @@ export interface GroupBilling {
 /**
  * Builds the {@link GroupBilling} view of one group for one member, with the plan it is on at `now`
  * (see {@link effectivePlanId}). `members` is the group's member count, the owner included.
+ * `handedOver` is true when the group's provider customer belongs to an owner who has since
+ * transferred the group: the subscription then is not the current owner's to manage, so the view
+ * offers a checkout instead and gives no notice about it.
  */
 export function toGroupBilling(
   subscription: StoredSubscription | null,
@@ -377,6 +410,7 @@ export function toGroupBilling(
   now: Date,
   graceDays: number,
   members: number,
+  handedOver = false,
 ): GroupBilling {
   const seatPlan = enabled && isSeatBilled(subscription) ? findPlan(subscription!.planId!) : null
   return {
@@ -386,11 +420,11 @@ export function toGroupBilling(
     currentPeriodEnd: enabled ? subscription?.currentPeriodEnd ?? null : null,
     cancelAtPeriodEnd: enabled ? subscription?.cancelAtPeriodEnd ?? false : false,
     trialEnd: enabled ? subscription?.trialEnd ?? null : null,
-    notice: enabled && canManageBilling(role)
+    notice: enabled && canManageBilling(role) && !handedOver
       ? billingNoticeOf(subscription, now, graceDays)
       : null,
     canManage: enabled && canManageBilling(role),
-    subscribed: enabled && hasLiveSubscription(subscription),
+    subscribed: enabled && hasLiveSubscription(subscription) && !handedOver,
     hasCustomer: enabled && hasCustomer,
     seatPrice: seatPlan
       ? { seats: members, amount: seatPlan.amount, currency: seatPlan.currency }
@@ -656,8 +690,16 @@ export interface BillingRepository {
    * or a role change committed first is seen, and `null` answers a stranger or a deleted group.
    */
   lockedRoleOf(groupId: string, userId: number): Promise<GroupRole | null>
-  /** The provider customer that pays for the group, or `null` before its first checkout. */
+  /**
+   * The provider customer of the group's current owner, or `null` before its first checkout and
+   * after a transfer of ownership, until the new owner checks out with a customer of their own.
+   */
   customerOf(groupId: string): Promise<string | null>
+  /**
+   * Whether the group's provider customer belongs to an owner who has since transferred the group.
+   * Nobody can open its portal through the app, and the new owner checks out with a new customer.
+   */
+  handedOver(groupId: string): Promise<boolean>
   /** The group's members, the owner included: the count `maxMembers` caps and seats bill. */
   membersOf(groupId: string): Promise<number>
 }

@@ -26,6 +26,19 @@ export const MEMBERSHIP_EVENTS: readonly string[] = [
 const SEAT_PLAN_IDS = PLANS.filter((plan) => plan.perSeat).map((plan) => plan.id)
 
 /**
+ * A condition on `subscriptions` rows: the group's customer has not been handed over by a transfer
+ * of ownership (#250). The previous owner's subscription only runs out its period, and the app
+ * never changes what their card is billed for a group they no longer own.
+ */
+function notHandedOver(sql: postgres.Sql): postgres.PendingQuery<postgres.Row[]> {
+  return sql`NOT EXISTS (
+    SELECT 1 FROM billing_customers
+    WHERE billing_customers.group_id = subscriptions.group_id
+      AND billing_customers.handed_over_at IS NOT NULL
+  )`
+}
+
+/**
  * Queues a seat sync for the group, to run at once. The queue time is the row's version, so two
  * changes in one millisecond queue one sync; each sync reads the count when it runs, so one is
  * enough.
@@ -68,6 +81,7 @@ export function seatSyncJob(
         WHERE group_id = ${groupId}
           AND status <> ${BillingStatus.Canceled}
           AND plan_id IN ${sql(SEAT_PLAN_IDS)}
+          AND ${notHandedOver(sql)}
       `
     )[0]
     if (!row) return
@@ -117,6 +131,7 @@ export async function queueSeatDrift(sql: postgres.Sql, now = new Date()): Promi
   const billed = await sql<{ groupId: string; quantity: number | null }[]>`
     SELECT group_id, quantity FROM subscriptions
     WHERE status <> ${BillingStatus.Canceled} AND plan_id IN ${sql(SEAT_PLAN_IDS)}
+      AND ${notHandedOver(sql)}
   `
   // Counted the way `maxMembers` is, one group at a time: few groups pay, and one count stays the
   // only definition of a seat.

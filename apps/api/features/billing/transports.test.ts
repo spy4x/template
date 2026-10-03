@@ -66,10 +66,13 @@ function stack(
     now = NOW,
     trialRequiresCard = true,
     members = 1,
+    handedOver = false,
   }: {
     subscription?: StoredSubscription | null
     members?: number
     customer?: string | null
+    /** The group's customer was handed over by a transfer; `customer` is then the new owner's. */
+    handedOver?: boolean
     enabled?: boolean
     now?: Date
     trialRequiresCard?: boolean
@@ -88,6 +91,7 @@ function stack(
       lockedRoleOf: (id: string, userId: number) => groups.roleOf(id, userId),
       customerOf: () => Promise.resolve(customer),
       membersOf: () => Promise.resolve(members),
+      handedOver: () => Promise.resolve(handedOver),
     },
     groups,
     provider: enabled ? fakeProvider(recorder) : null,
@@ -328,6 +332,72 @@ describe("billing over REST", () => {
       customerId: "cus_1",
       returnUrl: `https://app.example.com/groups/${groupId}`,
     }])
+  })
+
+  describe("after a transfer of ownership", () => {
+    /** The old owner's subscription, cancelled at the end of its period, as a transfer needs it. */
+    const ENDING: StoredSubscription = { ...PRO, cancelAtPeriodEnd: true }
+
+    it("opens the new owner's checkout with a new customer and a trial until the old period ends", async () => {
+      // A setup that starts trials without a card still asks the new owner for one.
+      const { recorder, call } = stack({
+        subscription: ENDING,
+        handedOver: true,
+        trialRequiresCard: false,
+        members: 2,
+      })
+
+      const response = await call(OWNER, "POST", "/checkout", { planId: "pro" })
+
+      expect(response.status).toBe(200)
+      // From 2026-10-01T10:00 to 2026-11-01T00:00 is 30 days and 14 hours: 31 whole days.
+      expect(recorder.checkouts).toEqual([{
+        planId: "pro",
+        successUrl: `https://app.example.com/groups/${groupId}`,
+        cancelUrl: `https://app.example.com/groups/${groupId}/pricing`,
+        reference: groupId,
+        quantity: 2,
+        trialDays: 31,
+      }])
+    })
+
+    it("refuses the new owner's checkout while the old owner's subscription still renews", async () => {
+      const { recorder, call } = stack({ subscription: PRO, handedOver: true })
+
+      const response = await call(OWNER, "POST", "/checkout", { planId: "pro" })
+
+      expect([response.status, await code(response)]).toEqual([409, "ALREADY_SUBSCRIBED"])
+      expect(recorder.checkouts).toEqual([])
+    })
+
+    it("opens a checkout with no trial once the old owner's subscription has ended", async () => {
+      const { recorder, call } = stack({
+        subscription: { ...ENDING, status: BillingStatus.Canceled },
+        handedOver: true,
+      })
+
+      await call(OWNER, "POST", "/checkout", { planId: "pro" })
+
+      expect(recorder.checkouts).toHaveLength(1)
+      expect(recorder.checkouts[0]).not.toHaveProperty("trialDays")
+      expect(recorder.checkouts[0]).not.toHaveProperty("customerId")
+    })
+
+    it("shows the new owner the plan, a checkout and no portal, notice or old customer", async () => {
+      const { recorder, call } = stack({ subscription: ENDING, handedOver: true })
+
+      const owner = await (await call(OWNER, "GET", "")).json()
+      const portal = await call(OWNER, "POST", "/portal")
+
+      expect(owner.billing).toMatchObject({
+        planId: "pro",
+        subscribed: false,
+        hasCustomer: false,
+        notice: null,
+      })
+      expect([portal.status, await code(portal)]).toEqual([409, "NO_SUBSCRIPTION"])
+      expect(recorder.portals).toEqual([])
+    })
   })
 
   it("refuses the portal of a group that never paid", async () => {

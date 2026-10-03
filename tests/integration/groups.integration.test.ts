@@ -69,6 +69,7 @@ Deno.test({
       await applyMigration(sql, "2026_10_13_0002_group_single_owner.sql")
       await applyMigration(sql, "2026_10_14_0001_subscription_quantity.sql")
       await applyMigration(sql, "2026_10_15_0001_subscription_ever_active.sql")
+      await applyMigration(sql, "2026_10_16_0001_billing_customer_handover.sql")
 
       await t.step("backfill is rerunnable and covers only active users", async () => {
         await applyMigration(sql, "2026_08_18_0002_personal_group_backfill.sql")
