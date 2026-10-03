@@ -34,6 +34,9 @@ import { handler as inviteAccept } from "./routes/invite/accept.ts"
 import { handler as inviteDecline } from "./routes/invite/decline.ts"
 import { handler as invitationCreate } from "./routes/groups/[groupId]/invitations/index.ts"
 import { handler as invitationRevoke } from "./routes/groups/[groupId]/invitations/[invitationId]/revoke.ts"
+import { handler as subscribe } from "./routes/subscribe/index.ts"
+import { handler as subscriptionConfirm } from "./routes/subscribe/confirm.ts"
+import { handler as unsubscribe } from "./routes/unsubscribe.ts"
 import { EMAIL_FAILURES } from "@ui/email-screen.tsx"
 import { pageMiddleware } from "./middleware.ts"
 import type { State } from "./utils.ts"
@@ -100,6 +103,12 @@ function appWith(fetch: typeof globalThis.fetch) {
     .get("/invite/:token", invitePage.GET!)
     .post("/groups/:groupId/invitations", invitationCreate.POST!)
     .post("/groups/:groupId/invitations/:invitationId/revoke", invitationRevoke.POST!)
+    .get("/subscribe", subscribe.GET!)
+    .post("/subscribe", subscribe.POST!)
+    .get("/subscribe/confirm", subscriptionConfirm.GET!)
+    .post("/subscribe/confirm", subscriptionConfirm.POST!)
+    .get("/unsubscribe", unsubscribe.GET!)
+    .post("/unsubscribe", unsubscribe.POST!)
     .handler()
 }
 
@@ -1719,5 +1728,111 @@ describe("invitations", () => {
     expect(response.headers.get("location")).toBe(`/groups/${groupId}`)
     expect(calls.find((call) => call.method === "DELETE")?.path)
       .toBe(`/api/groups/${groupId}/invitations/${invitationId}`)
+  })
+})
+
+describe("the subscription pages", () => {
+  /**
+   * A fake API where nobody is signed in and every other call answers `answer(url)`. Records each
+   * call's full URL, query included, and its body.
+   */
+  function subscribersApi(answer: (url: URL) => Response) {
+    const calls: { method: string; url: string; body: unknown }[] = []
+    const fetch = async (input: string | URL | Request, init?: RequestInit) => {
+      const request = new Request(input, init)
+      const url = new URL(request.url)
+      const text = await request.text()
+      calls.push({
+        method: request.method,
+        url: url.pathname + url.search,
+        body: text ? JSON.parse(text) : null,
+      })
+      return url.pathname === "/api/auth/me"
+        ? Response.json({ error: "User not signed in" }, { status: 401 })
+        : answer(url)
+    }
+    const apiCalls = () => calls.filter((call) => call.url !== "/api/auth/me")
+    return { apiCalls, fetch: fetch as typeof globalThis.fetch }
+  }
+  const token = { list: "news", token: "token-from-the-link" }
+  const tokenQuery = new URLSearchParams(token).toString()
+
+  it("asks the API for a confirm link with the address and the list, and says it is on its way", async () => {
+    const { apiCalls, fetch } = subscribersApi(() => Response.json({}, { status: 202 }))
+
+    const response = await appWith(fetch)(
+      formPost("/subscribe", { email: "ada@example.com", list: "news" }),
+      info,
+    )
+
+    expect(apiCalls()).toEqual([
+      { method: "POST", url: "/api/subscribers", body: { email: "ada@example.com", list: "news" } },
+    ])
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain("Check your inbox")
+  })
+
+  it("shows the address a confirm link holds, sends no Referer and keeps the page out of caches", async () => {
+    const { apiCalls, fetch } = subscribersApi(() =>
+      Response.json({ state: "confirm", email: "ada@example.com" })
+    )
+
+    const response = await appWith(fetch)(
+      new Request(`${config.webAppOrigin}/subscribe/confirm?${tokenQuery}`),
+      info,
+    )
+
+    expect(apiCalls()).toEqual([
+      { method: "GET", url: `/api/subscribers/confirm?${tokenQuery}`, body: null },
+    ])
+    expect(response.status).toBe(200)
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer")
+    expect(response.headers.get("cache-control")).toBe("no-store")
+    const page = await response.text()
+    expect(page).toContain("ada@example.com")
+    expect(page).toContain(`name="token" value="token-from-the-link"`)
+  })
+
+  it("confirms with the link's list and token, then redirects to the page without the token", async () => {
+    const { apiCalls, fetch } = subscribersApi(() => Response.json({ state: "done" }))
+
+    const response = await appWith(fetch)(formPost("/subscribe/confirm", token), info)
+
+    expect(apiCalls()).toEqual([{ method: "POST", url: "/api/subscribers/confirm", body: token }])
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe("/subscribe/confirm?state=done")
+  })
+
+  it("shows an expired confirm link with the API's status and offers a new one", async () => {
+    const { fetch } = subscribersApi(() => Response.json({ state: "expired" }, { status: 400 }))
+
+    const response = await appWith(fetch)(formPost("/subscribe/confirm", token), info)
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toContain("This link has expired")
+  })
+
+  it("unsubscribes with the token in the API call's query, then redirects without the token", async () => {
+    const { apiCalls, fetch } = subscribersApi(() => Response.json({ state: "done" }))
+
+    const response = await appWith(fetch)(formPost("/unsubscribe", token), info)
+
+    expect(apiCalls()).toEqual([
+      { method: "POST", url: `/api/subscribers/unsubscribe?${tokenQuery}`, body: null },
+    ])
+    expect(response.status).toBe(303)
+    expect(response.headers.get("location")).toBe("/unsubscribe?state=done")
+  })
+
+  it("passes the API's 429 and Retry-After on when unsubscribes come too fast", async () => {
+    const { fetch } = subscribersApi(() =>
+      Response.json({ state: "limited" }, { status: 429, headers: { "retry-after": "30" } })
+    )
+
+    const response = await appWith(fetch)(formPost("/unsubscribe", token), info)
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get("retry-after")).toBe("30")
+    expect(await response.text()).toContain("Could not unsubscribe")
   })
 })

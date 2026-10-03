@@ -133,4 +133,10 @@ export const API_BODIES = {
     toGroupId: field(form, "toGroupId"),
     noteIds: [noteId],
   }),
+  subscribe: (form: FormData) => ({ email: field(form, "email"), list: field(form, "list") }),
+  /** The list and token a subscription link carries, for its confirm or its unsubscribe. */
+  subscriptionToken: (form: FormData) => ({
+    list: field(form, "list"),
+    token: field(form, "token"),
+  }),
 } as const
