@@ -55,6 +55,7 @@ function stack(plan = FREE_PLAN_ID, plans: Record<string, string> = {}) {
       [`${groupId}:${OWNER}`]: GroupRole.OWNER,
       [`${groupId}:${VIEWER}`]: GroupRole.VIEWER,
       [`${editableGroupId}:${OWNER}`]: GroupRole.EDITOR,
+      [`${editableGroupId}:${VIEWER}`]: GroupRole.EDITOR,
       [`${readOnlyGroupId}:${OWNER}`]: GroupRole.VIEWER,
     }),
   }
@@ -495,6 +496,28 @@ describe("notes over both transports", () => {
       })
 
       expect(response.status).toBe(402)
+      expect(notes.writes).toBe(0)
+    })
+
+    it("tells a viewer of the source group they cannot write there, even when the target is full", async () => {
+      const { notes, buses } = stack()
+      await seedTwo(notes)
+      for (let i = 0; i < 10; i++) {
+        await notes.create(
+          { groupId: editableGroupId, id: crypto.randomUUID(), title: `T${i}`, body: "" },
+          OWNER,
+          null,
+        )
+      }
+      notes.writes = 0
+
+      const response = await rest(buses, VIEWER)("POST", "/move", {
+        toGroupId: editableGroupId,
+        noteIds: [noteId],
+      })
+
+      expect(response.status).toBe(403)
+      expect((await response.json()).error.code).toBe("ROLE_INSUFFICIENT")
       expect(notes.writes).toBe(0)
     })
 

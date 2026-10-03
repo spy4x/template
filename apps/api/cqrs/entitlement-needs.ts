@@ -20,12 +20,17 @@ export const ENTITLEMENT_NEEDS: EntitlementNeeds = new Map([
     (actor) => canMutateNotes(actor),
   ),
   // A move adds its notes to the target group: the gate checks room for one there, and the write
-  // counts all of them.
+  // counts all of them. A person who cannot write in the source is not judged, so the handler
+  // answers "not an editor" (403) before a full target's plan answers 402.
   needsRoom(
     NoteMoveCommand,
     "maxNotes",
     (command) => command.data.toGroupId,
-    (actor) => canMutateNotes(actor),
+    async (actor, command, _roleOf, roleIn) => {
+      if (!canMutateNotes(actor)) return false
+      const source = await roleIn(command.data.groupId, command.data.actor.userId)
+      return source !== null && canMutateNotes(source)
+    },
   ),
   // Pending invitations take no seat: the cap counts members, here and again when one accepts.
   needsRoom(

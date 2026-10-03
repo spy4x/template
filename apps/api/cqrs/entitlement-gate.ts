@@ -37,6 +37,8 @@ export type Judge<T> = (
   actor: GroupRole,
   command: T,
   roleOf: (userId: number) => Promise<GroupRole | null>,
+  /** Any member's role in any group: for a command that also names a second group. */
+  roleIn: (groupId: string, userId: number) => Promise<GroupRole | null>,
 ) => boolean | Promise<boolean>
 
 /** The commands the gate checks, one entry each. Build entries with {@link needsFeature} and {@link needsRoom}. */
@@ -109,7 +111,12 @@ export function createEntitlementGate(
     const actorId = actorIdOf(command)
     const role = actorId === null ? null : await dependencies.roleOf(groupId, actorId)
     const judged = role !== null &&
-      await entry.judges(role, command, (userId) => dependencies.roleOf(groupId, userId))
+      await entry.judges(
+        role,
+        command,
+        (userId) => dependencies.roleOf(groupId, userId),
+        dependencies.roleOf,
+      )
     const entitlements = entitlementsOf(await dependencies.planOf(groupId), true)
     if ("limit" in entry.need) {
       const max = entitlements.limits[entry.need.limit]
