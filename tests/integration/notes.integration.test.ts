@@ -690,6 +690,24 @@ Deno.test("notes against Postgres", async (t) => {
       expect(await auditKinds(groupId)).toEqual([])
     })
 
+    await t.step("a move cannot take a note from a group other than the source", async () => {
+      const { groupId, toGroupId, editor, ids } = await twoGroups(["a"])
+      const third = await twoGroups(["secret"])
+      const [from, to] = [await nextSequence(sql, groupId), await nextSequence(sql, toGroupId)]
+
+      const error = await refusal(move(editor, groupId, toGroupId, [ids[0], third.ids[0]]))
+
+      expect(error).toMatchObject({ code: "NOTE_NOT_FOUND" })
+      const homes = await sql<{ id: string; groupId: string }[]>`
+        SELECT id, group_id FROM notes WHERE id IN ${sql([ids[0], third.ids[0]])}
+      `
+      expect(new Map(homes.map((row) => [row.id, row.groupId]))).toEqual(
+        new Map([[ids[0], groupId], [third.ids[0], third.groupId]]),
+      )
+      expect(await nextSequence(sql, groupId)).toBe(from)
+      expect(await nextSequence(sql, toGroupId)).toBe(to)
+    })
+
     await t.step(
       "a move needs edit rights in both groups, and a stranger is told the group is missing",
       async () => {
@@ -760,11 +778,11 @@ Deno.test("notes against Postgres", async (t) => {
       const input = { fromGroupId: groupId, toGroupId, noteIds: ids }
 
       const over = await refusal(notes.move(input, editor, 2))
-      const stillThere = await notes.count(groupId)
+      expect(over).toMatchObject({ code: "PLAN_LIMIT_REACHED", limit: 2 })
+      expect(await notes.count(groupId)).toBe(2)
+
       const fits = await notes.move(input, editor, 3)
 
-      expect(over).toMatchObject({ code: "PLAN_LIMIT_REACHED", limit: 2 })
-      expect(stillThere).toBe(2)
       expect(fits).toHaveLength(2)
       expect(await notes.count(toGroupId)).toBe(3)
     })
