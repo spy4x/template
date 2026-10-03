@@ -297,12 +297,12 @@ export async function deleteAccount(password: string, otp?: string): Promise<
 > {
   const result = await apiFetch<{ deleteAfter: string }>("/api/auth/account/delete", {
     method: "POST",
-    body: JSON.stringify(otp === undefined ? { password } : { password, otp }),
+    // `JSON.stringify` leaves out an undefined code.
+    body: JSON.stringify({ password, otp }),
   })
   if (!result.ok) {
     return { ok: false, blocked: result.status === 409, error: result.error.message }
   }
-  setSignOutOwed(false)
   sessionState.value = { ...sessionState.value, user: null, isMfaRequired: false }
   return { ok: true, deleteAfter: new Date(result.data.deleteAfter) }
 }
