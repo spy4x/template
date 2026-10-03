@@ -76,6 +76,9 @@ export function planDeploy(values: Record<string, string>, envFilePath: string):
       command: "rsync",
       args: [
         "-avhzru",
+        // Removes files deleted here, so a stale module cannot break the build on the server.
+        // Excluded paths (the env file, the private key) are never deleted: no --delete-excluded.
+        "--delete",
         "-e",
         "ssh",
         "--exclude-from=infra/deploy/exclude.txt",
