@@ -7,6 +7,7 @@ import { shutdownSignal, ShutdownSignalError } from "@spy4x/platform/server/shut
 import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
 import { createMailSender, mailOffWarning, readMailSetup } from "@server/mail/mail.ts"
 import { systemEnv } from "@spy4x/server/config"
+import { readSubscribersSetup, subscribersOffWarning } from "@server/subscribers/subscribers.ts"
 // The API's own reading of the billing variables, so both processes run one provider.
 import { readBillingSetup } from "../api/features/billing/config.ts"
 
@@ -38,6 +39,14 @@ const mailSetup = readMailSetup(Deno.env)
 const mailWarning = mailOffWarning(mailSetup)
 if (mailWarning) console.warn(mailWarning)
 
+// The worker signs the subscriber links it mails; the API checks them with the same secrets.
+const subscribersSetup = readSubscribersSetup(
+  Deno.env,
+  Deno.env.get("ENV") === "dev" ? "dev" : "prod",
+)
+const subscribersWarning = subscribersOffWarning(subscribersSetup)
+if (subscribersWarning) console.warn(subscribersWarning)
+
 // A per-member subscription's quantity is changed from here, through the outbox, so a provider
 // that is down never holds a new member back. A setup that cannot run stops the worker, as it stops
 // the API.
@@ -46,13 +55,18 @@ const billingSetup = readBillingSetup(systemEnv, Deno.env.get("ENV") === "dev" ?
 // A committed group change is announced on a Postgres channel; the API process, which holds the
 // sockets, turns it into a hint for the group's members. The same table holds jobs: a row that
 // belongs to no group and runs when its time has come.
-const processor = createOutboxProcessor(sql, {
-  store: createPostgresAuthStore(sql),
-  sender: createMailSender(mailSetup, sql),
-  // The API's own rule (apps/api/services/config.ts): plain HTTP only in development.
-  brand: { webAppUrl: `http${Deno.env.get("ENV") === "dev" ? "" : "s"}://${domain}` },
-  log: (line) => console.error(line),
-}, billingSetup.provider)
+const processor = createOutboxProcessor(
+  sql,
+  {
+    store: createPostgresAuthStore(sql),
+    sender: createMailSender(mailSetup, sql),
+    // The API's own rule (apps/api/services/config.ts): plain HTTP only in development.
+    brand: { webAppUrl: `http${Deno.env.get("ENV") === "dev" ? "" : "s"}://${domain}` },
+    log: (line) => console.error(line),
+  },
+  billingSetup.provider,
+  subscribersSetup,
+)
 
 // Starts the nightly chain the first time; a restart finds the row and adds nothing.
 await scheduleNightlyJobs(sql)

@@ -66,6 +66,9 @@ The screenshots and the GIF use a throw-away database and a made-up user;
   shows a stale write as a conflict to settle, never as a silent overwrite. The layer sits in one
   folder, so a product that does not want it deletes the folder and keeps an online SPA:
   [docs/offline.md](docs/offline.md).
+- **Mailing lists.** Visitors subscribe at `/subscribe` with double opt-in, and every list mail
+  carries a one-click unsubscribe. The worker signs the links with `SUBSCRIBERS_SECRET` and sends
+  the confirm, welcome and issue mail: [docs/architecture.md](docs/architecture.md#mail-subscriptions).
 - **CQRS with an outbox.** Commands, queries and events go through one bus. Creating a shared
   group writes its event to `outbox_events`, and the worker drains that table.
 - **Safe API defaults.** Every mutation must come from the web app's own origin, and group lists
@@ -178,6 +181,7 @@ Current tasks come from [`deno.jsonc`](deno.jsonc).
 | `deno task db:migrate`       | Apply the SQL migrations in `libs/server/db`           |
 | `deno task db:reset`         | Drop, migrate and seed a dev database (`ENV=dev` only) |
 | `deno task spa:build`        | Build the SPA                                          |
+| `deno task subscribers:send` | Queue an issue for a mailing list (worker container)   |
 | `deno task deploy`           | Copy the production files to the server and start them |
 
 Run individual app tasks with `api:*`, `spa:*`, or `mpa:*`. Deno workspace members inherit shared

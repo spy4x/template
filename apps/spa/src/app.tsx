@@ -21,6 +21,7 @@ import { AuthView } from "./views/AuthView.tsx"
 import { EmailView } from "./views/EmailView.tsx"
 import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView.tsx"
 import { GroupsView } from "./views/GroupsView.tsx"
+import { SubscribeView, SubscriptionConfirmView, UnsubscribeView } from "./views/SubscribeViews.tsx"
 import { GroupSettingsView } from "./views/GroupSettingsView.tsx"
 import { InvitationView } from "./views/InvitationView.tsx"
 import { invitationsStore } from "./state/invitations.ts"
@@ -65,6 +66,9 @@ function Routes() {
       <Route path="/forgot-password" component={ForgotPasswordView} />
       <Route path="/reset-password" component={ResetPasswordView} />
       <Route path="/email" component={EmailView} />
+      <Route path="/subscribe" component={SubscribeView} />
+      <Route path="/subscribe/confirm" component={SubscriptionConfirmView} />
+      <Route path="/unsubscribe" component={UnsubscribeView} />
       <Route path="/groups" component={GroupsView} />
       <Route path="/groups/:groupId">
         {(params) => <GroupSettingsView groupId={params.groupId} />}

@@ -21,12 +21,14 @@ COPY libs/domain/billing/deno.json ./libs/domain/billing/deno.json
 COPY libs/domain/groups/deno.json ./libs/domain/groups/deno.json
 COPY libs/domain/identity/deno.json ./libs/domain/identity/deno.json
 COPY libs/domain/notes/deno.json ./libs/domain/notes/deno.json
+COPY libs/domain/subscribers/deno.json ./libs/domain/subscribers/deno.json
 COPY libs/server/auth/deno.json ./libs/server/auth/deno.json
 COPY libs/server/billing/deno.json ./libs/server/billing/deno.json
 COPY libs/server/groups/deno.json ./libs/server/groups/deno.json
 COPY libs/server/jobs/deno.json ./libs/server/jobs/deno.json
 COPY libs/server/mail/deno.json ./libs/server/mail/deno.json
 COPY libs/server/notes/deno.json ./libs/server/notes/deno.json
+COPY libs/server/subscribers/deno.json ./libs/server/subscribers/deno.json
 COPY libs/ui/deno.json ./libs/ui/deno.json
 
 # Install dependencies (this layer will be cached if deno.jsonc doesn't change)
