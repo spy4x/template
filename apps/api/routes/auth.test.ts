@@ -1218,6 +1218,18 @@ describe("deleting one's own account", () => {
     expect(calls).toEqual([])
   })
 
+  it("refuses a session that still owes its authenticator code and deletes nothing", async () => {
+    const owing = buildAuthData({
+      user: { mfa: UserMFAStatus.CONFIGURED },
+      session: { secondFactor: SecondFactorStatus.Pending },
+    })
+    const { app, calls } = buildApp(owing)
+    const response = await send(app, withCode, sameOriginHeaders)
+
+    expect(response.status).toBe(401)
+    expect(calls).toEqual([])
+  })
+
   it("names the groups that stop it with 409, before the password is checked", async () => {
     const { app, calls } = buildApp(undefined, {
       signIn: { accountDeletionBlockers: () => Promise.resolve([blocker]) },
