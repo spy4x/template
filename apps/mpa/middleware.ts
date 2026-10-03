@@ -9,14 +9,12 @@ import { createSameOriginCheck } from "@spy4x/server/http/same-origin"
  *
  * 1. refuses a post from another site with 403 before anything else runs: the API's own rule
  *    (`Sec-Fetch-Site: same-origin`, and `Origin` equal to `webAppOrigin` or `null`), without its
- *    session cookie check, since the sign-in and sign-up forms post before there is a session;
+ *    session cookie check, since the MPA has no session;
  * 2. gives the route an API client bound to this request, which presents an MPA on its own domain
  *    to the API as the API's origin once step 1 has passed;
- * 3. hands the browser every cookie the API set, exactly as the API wrote it (`HttpOnly`, `Secure`
- *    outside development, `SameSite=Lax`);
- * 4. answers a form it cannot read with {@link FormRejected}'s status;
- * 5. forbids framing, so another site cannot trick a click on a form, and keeps signed-in pages out
- *    of shared caches and the back-button cache.
+ * 3. answers a form it cannot read with {@link FormRejected}'s status;
+ * 4. forbids framing, so another site cannot trick a click on a form, and keeps pages out of shared
+ *    caches, since the newsletter pages carry a token in their address.
  */
 export function pageMiddleware(
   config: MpaConfig,
@@ -28,15 +26,14 @@ export function pageMiddleware(
   })
   return define.middleware(async (ctx) => {
     if (crossSiteRefusal(ctx.req)) {
-      return withPageHeaders(new Response("Cross-site request refused", { status: 403 }), [])
+      return withPageHeaders(new Response("Cross-site request refused", { status: 403 }))
     }
-    const setCookies: string[] = []
     ctx.state.webAppOrigin = config.webAppOrigin
+    ctx.state.spaOrigin = config.apiOrigin
     ctx.state.api = createApi({
       apiUrl: config.apiUrl,
       request: ctx.req,
       remoteAddress: remoteAddress(ctx.info),
-      setCookies,
       origins: config.webAppOrigin === config.apiOrigin
         ? undefined
         : { page: config.webAppOrigin, api: config.apiOrigin },
@@ -49,7 +46,7 @@ export function pageMiddleware(
       if (!(error instanceof FormRejected)) throw error
       response = new Response(error.message, { status: error.status })
     }
-    return withPageHeaders(response, setCookies)
+    return withPageHeaders(response)
   })
 }
 
@@ -58,9 +55,8 @@ function remoteAddress(info: Deno.ServeHandlerInfo): string {
   return address.transport === "tcp" || address.transport === "udp" ? address.hostname : ""
 }
 
-function withPageHeaders(response: Response, setCookies: readonly string[]): Response {
+function withPageHeaders(response: Response): Response {
   const headers = new Headers(response.headers)
-  for (const cookie of setCookies) headers.append("set-cookie", cookie)
   headers.set("x-frame-options", "DENY")
   headers.set("content-security-policy", "frame-ancestors 'none'")
   if (headers.get("content-type")?.startsWith("text/html")) {

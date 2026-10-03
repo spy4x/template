@@ -1,13 +1,11 @@
-import { type PlanRefusal, readPlanRefusal } from "@domain/billing"
 /**
- * The browser's request headers the API needs: the session cookie, the two headers the API's
- * cross-site guard checks, and what its audit log and rate limits record. All pass on unchanged,
+ * The browser's request headers the API needs: the two headers the API's cross-site guard checks,
+ * and what its rate limits record. The MPA has no session, so no cookie passes either way. All pass on unchanged,
  * except an `Origin` equal to the MPA's own when the MPA has its own domain (see `createApi`). The
  * MPA never adds `Origin` or `Sec-Fetch-Site` itself, so it cannot vouch for a post the browser
  * did not make.
  */
 const FORWARDED_HEADERS = [
-  "cookie",
   "origin",
   "sec-fetch-site",
   "user-agent",
@@ -30,8 +28,7 @@ export interface Api {
 
 /**
  * An API client bound to one browser request. Each call carries the request's
- * {@link FORWARDED_HEADERS}, and every `Set-Cookie` the API answers with lands in `setCookies`, for
- * the page's response to hand to the browser as the API wrote it.
+ * {@link FORWARDED_HEADERS}; a `Set-Cookie` the API answers with never reaches the browser.
  *
  * `remoteAddress` fills `X-Real-IP` when no proxy in front of the MPA set it, so the API's rate
  * limits count the browser, not the MPA.
@@ -42,12 +39,11 @@ export interface Api {
  * MPA's own; any other value, `null` included, passes on unchanged for the API to judge.
  */
 export function createApi(
-  { apiUrl, request, remoteAddress, setCookies, origins, fetch = globalThis.fetch }: {
+  { apiUrl, request, remoteAddress, origins, fetch = globalThis.fetch }: {
     apiUrl: string
     request: Request
     origins?: { page: string; api: string }
     remoteAddress: string
-    setCookies: string[]
     fetch?: typeof globalThis.fetch
   },
 ): Api {
@@ -67,7 +63,6 @@ export function createApi(
         body: json === undefined ? undefined : JSON.stringify(json),
         redirect: "manual",
       })
-      setCookies.push(...response.headers.getSetCookie())
       const text = await response.text()
       let body: unknown = null
       try {
@@ -81,11 +76,6 @@ export function createApi(
         : { status: response.status, body, retryAfter }
     },
   }
-}
-
-/** Whether the answer is a success. */
-export function isOk(answer: ApiAnswer): boolean {
-  return answer.status >= 200 && answer.status < 300
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -102,16 +92,4 @@ export function errorMessage(answer: ApiAnswer, fallback: string): string {
   if (typeof error === "string") return error
   if (isRecord(error) && typeof error.message === "string") return error.message
   return fallback
-}
-
-/** What the group's plan refused, from the `error` of a 402 answer, or `null`. */
-export function planRefusalOf(answer: ApiAnswer): PlanRefusal | null {
-  return isRecord(answer.body) ? readPlanRefusal(answer.body.error) : null
-}
-
-/** The code of a group or note error, such as `VERSION_CONFLICT`. */
-export function errorCode(answer: ApiAnswer): string | undefined {
-  if (!isRecord(answer.body) || !isRecord(answer.body.error)) return undefined
-  const { code } = answer.body.error
-  return typeof code === "string" ? code : undefined
 }

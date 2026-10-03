@@ -106,7 +106,7 @@ deno serve --allow-all --port "$API_PORT" --host 127.0.0.1 apps/api/index.ts \
 PIDS+=($!)
 wait_for api "${PIDS[-1]}" "http://127.0.0.1:$API_PORT/api/health"
 
-# The worker sends the password reset mails the reset spec reads back through /api/test/last-mail.
+# The worker sends the newsletter mails the subscribe spec reads back through /api/test/last-mail.
 deno run --allow-all apps/worker/+main.ts >"$SCRATCH/worker.log" 2>&1 &
 PIDS+=($!)
 for _ in $(seq 1 120); do
@@ -121,10 +121,10 @@ deno task mpa:build
 deno serve --allow-all --port "$MPA_PORT" --host 127.0.0.1 apps/mpa/_fresh/server.js \
   >"$SCRATCH/mpa.log" 2>&1 &
 PIDS+=($!)
-wait_for mpa "${PIDS[-1]}" "http://127.0.0.1:$MPA_PORT/sign-in"
+wait_for mpa "${PIDS[-1]}" "http://127.0.0.1:$MPA_PORT/health"
 
 deno run --allow-net --allow-env e2e/mpa/proxy.ts >"$SCRATCH/proxy.log" 2>&1 &
 PIDS+=($!)
-wait_for proxy "${PIDS[-1]}" "$MPA_BASE_URL/sign-in"
+wait_for proxy "${PIDS[-1]}" "$MPA_BASE_URL/health"
 
 deno task --cwd apps/mpa e2e
