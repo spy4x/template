@@ -364,6 +364,15 @@ CREATE TABLE billing_customers (
 CREATE UNIQUE INDEX idx_billing_customers_provider_customer_id
     ON billing_customers (provider_customer_id);
 
+-- Customers handed over by a transfer of ownership (#250), for good. See the migration for the why.
+CREATE TABLE billing_handed_over_customers (
+    provider_customer_id VARCHAR(255) PRIMARY KEY,
+    group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    -- The owner who paid with this customer; `NULL` once their account is deleted.
+    previous_owner_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
+    handed_over_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
 -- A group's subscription as the newest applied event left it. `provider_event_at` and
 -- `provider_event_rank` (1 created, 2 updated, 3 canceled) order the events: one that sorts before
 -- them is older and changes nothing, so a late delivery never rolls the plan back.
@@ -388,6 +397,9 @@ CREATE TABLE subscriptions (
     -- Whether this subscription was ever active, so it has paid at least once (#247). Only then
     -- does a failed payment get the grace period; a trial whose first charge fails gets none.
     ever_active BOOLEAN DEFAULT FALSE NOT NULL,
+    -- The customer this subscription bills (#250), so a handed-over customer's subscription is
+    -- known by its own customer and not by the group's current one.
+    provider_customer_id VARCHAR(255),
     CONSTRAINT subscriptions_status_check CHECK (status BETWEEN 1 AND 6),
     CONSTRAINT subscriptions_provider_event_rank_check CHECK (provider_event_rank BETWEEN 1 AND 3),
     CONSTRAINT subscriptions_past_due_since_check

@@ -1228,7 +1228,7 @@ describe("the groups pages", () => {
       memberCount: 2,
     })
 
-  it("tells the owner of a subscribed group that the subscription moves and stays on their card", async () => {
+  it("tells the owner of a subscribed group that the old card is not charged again after a transfer", async () => {
     const billing = (subscribed: boolean) => ({
       enabled: true,
       planId: "pro",
@@ -1256,7 +1256,7 @@ describe("the groups pages", () => {
       return html.slice(start, html.indexOf("</p>", start))
     }
 
-    expect(await explanation(true)).toContain("stays on your card")
+    expect(await explanation(true)).toContain("your card is not charged again")
     expect(await explanation(false)).not.toContain("subscription")
   })
 

@@ -120,6 +120,7 @@ const GROUP_ERROR_CODES: Record<
   NAME_MISMATCH: "bad_request",
   PASSWORD_INVALID: "bad_request",
   ROLE_INSUFFICIENT: "forbidden",
+  SUBSCRIPTION_RENEWS: "conflict",
   USER_NOT_ACTIVE: "unauthorized",
 }
 

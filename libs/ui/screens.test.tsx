@@ -1710,14 +1710,14 @@ describe("GroupTransferSection without JavaScript", () => {
     expect(noScriptSurface(screen).forms).toEqual([])
   })
 
-  it("says the transfer comes before deleting the account, and the subscription moves", () => {
+  it("says the transfer comes before deleting the account, and a subscription must be cancelled first", () => {
     const plain = renderToString(<GroupTransferSection {...transferDefaults} />)
     const paid = renderToString(<GroupTransferSection {...transferDefaults} hasSubscription />)
 
     expect(plain).toContain("Before you can delete your account")
     expect(plain).toContain("you become an admin")
-    expect(plain).not.toContain("The subscription moves with the group")
-    expect(paid).toContain("The subscription moves with the group")
+    expect(plain).not.toContain("A subscription that renews blocks the transfer")
+    expect(paid).toContain("A subscription that renews blocks the transfer")
   })
 
   it("opens with a refused transfer under the field it names, tied to that field", () => {

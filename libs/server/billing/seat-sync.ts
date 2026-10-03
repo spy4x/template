@@ -26,6 +26,18 @@ export const MEMBERSHIP_EVENTS: readonly string[] = [
 const SEAT_PLAN_IDS = PLANS.filter((plan) => plan.perSeat).map((plan) => plan.id)
 
 /**
+ * A condition on `subscriptions` rows: the subscription's own customer has not been handed over by
+ * a transfer of ownership (#250). The previous owner's subscription only runs out its period, and
+ * the app never changes what their card is billed for a group they no longer own.
+ */
+function notHandedOver(sql: postgres.Sql): postgres.PendingQuery<postgres.Row[]> {
+  return sql`NOT EXISTS (
+    SELECT 1 FROM billing_handed_over_customers AS handed
+    WHERE handed.provider_customer_id = subscriptions.provider_customer_id
+  )`
+}
+
+/**
  * Queues a seat sync for the group, to run at once. The queue time is the row's version, so two
  * changes in one millisecond queue one sync; each sync reads the count when it runs, so one is
  * enough.
@@ -68,11 +80,15 @@ export function seatSyncJob(
         WHERE group_id = ${groupId}
           AND status <> ${BillingStatus.Canceled}
           AND plan_id IN ${sql(SEAT_PLAN_IDS)}
+          AND ${notHandedOver(sql)}
       `
     )[0]
     if (!row) return
     const members = await new PostgresInvitationRepository(sql).countMembers(groupId)
     if (members < 1 || row.quantity === members) return
+    // No lock is held over the provider call. A transfer of ownership that commits between the
+    // read above and this call still lets one change through; a transfer moves no member count, so
+    // that change is the one the old owner's group already needed.
     const result = await provider.updateQuantity({
       subscriptionId: row.providerSubscriptionId,
       quantity: members,
@@ -117,6 +133,7 @@ export async function queueSeatDrift(sql: postgres.Sql, now = new Date()): Promi
   const billed = await sql<{ groupId: string; quantity: number | null }[]>`
     SELECT group_id, quantity FROM subscriptions
     WHERE status <> ${BillingStatus.Canceled} AND plan_id IN ${sql(SEAT_PLAN_IDS)}
+      AND ${notHandedOver(sql)}
   `
   // Counted the way `maxMembers` is, one group at a time: few groups pay, and one count stays the
   // only definition of a seat.

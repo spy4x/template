@@ -62,6 +62,10 @@ const ERROR_DEFINITIONS: Record<GroupFeatureErrorCode, ErrorDefinition> = {
   MFA_REQUIRED: { status: 401, message: "Complete MFA to access groups" },
   REQUEST_ORIGIN_INVALID: { status: 403, message: "Request origin is invalid" },
   ROLE_INSUFFICIENT: { status: 403, message: "Group role is insufficient" },
+  SUBSCRIPTION_RENEWS: {
+    status: 409,
+    message: "Cancel the group's subscription in the billing portal before transferring it",
+  },
   USER_NOT_ACTIVE: { status: 401, message: "Authentication required" },
 }
 

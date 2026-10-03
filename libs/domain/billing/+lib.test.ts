@@ -16,6 +16,7 @@ import {
   entitlementsOf,
   FREE_PLAN_ID,
   graceEndsAt,
+  handoverTrialDays,
   hasLiveSubscription,
   isSeatBilled,
   PlanError,
@@ -177,6 +178,32 @@ describe("billing domain", () => {
     expect(effectivePlanId(cancelled(), at(0), DEFAULT_GRACE_DAYS)).toBe(FREE_PLAN_ID)
     expect(effectivePlanId(cancelled({ cancelAtPeriodEnd: false }), at(0), DEFAULT_GRACE_DAYS))
       .toBe(PRO_PLAN_ID)
+  })
+
+  it("carries the old owner's remaining plan time over to the new owner's trial, in whole days rounded up", () => {
+    expect(handoverTrialDays(cancelled(), at(-20 * DAY), 7)).toBe(20)
+    expect(handoverTrialDays(cancelled(), at(-20 * DAY + 1), 7)).toBe(20)
+    expect(handoverTrialDays(cancelled(), at(-1), 7)).toBe(1)
+    // A trial cancelled at its end carries over only the trial.
+    expect(handoverTrialDays(trial({ cancelAtPeriodEnd: true }), at(-2 * DAY), 7)).toBe(2)
+  })
+
+  it("carries over nothing once the plan has ended, or while the old subscription still renews", () => {
+    expect(handoverTrialDays(cancelled(), at(0), 7)).toBeNull()
+    expect(handoverTrialDays(cancelled({ status: BillingStatus.Canceled }), at(-DAY), 7))
+      .toBeNull()
+    expect(handoverTrialDays(cancelled({ cancelAtPeriodEnd: false }), at(-DAY), 7)).toBeNull()
+    // A trial that converts at its end charges the card then: it renews, though it has an end.
+    expect(handoverTrialDays(trial(), at(-2 * DAY), 7)).toBeNull()
+    expect(handoverTrialDays(null, at(-DAY), 7)).toBeNull()
+  })
+
+  it("carries over a past-due plan only until its grace ends, not to the period's end", () => {
+    const pastDue = cancelled({ status: BillingStatus.PastDue, pastDueSince: FAILED_AT })
+
+    // Past due since October 1, so the seven-day grace ends October 8, before the period ends.
+    expect(handoverTrialDays(pastDue, NOW, 7)).toBe(6)
+    expect(handoverTrialDays(pastDue, new Date(FAILED_AT.getTime() + 7 * DAY), 7)).toBeNull()
   })
 
   it("tells of a trial's end only in its last three days, counting the days left", () => {

@@ -164,9 +164,48 @@ address. A failed send is retried. With mail off, nothing is sent.
   `ALREADY_SUBSCRIBED`), even when that subscription shows as Free (paused, incomplete, or on a price
   not in the catalog). The owner changes or cancels it in the portal.
 - The owner sees the portal button whenever the group has a live subscription or a Stripe customer
-  (past invoices, the card on file).
+  (past invoices, the card on file), except a customer handed over by a transfer of ownership
+  ("Transfer of ownership" below).
 - A group with a live subscription cannot be deleted (409 `GROUP_SUBSCRIBED`); the owner cancels the
   subscription in the portal first. The settings page disables the delete button and says why.
+
+## Transfer of ownership
+
+A Stripe customer belongs to one group (`billing_customers`, keyed by the group) and carries the
+card, name, address and invoices of the owner who checked out. Stripe cannot move a subscription to
+another customer. So a transfer of ownership
+([#250](https://github.com/spy4x/template/issues/250)) never gives the new owner the old owner's
+customer, and never lets the old owner's card be charged again without their say:
+
+1. **A subscription that still renews refuses the transfer** (409 `SUBSCRIPTION_RENEWS`). The owner
+   cancels it in the portal first, at the end of the paid period. A subscription cancelled at its
+   period's end, or one that has ended, lets the transfer through. The check runs in the transfer's
+   transaction, under the group lock (`handOverBilling` in `libs/server/billing/handover.ts`).
+2. **The transfer records the old customer as handed over, for good**
+   (`billing_handed_over_customers`, with the owner who paid with it). From then on the app opens no
+   portal for it: the new owner gets no **Manage billing** button and
+   the portal answers 409 `NO_SUBSCRIPTION`, and the old owner, now an admin, may not open it
+   either. Nobody sees the old owner's billing details through the app. No subscription of that
+   customer ever takes the group back, even one that pays later (a past-due invoice paid on retry,
+   an edit in the Stripe dashboard): its events update only the subscription the group still holds.
+   Each subscription stores its own customer, and that customer decides.
+3. **The group keeps its plan until the paid period ends**, as any cancelled plan does. Nothing is
+   charged in that time: the subscription does not renew, and the worker changes no seats on it
+   (the seat sync and the nightly drift check skip a subscription whose own customer is handed
+   over). Its mails, such as "plan ending" or "payment failed", go to the old owner who pays for it,
+   never to the new owner.
+4. **The new owner checks out with a customer of their own.** The settings page shows them the
+   plan with **See plans**, with no notice about the old subscription. Their checkout carries no
+   customer, so Stripe makes a new one, and starts with a trial that lasts until the old plan ends
+   (`handoverTrialDays`, whole days rounded up), with a card always asked. The new owner is first
+   charged when the old owner's paid time is over, and the two subscriptions never bill the same
+   days. The new subscription takes over the group as soon as it trials ("Flow" below), its customer
+   replaces the old one, and the old subscription's later events, its end included, change
+   nothing.
+   Once the old plan has ended, the new owner's checkout has no trial: a trial is given once per
+   group.
+
+The settings page tells the owner this before they transfer.
 
 ## Entitlements
 
@@ -375,5 +414,22 @@ provider, so its public secret cannot sign a real event.
   a group therefore run one after another. With two workers, two syncs could run at once and the
   older count could reach Stripe last: the stored quantity would then match the members while
   Stripe bills another count, and only a later webhook from Stripe would correct it.
+- A transfer reads the subscription as the webhooks last reported it. If the owner renews a cancelled
+  subscription in the portal and transfers the group before Stripe's webhook for the renewal
+  arrives, the transfer goes through and the subscription renews on their card. Nobody can then
+  reach its portal through the app: cancel it in the Stripe dashboard.
+- If the old owner renews the cancelled subscription in Stripe after the transfer, outside the app,
+  the group keeps it and the new owner sees **See plans**, but their checkout answers 409
+  `ALREADY_SUBSCRIBED`. Nobody can reach that subscription's portal through the app: cancel it in
+  the Stripe dashboard.
+- The handover trial carries over the old plan's remaining days whatever plan the new owner picks,
+  so days left of a cheaper plan become free days of a dearer one.
+- After a transfer the new owner cannot delete the group until the old subscription has ended (409
+  `GROUP_SUBSCRIBED`), and that refusal still tells them to cancel in the portal, which they cannot
+  open.
+- The new owner's first subscription after a transfer is a trial in Stripe's terms, so the trial
+  notice ("Notices" above) tells them the trial ends three days before the old plan would have.
+- The old owner, now an admin, can no longer see past invoices through the app; Stripe's receipts
+  reach them by mail.
 - The worker imports `readBillingSetup` from the API (`apps/api/features/billing/config.ts`)
   rather than from a shared library.
