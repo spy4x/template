@@ -113,7 +113,7 @@ Deno.test("details: the database refuses a description over 500 characters", asy
         { description: "x".repeat(501), color: null, emoji: null },
         owner,
       ),
-    ).rejects.toThrow()
+    ).rejects.toThrow(`groups_description_check`)
   })
 })
 
