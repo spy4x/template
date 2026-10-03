@@ -118,7 +118,9 @@ export async function moveNoteRows(
         change_sequence = ${input.changeSequence}::bigint
     WHERE group_id = ${input.fromGroupId}
       AND deleted_at IS NULL
-      ${input.noteIds === null ? transaction`` : transaction`AND id IN ${transaction(input.noteIds)}`}
+      ${
+    input.noteIds === null ? transaction`` : transaction`AND id IN ${transaction(input.noteIds)}`
+  }
     RETURNING id
   `
   // One missing note refuses the whole move, and the transaction takes the others back.

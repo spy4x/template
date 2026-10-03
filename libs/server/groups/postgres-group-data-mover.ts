@@ -2,8 +2,8 @@ import type postgres from "postgres"
 import {
   assertCanMoveGroupData,
   GROUP_DATA_EVENTS,
-  GroupError,
   type GroupDataMover,
+  GroupError,
   type GroupMoveAllInput,
   type GroupMoveAllResult,
   type GroupRole,
