@@ -638,6 +638,21 @@ describe("GroupMembersSection", () => {
     expect(focused()).toBe("invite-open")
   })
 
+  it("leaves focus alone when a member whose role changed earlier leaves later", async () => {
+    const page = (over: Partial<GroupMembersSectionProps>) => (
+      <div>
+        <GroupMembersSection {...props} {...over} />
+        <input data-e2e="elsewhere" />
+      </div>
+    )
+    await mount(page({}))
+    await rerender(page({ pendingUserId: 3 }))
+    await rerender(page({}))
+    find<HTMLInputElement>("[data-e2e=elsewhere]").focus()
+    await rerender(page({ members: [owner, editor] }))
+    expect(focused()).toBe("elsewhere")
+  })
+
   it("moves focus to a refused change's message under the member's row", async () => {
     await mount(<GroupMembersSection {...props} />)
     await rerender(

@@ -187,12 +187,18 @@ export function useFocusAfterRemoval(
   useEffect(() => {
     known.current = ids
     const gone = awaited.current
-    if (!gone || ids === null || ids.includes(gone.id)) return
+    if (!gone || ids === null) return
+    if (ids.includes(gone.id)) {
+      // The request ended and the row stayed (a role change, a refusal): stop waiting for it, so
+      // a later departure for another reason leaves focus where the person is.
+      if (pendingId === null) awaited.current = null
+      return
+    }
     awaited.current = null
     const rows = Array.from(list.current?.children ?? []).slice(Math.max(gone.index, 0))
     const menu = rows.map((row) => row.querySelector("button")).find((button) => button !== null)
     ;(menu ?? fallback())?.focus()
-  }, [key])
+  }, [key, pendingId])
 }
 
 /**
