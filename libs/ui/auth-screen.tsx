@@ -41,7 +41,7 @@ const LOGIN_LABELS: Record<AuthScreenKind, string> = {
 const COPY: Record<AuthScreenKind, { title: string; description: string; failure: string }> = {
   "sign-in": {
     title: "Welcome back",
-    description: "Sign in with your e-mail address and password.",
+    description: "Sign in with your e-mail address or username.",
     failure: "Sign in failed",
   },
   "sign-up": {
