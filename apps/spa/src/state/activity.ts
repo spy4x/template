@@ -56,7 +56,9 @@ export function createActivityStore(dependencies: ActivityDependencies) {
   async function loadMore(): Promise<void> {
     const id = groupId.value
     const cursor = nextCursor.value
-    if (id === null || cursor === null || loadingMore.value) return
+    // While the first page is still on its way there is nothing to continue from, and a second
+    // read would make `open` drop its answer.
+    if (id === null || cursor === null || loading.value || loadingMore.value) return
     const read = ++reads
     loadingMore.value = true
     error.value = null

@@ -48,6 +48,28 @@ describe("activity store", () => {
     expect(asked.length).toBe(2)
   })
 
+  it("keeps the reopened first page when Load more is pressed before it returns", async () => {
+    const reopened = deferred<ActivityPageResult>()
+    const asked: (string | null)[] = []
+    let calls = 0
+    const store = createActivityStore({
+      list: ({ cursor }) => {
+        asked.push(cursor)
+        return ++calls === 1
+          ? Promise.resolve({ events: [row(2)], nextCursor: "c1" })
+          : reopened.promise
+      },
+    })
+    await store.open("g")
+    const again = store.open("g")
+    await store.loadMore()
+    reopened.resolve({ events: [row(5), row(4)], nextCursor: null })
+    await again
+    expect(asked).toEqual([null, null])
+    expect(store.events.value.map((event) => event.id)).toEqual(["5", "4"])
+    expect(store.loading.value).toBe(false)
+  })
+
   it("keeps the events and shows the message when the next page fails", async () => {
     const store = createActivityStore({
       list: ({ cursor }) =>
