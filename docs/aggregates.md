@@ -22,7 +22,7 @@ group reads notes; an editor or above writes them.
 - **Every command carries an idempotency key** over the socket, and **every update and delete names
   the version it saw**. A stale version is refused with a typed conflict that carries the current
   version, instead of overwriting a change the client never saw.
-- **Screens are dumb and work without JavaScript** (see "Three layers of UI" in `AGENTS.md`).
+- **Screens are dumb: props in, callbacks out** (see "Three layers of UI" in `AGENTS.md`).
 
 ## The files, in order
 
@@ -107,16 +107,14 @@ has its own address, a back link to the list and room for a long text.
 
 | File                      | What it holds                                                                                                                                                                                                                                                                                                  |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `progressive.tsx`         | `NOTE_PATHS`: the routes the forms post to and the pages link to. They carry no group id: `/notes`, `/notes/new`, `/notes/:id` and `/notes/:id/delete` act on the person's selected group (see "How a group call travels", item 8, in `docs/handoff.md`).                                                       |
+| `progressive.tsx`         | `NOTE_PATHS`: the pages the screens link to: `/notes`, `/notes/new` and `/notes/:id`. They carry no group id: the SPA acts on the person's selected group (see "How a group call travels", item 8, in `docs/handoff.md`).                                                       |
 | `notes-screen.tsx`        | The list page, `NotesScreen`: props in, links out, no form. "New note" and each note's title are links. A viewer gets the list and no "New note".                                                                                                                                                              |
 | `note-editor-screen.tsx`  | The editor page, `NoteEditorScreen`, for `/notes/new` (no note yet) and `/notes/:id`. The form posts the API's field names; "Save" and "Cancel" are the form's own. A viewer gets the note as text. A note that cannot be read is "Note not found". The version conflict link and message are part of the screen. |
-| `screens.test.tsx`        | Renders each screen on the server and checks that every action is a working form or link whose fields match the request schema.                                                                                                                                                                                |
-| `interactions.test.tsx`   | Drives each screen in a browser DOM: typing, submitting through the callback or natively, and the delete dialog.                                                                                                                                                                                                |
+| `screens.test.tsx`        | Renders the newsletter screens on the server and checks that every action is a working form or link whose fields match the request schema.                                                                                                                                                                                |
+| `interactions.test.tsx`   | Drives each screen in a browser DOM: typing, submitting through the callback, and the delete dialog.                                                                                                                                                                                                |
 
-Deleting asks first. With the app's `onDelete`, "Delete" opens preact-components' `ConfirmDialog`.
-Without it (the page without JavaScript), "Delete" is a link to `GET /notes/:id/delete`, a page that
-asks "delete this note?" in a form posting the version; a refusal shows the note's page again, as
-it is now, with the error.
+Deleting asks first. With the app's `onDelete`, "Delete" in the page's menu opens
+preact-components' `ConfirmDialog`; without it, the menu has no delete.
 
 **A note in another of the person's groups.** A note belongs to one group, and the pages work on the
 person's selected group. A link must never change the selection (another site could switch a

@@ -6,7 +6,7 @@ import { Input } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { Link } from "@spy4x/preact-ui/link"
 import { AuthCard } from "./auth-screen.tsx"
-import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
+import { type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
 /** The messages shown when a step failed without a message of its own. */
 export const PASSWORD_RESET_FAILURES = {
@@ -85,7 +85,7 @@ export function ForgotPasswordScreen(
       description="Enter the e-mail address you signed up with. We mail you a link to choose a new password; it works once, for 30 minutes."
       after={<>Remembered it? {signInLink(navigate)}</>}
     >
-      <ScreenForm action={FORM_ACTIONS.forgotPassword} pending={pending} onSubmit={onSubmit}>
+      <ScreenForm pending={pending} onSubmit={onSubmit}>
         <Stack>
           <Field id="forgot-password-email" label="E-mail" error={error} required>
             <Input
@@ -182,10 +182,8 @@ export function ResetPasswordScreen(
         </>
       }
     >
-      <ScreenForm action={FORM_ACTIONS.resetPassword} pending={pending} onSubmit={onSubmit}>
+      <ScreenForm pending={pending} onSubmit={onSubmit}>
         <Stack>
-          <input type="hidden" name="email" value={email} />
-          <input type="hidden" name="code" value={code} />
           <Field
             id="reset-password-new"
             label="New password"

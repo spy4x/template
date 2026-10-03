@@ -21,12 +21,13 @@ import {
   PAID_PLANS,
   type SeatPrice,
 } from "@domain/billing"
-import { PageHeader } from "./group-page.tsx"
+import { PageHeader } from "./page-header.tsx"
 import { GROUP_PATHS, type Navigate } from "./progressive.tsx"
 
 /**
- * The routes a group's billing lives at and posts to. Both posts are made by the server-rendered
- * app for a browser without JavaScript; it asks the API for the provider's page and redirects there.
+ * The routes a group's billing lives at. `checkout` and `portal` are what the plan components'
+ * forms name as their action; the SPA takes both submits over and asks the API for the provider's
+ * page.
  */
 export const BILLING_PATHS = {
   /** The plans the group can move to. */

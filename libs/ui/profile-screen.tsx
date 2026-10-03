@@ -14,7 +14,7 @@ import { Modal } from "@spy4x/preact-ui/modal"
 import type { EmailStatus, UserMFAStatus, UserPushTokenPublic } from "@domain/identity"
 import { ACCOUNT_COLUMN } from "./frame.tsx"
 import { PageHeader, TOUCH_TARGET } from "./page-header.tsx"
-import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
+import { type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
 import { useSucceeded } from "./use-succeeded.ts"
 import { TwoFactorStep, twoFactorStep } from "./two-factor.ts"
@@ -320,7 +320,6 @@ export function ProfileScreen(
               )
               : (
                 <ScreenForm
-                  action={FORM_ACTIONS.totpStart}
                   pending={pending.totp}
                   onSubmit={onStartTotp}
                 >
@@ -370,11 +369,9 @@ export function ProfileScreen(
                     value={`Added ${new Date(device.createdAt).toLocaleString()}`}
                     action={
                       <ScreenForm
-                        action={FORM_ACTIONS.pushRemove}
                         pending={pending.push}
                         onSubmit={onRemovePush && (() => onRemovePush(device.deviceId))}
                       >
-                        <input type="hidden" name="deviceId" value={device.deviceId} />
                         <Button
                           type="submit"
                           variant="ghost"
@@ -407,7 +404,6 @@ export function ProfileScreen(
         dataE2E="profile-dialog"
       >
         <ScreenForm
-          action={FORM_ACTIONS.profile}
           pending={pending.profile}
           onSubmit={onSaveProfile}
         >
@@ -470,7 +466,6 @@ export function ProfileScreen(
         dataE2E="password-dialog"
       >
         <ScreenForm
-          action={FORM_ACTIONS.password}
           pending={pending.password}
           onSubmit={onChangePassword}
         >
@@ -536,7 +531,6 @@ export function ProfileScreen(
           dataE2E="totp-dialog"
         >
           <ScreenForm
-            action={FORM_ACTIONS.totpFinish}
             pending={pending.totp}
             onSubmit={onFinishTotp}
           >

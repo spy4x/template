@@ -2,8 +2,8 @@
  * The app frame and the account screens (profile, e-mail address, sign-in) driven in a browser DOM
  * (happy-dom): what opens, what the app's callbacks receive, and where focus goes.
  *
- * A form's native post is never sent here: a submit is dispatched as an event, and "posts
- * natively" means nothing cancelled it, which is what lets the browser post to the form's action.
+ * A form's native post is never sent here: a submit is dispatched as an event, and the helper
+ * reports whether the app's callback cancelled it.
  */
 import { expect } from "@std/expect"
 import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd"
@@ -23,7 +23,7 @@ import {
 } from "./email-screen.tsx"
 import { ACCOUNT_COLUMN, AppFrame, navKey, PublicFrame } from "./frame.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
-import { FORM_ACTIONS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
+import { NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
 const own = { document: globalThis.document, FormData: globalThis.FormData }
@@ -77,11 +77,11 @@ async function type(selector: string, value: string): Promise<void> {
 }
 
 /**
- * Submits the form posting to `action`, from its submit button, and lets EnhancedForm's callback
- * run. Returns whether the native post was cancelled.
+ * Submits the form that holds the element `selector` finds, from its submit button, and lets
+ * EnhancedForm's callback run. Returns whether the native post was cancelled.
  */
-async function submit(action: string): Promise<boolean> {
-  const form = find<HTMLFormElement>(`form[action="${action}"]`)
+async function submit(selector: string): Promise<boolean> {
+  const form = find(selector).closest("form")!
   form.querySelector<HTMLButtonElement>("button[type=submit]")?.focus()
   const event = new window.SubmitEvent("submit", { bubbles: true, cancelable: true })
   await act(async () => {
@@ -251,14 +251,11 @@ describe("AppFrame", () => {
 })
 
 describe("PublicFrame", () => {
-  it("signs out through the app's callback, and natively without one", async () => {
+  it("signs out through the app's callback", async () => {
     const signOut = spy<[]>()
     await mount(<PublicFrame canSignOut onSignOut={signOut.fn}>page</PublicFrame>)
-    expect(await submit(FORM_ACTIONS.signOut)).toBe(true)
+    expect(await submit("[data-e2e=signout]")).toBe(true)
     expect(signOut.calls).toHaveLength(1)
-
-    await rerender(<PublicFrame canSignOut>page</PublicFrame>)
-    expect(await submit(FORM_ACTIONS.signOut)).toBe(false)
   })
 
   it("follows the brand link through navigate instead of loading the page", async () => {
@@ -359,7 +356,7 @@ describe("ProfileScreen", () => {
     expect(isOpen("profile-dialog")).toBe(true)
     await type("[data-e2e=profile-first-name]", "Grace")
     expect(change.calls).toEqual([["firstName", "Grace"]])
-    expect(await submit(FORM_ACTIONS.profile)).toBe(true)
+    expect(await submit("[data-e2e=profile-first-name]")).toBe(true)
     expect(save.calls).toHaveLength(1)
 
     await rerender(<ProfileScreen {...props} pending={{ ...props.pending, profile: true }} />)
@@ -408,7 +405,7 @@ describe("ProfileScreen", () => {
     await mount(<ProfileScreen {...profileDefaults} pending={pending} onSaveProfile={save.fn} />)
     await click("[data-e2e=profile-edit]")
 
-    expect(await submit(FORM_ACTIONS.profile)).toBe(true)
+    expect(await submit("[data-e2e=profile-first-name]")).toBe(true)
     expect(save.calls).toEqual([])
   })
 
@@ -419,7 +416,7 @@ describe("ProfileScreen", () => {
     await mount(<ProfileScreen {...props} />)
     expect(document.querySelector("[data-e2e=totp-dialog]")).toBe(null)
 
-    expect(await submit(FORM_ACTIONS.totpStart)).toBe(true)
+    expect(await submit("[data-e2e=totp-start]")).toBe(true)
     expect(start.calls).toHaveLength(1)
     await rerender(<ProfileScreen {...props} enrolment={{ qrcode: "<svg/>", secret: "ABC" }} />)
 
@@ -483,7 +480,7 @@ describe("ProfileScreen", () => {
   it("offers Add this device in an empty list, and removes a device with its id", async () => {
     const remove = spy<[string]>()
     await mount(<ProfileScreen {...profileDefaults} onRemovePush={remove.fn} />)
-    expect(await submit(FORM_ACTIONS.pushRemove)).toBe(true)
+    expect(await submit(`[data-e2e=push-remove-${device.deviceId}]`)).toBe(true)
     expect(remove.calls).toEqual([[device.deviceId]])
 
     const register = spy<[]>()
@@ -525,7 +522,7 @@ describe("EmailScreen", () => {
     await type("[data-e2e=email-code]", "Ab3_x-9Q")
 
     expect(change.calls).toEqual([["code", "Ab3_x-9Q"]])
-    expect(await submit(FORM_ACTIONS.emailVerify)).toBe(true)
+    expect(await submit("[data-e2e=email-code]")).toBe(true)
     expect(verify.calls).toHaveLength(1)
   })
 
@@ -534,7 +531,7 @@ describe("EmailScreen", () => {
     const pending = { ...emailDefaults.pending, verify: true }
     await mount(<EmailScreen {...emailDefaults} pending={pending} onVerify={verify.fn} />)
 
-    await submit(FORM_ACTIONS.emailVerify)
+    await submit("[data-e2e=email-code]")
 
     expect(verify.calls).toHaveLength(0)
   })
@@ -572,12 +569,12 @@ describe("EmailScreen", () => {
 
     await click("[data-e2e=email-change-open]")
     expect(isOpen("email-change-dialog")).toBe(true)
-    const form = find<HTMLFormElement>(`form[action="${FORM_ACTIONS.emailChange}"]`)
+    const form = find<HTMLFormElement>("[data-e2e=email-new]").closest("form")!
     expect(Object.fromEntries(new FormData(form))).toEqual({
       email: "new@example.com",
       password: "Passw0rd!",
     })
-    expect(await submit(FORM_ACTIONS.emailChange)).toBe(true)
+    expect(await submit("[data-e2e=email-new]")).toBe(true)
     expect(changeAddress.calls).toHaveLength(1)
 
     await rerender(<EmailScreen {...props} pending={changePending} />)

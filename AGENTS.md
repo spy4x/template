@@ -48,16 +48,20 @@ says what is missing. Do not copy the gap into a new screen.
   (`@spy4x/preact-system/boundary`) over every module, with this repository's app aliases.
 - **Built on preact-components' `EnhancedForm`.** Every form here is `ScreenForm`
   (`libs/ui/progressive.tsx`): `EnhancedForm` with its status taken from the screen's `pending`
-  prop, so a pending form is disabled and refuses a second submit.
+  prop, so a pending form is disabled and refuses a second submit. A form takes its submit over
+  with `onSubmit`; only the newsletter's pass `action` too.
+- **One page header.** Every page starts with `PageHeader` (`libs/ui/page-header.tsx`): the title,
+  the primary action and one "More actions" menu. Do not draw a second one.
 - **State comes in as props:** `value`, `errors`, `pending`, `items`, `cursor`. Error and pending
   display is part of the component, so every screen shows the same messages.
 - **Accessible by construction.** Every control has a label. Error text is tied to its field with
   `aria-describedby`. Focus moves to the first error, and to the next control after a step change.
   A message the API ties to no field stays under its form.
 - **`data-e2e` hooks stay**, so the e2e page objects keep working.
-- **Tested.** Each component has a server-render test (`libs/ui/screens.test.tsx`), and an
-  interaction test that types, submits and checks where focus goes, in a happy-dom page
-  (`libs/ui/interactions.test.tsx`).
+- **Tested.** Each screen has an interaction test that types, submits through its callback and
+  checks where focus goes, in a happy-dom page (`libs/ui/*.test.tsx`, such as
+  `interactions.test.tsx` and `notes.test.tsx`). The newsletter screens also have a server-render
+  test that finds a working form or link for every action (`libs/ui/screens.test.tsx`).
 
 ## Adding a feature
 

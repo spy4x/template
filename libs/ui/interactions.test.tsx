@@ -1,10 +1,10 @@
 /**
- * Every `libs/ui` component driven in a browser DOM (happy-dom): typing, submitting with and
- * without the app's callback, and where focus goes. `screens.test.tsx` covers what the server
+ * Auth, password-reset and newsletter screens driven in a browser DOM (happy-dom): typing,
+ * submitting through the app's callback, and where focus goes. `screens.test.tsx` covers what the server
  * renders; this file covers what a person does once the page runs.
  *
- * A form's native post is never sent here: a submit is dispatched as an event, and "posts
- * natively" means nothing cancelled it, which is what lets the browser post to the form's action.
+ * A form's native post is never sent here: a submit is dispatched as an event, and the helper
+ * reports whether the app's callback cancelled it. A form that is not cancelled posts natively.
  */
 import { expect } from "@std/expect"
 import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd"
@@ -81,11 +81,11 @@ async function type(selector: string, value: string): Promise<void> {
 }
 
 /**
- * Submits the form posting to `action`, from its submit button, and lets EnhancedForm's callback
- * run. Returns whether the native post was cancelled.
+ * Submits the form that holds the element `selector` finds, from its submit button, and lets
+ * EnhancedForm's callback run. Returns whether the native post was cancelled.
  */
-async function submit(action: string): Promise<boolean> {
-  const form = find<HTMLFormElement>(`form[action="${action}"]`)
+async function submit(selector: string): Promise<boolean> {
+  const form = find(selector).closest("form")!
   form.querySelector<HTMLButtonElement>("button[type=submit]")?.focus()
   const event = new window.SubmitEvent("submit", { bubbles: true, cancelable: true })
   await act(async () => {
@@ -126,14 +126,8 @@ describe("AuthScreen in the browser", () => {
     await type("input[name=login]", "ada@example.com")
     await type("input[name=password]", "long-enough")
 
-    expect(await submit(FORM_ACTIONS.signIn)).toBe(true)
+    expect(await submit("input[name=login]")).toBe(true)
     expect(signIn.calls).toEqual([[{ login: "ada@example.com", password: "long-enough" }]])
-  })
-
-  it("posts the sign-in natively when the app takes nothing over", async () => {
-    await mount(<AuthScreen {...authDefaults} />)
-
-    expect(await submit(FORM_ACTIONS.signIn)).toBe(false)
   })
 
   it("sends the one-time code through the app's callback", async () => {
@@ -144,7 +138,7 @@ describe("AuthScreen in the browser", () => {
 
     await type("input[name=otp]", "012345")
 
-    expect(await submit(FORM_ACTIONS.oneTimeCode)).toBe(true)
+    expect(await submit("input[name=otp]")).toBe(true)
     expect(code.calls).toEqual([["012345"]])
   })
 })
@@ -168,16 +162,8 @@ describe("ForgotPasswordScreen in the browser", () => {
     await type("[data-e2e=forgot-password-email]", "ada@example.com")
 
     expect(change.calls).toEqual([["ada@example.com"]])
-    expect(await submit(FORM_ACTIONS.forgotPassword)).toBe(true)
+    expect(await submit("[data-e2e=forgot-password-email]")).toBe(true)
     expect(send.calls).toHaveLength(1)
-  })
-
-  it("posts the address natively when the app takes nothing over", async () => {
-    await mount(<ForgotPasswordScreen {...forgotDefaults} email="ada@example.com" />)
-
-    const form = find<HTMLFormElement>(`form[action="${FORM_ACTIONS.forgotPassword}"]`)
-    expect(Object.fromEntries(new FormData(form))).toEqual({ email: "ada@example.com" })
-    expect(await submit(FORM_ACTIONS.forgotPassword)).toBe(false)
   })
 
   it("ties an error to the address field and moves focus there", async () => {
@@ -222,21 +208,8 @@ describe("ResetPasswordScreen in the browser", () => {
     await type("[data-e2e=reset-password-new]", "battery-staple")
 
     expect(change.calls).toEqual([["battery-staple"]])
-    expect(await submit(FORM_ACTIONS.resetPassword)).toBe(true)
+    expect(await submit("[data-e2e=reset-password-new]")).toBe(true)
     expect(save.calls).toHaveLength(1)
-  })
-
-  it("posts the link's address and code with the new password when the app takes nothing over", async () => {
-    await mount(<ResetPasswordScreen {...resetDefaults} newPassword="battery-staple" />)
-
-    const form = find<HTMLFormElement>(`form[action="${FORM_ACTIONS.resetPassword}"]`)
-    const sent = Object.fromEntries(new FormData(form))
-    expect(sent).toEqual({
-      email: "ada@example.com",
-      code: "code-from-the-link",
-      newPassword: "battery-staple",
-    })
-    expect(await submit(FORM_ACTIONS.resetPassword)).toBe(false)
   })
 
   it("ties an error to the new password field and moves focus there", async () => {
@@ -273,7 +246,7 @@ describe("SubscribeForm in the browser", () => {
     await type("[data-e2e=subscribe-email]", "ada@example.com")
 
     expect(change.calls).toEqual([["ada@example.com"]])
-    expect(await submit(FORM_ACTIONS.subscribe)).toBe(true)
+    expect(await submit(`form[action="${FORM_ACTIONS.subscribe}"]`)).toBe(true)
     expect(send.calls).toHaveLength(1)
   })
 
@@ -285,7 +258,7 @@ describe("SubscribeForm in the browser", () => {
       list: "news",
       email: "ada@example.com",
     })
-    expect(await submit(FORM_ACTIONS.subscribe)).toBe(false)
+    expect(await submit(`form[action="${FORM_ACTIONS.subscribe}"]`)).toBe(false)
   })
 
   it("ties an error to the address field and moves focus there", async () => {
@@ -330,7 +303,7 @@ describe("SubscriptionConfirmScreen in the browser", () => {
     const confirm = spy<[]>()
     await mount(<SubscriptionConfirmScreen {...confirmDefaults} onSubmit={confirm.fn} />)
 
-    expect(await submit(FORM_ACTIONS.subscribeConfirm)).toBe(true)
+    expect(await submit(`form[action="${FORM_ACTIONS.subscribeConfirm}"]`)).toBe(true)
     expect(confirm.calls).toHaveLength(1)
   })
 
@@ -340,7 +313,7 @@ describe("SubscriptionConfirmScreen in the browser", () => {
     const form = find<HTMLFormElement>(`form[action="${FORM_ACTIONS.subscribeConfirm}"]`)
     expect(Object.fromEntries(new FormData(form)))
       .toEqual({ list: "news", token: "token-from-the-link" })
-    expect(await submit(FORM_ACTIONS.subscribeConfirm)).toBe(false)
+    expect(await submit(`form[action="${FORM_ACTIONS.subscribeConfirm}"]`)).toBe(false)
   })
 
   it("shows a failed confirm under the form and moves focus there", async () => {
@@ -377,7 +350,7 @@ describe("UnsubscribeScreen in the browser", () => {
     const leave = spy<[]>()
     await mount(<UnsubscribeScreen {...unsubscribeDefaults} onSubmit={leave.fn} />)
 
-    expect(await submit(FORM_ACTIONS.unsubscribe)).toBe(true)
+    expect(await submit(`form[action="${FORM_ACTIONS.unsubscribe}"]`)).toBe(true)
     expect(leave.calls).toHaveLength(1)
   })
 
@@ -387,7 +360,7 @@ describe("UnsubscribeScreen in the browser", () => {
     const form = find<HTMLFormElement>(`form[action="${FORM_ACTIONS.unsubscribe}"]`)
     expect(Object.fromEntries(new FormData(form)))
       .toEqual({ list: "news", token: "token-from-the-link" })
-    expect(await submit(FORM_ACTIONS.unsubscribe)).toBe(false)
+    expect(await submit(`form[action="${FORM_ACTIONS.unsubscribe}"]`)).toBe(false)
   })
 
   it("shows a failed unsubscribe under the form and moves focus there", async () => {
