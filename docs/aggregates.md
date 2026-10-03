@@ -189,8 +189,28 @@ same steps; copy the notes files that mention `move`:
    transaction, or the move is refused with a clear error when a reference would be left behind.
    Never move the row and leave its references in the old group.
 
-Moving all of a group's data before the group is deleted is not built (spy4x/template#260); it
-would call this command with every id of the group.
+### Register it for "move all data"
+
+A person can move everything a group holds to another group (`GroupMoveAllCommand`,
+`POST /api/groups/:groupId/move-all`, socket `group.moveAll`), usually before deleting the emptied
+group. One command moves every registered aggregate in one transaction, so a movable aggregate must
+register, or its rows stay behind and are lost when the group is deleted.
+
+1. Write a `MovableAggregate` (`libs/server/groups/movable.ts`): a `kind` and
+   `moveAll(sql, context)`, which moves the aggregate's live rows inside the transaction the mover
+   opened and returns how many moved. Reuse the repository's own move (the notes file
+   `libs/server/notes/note-movable.ts` calls `moveNoteRows`, the function `PostgresNoteRepository.move`
+   uses); never copy its SQL. Stamp the rows with `context.changeSequence`, the target's sequence.
+2. Add it to `MOVABLE_AGGREGATES` in `apps/api/services/db-base.ts`. The order is the order of the
+   moves; the mover has already recorded both groups' changes, locked both groups and checked edit
+   rights in both.
+3. An aggregate with a plan cap gets its limit in `MoveAllAllowances` (`libs/domain/groups`) and in
+   the command's `allowance`, read by the gate in `apps/api/cqrs/entitlement-needs.ts`; count it
+   against the target under the lock, as `moveNoteRows` does with `assertRoomFor`.
+4. Add a case to `tests/integration/group-move-all.integration.test.ts`: the rows moved, and a
+   failure after your aggregate leaves nothing moved.
+
+The counts go into the audit events, which the activity page words as "N items".
 
 ## Adding a setting to a group
 
