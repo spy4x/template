@@ -21,9 +21,9 @@ import {
   type EmailScreenProps,
   EmailUnavailable,
 } from "./email-screen.tsx"
-import { AppFrame, navKey, PublicFrame } from "./frame.tsx"
+import { ACCOUNT_COLUMN, AppFrame, navKey, PublicFrame } from "./frame.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
-import { FORM_ACTIONS, SCREEN_PATHS } from "./progressive.tsx"
+import { FORM_ACTIONS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
 const own = { document: globalThis.document, FormData: globalThis.FormData }
@@ -179,6 +179,20 @@ describe("AppFrame", () => {
     await rerender(<AppFrame user={ada} onSignOut={() => {}} connection="closed">page</AppFrame>)
     expect(status.textContent).toBe("Offline")
     expect(status.className).not.toContain("sr-only")
+  })
+
+  it("draws the banner as wide as the profile page's column there, and full width elsewhere", async () => {
+    const frame = (path: string) => (
+      <AppFrame user={ada} onSignOut={() => {}} currentPath={path} banner={<p id="banner">b</p>}>
+        page
+      </AppFrame>
+    )
+    const column = () => find("#banner").parentElement?.className ?? ""
+
+    await mount(frame(SCREEN_PATHS.profile))
+    expect(column()).toContain(ACCOUNT_COLUMN)
+    await rerender(frame(NOTE_PATHS.list))
+    expect(column()).not.toContain("max-w-2xl")
   })
 
   it("gives the group picker a 44 px touch target below the sm breakpoint", async () => {

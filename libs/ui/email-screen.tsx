@@ -9,6 +9,7 @@ import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
 import { Notice } from "@spy4x/preact-ui/notice"
 import { type EmailStatus, emailToVerify } from "@domain/identity"
+import { ACCOUNT_COLUMN } from "./frame.tsx"
 import { PageHeader, TOUCH_TARGET } from "./page-header.tsx"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
@@ -167,7 +168,7 @@ export function EmailScreen(
 
   const hasEmail = status.email !== null
   return (
-    <Stack gap="lg" class="w-full max-w-2xl">
+    <Stack gap="lg" class={ACCOUNT_COLUMN}>
       <PageHeader
         title="E-mail address"
         back={{ href: SCREEN_PATHS.profile, label: "Back to profile" }}

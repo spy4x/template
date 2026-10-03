@@ -12,6 +12,7 @@ import { Input } from "@spy4x/preact-ui/input"
 import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
 import type { EmailStatus, UserMFAStatus, UserPushTokenPublic } from "@domain/identity"
+import { ACCOUNT_COLUMN } from "./frame.tsx"
 import { PageHeader, TOUCH_TARGET } from "./page-header.tsx"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
@@ -232,7 +233,7 @@ export function ProfileScreen(
   const qrSrc = enrolment?.qrcode ? svgToDataUrl(enrolment.qrcode) : null
 
   return (
-    <Stack gap="xl" class="w-full max-w-2xl">
+    <Stack gap="xl" class={ACCOUNT_COLUMN}>
       <PageHeader title="Profile" />
 
       <SettingGroup title="Account">

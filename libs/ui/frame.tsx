@@ -33,6 +33,9 @@ export function navKey(path: string | undefined): string | undefined {
   return undefined
 }
 
+/** The column the account pages (profile, e-mail address) sit in, narrower than the frame's. */
+export const ACCOUNT_COLUMN = "w-full max-w-2xl"
+
 /** Where the live connection to the API stands. */
 export type ConnectionStatus = "idle" | "connecting" | "open" | "closed" | "reconnecting"
 
@@ -109,7 +112,8 @@ function ConnectionState({ status }: { status: ConnectionStatus }): JSX.Element 
  * The signed-in frame, mobile first: a bottom tab bar on a phone and a rail from `md` up
  * (`RailShell`), and a slim header with the brand, the current group, the connection while it is
  * not live, and the user menu holding Sign out. The page sits in a column of at most 64 rem;
- * `banner` shows above every page, such as the request to verify the e-mail address. Signed-out
+ * `banner` shows above every page, such as the request to verify the e-mail address, as wide as
+ * the page's own column ({@link ACCOUNT_COLUMN} on the account pages). Signed-out
  * screens use {@link PublicFrame} instead.
  *
  * The navigation entries are real links; with `navigate`, a plain click on one goes through the
@@ -157,7 +161,9 @@ export function AppFrame(
           </div>
         </header>
         <div class="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-          {banner}
+          {navKey(currentPath) === "profile"
+            ? <div class={`${ACCOUNT_COLUMN} empty:hidden`}>{banner}</div>
+            : banner}
           {children}
         </div>
       </RailShell>
