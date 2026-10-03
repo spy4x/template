@@ -1,9 +1,9 @@
 /**
  * The browser's request headers the API needs: the two headers the API's cross-site guard checks,
  * and what its rate limits record. The MPA has no session, so no cookie passes either way. All pass
- * on unchanged, except an `Origin` equal to the MPA's own when the MPA has its own domain (see `createApi`). The
- * MPA never adds `Origin` or `Sec-Fetch-Site` itself, so it cannot vouch for a post the browser
- * did not make.
+ * on unchanged, except an `Origin` equal to the MPA's own when the MPA has its own domain (see
+ * `createApi`). The MPA never adds `Origin` or `Sec-Fetch-Site` itself, so it cannot vouch for a
+ * post the browser did not make.
  */
 const FORWARDED_HEADERS = [
   "origin",

@@ -2,8 +2,8 @@
 
 # template
 
-**A modern SaaS baseline built on web standards: auth with a second factor, groups, an API, web
-clients, a worker and Postgres, already wired together.**
+**A SaaS starting point on web standards: sign-up with a second factor, groups, billing, an API, a
+web app, a worker and Postgres. Work in progress: parts of the worker are not built yet.**
 
 [![CI](https://ci.antonshubin.com/api/badges/11/status.svg)](https://ci.antonshubin.com/repos/11)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -31,11 +31,55 @@ It exists because every SaaS MVP needs the same groundwork before its first feat
 parts live here and in the published [`@spy4x/*`](https://jsr.io/@spy4x) packages; product rules
 stay out.
 
-**Status:** in migration. Sign-up, sign-in with TOTP, groups, notes (the reference aggregate),
-the outbox worker and the MPA's newsletter pages work today, and the SPA works offline
-([docs/offline.md](docs/offline.md)); group administration does not yet. Details in
-[docs/architecture.md](docs/architecture.md#migration-status) and
-[ADR 001](docs/decisions/001-deno-platform-template.md).
+**Status:** work in progress, moving to the target architecture in
+[ADR 001](docs/decisions/001-deno-platform-template.md). Sign-up, sign-in with TOTP, groups with
+members, roles, invitations and ownership transfer, billing per member, notes (the reference
+aggregate), the outbox worker and the public website work today, and the SPA works offline
+([docs/offline.md](docs/offline.md)). Parts of the worker are not built yet. Details in
+[docs/architecture.md](docs/architecture.md#migration-status). The live demo runs at
+https://template.antonshubin.com, its website at https://template-mpa.antonshubin.com.
+
+## Quick start
+
+```sh
+cp infra/envs/.env.example infra/envs/.env
+```
+
+Before going on, fill in the secrets in `infra/envs/.env` (`KV_PASSWORD` is the Valkey password;
+Valkey and the API both refuse to start without it, `openssl rand -hex 24` makes one). It runs on
+Docker; to use Podman, set `CONTAINER_PROVIDER=podman` (`proxy:start` and `proxy:stop` still call
+Docker).
+
+```sh
+deno task vapid-key:create   # web push keys → infra/configs/vapid.json
+deno task proxy:start        # Traefik
+deno task dev                # Postgres, Valkey, MinIO, API, worker, SPA, Loki, Prometheus, Grafana
+```
+
+Then open `http://<DOMAIN>` from the env file: http://app.localhost with the values in
+`infra/envs/.env.example`.
+
+Promtail, node-exporter and cAdvisor watch the whole host, so they are off by default. Set
+`COMPOSE_PROFILES=host-monitoring` in the env file to start them too.
+
+To try the MPA in Compose, see "The SPA and the MPA" below. Stop the proxy with
+`deno task proxy:stop`. Compose applies pending migrations on every start, in the one-shot
+`migrate` service that the API and the worker wait for; a failed migration stops the start. To apply
+them from the host instead, for an API run outside Compose, use the values from your `.env` and the
+port Compose publishes:
+
+```sh
+DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=<user> DB_PASS=<password> DB_NAME=<name> deno task db:migrate
+```
+
+To start again from an empty development database, run `ENV=dev deno task db:reset` with the same
+values (plus the seed's `AUTH_PEPPER` and `SEED_PASSWORD`). It drops the database, migrates it and
+seeds it, after you confirm; `--yes` skips the question. It refuses unless `ENV=dev`, `DB_HOST` is
+`localhost`, `127.0.0.1` or `db`, and `DB_NAME` differs from the one in `infra/envs/.env.prod`. A
+missing or unreadable `.env.prod` also refuses; on a machine without one, add `--no-prod-check`.
+
+To add a demo user `demo` who owns a group, run `deno task db:seed` with the same values plus
+`AUTH_PEPPER` (the API's) and `SEED_PASSWORD` (the demo user's password, 8 to 50 characters).
 
 ## What a fresh project looks like
 
@@ -92,10 +136,10 @@ The template ships two web apps over the same API, with different jobs.
   happens there: sign-up and sign-in, notes, groups, billing, the profile. People see each other's
   changes live over a WebSocket ([ADR 002](docs/decisions/002-realtime-transport-and-sync.md)), and
   it works offline ([docs/offline.md](docs/offline.md)). Compose serves it at `DOMAIN`.
-- **The MPA** (`apps/mpa`, Fresh) is the product's public website. Today it holds the newsletter
-  pages and a placeholder home page; the landing, pricing and legal pages are being built
-  (https://github.com/spy4x/template/issues/265). Every page is rendered on the server and works with JavaScript turned
-  off. It has no session; its sign-in and sign-up links open the SPA at `DOMAIN`.
+- **The MPA** (`apps/mpa`, Fresh) is the product's public website: the home page, pricing read
+  from the `PLANS` catalog, privacy and terms pages to adapt, `robots.txt`, `sitemap.xml` and the
+  newsletter. Every page is rendered on the server and works with JavaScript turned off. It has
+  no session; its sign-in and sign-up links open the SPA at `DOMAIN`.
 
 The MPA calls the API over HTTP from the server, only for the newsletter, and never touches the
 database itself. It needs `ENV` and `DOMAIN` (the same values as the API), its own host
@@ -110,45 +154,6 @@ record pointing at the server; Traefik gets its certificate as for `DOMAIN`. Wit
 nothing about the deploy changes. The MPA's end-to-end test runs in CI on every pull
 request, and locally with `e2e/mpa/run.sh` against a running Postgres and Valkey (see the header
 of that script).
-
-## Quick start
-
-```sh
-cp infra/envs/.env.example infra/envs/.env
-```
-
-Before going on, fill in the secrets in `infra/envs/.env` (`KV_PASSWORD` is the Valkey password;
-Valkey and the API both refuse to start without it, `openssl rand -hex 24` makes one). It runs on
-Docker; to use Podman, set `CONTAINER_PROVIDER=podman` (`proxy:start` and `proxy:stop` still call
-Docker).
-
-```sh
-deno task vapid-key:create   # web push keys → infra/configs/vapid.json
-deno task proxy:start        # Traefik
-deno task dev                # Postgres, Valkey, MinIO, API, worker, SPA, Loki, Prometheus, Grafana
-```
-
-Promtail, node-exporter and cAdvisor watch the whole host, so they are off by default. Set
-`COMPOSE_PROFILES=host-monitoring` in the env file to start them too.
-
-To try the MPA in Compose, see "The SPA and the MPA". Stop the proxy with
-`deno task proxy:stop`. Compose applies pending migrations on every start, in the one-shot
-`migrate` service that the API and the worker wait for; a failed migration stops the start. To apply
-them from the host instead, for an API run outside Compose, use the values from your `.env` and the
-port Compose publishes:
-
-```sh
-DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=<user> DB_PASS=<password> DB_NAME=<name> deno task db:migrate
-```
-
-To start again from an empty development database, run `ENV=dev deno task db:reset` with the same
-values (plus the seed's `AUTH_PEPPER` and `SEED_PASSWORD`). It drops the database, migrates it and
-seeds it, after you confirm; `--yes` skips the question. It refuses unless `ENV=dev`, `DB_HOST` is
-`localhost`, `127.0.0.1` or `db`, and `DB_NAME` differs from the one in `infra/envs/.env.prod`. A
-missing or unreadable `.env.prod` also refuses; on a machine without one, add `--no-prod-check`.
-
-To add a demo user `demo` who owns a group, run `deno task db:seed` with the same values plus
-`AUTH_PEPPER` (the API's) and `SEED_PASSWORD` (the demo user's password, 8 to 50 characters).
 
 ## Production certificates
 
