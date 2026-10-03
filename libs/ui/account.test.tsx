@@ -289,6 +289,18 @@ describe("ProfileScreen", () => {
     expect(isOpen("password-dialog")).toBe(false)
   })
 
+  it("names each settings group by its own h2, under the page's one h1", async () => {
+    await mount(<ProfileScreen {...profileDefaults} />)
+
+    const names = [...document.querySelectorAll("section[aria-labelledby]")].map((section) =>
+      document.getElementById(section.getAttribute("aria-labelledby") ?? "")?.textContent
+    )
+    expect(names).toEqual(["Account", "Security", "Push devices"])
+    expect([...document.querySelectorAll("h1, h2")].map((h) => h.tagName)).toEqual(
+      ["H1", "H2", "H2", "H2"],
+    )
+  })
+
   it("edits the name in a dialog, saves it through the app's callback and closes once it is saved", async () => {
     const change = spy<[string, string]>()
     const save = spy<[]>()

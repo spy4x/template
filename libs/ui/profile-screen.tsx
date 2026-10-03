@@ -9,12 +9,12 @@ import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
-import { Cluster, Section, Stack } from "@spy4x/preact-ui/layout"
+import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
 import type { EmailStatus, UserMFAStatus, UserPushTokenPublic } from "@domain/identity"
 import { PageHeader } from "./page-header.tsx"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
-import { SettingList, SettingRow } from "./setting-row.tsx"
+import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
 import { TwoFactorStep, twoFactorStep } from "./two-factor.ts"
 
 /** The messages shown when an action failed without a message of its own. */
@@ -232,7 +232,7 @@ export function ProfileScreen(
     <Stack gap="xl" class="w-full max-w-2xl">
       <PageHeader title="Profile" />
 
-      <Section title="Account">
+      <SettingGroup title="Account">
         <SettingList>
           <SettingRow
             label="Name"
@@ -265,9 +265,9 @@ export function ProfileScreen(
             }
           />
         </SettingList>
-      </Section>
+      </SettingGroup>
 
-      <Section title="Security">
+      <SettingGroup title="Security">
         <SettingList>
           <SettingRow
             label="Password"
@@ -331,9 +331,9 @@ export function ProfileScreen(
           />
         </SettingList>
         {step !== TwoFactorStep.Confirm && <ErrorState message={errors.totp} />}
-      </Section>
+      </SettingGroup>
 
-      <Section
+      <SettingGroup
         title="Push devices"
         description="Devices that get a notification when something changes."
       >
@@ -344,6 +344,7 @@ export function ProfileScreen(
               icon={<IconBell class="size-6" />}
               title="No devices yet"
               headingLevel={3}
+              class="w-full max-w-none"
               description="Add this browser to get notifications on it."
               action={onRegisterPush && <AddDevice onClick={onRegisterPush} busy={pending.push} />}
             />
@@ -385,7 +386,7 @@ export function ProfileScreen(
               )}
             </>
           )}
-      </Section>
+      </SettingGroup>
 
       <Modal
         open={editingName}
@@ -601,7 +602,7 @@ function EmailValue({ email }: { email?: EmailStatus | null }): JSX.Element {
   if (email.email === null) return <span>None. You sign in with your username.</span>
   return (
     <span class="flex flex-wrap items-center gap-2">
-      <span class="break-all">{email.email}</span>
+      <span class="wrap-anywhere">{email.email}</span>
       <Badge
         text={email.proven ? "Verified" : "Not verified"}
         color={email.proven ? "green" : "orange"}

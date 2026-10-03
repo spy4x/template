@@ -36,3 +36,26 @@ export function SettingRow(
     </div>
   )
 }
+
+/**
+ * A named group of settings, such as Account or Security: a small heading over its rows, so the
+ * page title stays the one large heading on a settings page.
+ */
+export function SettingGroup(
+  { title, description, children }: {
+    title: string
+    description?: string
+    children: ComponentChildren
+  },
+): JSX.Element {
+  const headingId = `setting-group-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
+  return (
+    <section class="flex flex-col gap-3" aria-labelledby={headingId}>
+      <header class="flex flex-col gap-1">
+        <h2 id={headingId} class="text-sm font-semibold">{title}</h2>
+        {description && <p class="text-sm text-muted">{description}</p>}
+      </header>
+      {children}
+    </section>
+  )
+}
