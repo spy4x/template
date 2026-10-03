@@ -284,6 +284,7 @@ describe("ProfileScreen", () => {
     expect(find("[data-e2e=profile-email-link]").getAttribute("href")).toBe(SCREEN_PATHS.email)
     expect(document.body.textContent).toContain("ada@example.com")
     expect(document.body.textContent).toContain("Verified")
+    expect(document.body.textContent).not.toContain("Not verified")
     expect(isOpen("profile-dialog")).toBe(false)
     expect(isOpen("password-dialog")).toBe(false)
   })
@@ -351,7 +352,7 @@ describe("ProfileScreen", () => {
     expect(save.calls).toEqual([])
   })
 
-  it("opens a dialog for the first code of an enrolment, focused on the code, and drops it when closed", async () => {
+  it("opens a dialog for the first code of an enrolment, focused on the code, and cancels the enrolment from it", async () => {
     const start = spy<[]>()
     const cancel = spy<[]>()
     const props = { ...profileDefaults, onStartTotp: start.fn, onCancelTotp: cancel.fn }

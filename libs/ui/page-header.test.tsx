@@ -27,6 +27,13 @@ describe("PageHeader", () => {
     expect(withMenu).toContain(`aria-label="More actions"`)
     expect(withMenu).toContain(">Leave</button>")
     expect(renderToString(<PageHeader title="Trip" />)).not.toContain("More actions")
+    const withAction = (
+      <PageHeader
+        title="Trip"
+        action={<PageAction label="New" Icon={IconPlus} onClick={() => {}} />}
+      />
+    )
+    expect(renderToString(withAction)).not.toContain("More actions")
   })
 })
 
