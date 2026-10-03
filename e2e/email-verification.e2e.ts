@@ -60,16 +60,18 @@ test("a new account proves its address with the mailed code, then moves to a new
       .toBeVisible()
     await enterCode(page, code)
     await expect(page.locator("[data-e2e=email-verified]")).toBeVisible()
-    await expect(page.locator("[data-e2e=email-current]")).toContainText("which is verified")
+    await expect(page.locator("[data-e2e=email-state]")).toHaveText("Verified")
     await gotoApp(page, "/", page.locator("[data-e2e=profile-email-link]"))
     await expect(banner).toHaveCount(0)
 
     // A change waits for the new address's code; until then the account keeps the old one.
-    await gotoApp(page, "/email", page.locator("[data-e2e=email-new]"))
+    await gotoApp(page, "/email", page.locator("[data-e2e=email-change-open]"))
+    await page.locator("[data-e2e=email-change-open]").click()
     await page.locator("[data-e2e=email-new]").fill(next)
     await page.locator("[data-e2e=email-password]").fill(password)
     await page.locator("[data-e2e=email-change]").click()
     await expect(page.locator("[data-e2e=email-change-notice]")).toBeVisible()
+    await expect(page.locator("[data-e2e=email-change-dialog]")).toHaveCount(0)
     await expect(page.locator("[data-e2e=email-current]")).toContainText(email)
     await expect(page.locator("[data-e2e=email-verify-card]")).toContainText(next)
 
