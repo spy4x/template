@@ -11,6 +11,7 @@ import {
   newInvitationToken,
   PostgresInvitationRepository,
 } from "@server/groups/postgres-invitation-repository.ts"
+import { purgeDeadInvitations } from "@server/groups/purge-dead-invitations.ts"
 import { insertUser, team, withSchema } from "./group-team.ts"
 
 /**
@@ -409,5 +410,55 @@ Deno.test("invitations: two accepts at once for the last free seat let exactly o
       SELECT count(*)::int AS count FROM group_members WHERE group_id = ${groupId}
     `
     expect(count).toBe(6)
+  })
+})
+
+Deno.test("invitations: the sweep deletes ones dead over 30 days and keeps the rest and the audit", async () => {
+  await withSchema(async (sql) => {
+    const { groupId, owner, stranger } = await team(sql)
+    const invitations = new PostgresInvitationRepository(sql)
+    const ids = async () =>
+      (await sql<{ id: string }[]>`SELECT id FROM group_invitations`)
+        .map((row) => row.id).sort()
+    const age = async (id: string, column: string, days: number) => {
+      await sql`
+        UPDATE group_invitations SET ${sql(column)} = now() - make_interval(days => ${days})
+        WHERE id = ${id}
+      `
+    }
+
+    const live = await invite(invitations, groupId, owner)
+    const expiredOld = await invite(invitations, groupId, owner)
+    const expiredRecent = await invite(invitations, groupId, owner)
+    const revokedOld = await invite(invitations, groupId, owner)
+    const revokedRecent = await invite(invitations, groupId, owner)
+    const declinedOld = await invite(invitations, groupId, owner)
+    const usedOld = await invite(invitations, groupId, owner)
+    const usedRecent = await invite(invitations, groupId, owner)
+    await age(expiredOld.invitation.id, "expires_at", 31)
+    await age(expiredRecent.invitation.id, "expires_at", 29)
+    await invitations.revoke(groupId, revokedOld.invitation.id, owner)
+    await age(revokedOld.invitation.id, "revoked_at", 31)
+    await invitations.revoke(groupId, revokedRecent.invitation.id, owner)
+    await age(revokedRecent.invitation.id, "revoked_at", 29)
+    await age(declinedOld.invitation.id, "declined_at", 31)
+    await invitations.accept(usedOld.lookup, stranger, NO_LIMITS)
+    await sql`
+      UPDATE group_invitation_acceptances SET accepted_at = now() - interval '31 days'
+      WHERE invitation_id = ${usedOld.invitation.id}
+    `
+    await invitations.accept(usedRecent.lookup, await insertUser(sql), NO_LIMITS)
+    const auditBefore = (await auditKinds(sql, groupId)).length
+
+    expect(await purgeDeadInvitations(sql)).toBe(4)
+
+    expect(await ids()).toEqual([
+      live.invitation.id,
+      expiredRecent.invitation.id,
+      revokedRecent.invitation.id,
+      usedRecent.invitation.id,
+    ].sort())
+    expect((await auditKinds(sql, groupId)).length).toBe(auditBefore)
+    expect(await purgeDeadInvitations(sql)).toBe(0)
   })
 })

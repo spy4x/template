@@ -334,7 +334,8 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 - The password and two-factor calls are still REST: they change the session the socket is bound
   to. The MPA has no socket, so the profile and push REST routes stay for it.
 - Invitations (#131) are the only way into a group through the product; tests may still seed a
-  member with `POST /api/test/add-member`. Expired invitation rows are never deleted.
+  member with `POST /api/test/add-member`. The nightly cleanup deletes invitations that have been
+  dead (expired, revoked, declined or used up) for over 30 days.
 - No local projection in the SPA, no offline outbox, no conflict UI. The page keeps its cursors in
   `localStorage` and rereads the whole group list to catch up.
 - The worker publishes a group change with `pg_notify`, which reaches only API instances that are
