@@ -63,6 +63,8 @@ test("deleting my account signs me out on every device, and signing in during th
     await signIn(page, email, password)
     await expect(page.locator("[data-e2e=danger-zone]")).toBeAttached()
     expect((await page.request.get(`${apiBase}/api/auth/me`)).status()).toBe(200)
+    // The restore brings back the account, not the other device's old session.
+    expect((await other.request.get(`${apiBase}/api/auth/me`)).status()).toBe(401)
   } finally {
     await other?.close()
     await cleanup(request, email, { soft: true })

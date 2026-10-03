@@ -267,20 +267,30 @@ Deno.test("deleting one's own account", async (t) => {
       },
     )
 
-    await t.step("the request signs out every session of the user at once", async () => {
-      const dan = await signUp(app, "dan")
-      const other = cookieOf(await signIn(app, "dan"))
-      expect((await app.request("/me", { cookie: dan.cookie })).status).toBe(200)
+    await t.step(
+      "the request signs out every session of the user at once, and a restore brings none back",
+      async () => {
+        const dan = await signUp(app, "dan")
+        const other = cookieOf(await signIn(app, "dan"))
+        expect((await app.request("/me", { cookie: dan.cookie })).status).toBe(200)
 
-      await requestDeletion(app, sql, dan, other)
+        await requestDeletion(app, sql, dan, other)
 
-      expect((await app.request("/me", { cookie: dan.cookie })).status).toBe(401)
-      expect((await app.request("/me", { cookie: other })).status).toBe(401)
-      const [deleted] = await sql<{ deleted: boolean }[]>`
-        SELECT deleted_at IS NOT NULL AS deleted FROM users WHERE id = ${dan.id}
-      `
-      expect(deleted.deleted).toBe(true)
-    })
+        expect((await app.request("/me", { cookie: dan.cookie })).status).toBe(401)
+        expect((await app.request("/me", { cookie: other })).status).toBe(401)
+        const [deleted] = await sql<{ deleted: boolean }[]>`
+          SELECT deleted_at IS NOT NULL AS deleted FROM users WHERE id = ${dan.id}
+        `
+        expect(deleted.deleted).toBe(true)
+
+        // The soft delete alone refuses the old sessions; once a sign-in restores the account,
+        // only the new session works.
+        const restored = cookieOf(await signIn(app, "dan"))
+        expect((await app.request("/me", { cookie: restored })).status).toBe(200)
+        expect((await app.request("/me", { cookie: dan.cookie })).status).toBe(401)
+        expect((await app.request("/me", { cookie: other })).status).toBe(401)
+      },
+    )
 
     await t.step(
       "the request queues the mail at once and the delete for good in 7 days",
