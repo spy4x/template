@@ -8,6 +8,7 @@ import {
   NoteError,
   NoteGetQuery,
   NoteListQuery,
+  NoteMoveCommand,
   type NoteRepository,
   NoteUpdateCommand,
 } from "@domain/notes"
@@ -71,6 +72,36 @@ export function createNoteDeleteHandler(
       data.actor.userId,
     )
     return { note }
+  }
+}
+
+/**
+ * Moving needs an editor's rights in both groups. The source is checked first, so a person who
+ * cannot write there is told so before anything about the target; a target the person does not
+ * belong to is "group not found".
+ */
+export function createNoteMoveHandler(
+  { notes, groups }: NoteHandlerDependencies,
+): CommandHandler<NoteMoveCommand> {
+  return async (command) => {
+    const { data, allowance } = command
+    // The gate sets it on every move it lets through; without it the target's cap goes unchecked.
+    if (allowance === undefined) {
+      throw new Error("NoteMoveCommand reached its handler without the entitlement gate")
+    }
+    assertCanWriteNotes(await groups.roleOf(data.groupId, data.actor.userId))
+    assertCanWriteNotes(await groups.roleOf(data.toGroupId, data.actor.userId))
+    const moved = await notes.move(
+      {
+        fromGroupId: data.groupId,
+        toGroupId: data.toGroupId,
+        noteIds: data.noteIds,
+        requestId: data.requestId,
+      },
+      data.actor.userId,
+      allowance,
+    )
+    return { notes: moved }
   }
 }
 

@@ -10,6 +10,7 @@ import {
   NoteDeleteCommand,
   NoteGetQuery,
   NoteListQuery,
+  NoteMoveCommand,
   NoteUpdateCommand,
 } from "@domain/notes"
 import { createSessionGate } from "../../cqrs/session-gate.ts"
@@ -25,6 +26,7 @@ import {
   createNoteDeleteHandler,
   createNoteGetHandler,
   createNoteListHandler,
+  createNoteMoveHandler,
   createNoteUpdateHandler,
 } from "./handlers.ts"
 import { createNoteSocketRequests } from "./socket.ts"
@@ -38,6 +40,10 @@ import { createNoteSocketRequests } from "./socket.ts"
 
 const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
 const noteId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
+/** Where OWNER may write, may only read, and is no member at all. */
+const editableGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111003"
+const readOnlyGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111004"
+const strangerGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111005"
 const OWNER = 1
 const VIEWER = 2
 
@@ -48,6 +54,8 @@ function stack(plan = FREE_PLAN_ID) {
     groups: roles({
       [`${groupId}:${OWNER}`]: GroupRole.OWNER,
       [`${groupId}:${VIEWER}`]: GroupRole.VIEWER,
+      [`${editableGroupId}:${OWNER}`]: GroupRole.EDITOR,
+      [`${readOnlyGroupId}:${OWNER}`]: GroupRole.VIEWER,
     }),
   }
   const commands = new CommandBus()
@@ -65,6 +73,7 @@ function stack(plan = FREE_PLAN_ID) {
   commands.register(NoteCreateCommand, createNoteCreateHandler(dependencies))
   commands.register(NoteUpdateCommand, createNoteUpdateHandler(dependencies))
   commands.register(NoteDeleteCommand, createNoteDeleteHandler(dependencies))
+  commands.register(NoteMoveCommand, createNoteMoveHandler(dependencies))
   const queries = new QueryBus()
   queries.use(createSessionGate([]))
   queries.register(NoteListQuery, createNoteListHandler(dependencies))
@@ -73,6 +82,7 @@ function stack(plan = FREE_PLAN_ID) {
     create: (command: NoteCreateCommand) => commands.execute(command),
     update: (command: NoteUpdateCommand) => commands.execute(command),
     delete: (command: NoteDeleteCommand) => commands.execute(command),
+    move: (command: NoteMoveCommand) => commands.execute(command),
     list: (query: NoteListQuery) => queries.execute(query),
     get: (query: NoteGetQuery) => queries.execute(query),
     cursor: {
@@ -324,5 +334,137 @@ describe("notes over both transports", () => {
     const deleted = await send("DELETE", `/${noteId}`, { version: 3 })
 
     expect([read.status, edited.status, deleted.status]).toEqual([200, 200, 200])
+  })
+
+  describe("moving notes to another group", () => {
+    const second = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111006"
+
+    async function seedTwo(notes: MemoryNoteRepository) {
+      await seedNote(notes)
+      await notes.create({ groupId, id: second, title: "Other", body: "" }, OWNER, null)
+      notes.writes = 0
+    }
+
+    function groupsOf(notes: MemoryNoteRepository) {
+      return [...notes.notes.values()].map((note) => [note.id, note.groupId])
+    }
+
+    it("moves the notes over REST, keeping their ids and raising their versions", async () => {
+      const { notes, buses } = stack()
+      await seedTwo(notes)
+
+      const response = await rest(buses, OWNER)("POST", "/move", {
+        toGroupId: editableGroupId,
+        noteIds: [noteId, second],
+      })
+
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      expect(body.notes.map((note: { id: string }) => note.id)).toEqual([noteId, second])
+      expect(body.notes[0]).toMatchObject({ groupId: editableGroupId, version: 3 })
+      expect(groupsOf(notes)).toEqual([[noteId, editableGroupId], [second, editableGroupId]])
+    })
+
+    it("moves the notes over the socket", async () => {
+      const { notes, buses } = stack()
+      await seedTwo(notes)
+      const ws = socket(buses, OWNER)
+
+      const frame = await ws.command("note.move", {
+        groupId,
+        toGroupId: editableGroupId,
+        noteIds: [noteId],
+      })
+
+      expect(frame).toMatchObject({ kind: "server.result", payload: { notes: [{ id: noteId }] } })
+      expect(groupsOf(notes)).toEqual([[noteId, editableGroupId], [second, groupId]])
+      ws.shutdown()
+    })
+
+    it("refuses a viewer of the source group and moves nothing", async () => {
+      const { notes, buses } = stack()
+      await seedTwo(notes)
+
+      const response = await rest(buses, VIEWER)("POST", "/move", {
+        toGroupId: editableGroupId,
+        noteIds: [noteId],
+      })
+
+      expect(response.status).toBe(403)
+      expect((await response.json()).error.code).toBe("ROLE_INSUFFICIENT")
+      expect(notes.writes).toBe(0)
+    })
+
+    it("refuses a move to a group where the person only reads or is no member", async () => {
+      const { notes, buses } = stack()
+      await seedTwo(notes)
+      const send = rest(buses, OWNER)
+
+      const viewerTarget = await send("POST", "/move", {
+        toGroupId: readOnlyGroupId,
+        noteIds: [noteId],
+      })
+      const strangerTarget = await send("POST", "/move", {
+        toGroupId: strangerGroupId,
+        noteIds: [noteId],
+      })
+
+      expect(viewerTarget.status).toBe(403)
+      expect((await viewerTarget.json()).error.code).toBe("ROLE_INSUFFICIENT")
+      expect(strangerTarget.status).toBe(404)
+      expect(notes.writes).toBe(0)
+    })
+
+    it("refuses a move into the same group, and an empty or repeating list", async () => {
+      const { notes, buses } = stack()
+      await seedTwo(notes)
+      const send = rest(buses, OWNER)
+
+      const same = await send("POST", "/move", { toGroupId: groupId, noteIds: [noteId] })
+      const empty = await send("POST", "/move", { toGroupId: editableGroupId, noteIds: [] })
+      const twice = await send("POST", "/move", {
+        toGroupId: editableGroupId,
+        noteIds: [noteId, noteId],
+      })
+
+      expect((await same.json()).error.code).toBe("SAME_GROUP")
+      expect([same.status, empty.status, twice.status]).toEqual([400, 400, 400])
+      expect(notes.writes).toBe(0)
+    })
+
+    it("moves none when one of the notes is not in the source group", async () => {
+      const { notes, buses } = stack()
+      await seedTwo(notes)
+
+      const response = await rest(buses, OWNER)("POST", "/move", {
+        toGroupId: editableGroupId,
+        noteIds: [noteId, crypto.randomUUID()],
+      })
+
+      expect(response.status).toBe(404)
+      expect(groupsOf(notes)).toEqual([[noteId, groupId], [second, groupId]])
+    })
+
+    it("refuses a move that would take the target group over the free plan's cap", async () => {
+      const { notes, buses } = stack()
+      await seedTwo(notes)
+      for (let i = 0; i < 9; i++) {
+        await notes.create(
+          { groupId: editableGroupId, id: crypto.randomUUID(), title: `T${i}`, body: "" },
+          OWNER,
+          null,
+        )
+      }
+      notes.writes = 0
+
+      const response = await rest(buses, OWNER)("POST", "/move", {
+        toGroupId: editableGroupId,
+        noteIds: [noteId, second],
+      })
+
+      expect(response.status).toBe(402)
+      expect((await response.json()).error.code).toBe("PLAN_LIMIT_REACHED")
+      expect(notes.writes).toBe(0)
+    })
   })
 })

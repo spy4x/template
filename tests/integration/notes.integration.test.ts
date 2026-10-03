@@ -12,6 +12,7 @@ import {
   NoteGetQuery,
   type NoteListPageKey,
   NoteListQuery,
+  NoteMoveCommand,
   NoteUpdateCommand,
   NoteVersionConflictError,
 } from "@domain/notes"
@@ -26,6 +27,7 @@ import {
   createNoteDeleteHandler,
   createNoteGetHandler,
   createNoteListHandler,
+  createNoteMoveHandler,
   createNoteUpdateHandler,
   type NoteHandlerDependencies,
 } from "../../apps/api/features/notes/handlers.ts"
@@ -117,6 +119,7 @@ function buses(sql: postgres.Sql) {
   commands.register(NoteCreateCommand, createNoteCreateHandler(dependencies))
   commands.register(NoteUpdateCommand, createNoteUpdateHandler(dependencies))
   commands.register(NoteDeleteCommand, createNoteDeleteHandler(dependencies))
+  commands.register(NoteMoveCommand, createNoteMoveHandler(dependencies))
   const queries = new QueryBus()
   queries.use(createSessionGate([]))
   queries.register(NoteListQuery, createNoteListHandler(dependencies))
@@ -587,5 +590,204 @@ Deno.test("notes against Postgres", async (t) => {
         expect(seen.toSorted()).toEqual(ids.toSorted())
       },
     )
+
+    /** Two groups the editor writes in, and the notes made in the first. */
+    async function twoGroups(titles: string[]) {
+      const first = await seedGroup(sql)
+      const second = crypto.randomUUID()
+      await new PostgresGroupRepository(sql).create({ id: second, name: "Elsewhere" }, first.owner)
+      await sql`
+        INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+        VALUES (${second}, ${first.editor}, ${GroupRole.EDITOR}, ${first.owner})
+      `
+      const ids: string[] = []
+      for (const title of titles) {
+        const id = crypto.randomUUID()
+        await commands.execute(
+          new NoteCreateCommand({
+            actor: actor(first.editor),
+            groupId: first.groupId,
+            id,
+            title,
+            body: "",
+          }),
+        )
+        ids.push(id)
+      }
+      return { ...first, toGroupId: second, ids }
+    }
+
+    function move(
+      userId: number,
+      groupId: string,
+      toGroupId: string,
+      noteIds: string[],
+    ) {
+      return commands.execute(
+        new NoteMoveCommand({ actor: actor(userId), groupId, toGroupId, noteIds }),
+      )
+    }
+
+    async function auditKinds(groupId: string): Promise<string[]> {
+      return (await sql<{ eventKind: string }[]>`
+        SELECT event_kind FROM audit_events
+        WHERE group_id = ${groupId} AND event_kind LIKE 'note.moved%'
+      `).map((row) => row.eventKind)
+    }
+
+    await t.step(
+      "a move keeps the note's id and history, and writes one change and one audit event per group",
+      async () => {
+        const { groupId, toGroupId, editor, ids } = await twoGroups(["a", "b"])
+        const [fromBefore, toBefore] = [
+          BigInt(await nextSequence(sql, groupId)),
+          BigInt(await nextSequence(sql, toGroupId)),
+        ]
+
+        const { notes } = await move(editor, groupId, toGroupId, ids)
+
+        expect(notes.map((note) => [note.id, note.groupId, note.version])).toEqual([
+          [ids[0], toGroupId, 2],
+          [ids[1], toGroupId, 2],
+        ])
+        expect(BigInt(await nextSequence(sql, groupId))).toBe(fromBefore + 1n)
+        expect(BigInt(await nextSequence(sql, toGroupId))).toBe(toBefore + 1n)
+        expect((await outbox(sql, groupId)).map((row) => row.eventKind)).toEqual([
+          "note.created",
+          "note.created",
+          "note.moved_out",
+        ])
+        expect((await outbox(sql, toGroupId)).map((row) => row.eventKind)).toEqual([
+          "note.moved_in",
+        ])
+        expect(await auditKinds(groupId)).toEqual(["note.moved_out"])
+        expect(await auditKinds(toGroupId)).toEqual(["note.moved_in"])
+        const read = await queries.execute(
+          new NoteGetQuery({ actor: actor(editor), groupId: toGroupId, id: ids[0] }),
+        )
+        expect(read.note.changeSequence).toBe(String(toBefore))
+        expect(
+          await refusal(
+            queries.execute(new NoteGetQuery({ actor: actor(editor), groupId, id: ids[0] })),
+          ),
+        ).toMatchObject({ code: "NOTE_NOT_FOUND" })
+      },
+    )
+
+    await t.step("a move with one missing note moves none and records nothing", async () => {
+      const { groupId, toGroupId, editor, ids } = await twoGroups(["a", "b"])
+      const [from, to] = [await nextSequence(sql, groupId), await nextSequence(sql, toGroupId)]
+
+      const error = await refusal(move(editor, groupId, toGroupId, [ids[0], crypto.randomUUID()]))
+
+      expect(error).toMatchObject({ code: "NOTE_NOT_FOUND" })
+      expect(await nextSequence(sql, groupId)).toBe(from)
+      expect(await nextSequence(sql, toGroupId)).toBe(to)
+      const [{ count }] = await sql<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM notes WHERE id = ${ids[0]} AND group_id = ${groupId}
+      `
+      expect(count).toBe(1)
+      expect(await auditKinds(groupId)).toEqual([])
+    })
+
+    await t.step(
+      "a move needs edit rights in both groups, and a stranger is told the group is missing",
+      async () => {
+        const { groupId, toGroupId, owner, viewer, stranger, editor, ids } = await twoGroups(["a"])
+        await sql`
+          INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+          VALUES (${toGroupId}, ${viewer}, ${GroupRole.EDITOR}, ${owner})
+        `
+        const readsThere = await insertUser(sql)
+        await sql`
+          INSERT INTO group_members (group_id, user_id, role, added_by_user_id) VALUES
+            (${groupId}, ${readsThere}, ${GroupRole.EDITOR}, ${owner}),
+            (${toGroupId}, ${readsThere}, ${GroupRole.VIEWER}, ${owner})
+        `
+        const sequence = await nextSequence(sql, toGroupId)
+
+        const errors = [
+          // A viewer in the source group, an editor in the target.
+          await refusal(move(viewer, groupId, toGroupId, ids)),
+          // An editor in the source group, a viewer in the target.
+          await refusal(move(readsThere, groupId, toGroupId, ids)),
+          // No member of the source, or of the target.
+          await refusal(move(stranger, groupId, toGroupId, ids)),
+          await refusal(move(owner, groupId, crypto.randomUUID(), ids)),
+        ]
+
+        expect(errors.map((error) => (error as NoteError).code)).toEqual([
+          "ROLE_INSUFFICIENT",
+          "ROLE_INSUFFICIENT",
+          "GROUP_NOT_FOUND",
+          "GROUP_NOT_FOUND",
+        ])
+        expect(await nextSequence(sql, toGroupId)).toBe(sequence)
+        const moved = await move(editor, groupId, toGroupId, ids)
+        expect(moved.notes).toHaveLength(1)
+      },
+    )
+
+    await t.step(
+      "a demoted editor is refused by the transaction even when the handler's check had passed",
+      async () => {
+        const { groupId, toGroupId, editor, ids } = await twoGroups(["a"])
+        await sql`
+          UPDATE group_members SET role = ${GroupRole.VIEWER}
+          WHERE group_id = ${toGroupId} AND user_id = ${editor}
+        `
+
+        const error = await refusal(
+          new PostgresNoteRepository(sql).move(
+            { fromGroupId: groupId, toGroupId, noteIds: ids },
+            editor,
+            null,
+          ),
+        )
+
+        expect(error).toMatchObject({ code: "ROLE_INSUFFICIENT" })
+      },
+    )
+
+    await t.step("a move that would take the target over its cap moves none", async () => {
+      const { groupId, toGroupId, owner, editor, ids } = await twoGroups(["a", "b"])
+      const notes = new PostgresNoteRepository(sql)
+      await notes.create(
+        { groupId: toGroupId, id: crypto.randomUUID(), title: "x", body: "" },
+        owner,
+        null,
+      )
+      const input = { fromGroupId: groupId, toGroupId, noteIds: ids }
+
+      const over = await refusal(notes.move(input, editor, 2))
+      const stillThere = await notes.count(groupId)
+      const fits = await notes.move(input, editor, 3)
+
+      expect(over).toMatchObject({ code: "PLAN_LIMIT_REACHED", limit: 2 })
+      expect(stillThere).toBe(2)
+      expect(fits).toHaveLength(2)
+      expect(await notes.count(toGroupId)).toBe(3)
+    })
+
+    await t.step("two moves in opposite directions both finish, none deadlocks", async () => {
+      const { groupId, toGroupId, editor, ids } = await twoGroups(["a"])
+      const back = crypto.randomUUID()
+      await commands.execute(
+        new NoteCreateCommand({
+          actor: actor(editor),
+          groupId: toGroupId,
+          id: back,
+          title: "b",
+          body: "",
+        }),
+      )
+
+      const results = await Promise.allSettled([
+        move(editor, groupId, toGroupId, ids),
+        move(editor, toGroupId, groupId, [back]),
+      ])
+
+      expect(results.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"])
+    })
   })
 })

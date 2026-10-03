@@ -9,9 +9,12 @@ import {
   NoteDeleteCommand,
   noteDeleteRequestSchema,
   NoteGetQuery,
+  NoteMoveCommand,
+  noteMoveRequestSchema,
   NoteUpdateCommand,
   noteUpdateRequestSchema,
   type NoteWriteResult,
+  parseNoteMoveRequest,
   parseNoteRequest,
 } from "@domain/notes"
 import { createSameOriginMutationGuard } from "@spy4x/server/http/same-origin"
@@ -30,6 +33,7 @@ export interface NotesRouteDependencies extends NoteListDependencies {
   update(command: NoteUpdateCommand): Promise<{ note: Note }>
   delete(command: NoteDeleteCommand): Promise<{ note: DeletedNote }>
   get(query: NoteGetQuery): Promise<{ note: Note }>
+  move(command: NoteMoveCommand): Promise<{ notes: Note[] }>
   /** The origin the browser sends; see `GroupsRouteDependencies.expectedOrigin`. */
   expectedOrigin?: string
 }
@@ -44,6 +48,7 @@ export interface NotesRouteDependencies extends NoteListDependencies {
  * - `POST /` creates `{ id, title, body }`: 201, or 200 for a retry of the same create.
  * - `PATCH /:noteId` updates `{ title, body, version }`.
  * - `DELETE /:noteId` deletes `{ version }`.
+ * - `POST /move` moves `{ toGroupId, noteIds }` to another group, all or none: `{ notes }`.
  *
  * An update or delete that names a stale version answers 409 `VERSION_CONFLICT` with
  * `currentVersion`. Writes need the web app's origin and accept an `Idempotency-Key` header.
@@ -70,6 +75,20 @@ export function createNotesRoute(dependencies: NotesRouteDependencies): Hono<API
     .get("/:noteId", async (c) => {
       const result = await dependencies.get(
         new NoteGetQuery({ actor: actorOf(c), groupId: groupIdOf(c), id: noteIdOf(c) }),
+      )
+      return c.json(result)
+    })
+    .post("/move", requireSameOrigin, async (c) => {
+      const groupId = groupIdOf(c)
+      const input = parseNoteMoveRequest(noteMoveRequestSchema, await readJson(c), groupId)
+      const result = await dependencies.move(
+        new NoteMoveCommand({
+          actor: actorOf(c),
+          groupId,
+          ...input,
+          requestId: c.get("requestId"),
+          idempotencyKey: c.req.header("idempotency-key"),
+        }),
       )
       return c.json(result)
     })

@@ -28,6 +28,7 @@ function harness() {
     },
     update: unused,
     delete: unused,
+    move: unused,
     get: unused,
     list(query) {
       seen.list = query
@@ -47,6 +48,7 @@ describe("note socket requests", () => {
         "note.create": "command",
         "note.update": "command",
         "note.delete": "command",
+        "note.move": "command",
         "note.list": "query",
         "note.get": "query",
       })

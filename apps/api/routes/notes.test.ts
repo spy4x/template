@@ -42,6 +42,7 @@ function harness(
     },
     delete: () =>
       Promise.resolve({ note: { id: noteId, groupId, version: 2, changeSequence: "3" } }),
+    move: () => Promise.resolve({ notes: [note] }),
     get: () => Promise.resolve({ note }),
     list(query) {
       seen.list = query
