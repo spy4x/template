@@ -132,6 +132,22 @@ describe("billing screens without JavaScript", () => {
     expect(html).toContain("The trial ends in 2 days, on October 15, 2026.")
   })
 
+  it("announces a notice politely as a warning, with its kind for the e2e hooks", () => {
+    const at = new Date("2026-10-08T10:00:00Z")
+    const failed = {
+      ...PRO_OWNER,
+      status: BillingStatus.PastDue,
+      notice: { kind: BillingNoticeKind.PaymentFailed, at, daysLeft: 3 },
+    }
+    const html = renderToString(<BillingCard groupId={groupId} billing={failed} />)
+    const notice = html.match(/<div[^>]*data-e2e="billing-notice"[^>]*>/)?.[0] ?? ``
+
+    expect(notice).toContain(`role="status"`)
+    expect(notice).not.toContain(`role="alert"`)
+    expect(notice).toContain(`data-kind="${BillingNoticeKind.PaymentFailed}"`)
+    expect(notice).toContain(`border-warning`)
+  })
+
   it("tells the owner when a cancelled plan ends and how to renew it, beside the portal", () => {
     const at = new Date("2026-11-01T00:00:00Z")
     const ending = {
@@ -204,6 +220,15 @@ describe("billing screens without JavaScript", () => {
       renderToString(<PricingScreen groupId={groupId} groupName="Team" billing={FREE_OWNER} />),
     )
       .toContain(`value="${PRO_PLAN_ID}"`)
+  })
+
+  it("labels the per-member plan's price with the unit it is charged per", () => {
+    const html = renderToString(
+      <PricingScreen groupId={groupId} groupName="Team" billing={FREE_OWNER} />,
+    )
+
+    expect(html).toContain("€9.00")
+    expect(html).toContain("per member / month")
   })
 
   it("shows no plan to choose to a member who is not the owner, nor to a group that pays", () => {
