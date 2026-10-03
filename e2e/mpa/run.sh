@@ -62,6 +62,8 @@ AUTH_TOTP=$(openssl rand -hex 20)
 export AUTH_COOKIE_SECRET AUTH_PEPPER AUTH_TOTP
 export ENV=dev
 export DOMAIN="127.0.0.1:$FRONT_PORT"
+# The proxy serves the MPA and the API at one origin, so the MPA's own host is DOMAIN here.
+export MPA_DOMAIN="$DOMAIN"
 export DEV_EMAIL=dev@example.com
 export TIMEZONE=Etc/UTC
 export RATE_LIMITER_WINDOW_MS=60000
