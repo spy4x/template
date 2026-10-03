@@ -1,16 +1,24 @@
 import type { ComponentChildren, JSX } from "preact"
 import { useEffect, useRef, useState } from "preact/hooks"
 import { Button } from "@spy4x/preact-ui/button"
-import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
 import { ConfirmDialog } from "@spy4x/preact-ui/confirm-dialog"
+import { Dropdown, DropdownItem } from "@spy4x/preact-ui/dropdown"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
-import { Input, Select, Textarea } from "@spy4x/preact-ui/input"
+import { Input, Textarea } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { Link } from "@spy4x/preact-ui/link"
+import { IconArrowLeft, IconEllipsisVertical } from "@spy4x/preact-icons"
 import { NOTE_BODY_MAX_LENGTH, NOTE_TITLE_MAX_LENGTH } from "@domain/notes"
-import type { MoveTarget, NoteDraft, NoteFormErrors, NotesGroup } from "./notes-screen.tsx"
+import {
+  MENU_TRIGGER_CLASSES,
+  type MoveTarget,
+  type NoteDraft,
+  type NoteFormErrors,
+  type NotesGroup,
+  NotesPageHeader,
+} from "./notes-screen.tsx"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
@@ -41,172 +49,183 @@ export interface NoteEditorScreenProps {
   draftId: string
   errors: NoteFormErrors
   saving: boolean
-  /** Saves or creates. Without it, the browser posts the form. */
+  /** Saves or creates. */
   onSave?: () => void
   /** Rereads the note after a conflict; without it, the "load the latest" link reloads the page. */
   onReloadLatest?: () => void
   deleting: boolean
   /**
-   * Deletes the note. Given, "Delete" opens a confirmation dialog and this runs when the person
-   * confirms. Without it, "Delete" is a link to a page that asks the same question in a form.
+   * Deletes the note. Given, the page's menu holds "Delete", which asks first and runs this when
+   * the person confirms. Left out, the menu offers no delete.
    */
   onDelete?: () => void
-  /** Show the "delete this note?" page instead of the editor (the page without JavaScript). */
-  confirmingDelete?: boolean
   /**
    * The other groups the person may move this note to (editor or above there). Empty, or left
-   * out, hides the "Move to group" form.
+   * out, the menu offers no move.
    */
   moveTargets?: readonly MoveTarget[]
-  /** Moves the note to the chosen group. Without it, the browser posts the form. */
+  /** Moves the note to the chosen group. */
   onMove?: (toGroupId: string) => void
   moving?: boolean
-  /** The refusal of the last move, shown in the move form. */
+  /** The refusal of the last move, shown under the form. */
   moveError?: string | null
   navigate?: Navigate
 }
 
 /**
- * One note on a page of its own: the form to create it or edit it, with save and delete, and for a
- * viewer the note as text. Every action is a real form or link: the form posts the API's field
- * names to the note routes, and deleting is a dialog, or a page with a form when no script runs.
- * With its callbacks, the app takes the actions over; without them, the browser posts.
+ * One note on a page of its own: the form to create it or edit it, and for a viewer the note as
+ * text. The header has a back button and, on an existing note, a menu to move it to another group
+ * or delete it (after a confirmation). Save and Cancel sit under the text, and stay in reach at the
+ * bottom of a phone's screen.
  */
 export function NoteEditorScreen(props: NoteEditorScreenProps): JSX.Element {
   const { group, notFound, navigate } = props
   if (!group) {
     return (
-      <Card>
-        <CardHeader>
-          <h1 class="text-lg font-semibold">Note</h1>
-        </CardHeader>
-        <CardBody>
-          <Stack>
-            <EmptyState
-              title={props.loading ? "Loading the group..." : "This group was not found."}
-            />
-            <Link href={SCREEN_PATHS.groups} navigate={navigate} class="pc-link">
+      <EditorPage>
+        <NotesPageHeader leading={<BackButton navigate={navigate} />} title="Note" />
+        <EmptyState
+          headingLevel={2}
+          title={props.loading ? "Loading the group..." : "This group was not found."}
+          action={!props.loading && (
+            <Button href={SCREEN_PATHS.groups} navigate={navigate} variant="outline">
               Back to groups
-            </Link>
-          </Stack>
-        </CardBody>
-      </Card>
+            </Button>
+          )}
+        />
+      </EditorPage>
     )
   }
   if (notFound) {
     return (
-      <Page>
-        <BackLink navigate={navigate} />
-        <Card>
-          <CardHeader>
-            <h1 class="text-lg font-semibold">Note not found</h1>
-          </CardHeader>
-          <CardBody>
-            {props.errors.form
-              ? <ErrorState message={props.errors.form} />
-              : (
-                <p class="text-sm" data-e2e="note-not-found">
-                  There is no such note in{" "}
-                  {group.name}. It may have been deleted, or it may be in another of your groups:
-                  switch to that group, then open it from its notes.
-                </p>
-              )}
-          </CardBody>
-        </Card>
-      </Page>
+      <EditorPage>
+        <NotesPageHeader leading={<BackButton navigate={navigate} />} title="Note not found" />
+        {props.errors.form
+          ? <ErrorState message={props.errors.form} />
+          : (
+            <p class="text-sm text-muted" data-e2e="note-not-found">
+              There is no such note in{" "}
+              {group.name}. It may have been deleted, or it may be in another of your groups: switch
+              to that group, then open it from its notes.
+            </p>
+          )}
+      </EditorPage>
     )
   }
   if (props.loading) {
     return (
-      <Page>
-        <BackLink navigate={navigate} />
-        <EmptyState title="Loading the note..." />
-      </Page>
+      <EditorPage>
+        <NotesPageHeader leading={<BackButton navigate={navigate} />} title="Note" />
+        <EmptyState headingLevel={2} title="Loading the note..." />
+      </EditorPage>
     )
   }
-  return (
-    <Page>
-      <BackLink navigate={navigate} />
-      {!group.canWrite
-        ? <ReadOnlyNote {...props} />
-        : props.confirmingDelete && props.note
-        ? <ConfirmDeletePage {...props} group={group} note={props.note} />
-        : (
-          <>
-            <EditorCard {...props} group={group} />
-            {props.note && (props.moveTargets?.length ?? 0) > 0 &&
-              <MoveCard {...props} group={group} note={props.note} />}
-          </>
-        )}
-    </Page>
-  )
+  return group.canWrite ? <Editor {...props} group={group} /> : <ReadOnlyNote {...props} />
 }
 
-function Page({ children }: { children?: ComponentChildren }): JSX.Element {
+/** The editor's column: about 40 rem, a readable width for a form and its text. */
+function EditorPage({ children }: { children?: ComponentChildren }): JSX.Element {
   return (
-    <div class="mx-auto w-full max-w-3xl">
+    <div class="mx-auto w-full max-w-2xl">
       <Stack gap="lg">{children}</Stack>
     </div>
   )
 }
 
-function BackLink({ navigate }: { navigate?: Navigate }): JSX.Element {
+function BackButton({ navigate }: { navigate?: Navigate }): JSX.Element {
   return (
-    <Link
+    <Button
       href={NOTE_PATHS.list}
       navigate={navigate}
-      class="pc-link text-sm"
+      variant="icon"
+      size="none"
+      class="-ml-2 size-11 shrink-0 sm:size-9"
+      aria-label="Back to notes"
       data-e2e="note-back"
     >
-      Back to notes
-    </Link>
+      <IconArrowLeft class="size-5" />
+    </Button>
   )
 }
 
 /** A viewer's page: the note as text, with nothing to change. */
-function ReadOnlyNote({ note, value }: NoteEditorScreenProps): JSX.Element {
+function ReadOnlyNote({ note, value, group, navigate }: NoteEditorScreenProps): JSX.Element {
   return (
-    <Card>
-      <CardHeader>
-        <h1 class="text-lg font-semibold" data-e2e="note-read-title">
-          {note ? value.title : "New note"}
-        </h1>
-      </CardHeader>
-      <CardBody>
-        <Stack>
-          <p class="text-sm text-muted" data-e2e="note-read-only">
-            {note
-              ? "You can read this note. Only an editor can change it."
-              : "Only an editor can add notes to this group."}
-          </p>
-          {note && value.body && (
-            <p class="whitespace-pre-wrap text-sm" data-e2e="note-read-body">{value.body}</p>
-          )}
-        </Stack>
-      </CardBody>
-    </Card>
+    <EditorPage>
+      <NotesPageHeader
+        leading={<BackButton navigate={navigate} />}
+        title={note ? value.title : "New note"}
+        subtitle={group?.name}
+        subtitleE2E="notes-group"
+        titleE2E="note-read-title"
+      />
+      <p class="text-sm text-muted" data-e2e="note-read-only">
+        {note
+          ? "You can read this note. Only an editor can change it."
+          : "Only an editor can add notes to this group."}
+      </p>
+      {note && value.body && (
+        <p class="whitespace-pre-wrap break-words text-base" data-e2e="note-read-body">
+          {value.body}
+        </p>
+      )}
+    </EditorPage>
   )
 }
 
 type WithGroup = NoteEditorScreenProps & { group: NotesGroup }
 
-function EditorCard(props: WithGroup): JSX.Element {
+function Editor(props: WithGroup): JSX.Element {
   const { group, note, value, onChange, errors, saving, onSave, navigate } = props
+  const moveTargets = props.onMove ? props.moveTargets ?? [] : []
+  const [asking, setAsking] = useState(false)
+  const hasMenu = note !== null && (moveTargets.length > 0 || props.onDelete !== undefined)
   return (
-    <Card>
-      <CardHeader>
-        <h1 class="text-lg font-semibold">{note ? "Edit note" : "New note"}</h1>
-        <span class="text-sm text-muted">in {group.name}</span>
-      </CardHeader>
-      <CardBody>
-        <ScreenForm
-          action={note ? NOTE_PATHS.note(note.id) : NOTE_PATHS.create(group.id)}
-          pending={saving}
-          onSubmit={onSave}
-        >
-          {note
-            ? <input type="hidden" name="version" value={String(note.version)} />
-            : <input type="hidden" name="id" value={props.draftId} />}
+    <EditorPage>
+      <NotesPageHeader
+        leading={<BackButton navigate={navigate} />}
+        title={note ? "Edit note" : "New note"}
+        subtitle={group.name}
+        subtitleE2E="notes-group"
+        actions={hasMenu && (
+          <Dropdown
+            trigger={<IconEllipsisVertical class="size-5" />}
+            triggerLabel="More actions"
+            triggerClasses={MENU_TRIGGER_CLASSES}
+            triggerDataE2E="note-menu"
+          >
+            {moveTargets.map((target) => (
+              <DropdownItem
+                key={target.id}
+                onClick={() => props.onMove?.(target.id)}
+                disabled={props.moving}
+                dataE2E="note-move"
+              >
+                Move to {target.name}
+              </DropdownItem>
+            ))}
+            {props.onDelete && (
+              <DropdownItem
+                onClick={() => setAsking(true)}
+                disabled={props.deleting}
+                danger
+                dataE2E="note-delete"
+              >
+                Delete
+              </DropdownItem>
+            )}
+          </Dropdown>
+        )}
+      />
+      <ScreenForm
+        action={note ? NOTE_PATHS.note(note.id) : NOTE_PATHS.create(group.id)}
+        pending={saving}
+        onSubmit={onSave}
+      >
+        {note
+          ? <input type="hidden" name="version" value={String(note.version)} />
+          : <input type="hidden" name="id" value={props.draftId} />}
+        <Stack>
           <NoteFields
             groupId={group.id}
             value={value}
@@ -215,7 +234,7 @@ function EditorCard(props: WithGroup): JSX.Element {
             navigate={navigate}
           />
           {note?.conflict && (
-            <p class="mt-2 text-sm" data-e2e="note-conflict">
+            <p class="text-sm" data-e2e="note-conflict">
               <Link
                 href={NOTE_PATHS.note(note.id)}
                 navigate={props.onReloadLatest ? () => props.onReloadLatest?.() : navigate}
@@ -228,105 +247,30 @@ function EditorCard(props: WithGroup): JSX.Element {
               to see what changed. Your text here is kept until you do.
             </p>
           )}
-          <div class="mt-4 flex flex-wrap items-center gap-3">
-            <Button type="submit" data-e2e="note-save" busy={saving} busyLabel="Saving...">
-              {note ? "Save note" : "Add note"}
-            </Button>
-            <Button href={NOTE_PATHS.list} navigate={navigate} variant="outline" size="md">
+          <ErrorState message={props.moveError ?? null} />
+          <div class="sticky bottom-0 -mx-4 flex gap-3 border-t border-subtle bg-canvas px-4 py-3 sm:static sm:mx-0 sm:justify-end sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
+            <Button
+              href={NOTE_PATHS.list}
+              navigate={navigate}
+              variant="outline"
+              class="flex-1 sm:flex-none"
+              data-e2e="note-cancel"
+            >
               Cancel
             </Button>
-            {note && <DeleteControl {...props} note={note} />}
+            <Button
+              type="submit"
+              class="flex-1 sm:flex-none"
+              data-e2e="note-save"
+              busy={saving}
+              busyLabel="Saving..."
+            >
+              {note ? "Save note" : "Add note"}
+            </Button>
           </div>
-        </ScreenForm>
-      </CardBody>
-    </Card>
-  )
-}
-
-/**
- * "Move to group": one note to another group the person writes to. A form of its own, so moving
- * never sends the edit form's unsaved text; the note keeps its text and its address.
- */
-function MoveCard(
-  { group, note, moveTargets = [], moving, moveError, onMove }: WithGroup & { note: NoteTarget },
-): JSX.Element {
-  return (
-    <Card>
-      <CardHeader>
-        <h2 class="text-lg font-semibold">Move to group</h2>
-      </CardHeader>
-      <CardBody>
-        <ScreenForm
-          action={NOTE_PATHS.move(note.id)}
-          pending={moving}
-          onSubmit={onMove && ((data) => onMove(String(data.get("toGroupId") ?? "")))}
-        >
-          <Stack>
-            <p class="text-sm text-muted">
-              Members of {group.name} stop seeing this note; members of the group you choose see it.
-            </p>
-            <Field id="note-move-to" label="Group">
-              <Select
-                name="toGroupId"
-                data-e2e="note-move-to"
-                options={moveTargets.map((target) => ({ value: target.id, label: target.name }))}
-              />
-            </Field>
-            <ErrorState message={moveError ?? null} />
-            <div>
-              <Button
-                type="submit"
-                variant="outline"
-                data-e2e="note-move"
-                busy={moving}
-                busyLabel="Moving..."
-              >
-                Move note
-              </Button>
-            </div>
-          </Stack>
-        </ScreenForm>
-      </CardBody>
-    </Card>
-  )
-}
-
-/**
- * "Delete": a button that opens the confirmation dialog when the app takes deleting over, and a
- * link to the confirmation page when it does not.
- */
-function DeleteControl(
-  { group, note, value, deleting, onDelete, navigate }: WithGroup & { note: NoteTarget },
-): JSX.Element {
-  const [asking, setAsking] = useState(false)
-  if (!onDelete) {
-    return (
-      <Button
-        href={NOTE_PATHS.delete(note.id)}
-        navigate={navigate}
-        variant="outline"
-        size="md"
-        class="sm:ml-auto"
-        data-e2e="note-delete"
-      >
-        Delete
-      </Button>
-    )
-  }
-  return (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        class="sm:ml-auto"
-        data-e2e="note-delete"
-        busy={deleting}
-        busyLabel="Deleting..."
-        onClick={() => setAsking(true)}
-      >
-        Delete
-      </Button>
-      {asking && (
+        </Stack>
+      </ScreenForm>
+      {asking && note && (
         <ConfirmDialog
           title="Delete this note?"
           message={`"${value.title}" will be deleted for everyone in ${group.name}.`}
@@ -336,61 +280,19 @@ function DeleteControl(
           dataE2E="note-delete-dialog"
           onConfirm={() => {
             setAsking(false)
-            onDelete()
+            props.onDelete?.()
           }}
           onCancel={() => setAsking(false)}
         />
       )}
-    </>
-  )
-}
-
-/** The page without JavaScript asks "delete this note?" here, in a form that posts the version. */
-function ConfirmDeletePage(
-  { group, note, value, errors, deleting, onDelete, navigate }: WithGroup & { note: NoteTarget },
-): JSX.Element {
-  return (
-    <Card>
-      <CardHeader>
-        <h1 class="text-lg font-semibold">Delete this note?</h1>
-      </CardHeader>
-      <CardBody>
-        <ScreenForm action={NOTE_PATHS.delete(note.id)} pending={deleting} onSubmit={onDelete}>
-          <input type="hidden" name="version" value={String(note.version)} />
-          <Stack>
-            <p class="text-sm">
-              "{value.title}" will be deleted for everyone in {group.name}.
-            </p>
-            <ErrorState message={errors.form} />
-          </Stack>
-          <div class="mt-4 flex flex-wrap gap-3">
-            <Button
-              type="submit"
-              variant="danger"
-              data-e2e="note-delete-confirm"
-              busy={deleting}
-              busyLabel="Deleting..."
-            >
-              Delete note
-            </Button>
-            <Button
-              href={NOTE_PATHS.note(note.id)}
-              navigate={navigate}
-              variant="outline"
-              size="md"
-            >
-              Keep it
-            </Button>
-          </div>
-        </ScreenForm>
-      </CardBody>
-    </Card>
+    </EditorPage>
   )
 }
 
 /**
- * The title and text of a note form, with the form's error under them. When the title gets an
- * error, focus moves to it, so a keyboard or screen reader user lands on what to fix.
+ * The title and text of a note form, with the form's error under them. The title is the page's
+ * large first line; the text grows with what is typed. When the title gets an error, focus moves
+ * to it, so a keyboard or screen reader user lands on what to fix.
  */
 function NoteFields(
   { groupId, value, onChange, errors, navigate }: {
@@ -413,6 +315,8 @@ function NoteFields(
           data-e2e="note-title"
           name="title"
           autocomplete="off"
+          placeholder="What is this note about?"
+          class="text-lg font-semibold"
           maxLength={NOTE_TITLE_MAX_LENGTH}
           value={value.title}
           onInput={(e) => onChange?.({ ...value, title: e.currentTarget.value })}
@@ -423,7 +327,8 @@ function NoteFields(
         <Textarea
           data-e2e="note-body"
           name="body"
-          rows={14}
+          rows={8}
+          class="min-h-48 field-sizing-content"
           maxLength={NOTE_BODY_MAX_LENGTH}
           value={value.body}
           onInput={(e) => onChange?.({ ...value, body: e.currentTarget.value })}

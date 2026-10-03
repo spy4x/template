@@ -45,6 +45,7 @@ export function NotesView() {
         onMove={({ toGroupId, noteIds }) => void store.move(toGroupId, noteIds)}
         moving={store.moving.value}
         moveError={store.moveError.value}
+        onDelete={(note) => void store.remove(note)}
         navigate={navigate}
       />
     </>
