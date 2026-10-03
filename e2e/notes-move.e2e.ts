@@ -33,12 +33,11 @@ async function openNotes(page: Page, groupName: string): Promise<void> {
     name: "Groups",
   }).click()
   await page.getByRole("button", { name: `Open notes in ${groupName}` }).click()
-  await expect(page.getByRole("heading", { level: 1, name: `Notes in ${groupName}` }))
-    .toBeVisible()
+  await expect(page.locator("[data-e2e=notes-group]")).toHaveText(groupName)
 }
 
 test.describe("moving notes to another group", () => {
-  test("moves a note from its page and ticked notes from the list, and members of both groups see it live", async ({ browser, request }) => {
+  test("moves notes from a note's page, a row's menu and a selection, deletes one from its row, and members of both groups see it live", async ({ browser, request }) => {
     const owner = "e2e_notes_move_owner@example.com"
     const inSource = "e2e_notes_move_source@example.com"
     const inTarget = "e2e_notes_move_target@example.com"
@@ -71,7 +70,7 @@ test.describe("moving notes to another group", () => {
         })
         expect(added.status(), await added.text()).toBe(200)
       }
-      for (const title of ["One", "Two", "Three"]) {
+      for (const title of ["One", "Two", "Three", "Four"]) {
         const created = await ownerPage.request.post(
           `${apiBase}/api/groups/${groups.Source}/notes`,
           { headers, data: { id: crypto.randomUUID(), title, body: "" } },
@@ -85,20 +84,20 @@ test.describe("moving notes to another group", () => {
       await openNotes(targetPage, "Target")
       const sourceTitles = sourcePage.locator("[data-e2e=note-item-title]")
       const targetTitles = targetPage.locator("[data-e2e=note-item-title]")
-      await expect(sourceTitles).toHaveCount(3)
+      await expect(sourceTitles).toHaveCount(4)
       await expect(targetPage.getByText("No notes yet.")).toBeVisible()
 
       await openNotes(ownerPage, "Source")
       const ownerTitles = ownerPage.locator("[data-e2e=note-item-title]")
 
-      // One note, from its own page: the person lands on the list, which no longer has it.
+      // One note, from its own page's menu: the person lands on the list, which no longer has it.
       await ownerPage.getByRole("link", { name: "One", exact: true }).click()
-      await ownerPage.locator("[data-e2e=note-move-to]").selectOption({ label: "Target" })
-      await ownerPage.locator("[data-e2e=note-move]").click()
+      await ownerPage.locator("[data-e2e=note-menu]").click()
+      await ownerPage.getByRole("menuitem", { name: "Move to Target" }).click()
       await expect(ownerPage).toHaveURL("/notes")
-      await expect(ownerTitles).toHaveCount(2)
+      await expect(ownerTitles).toHaveCount(3)
       await expect(ownerPage.getByRole("link", { name: "One", exact: true })).toHaveCount(0)
-      await expect(sourceTitles).toHaveCount(2, { timeout: 5_000 })
+      await expect(sourceTitles).toHaveCount(3, { timeout: 5_000 })
       await expect(targetTitles).toHaveText(["One"], { timeout: 5_000 })
 
       // The move went over the socket, as one command with an idempotency key.
@@ -108,23 +107,39 @@ test.describe("moving notes to another group", () => {
       expect(single?.idempotencyKey).toBeTruthy()
       expect(single?.payload.noteIds).toHaveLength(1)
 
-      // Ticked notes, from the list: all of them or none.
-      await ownerPage.getByLabel("Tick Two").check()
+      // One note, from its row's menu on the list.
+      await ownerPage.getByRole("button", { name: "Actions for Two" }).click()
+      await ownerPage.getByRole("menuitem", { name: "Move to Target" }).click()
+      await expect(ownerTitles).toHaveCount(2)
+      await expect(targetTitles).toHaveCount(2, { timeout: 5_000 })
+
+      // Ticked notes, from the list: tick boxes appear only once the person asks to select.
+      await expect(ownerPage.locator("[data-e2e=note-select]")).toHaveCount(0)
+      await ownerPage.getByRole("button", { name: "More actions" }).click()
+      await ownerPage.getByRole("menuitem", { name: "Select notes to move" }).click()
+      // Nothing ticked yet: a hint, and no way to move nothing.
+      await expect(ownerPage.getByText("Tick the notes to move")).toBeVisible()
+      await expect(ownerPage.locator("[data-e2e=notes-move-submit]")).toHaveCount(0)
       await ownerPage.getByLabel("Tick Three").check()
+      await ownerPage.getByLabel("Tick Four").check()
+      await expect(ownerPage.getByText("2 selected")).toBeVisible()
       await ownerPage.locator("[data-e2e=notes-move-to]").selectOption({ label: "Target" })
       await ownerPage.locator("[data-e2e=notes-move-submit]").click()
       await expect(ownerPage.getByText("No notes yet.")).toBeVisible()
-      await expect(targetTitles).toHaveCount(3, { timeout: 5_000 })
+      await expect(targetTitles).toHaveCount(4, { timeout: 5_000 })
       await expect(sourcePage.getByText("No notes yet.")).toBeVisible({ timeout: 5_000 })
 
-      // Nothing ticked: a message, and nothing moves.
-      await ownerPage.getByRole("navigation", { name: "Main navigation" })
-        .getByRole("link", { name: "Groups" }).click()
-      await ownerPage.getByRole("button", { name: "Open notes in Target" }).click()
+      // Delete from a row's menu asks first; the members of the group see it go.
+      await openNotes(ownerPage, "Target")
+      await expect(ownerTitles).toHaveCount(4)
+      await ownerPage.getByRole("button", { name: "Actions for One" }).click()
+      await ownerPage.getByRole("menuitem", { name: "Delete" }).click()
+      const dialog = ownerPage.locator("[data-e2e=note-delete-dialog]")
+      await expect(dialog).toContainText(`"One" will be deleted for everyone in Target.`)
+      await dialog.getByRole("button", { name: "Delete", exact: true }).click()
       await expect(ownerTitles).toHaveCount(3)
-      await ownerPage.locator("[data-e2e=notes-move-submit]").click()
-      await expect(ownerPage.getByText("Tick the notes you want to move.")).toBeVisible()
-      await expect(ownerTitles).toHaveCount(3)
+      await expect(ownerPage.getByRole("link", { name: "One", exact: true })).toHaveCount(0)
+      await expect(targetTitles).toHaveCount(3, { timeout: 5_000 })
     } finally {
       for (const context of contexts) await context.close()
       for (const email of emails) await cleanup(request, email)

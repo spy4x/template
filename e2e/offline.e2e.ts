@@ -158,8 +158,7 @@ test.describe("offline notes", () => {
       await page.keyboard.press("ArrowDown")
       await page.keyboard.type("Offline second")
       await page.keyboard.press("Enter")
-      await expect(page.getByRole("heading", { level: 1, name: "Notes in Offline second" }))
-        .toBeVisible()
+      await expect(page.locator("[data-e2e=notes-group]")).toHaveText("Offline second")
       await expect(titles).toHaveText(["In the second"])
 
       await context.setOffline(false)

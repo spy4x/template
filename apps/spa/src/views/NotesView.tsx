@@ -38,13 +38,13 @@ export function NotesView() {
         notes={store.notes.value}
         loading={store.loading.value || groupsStore.loading.value || groupId === null}
         listError={store.listError.value}
-        nextPageHref={null}
         moveTargets={membership && canMutateNotes(membership.role)
           ? moveTargetsOf(groupsStore.groups.value, membership.id)
           : []}
         onMove={({ toGroupId, noteIds }) => void store.move(toGroupId, noteIds)}
         moving={store.moving.value}
         moveError={store.moveError.value}
+        onDelete={(note) => void store.remove(note)}
         navigate={navigate}
       />
     </>

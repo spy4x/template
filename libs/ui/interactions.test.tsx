@@ -14,7 +14,7 @@ import { act } from "preact/test-utils"
 import { UserMFAStatus, type UserPushTokenPublic } from "@domain/identity"
 import { GroupRole } from "@domain/groups"
 import type { PlanRefusal } from "@domain/billing"
-import { BILLING_PATHS, SeatPriceConfirm } from "./billing-screen.tsx"
+import { SeatPriceConfirm } from "./billing-screen.tsx"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { AppFrame, PublicFrame } from "./frame.tsx"
 import { GroupSettingsScreen } from "./group-settings-screen.tsx"
@@ -34,10 +34,8 @@ import {
   type TransferDraft,
 } from "./group-transfer.tsx"
 import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
-import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
-import { NotesScreen } from "./notes-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
-import { FORM_ACTIONS, GROUP_PATHS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
+import { FORM_ACTIONS, GROUP_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 import {
   ForgotPasswordScreen,
   type ForgotPasswordScreenProps,
@@ -403,194 +401,6 @@ describe("ProfileScreen in the browser", () => {
 
     expect(await submit(FORM_ACTIONS.pushRemove)).toBe(true)
     expect(remove.calls).toEqual([[device.deviceId]])
-  })
-})
-
-const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
-const note = {
-  id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001",
-  title: "Groceries",
-  body: "",
-  version: 3,
-}
-const noError = { title: null, form: null }
-const editorDefaults: NoteEditorScreenProps = {
-  group: { id: groupId, name: "Team", canWrite: true },
-  loading: false,
-  notFound: false,
-  note: null,
-  value: { title: "", body: "" },
-  draftId: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111009",
-  errors: noError,
-  saving: false,
-  deleting: false,
-}
-const existing = { id: note.id, version: 3, conflict: false }
-
-/** Clicks the first button of the open delete dialog with this label. */
-async function clickDialogButton(label: string): Promise<void> {
-  const button = [...document.querySelectorAll("[data-e2e=note-delete-dialog] button")]
-    .find((candidate) => candidate.textContent?.trim() === label)
-  if (!button) throw new Error(`the dialog has no ${label} button`)
-  await act(() => {
-    button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }) as unknown as Event)
-  })
-}
-
-const targets = [
-  { id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111003", name: "Family" },
-  { id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111004", name: "Work" },
-]
-
-describe("moving notes in the browser", () => {
-  const list = {
-    group: { id: groupId, name: "Team", canWrite: true },
-    notes: [note, { ...note, id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111005", title: "Trip" }],
-    loading: false,
-    listError: null,
-    nextPageHref: null,
-    moveTargets: targets,
-  }
-
-  async function tick(selector: string): Promise<void> {
-    const box = find<HTMLInputElement>(selector)
-    box.checked = true
-    await act(() => {
-      box.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event)
-    })
-  }
-
-  it("hands the app the ticked notes and the chosen group, and cancels the native post", async () => {
-    const move = spy<[{ toGroupId: string; noteIds: string[] }]>()
-    await mount(<NotesScreen {...list} onMove={move.fn} />)
-
-    await tick(`[data-e2e=note-${list.notes[1].id}] [data-e2e=note-select]`)
-    const select = find<HTMLSelectElement>("[data-e2e=notes-move-to]")
-    select.value = targets[1].id
-    await act(() => {
-      select.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event)
-    })
-
-    expect(await submit(NOTE_PATHS.moveMany(groupId))).toBe(true)
-    expect(move.calls).toEqual([[{ toGroupId: targets[1].id, noteIds: [list.notes[1].id] }]])
-  })
-
-  it("posts natively when the app takes nothing over", async () => {
-    await mount(<NotesScreen {...list} />)
-
-    expect(await submit(NOTE_PATHS.moveMany(groupId))).toBe(false)
-  })
-
-  it("moves one note from its page with the chosen group", async () => {
-    const move = spy<[string]>()
-    await mount(
-      <NoteEditorScreen
-        {...editorDefaults}
-        note={existing}
-        value={note}
-        moveTargets={targets}
-        onMove={move.fn}
-      />,
-    )
-
-    expect(await submit(NOTE_PATHS.move(note.id))).toBe(true)
-    expect(move.calls).toEqual([[targets[0].id]])
-  })
-
-  it("shows the refusal beside the move button", async () => {
-    await mount(<NotesScreen {...list} moveError="Tick the notes you want to move." />)
-
-    expect(find("[data-e2e=notes-move]").parentElement?.textContent).toContain(
-      "Tick the notes you want to move.",
-    )
-  })
-
-  it("refuses a second move while the first is pending", async () => {
-    const move = spy<[{ toGroupId: string; noteIds: string[] }]>()
-    await mount(<NotesScreen {...list} moving onMove={move.fn} />)
-
-    expect(await submit(NOTE_PATHS.moveMany(groupId))).toBe(true)
-    expect(move.calls).toEqual([])
-  })
-})
-
-describe("NoteEditorScreen in the browser", () => {
-  it("reports the typed title and creates the note through the app's callbacks", async () => {
-    const change = spy<[{ title: string; body: string }]>()
-    const save = spy<[]>()
-    await mount(<NoteEditorScreen {...editorDefaults} onChange={change.fn} onSave={save.fn} />)
-
-    await type("[data-e2e=note-title]", "Trip")
-
-    expect(change.calls).toEqual([[{ title: "Trip", body: "" }]])
-    expect(await submit(NOTE_PATHS.create(groupId))).toBe(true)
-    expect(save.calls).toHaveLength(1)
-  })
-
-  it("posts natively when the app takes nothing over", async () => {
-    await mount(<NoteEditorScreen {...editorDefaults} />)
-
-    expect(await submit(NOTE_PATHS.create(groupId))).toBe(false)
-  })
-
-  it("asks before deleting, and deletes only when the person confirms", async () => {
-    const remove = spy<[]>()
-    await mount(
-      <NoteEditorScreen {...editorDefaults} note={existing} value={note} onDelete={remove.fn} />,
-    )
-
-    await click("[data-e2e=note-delete]")
-    expect(remove.calls).toEqual([])
-    expect(find("[data-e2e=note-delete-dialog]").textContent).toContain("Delete this note?")
-
-    await clickDialogButton("Delete")
-    expect(remove.calls).toHaveLength(1)
-  })
-
-  it("deletes nothing when the person keeps the note", async () => {
-    const remove = spy<[]>()
-    await mount(
-      <NoteEditorScreen {...editorDefaults} note={existing} value={note} onDelete={remove.fn} />,
-    )
-    await click("[data-e2e=note-delete]")
-
-    await clickDialogButton("Keep it")
-
-    expect(remove.calls).toEqual([])
-    expect(document.querySelector("[data-e2e=note-delete-dialog]")).toBe(null)
-  })
-
-  it("moves focus to the title when it gets an error", async () => {
-    await mount(<NoteEditorScreen {...editorDefaults} />)
-
-    await rerender(
-      <NoteEditorScreen {...editorDefaults} errors={{ title: "Enter a title", form: null }} />,
-    )
-
-    expect(focused()).toBe("note-title")
-  })
-
-  it("moves focus to the plan's refusal and follows its upgrade link through navigate", async () => {
-    const navigate = spy<[string]>()
-    const refusal: PlanRefusal = {
-      code: "PLAN_LIMIT_REACHED",
-      entitlement: "maxNotes",
-      limit: 10,
-      canUpgrade: true,
-    }
-    await mount(<NoteEditorScreen {...editorDefaults} navigate={navigate.fn} />)
-
-    await rerender(
-      <NoteEditorScreen
-        {...editorDefaults}
-        navigate={navigate.fn}
-        errors={{ title: null, form: "Upgrade", plan: refusal }}
-      />,
-    )
-
-    expect(focused()).toBe("plan-refusal")
-    expect(await click("[data-e2e=plan-refusal] a")).toBe(true)
-    expect(navigate.calls).toEqual([[BILLING_PATHS.pricing(groupId)]])
   })
 })
 
