@@ -221,11 +221,12 @@ deno task e2e url-filters
 deno task compose --env-file=./infra/envs/.env.prod build
 
 # Test deployment (dry run)
-rsync -avhzru --dry-run -e ssh . user@server:/path \
+rsync -avhzru --delete --dry-run -e ssh \
   --exclude-from=infra/deploy/exclude.txt \
+  --exclude='.env*' --exclude='*.env' --exclude=/infra/configs/vapid.json \
   --include-from=infra/deploy/include.txt \
-  --include-from=infra/deploy/include.prod.txt \
-  --exclude "*"
+  --exclude='*' \
+  . user@server:/path
 ```
 
 ## Additional Resources

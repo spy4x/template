@@ -18,7 +18,9 @@
  *
  * Four steps, each stopping the deploy when it fails: rsync the files that
  * `infra/deploy/include.txt` names, leaving out every env file (any `.env*` or `*.env`, anywhere,
- * and the chosen env file itself) and the web push keys; copy the chosen env file to
+ * and the chosen env file itself) and the web push keys, and deleting server files under those
+ * paths that are gone here (excluded files are never deleted, so a file placed by hand under
+ * `apps/`, `libs/` or `infra/` survives only if it is an env file or the web push keys); copy the chosen env file to
  * `infra/envs/.env` on the server, readable by its owner only; create `infra/configs/vapid.json`
  * on the server when it is missing (never sent from this machine, never overwritten, mode 600);
  * then run `deno task compose up -d --build` there. Compose's one-shot `migrate` service applies
@@ -76,6 +78,9 @@ export function planDeploy(values: Record<string, string>, envFilePath: string):
       command: "rsync",
       args: [
         "-avhzru",
+        // Removes files deleted here, so a stale module cannot break the build on the server.
+        // Excluded paths (the env file, the private key) are never deleted: no --delete-excluded.
+        "--delete",
         "-e",
         "ssh",
         "--exclude-from=infra/deploy/exclude.txt",

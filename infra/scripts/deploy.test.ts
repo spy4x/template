@@ -13,6 +13,8 @@ Deno.test("planDeploy sends files and the env file to the host and path from the
   )
   expect(files.command).toBe("rsync")
   expect(files.args.at(-1)).toBe("deploy@home.example.net:/srv/app")
+  expect(files.args).toContain("--delete")
+  expect(files.args).not.toContain("--delete-excluded")
   expect(envFile.command).toBe("rsync")
   expect(envFile.args).toEqual([
     "-e",
