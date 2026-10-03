@@ -4,7 +4,20 @@ import { isSpaPath } from "./spa-paths.ts"
 
 describe("isSpaPath", () => {
   it("knows the SPA's own paths", () => {
-    for (const path of ["/", "/notes", "/notes/new", "/groups", "/sign-in", "/totp", "/email"]) {
+    for (
+      const path of [
+        "/",
+        "/notes",
+        "/notes/new",
+        "/groups",
+        "/sign-in",
+        "/totp",
+        "/email",
+        "/subscribe",
+        "/subscribe/confirm",
+        "/unsubscribe",
+      ]
+    ) {
       expect(isSpaPath(path), path).toBe(true)
     }
   })
