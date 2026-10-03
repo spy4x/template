@@ -99,7 +99,6 @@ const NOT_YET = [
   "Deleting an account or downloading its data",
   "A list of your sessions with a way to sign the others out",
   "Parts of the worker",
-  "The app's screens are being redesigned right now",
 ]
 
 function List({ items }: { items: readonly string[] }): JSX.Element {
@@ -151,7 +150,7 @@ export default define.page(function Home({ state }) {
       </Section>
 
       <Section id="features" title="What you get" description="Each part works today.">
-        <Grid as="ul" gap="md" minColumnWidth="md">
+        <ul class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((feature) => (
             <li key={feature.title}>
               <Card class="h-full">
@@ -162,7 +161,7 @@ export default define.page(function Home({ state }) {
               </Card>
             </li>
           ))}
-        </Grid>
+        </ul>
       </Section>
 
       <Section
