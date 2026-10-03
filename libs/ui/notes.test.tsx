@@ -101,9 +101,9 @@ async function tick(selector: string, on = true): Promise<void> {
   })
 }
 
-/** Submits the form posting to `action` from its submit button, and lets its callback run. */
-async function submit(action: string): Promise<boolean> {
-  const form = find<HTMLFormElement>(`form[action="${action}"]`)
+/** Submits the form that holds the element `selector` finds, and lets its callback run. */
+async function submit(selector: string): Promise<boolean> {
+  const form = find(selector).closest("form")!
   form.querySelector<HTMLButtonElement>("button[type=submit]")?.focus()
   const event = new window.SubmitEvent("submit", { bubbles: true, cancelable: true })
   await act(async () => {
@@ -291,7 +291,7 @@ describe("NotesScreen in the browser", () => {
       select.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event)
     })
 
-    expect(await submit(NOTE_PATHS.moveMany(groupId))).toBe(true)
+    expect(await submit("[data-e2e=notes-move-to]")).toBe(true)
     expect(move.calls).toEqual([[{ toGroupId: targets[1].id, noteIds: [trip.id] }]])
   })
 
@@ -303,7 +303,7 @@ describe("NotesScreen in the browser", () => {
     await tick(`${row(trip)} [data-e2e=note-select]`)
     await rerender(<NotesScreen {...listDefaults} onMove={move.fn} moving />)
 
-    expect(await submit(NOTE_PATHS.moveMany(groupId))).toBe(true)
+    expect(await submit("[data-e2e=notes-move-to]")).toBe(true)
     expect(move.calls).toEqual([])
   })
 
@@ -466,8 +466,8 @@ describe("NoteEditorScreen", () => {
 
     expect(html).toMatch(/<h1\b[^>]*>New note<\/h1>/)
     expect(html).toMatch(/data-e2e="notes-group"[^>]*>Team</)
-    expect(tagOf(html, "note-back")).toContain(`href="${NOTE_PATHS.list}"`)
-    expect(tagOf(html, "note-back")).toContain(`aria-label="Back to notes"`)
+    expect(tagOf(html, "page-back")).toContain(`href="${NOTE_PATHS.list}"`)
+    expect(tagOf(html, "page-back")).toContain(`aria-label="Back to notes"`)
     expect(html).not.toContain(`aria-label="More actions"`)
     expect(html).toContain("Add note")
   })
@@ -598,7 +598,7 @@ describe("NoteEditorScreen in the browser", () => {
     await type("[data-e2e=note-title]", "Trip")
 
     expect(change.calls).toEqual([[{ title: "Trip", body: "" }]])
-    expect(await submit(NOTE_PATHS.create(groupId))).toBe(true)
+    expect(await submit("[data-e2e=note-title]")).toBe(true)
     expect(save.calls).toHaveLength(1)
   })
 

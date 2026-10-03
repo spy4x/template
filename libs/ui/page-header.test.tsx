@@ -12,6 +12,21 @@ describe("PageHeader", () => {
     expect(html).toContain(">Personal</p>")
   })
 
+  it("draws a heading inside the h1 in place of the title text, which stays the tooltip", () => {
+    const html = renderToString(
+      <PageHeader title="Trip" heading={<input aria-label="Group name" value="Trip" />} />,
+    )
+    expect(html).toMatch(/<h1 [^>]*title="Trip"[^>]*><input aria-label="Group name"/)
+    expect(html).not.toContain(">Trip</h1>")
+  })
+
+  it("tags the subtitle for the e2e specs", () => {
+    const html = renderToString(
+      <PageHeader title="Notes" subtitle="Team" subtitleDataE2E="notes-group" />,
+    )
+    expect(html).toMatch(/<p [^>]*data-e2e="notes-group"[^>]*>Team<\/p>/)
+  })
+
   it("names the back arrow after the page it returns to", () => {
     const html = renderToString(
       <PageHeader title="Trip" back={{ href: "/groups", label: "Back to groups" }} />,

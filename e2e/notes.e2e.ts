@@ -106,7 +106,7 @@ test.describe("notes in a shared group", () => {
       await expect(ownerPage).toHaveURL(/\/notes\/[0-9a-f-]{36}$/)
       await expect(ownerPage.locator("[data-e2e=note-title]")).toHaveValue("Groceries")
       const notePath = new URL(ownerPage.url()).pathname
-      await ownerPage.locator("[data-e2e=note-back]").click()
+      await ownerPage.locator("[data-e2e=page-back]").click()
       await expect(ownerTitles).toHaveText(["Groceries"])
       await expect(memberTitles).toHaveText(["Groceries"], { timeout: 5_000 })
       await expect(memberPage.locator("[data-e2e=note-item-body]")).toHaveText(["milk"])
@@ -271,7 +271,7 @@ test.describe("notes in a shared group", () => {
       const selectedAfter = await (await page.request.get(`${apiBase}/api/groups/selected`)).json()
       expect(selectedAfter.groupId).toBe(selectedBefore.groupId)
 
-      await page.locator("[data-e2e=note-back]").click()
+      await page.locator("[data-e2e=page-back]").click()
       await expect(page).toHaveURL("/notes")
     } finally {
       await context.close()
@@ -294,13 +294,13 @@ test.describe("notes in a shared group", () => {
       await expect(page).toHaveURL("/notes/new")
 
       // Nothing typed: leaving is free.
-      await page.locator("[data-e2e=note-back]").click()
+      await page.locator("[data-e2e=page-back]").click()
       await expect(page).toHaveURL("/notes")
       await page.locator("[data-e2e=note-new]").click()
 
       await page.locator("[data-e2e=note-title]").fill("Half a thought")
       const dialog = page.getByRole("alertdialog", { name: "Leave without saving?" })
-      await page.locator("[data-e2e=note-back]").click()
+      await page.locator("[data-e2e=page-back]").click()
       await expect(dialog).toBeVisible()
       await dialog.getByRole("button", { name: "Stay" }).first().click()
       await expect(dialog).toHaveCount(0)

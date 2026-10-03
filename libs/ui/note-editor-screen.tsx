@@ -2,23 +2,21 @@ import type { ComponentChildren, JSX } from "preact"
 import { useEffect, useRef, useState } from "preact/hooks"
 import { Button } from "@spy4x/preact-ui/button"
 import { ConfirmDialog } from "@spy4x/preact-ui/confirm-dialog"
-import { Dropdown, DropdownItem } from "@spy4x/preact-ui/dropdown"
+import { DropdownItem } from "@spy4x/preact-ui/dropdown"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Input, Textarea } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { Link } from "@spy4x/preact-ui/link"
-import { IconArrowLeft, IconEllipsisVertical } from "@spy4x/preact-icons"
 import { NOTE_BODY_MAX_LENGTH, NOTE_TITLE_MAX_LENGTH } from "@domain/notes"
 import {
-  MENU_TRIGGER_CLASSES,
   type MoveTarget,
   type NoteDraft,
   type NoteFormErrors,
   type NotesGroup,
-  NotesPageHeader,
 } from "./notes-screen.tsx"
+import { PageHeader } from "./page-header.tsx"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
@@ -78,7 +76,7 @@ export function NoteEditorScreen(props: NoteEditorScreenProps): JSX.Element {
   if (!group) {
     return (
       <EditorPage>
-        <NotesPageHeader leading={<BackButton navigate={navigate} />} title="Note" />
+        <PageHeader back={BACK} navigate={navigate} title="Note" />
         <EmptyState
           headingLevel={2}
           title={props.loading ? "Loading the group..." : "This group was not found."}
@@ -94,7 +92,7 @@ export function NoteEditorScreen(props: NoteEditorScreenProps): JSX.Element {
   if (notFound) {
     return (
       <EditorPage>
-        <NotesPageHeader leading={<BackButton navigate={navigate} />} title="Note not found" />
+        <PageHeader back={BACK} navigate={navigate} title="Note not found" />
         {props.errors.form
           ? <ErrorState message={props.errors.form} />
           : (
@@ -110,7 +108,7 @@ export function NoteEditorScreen(props: NoteEditorScreenProps): JSX.Element {
   if (props.loading) {
     return (
       <EditorPage>
-        <NotesPageHeader leading={<BackButton navigate={navigate} />} title="Note" />
+        <PageHeader back={BACK} navigate={navigate} title="Note" />
         <EmptyState headingLevel={2} title="Loading the note..." />
       </EditorPage>
     )
@@ -127,32 +125,20 @@ function EditorPage({ children }: { children?: ComponentChildren }): JSX.Element
   )
 }
 
-function BackButton({ navigate }: { navigate?: Navigate }): JSX.Element {
-  return (
-    <Button
-      href={NOTE_PATHS.list}
-      navigate={navigate}
-      variant="icon"
-      size="none"
-      class="-ml-2 size-11 shrink-0 sm:size-9"
-      aria-label="Back to notes"
-      data-e2e="note-back"
-    >
-      <IconArrowLeft class="size-5" />
-    </Button>
-  )
-}
+/** The header's back link: to the list, which `navigate` follows without a page load. */
+const BACK = { href: NOTE_PATHS.list, label: "Back to notes" }
 
 /** A viewer's page: the note as text, with nothing to change. */
 function ReadOnlyNote({ note, value, group, navigate }: NoteEditorScreenProps): JSX.Element {
   return (
     <EditorPage>
-      <NotesPageHeader
-        leading={<BackButton navigate={navigate} />}
+      <PageHeader
+        back={BACK}
+        navigate={navigate}
         title={note ? value.title : "New note"}
         subtitle={group?.name}
-        subtitleE2E="notes-group"
-        titleE2E="note-read-title"
+        subtitleDataE2E="notes-group"
+        titleDataE2E="note-read-title"
       />
       <p class="text-sm text-muted" data-e2e="note-read-only">
         {note
@@ -177,18 +163,15 @@ function Editor(props: WithGroup): JSX.Element {
   const hasMenu = note !== null && (moveTargets.length > 0 || props.onDelete !== undefined)
   return (
     <EditorPage>
-      <NotesPageHeader
-        leading={<BackButton navigate={navigate} />}
+      <PageHeader
+        back={BACK}
+        navigate={navigate}
         title={note ? "Edit note" : "New note"}
         subtitle={group.name}
-        subtitleE2E="notes-group"
-        actions={hasMenu && (
-          <Dropdown
-            trigger={<IconEllipsisVertical class="size-5" />}
-            triggerLabel="More actions"
-            triggerClasses={MENU_TRIGGER_CLASSES}
-            triggerDataE2E="note-menu"
-          >
+        subtitleDataE2E="notes-group"
+        menuDataE2E="note-menu"
+        menu={hasMenu && (
+          <>
             {moveTargets.map((target) => (
               <DropdownItem
                 key={target.id}
@@ -209,11 +192,10 @@ function Editor(props: WithGroup): JSX.Element {
                 Delete
               </DropdownItem>
             )}
-          </Dropdown>
+          </>
         )}
       />
       <ScreenForm
-        action={note ? NOTE_PATHS.note(note.id) : NOTE_PATHS.create(group.id)}
         pending={saving}
         onSubmit={onSave}
       >

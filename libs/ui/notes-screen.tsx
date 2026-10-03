@@ -13,6 +13,7 @@ import { IconEllipsisVertical, IconPlus } from "@spy4x/preact-icons"
 import { timeAgo } from "@spy4x/platform/universal/time"
 import type { PlanRefusal } from "@domain/billing"
 import { canMutateNotes, type GroupRole } from "@domain/groups"
+import { PageAction, PageHeader } from "./page-header.tsx"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
 /**
@@ -77,38 +78,6 @@ export function moveTargetsOf(
 
 /** The overflow trigger: 44 px on a phone, where it is a touch target, 36 px from `sm` up. */
 export const MENU_TRIGGER_CLASSES = buttonClasses("icon", "none", "size-11 sm:size-9")
-
-/**
- * The page header of the notes pages: the title on the left, truncated to one line, an optional
- * subtitle under it, and the page's actions on the right. `leading` sits before the title (a back
- * button). The actions never wrap under the title: on a phone they are icon buttons.
- */
-export function NotesPageHeader(
-  { title, subtitle, leading, actions, titleE2E, subtitleE2E }: {
-    title: ComponentChildren
-    subtitle?: ComponentChildren
-    leading?: ComponentChildren
-    actions?: ComponentChildren
-    titleE2E?: string
-    subtitleE2E?: string
-  },
-): JSX.Element {
-  return (
-    <header class="flex min-h-11 items-center gap-3">
-      {leading}
-      <div class="min-w-0 flex-1">
-        <h1
-          class="truncate text-xl font-semibold leading-tight text-foreground sm:text-2xl"
-          data-e2e={titleE2E}
-        >
-          {title}
-        </h1>
-        {subtitle && <p class="truncate text-sm text-muted" data-e2e={subtitleE2E}>{subtitle}</p>}
-      </div>
-      {actions && <div class="flex shrink-0 items-center gap-2">{actions}</div>}
-    </header>
-  )
-}
 
 /**
  * A menu item that opens a page of the app: followed through `navigate` when the app gives one,
@@ -195,7 +164,7 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
   if (!group) {
     return (
       <ListPage>
-        <NotesPageHeader title="Notes" />
+        <PageHeader title="Notes" />
         <EmptyState
           headingLevel={2}
           title={loading ? "Loading the group..." : "This group was not found."}
@@ -253,39 +222,30 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
 
   return (
     <ListPage pageRef={page}>
-      <NotesPageHeader
+      <PageHeader
         title="Notes"
         subtitle={group.name}
-        subtitleE2E="notes-group"
-        actions={
+        subtitleDataE2E="notes-group"
+        action={group.canWrite && (
+          <PageAction
+            label="New note"
+            Icon={IconPlus}
+            href={NOTE_PATHS.new}
+            navigate={navigate}
+            dataE2E="note-new"
+          />
+        )}
+        menuDataE2E="notes-menu"
+        menu={
           <>
-            {group.canWrite && (
-              <Button
-                href={NOTE_PATHS.new}
-                navigate={navigate}
-                size="none"
-                class="size-11 px-0 sm:h-9 sm:w-auto sm:px-3 sm:text-sm"
-                data-e2e="note-new"
-              >
-                <IconPlus class="size-5 sm:size-4" />
-                <span class="sr-only sm:not-sr-only">New note</span>
-              </Button>
+            {canSelect && !selecting && (
+              <DropdownItem onClick={() => setSelecting(true)} dataE2E="notes-select">
+                Select notes to move
+              </DropdownItem>
             )}
-            <Dropdown
-              trigger={<IconEllipsisVertical class="size-5" />}
-              triggerLabel="More actions"
-              triggerClasses={MENU_TRIGGER_CLASSES}
-              triggerDataE2E="notes-menu"
-            >
-              {canSelect && !selecting && (
-                <DropdownItem onClick={() => setSelecting(true)} dataE2E="notes-select">
-                  Select notes to move
-                </DropdownItem>
-              )}
-              <NavigateItem href={SCREEN_PATHS.groups} navigate={navigate} dataE2E="notes-groups">
-                All groups
-              </NavigateItem>
-            </Dropdown>
+            <NavigateItem href={SCREEN_PATHS.groups} navigate={navigate} dataE2E="notes-groups">
+              All groups
+            </NavigateItem>
           </>
         }
       />
@@ -314,7 +274,6 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
         : selecting
         ? (
           <ScreenForm
-            action={NOTE_PATHS.moveMany(group.id)}
             pending={props.moving}
             onSubmit={(data) =>
               props.onMove?.({

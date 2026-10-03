@@ -9,38 +9,11 @@ import { safeRedirectPath } from "@spy4x/net/redirect-path"
 export type Navigate = (href: string) => void
 
 /**
- * Where every form on these screens posts when no JavaScript takes it over: the page routes a
- * server-rendered app handles. Each form's field names match the API schema of the same action.
+ * Where the forms of the public mailing-list pages post when no JavaScript takes them over: the
+ * MPA's routes. Each form's field names match the API schema of the same action. Every other
+ * screen is the SPA's, takes its submit over in code and posts nowhere.
  */
 export const FORM_ACTIONS = {
-  signIn: "/sign-in",
-  signUp: "/sign-up",
-  oneTimeCode: "/totp",
-  /** Asks for a reset link: `{ email }`. */
-  forgotPassword: "/forgot-password",
-  /** Sets a new password with the link's code: `{ email, code, newPassword }`. */
-  resetPassword: "/reset-password",
-  signOut: "/sign-out",
-  profile: "/profile/name",
-  password: "/profile/password",
-  totpStart: "/profile/totp/start",
-  totpFinish: "/profile/totp/finish",
-  totpDisable: "/profile/totp/disable",
-  pushRemove: "/profile/push/remove",
-  /** Creates a group: `{ id, name }`. */
-  groupCreate: "/groups",
-  /** Selects the group the notes show: `{ groupId }`. */
-  groupSelect: "/groups/select",
-  /** Proves the address waiting for a code: `{ code }`. */
-  emailVerify: "/email/verify",
-  /** Sends a new code to the address waiting for one: no fields. */
-  emailSend: "/email/send",
-  /** Moves to a new address once its code proves it: `{ email, password }`. */
-  emailChange: "/email/change",
-  /** Accepts an invitation: `{ token }` from its link, or `{ invitationId }` for one sent to you. */
-  invitationAccept: "/invite/accept",
-  /** Declines an invitation: `{ token }` or `{ invitationId }`, like the accept. */
-  invitationDecline: "/invite/decline",
   /** Asks for a confirm link to join a mailing list: `{ email, list }`. */
   subscribe: "/subscribe",
   /** Confirms a subscription with its link's token: `{ list, token }`. */
@@ -49,36 +22,14 @@ export const FORM_ACTIONS = {
   unsubscribe: "/unsubscribe",
 } as const
 
-/** The page an invitation's link opens: the group, the inviter and the role, to accept or decline. */
-export function invitationPagePath(token: string): string {
-  return `/invite/${encodeURIComponent(token)}`
-}
-
-/**
- * The routes the notes of the selected group post to and live at. A form's field names match the
- * API schema of the same action (`@domain/notes`); the group is the person's selected one, which
- * the server holds (`GET /api/groups/selected`), so no path names it. The notes screens post to
- * these.
- */
+/** Where the notes pages live. */
 export const NOTE_PATHS = {
-  /** The list; `POST` creates `{ id, title, body }`. */
+  /** The list. */
   list: "/notes",
   /** The create page: the editor with no note yet. */
   new: "/notes/new",
-  /**
-   * The create form's action: the list, with the group the page shows. The server refuses the post
-   * when that is no longer the selected group, so a note cannot land in a group other than the
-   * one on screen.
-   */
-  create: (groupId: string) => `/notes?${new URLSearchParams({ group: groupId })}`,
-  /** One note's page, with its edit form; `POST` updates `{ title, body, version }`. */
+  /** One note's page. */
   note: (noteId: string) => `/notes/${noteId}`,
-  /**
-   * `POST` moves the ticked notes of the list to another group, all or none: `{ toGroupId, noteIds }`.
-   * It names the group the page showed, like {@link NOTE_PATHS.create}, and the server refuses the
-   * post when that is no longer the selected group.
-   */
-  moveMany: (groupId: string) => `/notes/move?${new URLSearchParams({ group: groupId })}`,
 } as const
 
 /** The pages these screens link to. */
@@ -136,30 +87,6 @@ export function afterSignIn(next: string | null): string {
 export const GROUP_PATHS = {
   /** The group's settings page. */
   settings: (groupId: string) => `/groups/${encodeURIComponent(groupId)}`,
-  /** `POST` renames the group: `{ name }`. */
-  rename: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/rename`,
-  /** `POST` deletes the group, which its owner can restore for 30 days. Takes no fields. */
-  delete: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/delete`,
-  /** `POST` restores a deleted group. Takes no fields. */
-  restore: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/restore`,
-  /** `POST` gives a member a new role: `{ role }`. */
-  memberRole: (groupId: string, userId: number) =>
-    `/groups/${encodeURIComponent(groupId)}/members/${userId}/role`,
-  /** `POST` removes a member. Takes no fields. */
-  memberRemove: (groupId: string, userId: number) =>
-    `/groups/${encodeURIComponent(groupId)}/members/${userId}/remove`,
-  /** `POST` leaves the group. Takes no fields. */
-  leave: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/leave`,
-  /** `POST` hands the group to another member: `{ userId, name, password }`. */
-  transfer: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/transfer`,
-  /**
-   * `POST` creates an invitation: `{ role, expiresInDays, maxUses, email, sendEmail,
-   * acceptSeatPrice }`.
-   */
-  invitationCreate: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/invitations`,
-  /** `POST` revokes an invitation. Takes no fields. */
-  invitationRevoke: (groupId: string, invitationId: string) =>
-    `/groups/${encodeURIComponent(groupId)}/invitations/${encodeURIComponent(invitationId)}/revoke`,
 } as const
 
 /** `EnhancedForm` announces nothing itself: each screen shows its own busy button and error. */
@@ -168,8 +95,8 @@ const QUIET: EnhancedFormLabels = { sending: "", done: "", failed: "" }
 /**
  * A screen's form: `EnhancedForm` posting to `action`. Without `onSubmit`, the browser posts as
  * usual; with it, the native post is cancelled and `onSubmit` is called. While `pending`, the
- * fields are disabled and a second submit is refused. A form only the SPA draws, inside a dialog,
- * has no route to post to and leaves `action` out.
+ * fields are disabled and a second submit is refused. Only the public mailing-list pages (the
+ * MPA's) post natively; an SPA form leaves `action` out and always has `onSubmit`.
  */
 export function ScreenForm(
   { action, pending = false, onSubmit, class: className, children }: {

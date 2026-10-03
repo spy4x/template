@@ -112,7 +112,7 @@ test.describe("offline notes", () => {
       await page.locator("[data-e2e=note-body]").fill("no network here")
       await page.locator("[data-e2e=note-save]").click()
       await expect(page).toHaveURL(/\/notes\/[0-9a-f-]{36}$/)
-      await page.locator("[data-e2e=note-back]").click()
+      await page.locator("[data-e2e=page-back]").click()
       await expect(titles).toHaveText(["Written offline", "Written online"])
       await expect(page.locator("[data-e2e=offline-pending]")).toHaveText(
         "1 change is waiting to sync.",

@@ -3,7 +3,7 @@ import { type AuthCredentials, AuthForm, type AuthMode } from "@spy4x/preact-sys
 import { Button } from "@spy4x/preact-ui/button"
 import { Card } from "@spy4x/preact-ui/card"
 import { Link } from "@spy4x/preact-ui/link"
-import { FORM_ACTIONS, type Navigate, NEXT_PARAM, SCREEN_PATHS, withNext } from "./progressive.tsx"
+import { type Navigate, SCREEN_PATHS, withNext } from "./progressive.tsx"
 
 /** The three screens `AuthScreen` draws: the two credential modes, and the second factor. */
 export type AuthScreenKind = AuthMode | "one-time-code"
@@ -15,15 +15,9 @@ export const AUTH_PATHS: Record<AuthScreenKind, string> = {
   "one-time-code": SCREEN_PATHS.oneTimeCode,
 }
 
-const ACTIONS: Record<AuthScreenKind, string> = {
-  "sign-in": FORM_ACTIONS.signIn,
-  "sign-up": FORM_ACTIONS.signUp,
-  "one-time-code": FORM_ACTIONS.oneTimeCode,
-}
-
 /**
- * Each screen posts its API schema's field names: sign-in takes `login` (an address, or an older
- * account's username), sign-up takes `email`, and the second factor takes `otp`.
+ * Each screen names its fields as its API schema does: sign-in takes `login` (an address, or an
+ * older account's username), sign-up takes `email`, and the second factor takes `otp`.
  */
 const FIELD_NAMES: Record<AuthScreenKind, { login: string; code: string }> = {
   "sign-in": { login: "login", code: "otp" },
@@ -172,7 +166,6 @@ export function AuthScreen(
       <AuthForm
         mode={screen === "one-time-code" ? "sign-in" : screen}
         step={screen === "one-time-code" ? "one-time-code" : "credentials"}
-        action={ACTIONS[screen]}
         busy={busy}
         error={error}
         labels={{
@@ -185,18 +178,13 @@ export function AuthScreen(
         onSignIn={onSignIn}
         onSignUp={onSignUp}
         onOneTimeCode={onOneTimeCode}
-        footer={next || screen === "sign-in"
+        footer={screen === "sign-in"
           ? (
-            <>
-              {next && <input type="hidden" name={NEXT_PARAM} value={next} />}
-              {screen === "sign-in" && (
-                <p class="text-center text-sm">
-                  <Link href={SCREEN_PATHS.forgotPassword} navigate={navigate} class="pc-link">
-                    Forgot your password?
-                  </Link>
-                </p>
-              )}
-            </>
+            <p class="text-center text-sm">
+              <Link href={SCREEN_PATHS.forgotPassword} navigate={navigate} class="pc-link">
+                Forgot your password?
+              </Link>
+            </p>
           )
           : undefined}
       />

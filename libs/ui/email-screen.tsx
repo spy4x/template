@@ -11,7 +11,7 @@ import { Notice } from "@spy4x/preact-ui/notice"
 import { type EmailStatus, emailToVerify } from "@domain/identity"
 import { ACCOUNT_COLUMN } from "./frame.tsx"
 import { PageHeader, TOUCH_TARGET } from "./page-header.tsx"
-import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
+import { type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
 import { useSucceeded } from "./use-succeeded.ts"
 
@@ -218,7 +218,6 @@ export function EmailScreen(
             <p class="text-sm" role="status" data-e2e="email-change-notice">{notices.change}</p>
           )}
           <ScreenForm
-            action={FORM_ACTIONS.emailVerify}
             pending={pending.verify}
             onSubmit={onVerify}
           >
@@ -248,7 +247,7 @@ export function EmailScreen(
               </Cluster>
             </Stack>
           </ScreenForm>
-          <ScreenForm action={FORM_ACTIONS.emailSend} pending={pending.send} onSubmit={onSend}>
+          <ScreenForm pending={pending.send} onSubmit={onSend}>
             <Stack gap="sm">
               <p class="text-sm text-muted">
                 No mail?{" "}
@@ -280,7 +279,7 @@ export function EmailScreen(
         cancelLabel="Close"
         dataE2E="email-change-dialog"
       >
-        <ScreenForm action={FORM_ACTIONS.emailChange} pending={pending.change} onSubmit={onChange}>
+        <ScreenForm pending={pending.change} onSubmit={onChange}>
           <Stack>
             <p class="text-sm text-muted">
               We send a code to the new address. {hasEmail

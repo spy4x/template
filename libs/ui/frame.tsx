@@ -6,13 +6,7 @@ import { Button } from "@spy4x/preact-ui/button"
 import { Dropdown, DropdownItem } from "@spy4x/preact-ui/dropdown"
 import { followLinkClick, Link } from "@spy4x/preact-ui/link"
 import { GroupPicker, type GroupPickerData } from "./group-picker.tsx"
-import {
-  FORM_ACTIONS,
-  type Navigate,
-  NOTE_PATHS,
-  SCREEN_PATHS,
-  ScreenForm,
-} from "./progressive.tsx"
+import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
 /** Every page a signed-in user can open from the navigation, in the order it shows them. */
 const NAV_ITEMS: readonly RailShellItem[] = [
@@ -171,10 +165,10 @@ export function AppFrame(
   )
 }
 
-/** "Sign out" as a form that posts to its route; with `onSignOut`, the app takes it over. */
-function SignOutForm({ onSignOut }: { onSignOut?: () => void }): JSX.Element {
+/** "Sign out" as a form whose submit the app takes through `onSignOut`. */
+function SignOutForm({ onSignOut }: { onSignOut: () => void }): JSX.Element {
   return (
-    <ScreenForm action={FORM_ACTIONS.signOut} onSubmit={onSignOut}>
+    <ScreenForm onSubmit={onSignOut}>
       <Button type="submit" variant="ghost" data-e2e="signout">
         Sign out
       </Button>
@@ -190,7 +184,7 @@ function SignOutForm({ onSignOut }: { onSignOut?: () => void }): JSX.Element {
 export function PublicFrame(
   { canSignOut, onSignOut, navigate, children }: {
     canSignOut: boolean
-    onSignOut?: () => void
+    onSignOut: () => void
     navigate?: Navigate
     children: ComponentChildren
   },

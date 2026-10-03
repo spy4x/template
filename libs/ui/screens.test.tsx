@@ -2,15 +2,8 @@ import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import type { VNode } from "preact"
 import { renderToString } from "preact-render-to-string"
-import {
-  authOTPSchema,
-  authPasswordForgotSchema,
-  authPasswordResetSchema,
-  authSignInSchema,
-  authSignUpSchema,
-} from "@domain/identity"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
-import { FORM_ACTIONS, NEXT_PARAM, SCREEN_PATHS } from "./progressive.tsx"
+import { FORM_ACTIONS, SCREEN_PATHS } from "./progressive.tsx"
 import { ForgotPasswordScreen, ResetPasswordScreen } from "./password-reset-screen.tsx"
 import { subscribeSchema, subscriptionConfirmSchema, unsubscribeSchema } from "@domain/subscribers"
 import { SubscribeForm, SubscriptionConfirmScreen, UnsubscribeScreen } from "./subscribe-screen.tsx"
@@ -80,18 +73,10 @@ const authDefaults: AuthScreenProps = {
   error: null,
 }
 
-describe("AuthScreen without JavaScript", () => {
-  it("posts the sign-in credentials to the sign-in route and links to a password reset", () => {
+describe("AuthScreen links", () => {
+  it("links sign-in to a password reset and to sign-up", () => {
     const surface = noScriptSurface(<AuthScreen {...authDefaults} />)
-    expect(surface.forms).toEqual([
-      {
-        action: FORM_ACTIONS.signIn,
-        method: "post",
-        fields: schemaKeys(authSignInSchema),
-      },
-    ])
     expect(surface.links).toEqual([SCREEN_PATHS.forgotPassword, SCREEN_PATHS.signUp])
-    expect(surface.scriptOnlyButtons).toEqual(["auth-form-password-toggle"])
   })
 
   it("switches between sign in and sign up with a plain link", () => {
@@ -104,29 +89,14 @@ describe("AuthScreen without JavaScript", () => {
       .toEqual(["/sign-in"])
   })
 
-  it("posts the sign-up credentials to the sign-up route", () => {
-    const surface = noScriptSurface(<AuthScreen {...authDefaults} screen="sign-up" />)
-    expect(surface.forms).toEqual([
-      {
-        action: FORM_ACTIONS.signUp,
-        method: "post",
-        fields: schemaKeys(authSignUpSchema),
-      },
-    ])
-  })
-
-  it("posts the one-time code to its route and links back to sign in", () => {
+  it("links the one-time code step back to sign in", () => {
     const surface = noScriptSurface(
       <AuthScreen {...authDefaults} screen="one-time-code" isMfaRequired />,
     )
-    expect(surface.forms).toEqual([
-      { action: FORM_ACTIONS.oneTimeCode, method: "post", fields: schemaKeys(authOTPSchema) },
-    ])
     expect(surface.links).toEqual(["/sign-in"])
-    expect(surface.scriptOnlyButtons).toEqual([])
   })
 
-  it("posts next as a hidden field of every auth form and keeps it on every link between them", () => {
+  it("keeps next on every link between the auth screens", () => {
     const next = "/notes/abc"
     const withNextQuery = (path: string) => `${path}?next=%2Fnotes%2Fabc`
     const signIn = noScriptSurface(<AuthScreen {...authDefaults} next={next} />)
@@ -134,17 +104,9 @@ describe("AuthScreen without JavaScript", () => {
     const code = noScriptSurface(
       <AuthScreen {...authDefaults} screen="one-time-code" isMfaRequired next={next} />,
     )
-    expect(formAt(signIn, FORM_ACTIONS.signIn).fields)
-      .toEqual([...schemaKeys(authSignInSchema), NEXT_PARAM].sort())
-    expect(formAt(signUp, FORM_ACTIONS.signUp).fields)
-      .toEqual([...schemaKeys(authSignUpSchema), NEXT_PARAM].sort())
-    expect(formAt(code, FORM_ACTIONS.oneTimeCode).fields)
-      .toEqual([...schemaKeys(authOTPSchema), NEXT_PARAM].sort())
     expect(signIn.links).toEqual([SCREEN_PATHS.forgotPassword, withNextQuery(SCREEN_PATHS.signUp)])
     expect(signUp.links).toEqual([withNextQuery(SCREEN_PATHS.signIn)])
     expect(code.links).toEqual([withNextQuery(SCREEN_PATHS.signIn)])
-    expect(renderToString(<AuthScreen {...authDefaults} next={next} />))
-      .toContain(`<input type="hidden" name="next" value="/notes/abc"`)
   })
 
   it("links a signed-in user on to the profile instead of asking again", () => {
@@ -157,20 +119,12 @@ describe("AuthScreen without JavaScript", () => {
   })
 })
 
-describe("ForgotPasswordScreen without JavaScript", () => {
+describe("ForgotPasswordScreen links", () => {
   const props = { email: "", onEmailChange: () => {}, error: null, pending: false }
 
-  it("posts the address to the forgot-password route and links back to sign in", () => {
+  it("links back to sign in", () => {
     const surface = noScriptSurface(<ForgotPasswordScreen {...props} sent={false} />)
-    expect(surface.forms).toEqual([
-      {
-        action: FORM_ACTIONS.forgotPassword,
-        method: "post",
-        fields: schemaKeys(authPasswordForgotSchema),
-      },
-    ])
     expect(surface.links).toEqual([SCREEN_PATHS.signIn])
-    expect(surface.scriptOnlyButtons).toEqual([])
   })
 
   it("says the link is on its way and asks nothing more once it is sent", () => {
@@ -180,7 +134,7 @@ describe("ForgotPasswordScreen without JavaScript", () => {
   })
 })
 
-describe("ResetPasswordScreen without JavaScript", () => {
+describe("ResetPasswordScreen links", () => {
   const props = {
     email: "ada@example.com",
     code: "code-from-the-link",
@@ -191,20 +145,9 @@ describe("ResetPasswordScreen without JavaScript", () => {
     pending: false,
   }
 
-  it("posts the link's address and code with the new password to the reset route", () => {
-    const node = <ResetPasswordScreen {...props} />
-    const surface = noScriptSurface(node)
-    expect(surface.forms).toEqual([
-      {
-        action: FORM_ACTIONS.resetPassword,
-        method: "post",
-        fields: schemaKeys(authPasswordResetSchema),
-      },
-    ])
+  it("links an expired link to a new one", () => {
+    const surface = noScriptSurface(<ResetPasswordScreen {...props} />)
     expect(surface.links).toEqual([SCREEN_PATHS.forgotPassword])
-    const html = renderToString(node)
-    expect(html).toContain(`name="email" value="ada@example.com"`)
-    expect(html).toContain(`name="code" value="code-from-the-link"`)
   })
 
   it("points to sign-in once the password is changed", () => {
