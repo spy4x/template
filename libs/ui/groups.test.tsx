@@ -8,6 +8,7 @@ import { expect } from "@std/expect"
 import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd"
 import { Window } from "happy-dom"
 import { render, type VNode } from "preact"
+import { renderToString } from "preact-render-to-string"
 import { act } from "preact/test-utils"
 import type { PlanRefusal } from "@domain/billing"
 import { GroupRole } from "@domain/groups"
@@ -31,7 +32,7 @@ import {
   GroupMembersSection,
   type GroupMembersSectionProps,
 } from "./group-members.tsx"
-import { groupLabel, GroupMark } from "./group-appearance.tsx"
+import { GroupDetailsForm, groupLabel, GroupMark } from "./group-appearance.tsx"
 import { GroupPicker } from "./group-picker.tsx"
 import { GroupSettingsScreen, type GroupSettingsScreenProps } from "./group-settings-screen.tsx"
 import {
@@ -1158,15 +1159,35 @@ describe("group details", () => {
       await submit("[data-e2e=group-details-save]")
       expect(find("[data-e2e=group-details-dialog]").textContent).toContain("single emoji")
       expect(find("[data-e2e=group-emoji]").getAttribute("aria-invalid")).toBe("true")
+      expect(focused()).toBe("group-emoji")
     }
     expect(calls.calls).toEqual([])
   })
 
-  it("counts the description's characters, never a limit above 500", async () => {
-    await mount(<GroupSettingsScreen {...settings} onUpdateDetails={() => Promise.resolve()} />)
+  it("counts the description's characters, and refuses more than 500 of them when saving", async () => {
+    const calls = spy<[unknown]>()
+    await mount(
+      <GroupSettingsScreen
+        {...settings}
+        onUpdateDetails={(details) => {
+          calls.fn(details)
+          return Promise.resolve()
+        }}
+      />,
+    )
     await click("[data-e2e=group-details-open]")
     expect(find("[data-e2e=group-details-dialog]").textContent).toContain("8 of 500 characters")
-    expect(find("[data-e2e=group-description]").getAttribute("maxlength")).toBe("500")
+
+    // Each emoji is two UTF-16 units but one character, as the counter and the server count it.
+    await type("[data-e2e=group-description]", "🏠".repeat(501))
+    await submit("[data-e2e=group-details-save]")
+    expect(calls.calls).toEqual([])
+    expect(find("[data-e2e=group-details-dialog]").textContent).toContain("at most 500")
+    expect(focused()).toBe("group-description")
+
+    await type("[data-e2e=group-description]", "🏠".repeat(500))
+    await submit("[data-e2e=group-details-save]")
+    expect(calls.calls.length).toBe(1)
   })
 
   it("keeps the dialog open with the message of a refused save", async () => {
@@ -1179,6 +1200,7 @@ describe("group details", () => {
     await click("[data-e2e=group-details-open]")
     await submit("[data-e2e=group-details-save]")
     expect(find("[data-e2e=group-details-dialog]").textContent).toContain("Not allowed.")
+    expect(focused()).toBe("group-details-error")
   })
 
   it("closes the dialog once the save worked", async () => {
@@ -1226,5 +1248,27 @@ describe("group details", () => {
     expect(find("[data-e2e=group-mark]").getAttribute("data-color")).toBe("red")
     expect(groupLabel({ name: "Team", emoji: "🏠" })).toBe("🏠 Team")
     expect(groupLabel({ name: "Team", emoji: null })).toBe("Team")
+  })
+})
+
+describe("group details, as the server draws them", () => {
+  it("hides the mark and names each colour for a screen reader in one radio group", () => {
+    const mark = renderToString(<GroupMark color="green" emoji="🏠" />)
+    expect(mark).toMatch(/<span [^>]*aria-hidden="true"[^>]*>🏠<\/span>/)
+
+    const form = renderToString(
+      <GroupDetailsForm
+        initial={{ description: "", color: "blue", emoji: null }}
+        onSave={() => Promise.resolve()}
+        onCancel={() => {}}
+      />,
+    )
+    const radios = form.match(/<input [^>]*type="radio"[^>]*>/g) ?? []
+    // None and the six palette names.
+    expect(radios.length).toBe(7)
+    for (const radio of radios) expect(radio).toContain(`name="color"`)
+    for (const name of ["Red", "Orange", "Green", "Blue", "Purple", "Gray"]) {
+      expect(form).toMatch(new RegExp(`<span class="sr-only">${name}</span>`))
+    }
   })
 })
