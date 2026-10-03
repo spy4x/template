@@ -191,6 +191,7 @@ app.route(
     removeMember: (command) => commandBus.execute(command),
     leave: (command) => commandBus.execute(command),
     transfer: (command) => commandBus.execute(command),
+    moveAll: (command) => commandBus.execute(command),
     passwordLimit: rateLimits.strictByUser,
     cursor: groupListCursor,
     expectedOrigin,

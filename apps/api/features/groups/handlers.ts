@@ -1,11 +1,12 @@
 import type { CommandHandler, QueryHandler } from "@spy4x/platform/cqrs"
-import type { GroupRepository } from "@domain/groups"
+import type { GroupDataMover, GroupRepository } from "@domain/groups"
 import { GroupOwnershipTransferredEvent, GroupSelectedEvent } from "../../cqrs/events.ts"
 import {
   assertCanChangeRole,
   assertCanDelete,
   assertCanEditDetails,
   assertCanLeave,
+  assertCanMoveGroupData,
   assertCanRemoveMember,
   assertCanRename,
   assertCanTransfer,
@@ -20,6 +21,7 @@ import {
   GroupMemberRemoveCommand,
   GroupMemberRoleCommand,
   GroupMembersQuery,
+  GroupMoveAllCommand,
   GroupRenameCommand,
   GroupRestoreCommand,
   GroupSelectCommand,
@@ -268,5 +270,31 @@ export function createGroupTransferHandler(
       }),
     )
     return { transferred: true }
+  }
+}
+
+/**
+ * Moving all of a group's data needs an editor's rights in both groups. The source is checked
+ * first, so a person who cannot write there is told so before anything about the target; a target
+ * the person does not belong to is "group not found". The mover checks both again on locked rows.
+ */
+export function createGroupMoveAllHandler(
+  repository: GroupRepository,
+  mover: GroupDataMover,
+): CommandHandler<GroupMoveAllCommand> {
+  return async (command) => {
+    const { data, allowance } = command
+    // The gate sets it on every move it lets through; without it the target's cap goes unchecked.
+    if (allowance === undefined) {
+      throw new Error("GroupMoveAllCommand reached its handler without the entitlement gate")
+    }
+    const actorId = data.actor.userId
+    assertCanMoveGroupData((await repository.getForMember(data.groupId, actorId))?.role ?? null)
+    assertCanMoveGroupData((await repository.getForMember(data.toGroupId, actorId))?.role ?? null)
+    return await mover.moveAll(
+      { fromGroupId: data.groupId, toGroupId: data.toGroupId, requestId: data.requestId },
+      actorId,
+      { maxNotes: allowance },
+    )
   }
 }

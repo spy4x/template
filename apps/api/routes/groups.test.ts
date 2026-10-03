@@ -103,6 +103,7 @@ function dependencies(): GroupsRouteDependencies & {
     removeMember: () => Promise.reject(new Error("not used")),
     leave: () => Promise.reject(new Error("not used")),
     transfer: () => Promise.reject(new Error("not used")),
+    moveAll: () => Promise.reject(new Error("not used")),
     passwordLimit: (_c, next) => next(),
     list(query) {
       this.listQuery = query

@@ -117,6 +117,7 @@ function stack(plan = PRO_PLAN_ID) {
     removeMember: (command: GroupMemberRemoveCommand) => commands.execute(command),
     leave: (command: GroupLeaveCommand) => commands.execute(command),
     transfer: (command: GroupTransferCommand) => commands.execute(command),
+    moveAll: unused,
     passwordLimit: async (c, next) => {
       if (++limit.spent > limit.passwordBudget) return c.json({ error: "Too many requests" }, 429)
       await next()

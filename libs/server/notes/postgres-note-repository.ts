@@ -82,6 +82,56 @@ async function assertWriterNow(
   }
 }
 
+/** What {@link moveNoteRows} moves, and the facts it needs from the move around it. */
+export interface MoveNoteRowsInput {
+  fromGroupId: string
+  toGroupId: string
+  /** The notes to move, all of which must be live in the source; `null` moves every live note. */
+  noteIds: readonly string[] | null
+  actorId: number
+  /** The sequence of the change recorded on the target for this move; the notes are stamped. */
+  changeSequence: string
+  /** The target's cap on notes, `null` for none. */
+  allowance: number | null
+  /** The actor's role in the target, which a plan refusal needs. */
+  targetRole: GroupRole
+}
+
+/**
+ * The part of a move that moving chosen notes and moving a whole group share, in the caller's
+ * transaction (which has locked both groups and checked the roles): the notes change group, their
+ * version grows by one so an edit made on the old version conflicts, and the target's cap is
+ * counted after the update. Throws `NOTE_NOT_FOUND` when a named note is not live in the source,
+ * and a `PlanError` when the target would pass its cap; the caller's transaction takes the move
+ * back. Returns how many notes moved.
+ */
+export async function moveNoteRows(
+  transaction: postgres.TransactionSql,
+  input: MoveNoteRowsInput,
+): Promise<number> {
+  const moved = await transaction<{ id: string }[]>`
+    UPDATE notes
+    SET group_id = ${input.toGroupId},
+        version = version + 1,
+        updated_by_user_id = ${input.actorId},
+        updated_at = CURRENT_TIMESTAMP,
+        change_sequence = ${input.changeSequence}::bigint
+    WHERE group_id = ${input.fromGroupId}
+      AND deleted_at IS NULL
+      ${input.noteIds === null ? transaction`` : transaction`AND id IN ${transaction(input.noteIds)}`}
+    RETURNING id
+  `
+  // One missing note refuses the whole move, and the transaction takes the others back.
+  if (input.noteIds !== null && moved.length !== input.noteIds.length) {
+    throw new NoteError("NOTE_NOT_FOUND", "Note not found")
+  }
+  if (moved.length > 0 && input.allowance !== null) {
+    const used = await new PostgresNoteRepository(transaction).count(input.toGroupId) - 1
+    assertRoomFor("maxNotes", input.allowance, used, input.targetRole)
+  }
+  return moved.length
+}
+
 /**
  * Notes in Postgres. Every write runs in one transaction that first checks the actor's role on
  * the locked membership row and then records the change on the group (`recordGroupChange`): the
@@ -290,33 +340,15 @@ export class PostgresNoteRepository implements NoteRepository {
 
   /**
    * Both groups are locked in id order, so two moves in opposite directions wait for each other
-   * instead of deadlocking, and each role is read on its locked membership row. The cap is counted
-   * after the update, in the same transaction, like a create's.
+   * instead of deadlocking, and each role is read on its locked membership row. The changes are
+   * recorded first, so the moved rows carry the target's new sequence; the cap is counted after
+   * the update, in the same transaction, like a create's.
    */
   async move(input: NoteMoveInput, actorId: number, allowance: number | null): Promise<Note[]> {
     return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
       const roles = new Map<string, GroupRole>()
       for (const groupId of [input.fromGroupId, input.toGroupId].sort()) {
         roles.set(groupId, await assertWriterNow(transaction, groupId, actorId))
-      }
-      const moved = await transaction<{ id: string }[]>`
-        UPDATE notes
-        SET group_id = ${input.toGroupId},
-            version = version + 1,
-            updated_by_user_id = ${actorId},
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id IN ${transaction(input.noteIds)}
-          AND group_id = ${input.fromGroupId}
-          AND deleted_at IS NULL
-        RETURNING id
-      `
-      // One missing note refuses the whole move, and the transaction takes the others back.
-      if (moved.length !== input.noteIds.length) {
-        throw new NoteError("NOTE_NOT_FOUND", "Note not found")
-      }
-      if (allowance !== null) {
-        const used = await new PostgresNoteRepository(transaction).count(input.toGroupId) - 1
-        assertRoomFor("maxNotes", allowance, used, roles.get(input.toGroupId)!)
       }
       await recordNoteChange(transaction, input.fromGroupId, actorId, NOTE_EVENTS.movedOut)
       const sequence = await recordNoteChange(
@@ -325,17 +357,23 @@ export class PostgresNoteRepository implements NoteRepository {
         actorId,
         NOTE_EVENTS.movedIn,
       )
+      const count = await moveNoteRows(transaction, {
+        fromGroupId: input.fromGroupId,
+        toGroupId: input.toGroupId,
+        noteIds: input.noteIds,
+        actorId,
+        changeSequence: sequence,
+        allowance,
+        targetRole: roles.get(input.toGroupId)!,
+      })
       // The log of the group the notes left names where they went; the other says only how many.
       const target = (
         await transaction<{ name: string }[]>`SELECT name FROM groups WHERE id = ${input.toGroupId}`
       )[0]
       for (
         const [groupId, kind, details] of [
-          [input.fromGroupId, NOTE_EVENTS.movedOut, {
-            count: moved.length,
-            groupName: target.name,
-          }],
-          [input.toGroupId, NOTE_EVENTS.movedIn, { count: moved.length }],
+          [input.fromGroupId, NOTE_EVENTS.movedOut, { count, groupName: target.name }],
+          [input.toGroupId, NOTE_EVENTS.movedIn, { count }],
         ] as const
       ) {
         await writeAuditEvent(transaction, {
@@ -347,9 +385,9 @@ export class PostgresNoteRepository implements NoteRepository {
         })
       }
       const rows = await transaction<NoteRow[]>`
-        UPDATE notes SET change_sequence = ${sequence}::bigint
+        SELECT ${this.columnsOn(transaction)}
+        FROM notes
         WHERE id IN ${transaction(input.noteIds)}
-        RETURNING ${this.columnsOn(transaction)}
       `
       const byId = new Map(rows.map((row) => [row.id, toNote(row)]))
       return input.noteIds.map((id) => byId.get(id)!)

@@ -3,6 +3,7 @@ import {
   canMutateNotes,
   GroupInvitationCreateCommand,
   GroupMemberRoleCommand,
+  GroupMoveAllCommand,
   invitableRoles,
 } from "@domain/groups"
 import { NoteCreateCommand, NoteMoveCommand } from "@domain/notes"
@@ -32,6 +33,12 @@ export const ENTITLEMENT_NEEDS: EntitlementNeeds = new Map([
       return source !== null && canMutateNotes(source)
     },
   ),
+  // Moving a whole group adds every one of its notes to the target group, and how many is not known
+  // here. The gate is judged to refuse nothing (`judges` is `false`) but still reads the target's
+  // cap into `allowance`; the write counts the notes it moves under the group's lock and refuses
+  // the move that would pass it, so a group with nothing to move is never refused for a full
+  // target.
+  needsRoom(GroupMoveAllCommand, "maxNotes", (command) => command.data.toGroupId, () => false),
   // Pending invitations take no seat: the cap counts members, here and again when one accepts.
   needsRoom(
     GroupInvitationCreateCommand,

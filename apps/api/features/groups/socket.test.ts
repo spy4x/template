@@ -35,6 +35,7 @@ const UNUSED_GROUP_CHANGES = {
   setRole: () => Promise.reject(new Error("not used")),
   removeMember: () => Promise.reject(new Error("not used")),
   leave: () => Promise.reject(new Error("not used")),
+  moveAll: () => Promise.reject(new Error("not used")),
 }
 
 function harness() {
@@ -375,6 +376,7 @@ describe("group changes over the socket", () => {
       setRole: () => Promise.reject(new Error("not used")),
       removeMember: () => Promise.reject(new Error("not used")),
       leave: () => Promise.reject(new Error("not used")),
+      moveAll: () => Promise.reject(new Error("not used")),
     })
     return { requests, seen }
   }
