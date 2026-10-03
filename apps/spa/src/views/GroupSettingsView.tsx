@@ -1,11 +1,12 @@
 import { useEffect } from "preact/hooks"
 import { useLocation } from "wouter-preact"
 import { GroupSettingsScreen } from "@ui/group-settings-screen.tsx"
-import { GroupInvitationsSection } from "@ui/group-invitations.tsx"
-import { GroupTransferSection } from "@ui/group-transfer.tsx"
-import { canManageInvitations, type InvitationErrorCode } from "@domain/groups"
+import { InviteForm, PendingInvitations } from "@ui/group-invitations.tsx"
+import { GroupTransferForm } from "@ui/group-transfer.tsx"
+import { canManageInvitations, type GroupRole, type InvitationErrorCode } from "@domain/groups"
 import { entitlementsOf } from "@domain/billing"
-import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
+import type { GroupRow } from "@ui/groups-screen.tsx"
+import { type Navigate, NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { groupsStore } from "../state/groups.ts"
 import { membersStore } from "../state/members.ts"
 import { selectionStore } from "../state/selection.ts"
@@ -25,6 +26,99 @@ export async function transferAndRefresh(
   const moved = await team.transfer()
   if (moved) await groups.refreshFromUser()
   return moved
+}
+
+/**
+ * Renames the group to `name` through the store. Rejects with the store's message when the server
+ * refused, so the name in the header stays open with the message under it.
+ */
+export async function renameGroup(
+  groups: Pick<typeof groupsStore, "renameDraft" | "rename" | "actionError">,
+  groupId: string,
+  name: string,
+): Promise<void> {
+  groups.renameDraft.value = { groupId, name }
+  if (await groups.rename(groupId)) return
+  const failure = groups.actionError.value
+  throw new Error(
+    failure?.groupId === groupId && failure.action === "rename"
+      ? failure.message
+      : "Could not rename the group.",
+  )
+}
+
+/** The open group's plan, once the billing card has read it; `null` until then. */
+function billingOf(groupId: string) {
+  const current = billingStore.current.value
+  return current?.groupId === groupId ? current.billing : null
+}
+
+/**
+ * The "Invite people" dialog's body, wired to the invitations store. The role choice follows the
+ * group's plan once it is read; until then the server alone judges the role.
+ */
+export function GroupInvite(
+  { groupId, actorRole, onClose, navigate }: {
+    groupId: string
+    actorRole: GroupRole
+    onClose: () => void
+    navigate?: Navigate
+  },
+) {
+  const invites = invitationsStore
+  const createFailure = invites.createError.value
+  const billing = billingOf(groupId)
+  // A create refused for want of the price confirmation shows its message at the confirmation, when
+  // the confirmation is on screen; until the billing is read, it shows under the form.
+  const seatRefused = !!billing?.seatPrice &&
+    createFailure?.code === ("SEAT_PRICE_NOT_ACCEPTED" satisfies InvitationErrorCode)
+  return (
+    <InviteForm
+      groupId={groupId}
+      actorRole={actorRole}
+      memberRoles={billing
+        ? entitlementsOf(billing.planId, billing.enabled).features.memberRoles
+        : true}
+      draft={invites.draft.value}
+      onDraftChange={(draft) => (invites.draft.value = draft)}
+      creating={invites.creating.value}
+      createError={createFailure?.plan || seatRefused ? null : createFailure?.message}
+      createRefusal={createFailure?.plan ?? null}
+      onCreate={() => void invites.create()}
+      seatPrice={billing?.seatPrice && (
+        <SeatPriceConfirm
+          seatPrice={billing.seatPrice}
+          checked={invites.acceptSeatPrice.value}
+          onChange={(checked) => (invites.acceptSeatPrice.value = checked)}
+          error={seatRefused ? createFailure.message : null}
+        />
+      )}
+      created={invites.created.value}
+      onClose={onClose}
+      navigate={navigate}
+    />
+  )
+}
+
+/** The "Transfer ownership" dialog's body, wired to the members store. */
+export function GroupTransfer(
+  { groupId, group, onClose }: { groupId: string; group: GroupRow; onClose: () => void },
+) {
+  const team = membersStore
+  const ours = team.groupId.value === groupId
+  return (
+    <GroupTransferForm
+      groupName={group.name}
+      role={group.role}
+      members={ours ? team.members.value : null}
+      draft={team.transferDraft.value}
+      onDraftChange={(next) => (team.transferDraft.value = next)}
+      transferring={team.transferring.value}
+      error={ours ? team.transferError.value : null}
+      onTransfer={() => void transferAndRefresh(team, groupsStore)}
+      onCancel={onClose}
+    />
+  )
 }
 
 /**
@@ -51,19 +145,10 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
     if (role !== undefined && canManageInvitations(role)) void invites.open(groupId)
   }, [groupId, role])
   const invitesOurs = invites.groupId.value === groupId
-  const createFailure = invites.createError.value
-  // The billing card reads the group's plan; until it has, the server alone judges the role.
-  const billingOurs = billingStore.current.value?.groupId === groupId
-    ? billingStore.current.value.billing
-    : null
-  // A create refused for want of the price confirmation shows its message at the confirmation, when
-  // the confirmation is on screen; until the billing is read, it shows under the form.
-  const seatRefused = !!billingOurs?.seatPrice &&
-    createFailure?.code === ("SEAT_PRICE_NOT_ACCEPTED" satisfies InvitationErrorCode)
+  const billingOurs = billingOf(groupId)
   // Until the store has switched to this group, it holds another group's members.
   const ours = team.groupId.value === groupId
   const group = store.groups.value.find((candidate) => candidate.id === groupId) ?? null
-  const draft = store.renameDraft.value
   const working = store.working.value
   // An error of another group's page is not this page's.
   const failure = store.actionError.value?.groupId === groupId ? store.actionError.value : null
@@ -79,11 +164,7 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
         void selectionStore.select(id)
         navigate(NOTE_PATHS.list)
       }}
-      name={draft?.groupId === groupId ? draft.name : undefined}
-      onNameChange={(name) => (store.renameDraft.value = { groupId, name })}
-      renaming={working?.groupId === groupId && working.action === "rename"}
-      renameError={failure?.action === "rename" ? failure.message : null}
-      onRename={() => void store.rename(groupId)}
+      onRename={(name) => renameGroup(store, groupId, name)}
       isLastGroup={store.groups.value.length <= 1}
       hasSubscription={billingOurs?.subscribed ?? false}
       members={ours ? team.members.value : null}
@@ -114,50 +195,29 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
           navigate(SCREEN_PATHS.groups)
         })}
       billing={group && <GroupBillingCard groupId={groupId} />}
-      invitations={group && (
-        <GroupInvitationsSection
-          groupId={groupId}
+      invite={group
+        ? (close) => (
+          <GroupInvite
+            groupId={groupId}
+            actorRole={group.role}
+            onClose={close}
+            navigate={navigate}
+          />
+        )
+        : undefined}
+      pendingInvitations={group && (
+        <PendingInvitations
           actorRole={group.role}
-          memberRoles={billingOurs
-            ? entitlementsOf(billingOurs.planId, billingOurs.enabled).features.memberRoles
-            : true}
           invitations={invitesOurs ? invites.invitations.value : null}
           error={invitesOurs ? invites.loadError.value : null}
-          draft={invites.draft.value}
-          onDraftChange={(draft) => (invites.draft.value = draft)}
-          creating={invites.creating.value}
-          createError={createFailure?.plan || seatRefused ? null : createFailure?.message}
-          createRefusal={createFailure?.plan ?? null}
-          onCreate={() => void invites.create()}
-          seatPrice={billingOurs?.seatPrice && (
-            <SeatPriceConfirm
-              seatPrice={billingOurs.seatPrice}
-              checked={invites.acceptSeatPrice.value}
-              onChange={(checked) => (invites.acceptSeatPrice.value = checked)}
-              error={seatRefused ? createFailure.message : null}
-            />
-          )}
-          created={invites.created.value}
           revokingId={invites.revokingId.value}
           revokeError={invites.revokeError.value}
           onRevoke={(invitationId) => void invites.revoke(invitationId)}
-          navigate={navigate}
         />
       )}
-      transfer={group && (
-        <GroupTransferSection
-          groupId={groupId}
-          groupName={group.name}
-          role={group.role}
-          members={ours ? team.members.value : null}
-          hasSubscription={billingOurs?.subscribed ?? false}
-          draft={team.transferDraft.value}
-          onDraftChange={(next) => (team.transferDraft.value = next)}
-          transferring={team.transferring.value}
-          error={ours ? team.transferError.value : null}
-          onTransfer={() => void transferAndRefresh(team, store)}
-        />
-      )}
+      transfer={group
+        ? (close) => <GroupTransfer groupId={groupId} group={group} onClose={close} />
+        : undefined}
     />
   )
 }

@@ -30,15 +30,17 @@ test.describe("group list and settings pages", () => {
       await expect(page.getByRole("heading", { level: 1, name: "Groups" })).toBeVisible()
       await expect(page.locator("[data-e2e=group-item-name]")).toHaveCount(1)
 
-      await page.locator("[data-e2e=group-name]").fill("Trip")
       await page.getByRole("button", { name: "New group" }).click()
+      const dialog = page.getByRole("dialog", { name: "New group" })
+      await dialog.getByLabel("Name").fill("Trip")
+      await dialog.getByRole("button", { name: "Create group" }).click()
+      await expect(dialog).toBeHidden()
       await expect(page.locator("[data-e2e=group-item-name]").filter({ hasText: "Trip" }))
         .toHaveCount(1)
 
       await page.getByRole("link", { name: "Settings of Trip" }).click()
       await expect(page).toHaveURL(/\/groups\/[0-9a-f-]{36}$/)
-      await expect(page.getByRole("heading", { level: 1, name: "Trip" })).toBeVisible()
-      await expect(page.getByRole("heading", { level: 2, name: "General" })).toBeVisible()
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("Trip")
       await expect(page.locator("[data-e2e=group-general-name]")).toHaveText("Trip")
       await expect(page.locator("[data-e2e=group-general-role]")).toHaveText("Owner")
 
@@ -91,7 +93,7 @@ test.describe("group list and settings pages", () => {
       expect(await overflow()).toBeLessThanOrEqual(0)
 
       await page.getByRole("link", { name: `Settings of ${longName}` }).click()
-      await expect(page.getByRole("heading", { level: 2, name: "General" })).toBeVisible()
+      await expect(page.getByRole("heading", { level: 2, name: /^Members/ })).toBeVisible()
       expect(await overflow()).toBeLessThanOrEqual(0)
     } finally {
       await cleanup({ soft: true })
@@ -119,18 +121,22 @@ test.describe("group list and settings pages", () => {
       await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 
       await gotoApp(page, "/groups", page.getByRole("heading", { level: 1, name: "Groups" }))
-      await page.locator("[data-e2e=group-name]").fill("Trip")
       await page.getByRole("button", { name: "New group" }).click()
+      await page.getByRole("dialog", { name: "New group" }).getByLabel("Name").fill("Trip")
+      await page.getByRole("button", { name: "Create group" }).click()
       await page.getByRole("link", { name: "Settings of Trip" }).click()
 
+      await page.getByRole("button", { name: "Rename Trip" }).click()
       await page.getByLabel("New name").fill("Trip 2027")
-      await page.getByRole("button", { name: "Rename" }).click()
+      await page.getByLabel("New name").press("Enter")
       await expect(page.locator("[data-e2e=group-general-name]")).toHaveText("Trip 2027")
 
-      await page.getByText("Delete this group...").click()
-      await expect(page.locator("[data-e2e=group-delete-confirmation]"))
+      await page.getByRole("button", { name: "More actions" }).click()
+      await page.getByRole("menuitem", { name: "Delete group" }).click()
+      const dialog = page.locator("[data-e2e=group-delete-dialog]")
+      await expect(dialog.locator("[data-e2e=group-delete-confirmation]"))
         .toContainText("You can restore it from the Groups page for 30 days")
-      await page.getByRole("button", { name: "Delete group" }).click()
+      await dialog.getByRole("button", { name: "Delete group" }).click()
       await expect(page).toHaveURL("/groups")
       await expect(page.locator("[data-e2e=group-item-name]")).toHaveText(["Personal"])
       await expect(page.locator("[data-e2e=deleted-group-name]")).toHaveText(["Trip 2027"])
@@ -144,7 +150,7 @@ test.describe("group list and settings pages", () => {
     }
   })
 
-  test("the last group cannot be deleted: the button is disabled and says why", async ({ page, request }) => {
+  test("the last group cannot be deleted: the menu item is disabled and says why", async ({ page, request }) => {
     const email = "e2e_groups_last@example.com"
     const password = "Passw0rd!"
     const cleanup = async ({ soft = false } = {}) => {
@@ -166,8 +172,9 @@ test.describe("group list and settings pages", () => {
 
       await gotoApp(page, "/groups", page.getByRole("heading", { level: 1, name: "Groups" }))
       await page.getByRole("link", { name: "Settings of Personal" }).click()
-      await expect(page.locator("[data-e2e=group-delete]")).toBeDisabled()
-      await expect(page.locator("[data-e2e=group-delete-why]")).toBeVisible()
+      await page.getByRole("button", { name: "More actions" }).click()
+      await expect(page.locator("[data-e2e=group-delete-open]")).toBeDisabled()
+      await expect(page.locator("[data-e2e=group-delete-why]")).toHaveText("It is your only group")
 
       const groups = await page.request.get(`${apiBase}/api/groups`)
       const [only] = (await groups.json()).groups

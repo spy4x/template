@@ -57,7 +57,8 @@ test.describe("group invitations", () => {
 
       await signIn(page, admin, password)
       await gotoApp(page, `/groups/${groupId}`, settingsReady(page))
-      const section = page.locator("[data-e2e=group-section-invitations]")
+      await page.getByRole("button", { name: "Invite people" }).click()
+      const section = page.getByRole("dialog", { name: "Invite people" })
       // An admin invites at most editors.
       await expect(section.locator("[data-e2e=invitation-role] option")).toHaveText([
         "Viewer",
@@ -77,7 +78,10 @@ test.describe("group invitations", () => {
       await section.locator("[data-e2e=invitation-create]").click()
       const link = await section.locator("[data-e2e=invitation-created] code").textContent()
       expect(link).toMatch(/\/invite\/[A-Za-z0-9_-]{43}$/)
-      await expect(section.locator("[data-e2e=invitation]")).toHaveCount(1)
+      await section.locator("[data-e2e=invitation-done]").click()
+      await expect(section).toBeHidden()
+      await expect(page.locator("[data-e2e=group-section-invitations] [data-e2e=invitation]"))
+        .toHaveCount(1)
       const invitePath = new URL(link!).pathname
 
       const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })

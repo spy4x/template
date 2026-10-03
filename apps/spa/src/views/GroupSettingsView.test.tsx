@@ -9,7 +9,13 @@ import { billingStore } from "../state/billing.ts"
 import { groupsStore } from "../state/groups.ts"
 import { invitationsStore } from "../state/invitations.ts"
 import { membersStore } from "../state/members.ts"
-import { GroupSettingsView, transferAndRefresh } from "./GroupSettingsView.tsx"
+import {
+  GroupInvite,
+  GroupSettingsView,
+  GroupTransfer,
+  renameGroup,
+  transferAndRefresh,
+} from "./GroupSettingsView.tsx"
 
 const known = {
   id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001",
@@ -20,6 +26,20 @@ const known = {
   updatedAt: "2026-10-02T00:00:00.000Z",
 }
 const strangerId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111999"
+
+/** The invite dialog's body on the server, for the group `known`. */
+const renderInvite = (role = GroupRole.ADMIN) =>
+  renderToString(<GroupInvite groupId={known.id} actorRole={role} onClose={() => {}} />)
+
+/** The transfer dialog's body on the server, for the group `known` held by its owner. */
+const renderTransfer = () =>
+  renderToString(
+    <GroupTransfer
+      groupId={known.id}
+      group={{ ...known, role: GroupRole.OWNER }}
+      onClose={() => {}}
+    />,
+  )
 
 /** The view on the server: the router needs a path, because there is no `location`. */
 const render = (groupId: string) =>
@@ -100,16 +120,16 @@ describe("GroupSettingsView", () => {
     })
     const hint = VIEWERS_ONLY_HINT
 
-    expect(render(known.id)).not.toContain(hint)
+    expect(renderInvite()).not.toContain(hint)
     billingStore.current.value = { groupId: known.id, billing: plan(FREE_PLAN_ID) }
-    expect(render(known.id)).toContain(hint)
+    expect(renderInvite()).toContain(hint)
     billingStore.current.value = { groupId: strangerId, billing: plan(FREE_PLAN_ID) }
-    expect(render(known.id)).not.toContain(hint)
+    expect(renderInvite()).not.toContain(hint)
     billingStore.current.value = { groupId: known.id, billing: plan(PRO_PLAN_ID) }
-    expect(render(known.id)).not.toContain(hint)
+    expect(renderInvite()).not.toContain(hint)
   })
 
-  it("shows the transfer section to the owner only, offering every other member", () => {
+  it("offers the owner every other member of this group to transfer it to", () => {
     const vera = {
       userId: 2,
       name: "Vera Viewer",
@@ -127,17 +147,17 @@ describe("GroupSettingsView", () => {
       isYou: true,
     }, vera]
 
-    groupsStore.groups.value = [known]
-    expect(render(known.id)).not.toContain(`data-e2e="group-section-transfer"`)
+    membersStore.groupId.value = strangerId
+    expect(renderTransfer()).not.toContain(`data-e2e="group-section-transfer"`)
 
-    groupsStore.groups.value = [{ ...known, role: GroupRole.OWNER }]
-    const html = render(known.id)
+    membersStore.groupId.value = known.id
+    const html = renderTransfer()
     expect(html).toContain(`data-e2e="group-section-transfer"`)
     expect(html).toMatch(/<option[^>]*value="2"[^>]*>Vera Viewer<\/option>/)
     expect(html).not.toMatch(/<option[^>]*>Olga Owner<\/option>/)
   })
 
-  it("tells the owner the old card is not charged again after a transfer, for the open group's plan only", () => {
+  it("disables Transfer ownership while the open group's subscription renews, and for no other group's", () => {
     groupsStore.groups.value = [{ ...known, role: GroupRole.OWNER }]
     membersStore.groupId.value = known.id
     membersStore.members.value = [
@@ -171,13 +191,14 @@ describe("GroupSettingsView", () => {
       notice: null,
       seatPrice: null,
     }
-    const sentence = "your card is not charged again"
+    const blocked = "group-transfer-why"
 
-    expect(render(known.id)).not.toContain(sentence)
+    expect(render(known.id)).toContain("group-transfer-open")
+    expect(render(known.id)).not.toContain(blocked)
     billingStore.current.value = { groupId: strangerId, billing: subscribed }
-    expect(render(known.id)).not.toContain(sentence)
+    expect(render(known.id)).not.toContain(blocked)
     billingStore.current.value = { groupId: known.id, billing: subscribed }
-    expect(render(known.id)).toContain(sentence)
+    expect(render(known.id)).toContain(blocked)
   })
 
   it("shows a create refused for the price at the price box, and any other refusal under the form", () => {
@@ -205,7 +226,7 @@ describe("GroupSettingsView", () => {
       code: "SEAT_PRICE_NOT_ACCEPTED",
       plan: null,
     }
-    const refused = render(known.id)
+    const refused = renderInvite(GroupRole.OWNER)
     expect(refused).toContain(`id="invitation-seat-price-error"`)
     expect(box(refused)).toContain("invitation-seat-price-error")
     expect(refused.match(/Confirm the higher price/g)).toHaveLength(1)
@@ -215,7 +236,7 @@ describe("GroupSettingsView", () => {
       code: "INVALID_REQUEST",
       plan: null,
     }
-    const other = render(known.id)
+    const other = renderInvite(GroupRole.OWNER)
     expect(other).toContain("That address is not valid")
     expect(other).not.toContain(`id="invitation-seat-price-error"`)
   })
@@ -229,7 +250,7 @@ describe("GroupSettingsView", () => {
       plan: null,
     }
 
-    const html = render(known.id)
+    const html = renderInvite(GroupRole.OWNER)
 
     expect(html).not.toContain(`name="acceptSeatPrice"`)
     expect(html).toContain("Confirm the higher price")
@@ -257,5 +278,44 @@ describe("transferAndRefresh", () => {
 
     expect(moved).toBe(false)
     expect(reads).toBe(0)
+  })
+})
+
+describe("renameGroup", () => {
+  const store = (renamed: boolean, failure: typeof groupsStore.actionError.value = null) => {
+    const draft = { value: null as { groupId: string; name: string } | null }
+    return {
+      draft,
+      groups: {
+        renameDraft: draft,
+        rename: () => Promise.resolve(renamed),
+        actionError: { value: failure },
+      } as unknown as Parameters<typeof renameGroup>[0],
+    }
+  }
+
+  it("hands the new name to the store and resolves when the server renamed the group", async () => {
+    const { draft, groups } = store(true)
+
+    await renameGroup(groups, known.id, "Crew")
+
+    expect(draft.value).toEqual({ groupId: known.id, name: "Crew" })
+  })
+
+  it("rejects with the server's message when it refused this group's rename", async () => {
+    const { groups } = store(false, {
+      groupId: known.id,
+      action: "rename",
+      message: "That name is too long.",
+    })
+
+    await expect(renameGroup(groups, known.id, "Crew")).rejects.toThrow("That name is too long.")
+  })
+
+  it("rejects with a general message when the refusal held is another group's", async () => {
+    const { groups } = store(false, { groupId: strangerId, action: "rename", message: "Theirs." })
+
+    await expect(renameGroup(groups, known.id, "Crew")).rejects
+      .toThrow("Could not rename the group.")
   })
 })

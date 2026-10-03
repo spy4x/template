@@ -47,6 +47,7 @@ test.describe("groups over the socket", () => {
       const names = page.locator("[data-e2e=group-item-name]")
       await expect(names).toHaveCount(1)
 
+      await page.locator("[data-e2e=group-new]").click()
       await page.locator("[data-e2e=group-name]").fill("Trip")
       await page.locator("[data-e2e=group-create]").click()
       await expect(names.filter({ hasText: "Trip" })).toHaveCount(1)
@@ -175,6 +176,7 @@ test.describe("groups over the socket", () => {
 
       await gotoApp(page, "/groups", page.locator("[data-e2e=shell-ws-status]"))
       await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+      await page.locator("[data-e2e=group-new]").click()
       await page.locator("[data-e2e=group-name]").fill("Seen live")
       await page.locator("[data-e2e=group-create]").click()
       await expect(page.locator("[data-e2e=group-item-name]").filter({ hasText: "Seen live" }))

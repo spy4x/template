@@ -34,7 +34,6 @@ export function InvitationView({ token }: { token: string }) {
   const failed = store.answerError.value?.ref === token ? store.answerError.value : null
   return (
     <InvitationScreen
-      token={token}
       invitation={store.preview.value}
       loading={store.previewLoading.value}
       error={store.previewError.value}

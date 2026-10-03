@@ -99,8 +99,8 @@ test.describe("plan limits", () => {
 
       await gotoApp(page, `/groups/${groupId}`, page.locator("[data-e2e=group-general-name]"))
       const row = page.locator("[data-e2e=group-member]").filter({ hasText: member })
-      await row.getByLabel(`Role of ${member}`).selectOption({ label: "Admin" })
-      await row.getByRole("button", { name: "Change role" }).click()
+      await row.getByRole("button", { name: `Actions for ${member}` }).click()
+      await page.getByRole("menuitem", { name: "Make Admin" }).click()
 
       const refusal = row.locator("[data-e2e=plan-refusal]")
       await expect(refusal).toBeFocused()
@@ -109,8 +109,8 @@ test.describe("plan limits", () => {
       await expect(row.locator("[data-e2e=group-member-role]")).toHaveText("Editor")
 
       await upgrade(request, groupId)
-      await row.getByLabel(`Role of ${member}`).selectOption({ label: "Admin" })
-      await row.getByRole("button", { name: "Change role" }).click()
+      await row.getByRole("button", { name: `Actions for ${member}` }).click()
+      await page.getByRole("menuitem", { name: "Make Admin" }).click()
       await expect(row.locator("[data-e2e=group-member-role]")).toHaveText("Admin")
       await expect(refusal).toHaveCount(0)
     } finally {

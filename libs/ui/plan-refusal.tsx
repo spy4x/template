@@ -1,6 +1,7 @@
 import type { JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
-import { UpgradePrompt } from "@spy4x/preact-ui/billing"
+import { Button } from "@spy4x/preact-ui/button"
+import { Notice } from "@spy4x/preact-ui/notice"
 import type { FeatureKey, LimitKey, PlanRefusal } from "@domain/billing"
 import { BILLING_PATHS } from "./billing-screen.tsx"
 import type { Navigate } from "./progressive.tsx"
@@ -37,17 +38,15 @@ export interface PlanRefusalNoticeProps {
   /** The refusal the API sent with its 402, or the socket with its `forbidden`. */
   refusal: PlanRefusal
   navigate?: Navigate
-  /** The level of the notice's heading. */
-  headingLevel?: 2 | 3 | 4
 }
 
 /**
- * Why the group's plan refused an action, shown where the action was. The owner gets an upgrade
+ * Why the group's plan refused an action, shown where the action was. The owner gets a "See plans"
  * link to the group's pricing page; anyone else is told to ask the owner, as only the owner can
  * change the plan. Focus moves to the notice, so a keyboard or screen reader user hears it.
  */
 export function PlanRefusalNotice(
-  { groupId, refusal, navigate, headingLevel = 3 }: PlanRefusalNoticeProps,
+  { groupId, refusal, navigate }: PlanRefusalNoticeProps,
 ): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => box.current?.focus(), [refusal])
@@ -59,23 +58,21 @@ export function PlanRefusalNotice(
       data-e2e="plan-refusal"
       data-entitlement={refusal.entitlement}
     >
-      {refusal.canUpgrade
-        ? (
-          <UpgradePrompt
-            href={BILLING_PATHS.pricing(groupId)}
-            navigate={navigate}
-            headingLevel={headingLevel}
-            labels={{ title: text.title, message: text.message, action: "See plans" }}
-          />
-        )
-        : (
-          <div class="rounded-md border border-dashed border-control bg-surface p-4 text-sm">
-            <p class="font-semibold">{text.title}</p>
-            <p class="text-muted" data-e2e="plan-refusal-ask-owner">
-              {text.message} Ask the group's owner to upgrade the plan.
-            </p>
-          </div>
+      <Notice
+        tone="warning"
+        title={text.title}
+        action={refusal.canUpgrade && (
+          <Button href={BILLING_PATHS.pricing(groupId)} navigate={navigate} size="sm">
+            See plans
+          </Button>
         )}
+      >
+        {refusal.canUpgrade ? text.message : (
+          <span data-e2e="plan-refusal-ask-owner">
+            {text.message} Ask the group's owner to upgrade the plan.
+          </span>
+        )}
+      </Notice>
     </div>
   )
 }

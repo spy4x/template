@@ -1,24 +1,25 @@
 import type { ComponentChildren, JSX } from "preact"
-import { useEffect, useRef } from "preact/hooks"
-import { Button } from "@spy4x/preact-ui/button"
-import { Badge } from "@spy4x/preact-ui/badge"
+import { useEffect, useRef, useState } from "preact/hooks"
+import { IconCheck, IconCog6Tooth, IconPlus } from "@spy4x/preact-icons"
 import { AvatarGroup } from "@spy4x/preact-ui/avatar"
-import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
+import { Button } from "@spy4x/preact-ui/button"
+import { Card } from "@spy4x/preact-ui/card"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
-import { Link } from "@spy4x/preact-ui/link"
-import { Stack } from "@spy4x/preact-ui/layout"
+import { Cluster, Section, Stack } from "@spy4x/preact-ui/layout"
+import { Modal } from "@spy4x/preact-ui/modal"
 import { GROUP_RESTORE_DAYS, GroupRole } from "@domain/groups"
-import { FORM_ACTIONS, GROUP_PATHS, type Navigate, ScreenForm } from "./progressive.tsx"
+import { PageAction, PageHeader, useClosesWhenDone } from "./group-page.tsx"
+import { GROUP_PATHS, type Navigate, ScreenForm } from "./progressive.tsx"
 
 /** One group as the screen shows it. */
 export interface GroupRow {
   id: string
   name: string
   role: GroupRole
-  /** How many members the group has; the card shows its avatar stack when it is known. */
+  /** How many members the group has; the row shows its avatar stack when it is known. */
   memberCount?: number
   /** The first few members, oldest first, for the avatar stack. */
   members?: readonly { name: string }[]
@@ -40,11 +41,6 @@ export interface GroupsScreenProps {
   selectedId: string | null
   /** Follows a settings link without a page load; without it every link is an ordinary one. */
   navigate?: Navigate
-  /**
-   * The id the new group is created with, for the form without JavaScript: a form sent twice
-   * creates one group. An app that takes the submit over names the id itself.
-   */
-  draftId?: string
   /** What the person has typed as the new group's name. */
   name: string
   onNameChange?: (name: string) => void
@@ -52,23 +48,19 @@ export interface GroupsScreenProps {
   creating: boolean
   /** The list is being fetched. */
   loading: boolean
-  /** The error under the form or the list, or `null`. */
+  /** Why the create or the list read failed, or `null`. Shown in the dialog while it is open. */
   error: string | null
   /** Why a restore was refused, shown above the deleted groups, or `null`. */
   restoreError?: string | null
-  /** Restores a deleted group. A form that posts nothing to `GROUP_PATHS.restore`. */
+  /** Restores a deleted group. */
   onRestore?: (groupId: string) => void
   /** The group being restored, or `null`. */
   restoringId?: string | null
+  /** Creates a group named `name`. The dialog closes once `creating` ends without an error. */
   onCreate?: () => void
-  /** Reads the list again; without it there is no Refresh button, and a page load refreshes. */
-  onRefresh?: () => void
-  /**
-   * Opens a group's notes: selects the group, then shows `/notes`. A form that posts `{ groupId }`
-   * to `FORM_ACTIONS.groupSelect`; with this callback the app takes the submit over.
-   */
+  /** Opens a group's notes: the app selects the group, then shows `/notes`. */
   onOpen?: (groupId: string) => void
-  /** The invitations sent to the person, drawn under the heading; the app fills the slot. */
+  /** The invitations sent to the person, drawn under the header; the app fills the slot. */
   invitations?: ComponentChildren
 }
 
@@ -81,25 +73,22 @@ export const ROLE_TEXT: Record<GroupRole, string> = {
 }
 
 /**
- * The groups page: a card for each group the person belongs to, with the person's role, whether it
- * is the selected one, a link to its settings and a form that opens its notes; a form to create a
- * group; and, when the person has deleted groups they can still restore, a list of them with a
- * restore form each. The forms post the API's field names to their routes; with its callback, the
- * app takes a submit over.
+ * The groups page: one row per group with the person's role, the members' avatars and a quiet mark
+ * on the current group. A row opens the group's notes; its cog opens the group's settings. "New
+ * group" in the header opens a dialog with the name field. Deleted groups the person can still
+ * restore are listed under the groups, each with a Restore button.
  */
 export function GroupsScreen(
   {
     groups,
     selectedId,
     navigate,
-    draftId,
     name,
     onNameChange,
     creating,
     loading,
     error,
     onCreate,
-    onRefresh,
     onOpen,
     deleted = [],
     restoreError = null,
@@ -108,22 +97,116 @@ export function GroupsScreen(
     invitations,
   }: GroupsScreenProps,
 ): JSX.Element {
+  const [creatingOpen, setCreatingOpen] = useState(false)
+  useClosesWhenDone(creating, error !== null, () => setCreatingOpen(false))
   // A refused restore has no field to fix, so focus lands on the message above the list.
   const restoreMessage = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (restoreError) restoreMessage.current?.focus()
   }, [restoreError])
+
   return (
-    <Stack gap="lg">
-      <h1 class="text-xl font-semibold">Groups</h1>
+    <Stack gap="xl" class="mx-auto w-full max-w-3xl">
+      <PageHeader
+        title="Groups"
+        action={
+          <PageAction
+            label="New group"
+            Icon={IconPlus}
+            onClick={() => setCreatingOpen(true)}
+            dataE2E="group-new"
+          />
+        }
+      />
       {invitations}
-      <Card>
-        <CardHeader title="New group" headingLevel={2} />
-        <CardBody>
-          <ScreenForm action={FORM_ACTIONS.groupCreate} pending={creating} onSubmit={onCreate}>
-            <input type="hidden" name="id" value={draftId} />
+      {!creatingOpen && groups.length > 0 && <ErrorState message={error} />}
+      {groups.length === 0
+        ? (
+          <EmptyState
+            title={loading ? "Loading groups..." : "No groups yet."}
+            description={loading ? undefined : error ?? undefined}
+          />
+        )
+        : (
+          <Card>
+            <ul class="divide-y divide-subtle" data-e2e="group-list" aria-label="Your groups">
+              {groups.map((group) => (
+                <GroupItem
+                  key={group.id}
+                  group={group}
+                  selected={group.id === selectedId}
+                  navigate={navigate}
+                  onOpen={onOpen}
+                />
+              ))}
+            </ul>
+          </Card>
+        )}
+
+      {(deleted.length > 0 || restoreError) && (
+        <Section
+          title="Deleted groups"
+          description={`A deleted group and its notes can be restored for ${GROUP_RESTORE_DAYS} days. After that they are deleted for good.`}
+        >
+          <div ref={restoreMessage} tabIndex={-1} data-e2e="group-restore-error">
+            <ErrorState message={restoreError} />
+          </div>
+          {deleted.length > 0 && (
+            <Card>
+              <ul class="divide-y divide-subtle" data-e2e="deleted-group-list">
+                {deleted.map((group) => (
+                  <li
+                    key={group.id}
+                    class="flex items-center gap-3 px-4 py-3 sm:px-6"
+                    data-e2e={`deleted-group-${group.id}`}
+                  >
+                    <div class="flex min-w-0 flex-1 flex-col gap-1">
+                      <span
+                        class="truncate text-sm font-medium"
+                        title={group.name}
+                        data-e2e="deleted-group-name"
+                      >
+                        {group.name}
+                      </span>
+                      <span class="text-xs text-muted">
+                        Restorable until{" "}
+                        <time dateTime={restorableUntil(group.deletedAt)}>
+                          {restorableUntil(group.deletedAt).slice(0, 10)}
+                        </time>
+                      </span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Restore ${group.name}`}
+                      data-e2e="group-restore"
+                      busy={restoringId === group.id}
+                      busyLabel="Restoring..."
+                      disabled={restoringId !== null}
+                      onClick={() => onRestore?.(group.id)}
+                    >
+                      Restore
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+        </Section>
+      )}
+
+      {creatingOpen && (
+        <Modal
+          open
+          title="New group"
+          cancelLabel="Close"
+          onClose={() => setCreatingOpen(false)}
+          dataE2E="group-new-dialog"
+        >
+          <ScreenForm pending={creating} onSubmit={onCreate}>
             <Stack>
-              <Field id="group-name" label="Name" required>
+              <Field id="group-name" label="Name" error={error} required>
                 <Input
                   data-e2e="group-name"
                   name="name"
@@ -132,153 +215,79 @@ export function GroupsScreen(
                   value={name}
                   onInput={(e) => onNameChange?.(e.currentTarget.value)}
                   required
+                  autoFocus
                 />
               </Field>
-              <ErrorState message={error} />
-              <div>
+              <Cluster justify="end">
+                <Button type="button" variant="outline" onClick={() => setCreatingOpen(false)}>
+                  Cancel
+                </Button>
                 <Button
                   type="submit"
                   data-e2e="group-create"
                   busy={creating}
                   busyLabel="Creating..."
                 >
-                  New group
+                  Create group
                 </Button>
-              </div>
+              </Cluster>
             </Stack>
           </ScreenForm>
-        </CardBody>
-      </Card>
-
-      <section aria-labelledby="your-groups" class="flex flex-col gap-3">
-        <h2 id="your-groups" class="text-base font-semibold">Your groups</h2>
-        {groups.length === 0
-          ? <EmptyState title={loading ? "Loading groups..." : "No groups yet."} />
-          : (
-            <ul class="flex flex-col gap-3" data-e2e="group-list">
-              {groups.map((group) => (
-                <li key={group.id} data-e2e={`group-${group.id}`}>
-                  <Card>
-                    <CardBody class="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-                      <div class="flex min-w-0 flex-col gap-1">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <span class="break-words font-medium" data-e2e="group-item-name">
-                            {group.name}
-                          </span>
-                          {group.id === selectedId && <Badge text="Selected" color="green" />}
-                        </div>
-                        <span class="text-xs text-muted">
-                          {ROLE_TEXT[group.role]}
-                        </span>
-                        {group.memberCount !== undefined && group.members && (
-                          <AvatarGroup
-                            items={stackItems(group.members, group.memberCount)}
-                            label={`Members of ${group.name}`}
-                            size="xs"
-                            class="pt-1"
-                          />
-                        )}
-                      </div>
-                      <div class="flex flex-wrap items-center gap-2">
-                        <Link
-                          href={GROUP_PATHS.settings(group.id)}
-                          navigate={navigate}
-                          class="pc-link text-sm"
-                          aria-label={`Settings of ${group.name}`}
-                          data-e2e="group-settings"
-                        >
-                          Settings
-                        </Link>
-                        <ScreenForm
-                          action={FORM_ACTIONS.groupSelect}
-                          onSubmit={onOpen && (() => onOpen(group.id))}
-                        >
-                          <input type="hidden" name="groupId" value={group.id} />
-                          <Button
-                            type="submit"
-                            variant="outline"
-                            size="sm"
-                            aria-label={`Open notes in ${group.name}`}
-                            data-e2e="group-open"
-                          >
-                            Open notes
-                          </Button>
-                        </ScreenForm>
-                      </div>
-                    </CardBody>
-                  </Card>
-                </li>
-              ))}
-            </ul>
-          )}
-        {onRefresh && (
-          <div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              data-e2e="group-refresh"
-              busy={loading}
-              busyLabel="Refreshing..."
-              onClick={onRefresh}
-            >
-              Refresh
-            </Button>
-          </div>
-        )}
-      </section>
-
-      {(deleted.length > 0 || restoreError) && (
-        <section aria-labelledby="deleted-groups" class="flex flex-col gap-3">
-          <h2 id="deleted-groups" class="text-base font-semibold">Deleted groups</h2>
-          <p class="text-sm text-muted">
-            A deleted group and its notes can be restored for {GROUP_RESTORE_DAYS}{" "}
-            days. After that they are deleted for good.
-          </p>
-          <div ref={restoreMessage} tabIndex={-1} data-e2e="group-restore-error">
-            <ErrorState message={restoreError} />
-          </div>
-          <ul class="flex flex-col gap-3" data-e2e="deleted-group-list">
-            {deleted.map((group) => (
-              <li key={group.id} data-e2e={`deleted-group-${group.id}`}>
-                <Card>
-                  <CardBody class="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-                    <div class="flex min-w-0 flex-col gap-1">
-                      <span class="break-words font-medium" data-e2e="deleted-group-name">
-                        {group.name}
-                      </span>
-                      <span class="text-xs text-muted">
-                        Can be restored until{" "}
-                        <time dateTime={restorableUntil(group.deletedAt)}>
-                          {restorableUntil(group.deletedAt).slice(0, 10)}
-                        </time>
-                      </span>
-                    </div>
-                    <ScreenForm
-                      action={GROUP_PATHS.restore(group.id)}
-                      pending={restoringId === group.id}
-                      onSubmit={onRestore && (() => onRestore(group.id))}
-                    >
-                      <Button
-                        type="submit"
-                        variant="outline"
-                        size="sm"
-                        aria-label={`Restore ${group.name}`}
-                        data-e2e="group-restore"
-                        busy={restoringId === group.id}
-                        busyLabel="Restoring..."
-                      >
-                        Restore
-                      </Button>
-                    </ScreenForm>
-                  </CardBody>
-                </Card>
-              </li>
-            ))}
-          </ul>
-        </section>
+        </Modal>
       )}
     </Stack>
+  )
+}
+
+/** One group's row: opens its notes, with a cog to its settings. */
+function GroupItem(
+  { group, selected, navigate, onOpen }: {
+    group: GroupRow
+    selected: boolean
+    navigate?: Navigate
+    onOpen?: (groupId: string) => void
+  },
+): JSX.Element {
+  return (
+    <li class="flex items-center gap-3 px-4 py-3 sm:px-6" data-e2e={`group-${group.id}`}>
+      <button
+        type="button"
+        class="flex min-h-11 min-w-0 flex-1 flex-col items-start justify-center gap-1 rounded-md text-left"
+        aria-label={`Open notes in ${group.name}${selected ? ", the current group" : ""}`}
+        data-e2e="group-open"
+        onClick={() => onOpen?.(group.id)}
+      >
+        <span class="flex min-w-0 max-w-full items-center gap-2">
+          <span class="truncate text-sm font-medium" title={group.name} data-e2e="group-item-name">
+            {group.name}
+          </span>
+          {selected && (
+            <span class="flex shrink-0 text-muted" data-e2e="group-current">
+              <IconCheck class="size-4" aria-hidden="true" />
+            </span>
+          )}
+        </span>
+        <span class="text-xs text-muted">{ROLE_TEXT[group.role]}</span>
+      </button>
+      {group.memberCount !== undefined && group.members && (
+        <AvatarGroup
+          items={stackItems(group.members, group.memberCount)}
+          label={`Members of ${group.name}`}
+          size="xs"
+          max={3}
+        />
+      )}
+      <Button
+        href={GROUP_PATHS.settings(group.id)}
+        navigate={navigate}
+        variant="icon"
+        aria-label={`Settings of ${group.name}`}
+        class="min-h-11 min-w-11 justify-center"
+        data-e2e="group-settings"
+      >
+        <IconCog6Tooth class="size-5" aria-hidden="true" />
+      </Button>
+    </li>
   )
 }
 
@@ -289,8 +298,8 @@ function restorableUntil(deletedAt: string): string {
 }
 
 /**
- * The avatars of a group's card: the members the list named, then a nameless one for each member
- * it did not, so the stack's `+N` chip and its label count everyone.
+ * The avatars of a group's row: the members the list named, then a nameless one for each member it
+ * did not, so the stack's `+N` chip and its label count everyone.
  */
 function stackItems(
   members: readonly { name: string }[],

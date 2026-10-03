@@ -1,15 +1,14 @@
 import type { JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
-import { BillingInterval, PlanCard, PricingTable, UpgradePrompt } from "@spy4x/preact-ui/billing"
+import { BillingInterval, PlanCard, PricingTable } from "@spy4x/preact-ui/billing"
 import { Button } from "@spy4x/preact-ui/button"
-import { Card, CardBody } from "@spy4x/preact-ui/card"
+import { Card } from "@spy4x/preact-ui/card"
 import { Checkbox } from "@spy4x/preact-ui/checkbox"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Notice } from "@spy4x/preact-ui/notice"
-import { Link } from "@spy4x/preact-ui/link"
-import { Stack } from "@spy4x/preact-ui/layout"
+import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { formatMoney } from "@spy4x/platform/universal/money"
 import {
   billingDate,
@@ -22,6 +21,7 @@ import {
   PAID_PLANS,
   type SeatPrice,
 } from "@domain/billing"
+import { PageHeader } from "./group-page.tsx"
 import { GROUP_PATHS, type Navigate } from "./progressive.tsx"
 
 /**
@@ -89,7 +89,6 @@ export function BillingNoticeBanner(
   return (
     <Notice
       tone="warning"
-      class="mb-4"
       data-e2e="billing-notice"
       data-kind={notice.kind}
     >
@@ -161,105 +160,106 @@ export function BillingCard(
   const plan = billing ? findPlan(billing.planId) : null
   const planCard = portalOpen && billing.subscribed && billing.planId !== FREE_PLAN_ID &&
     billing.status !== null && billing.status <= 5
+  const action = billing !== null && billing.enabled && billing.canManage && (
+    <Cluster gap="sm">
+      {!billing.subscribed && (
+        <Button
+          href={BILLING_PATHS.pricing(groupId)}
+          navigate={navigate}
+          variant="outline"
+          size="sm"
+          data-e2e="billing-see-plans"
+        >
+          See plans
+        </Button>
+      )}
+      {portalOpen && (
+        <fieldset ref={portal} disabled={pending} class="m-0 min-w-0 border-0 p-0">
+          <form method="post" action={BILLING_PATHS.portal(groupId)}>
+            <Button type="submit" variant="outline" size="sm" busy={pending}>
+              Manage billing
+            </Button>
+          </form>
+        </fieldset>
+      )}
+    </Cluster>
+  )
   return (
-    <section aria-labelledby="group-billing" data-e2e="group-section-billing">
-      <Card>
-        <CardBody>
-          <Stack>
-            <h2 id="group-billing" class="text-base font-semibold">Plan</h2>
-            {billing === null
-              ? (error
-                ? <ErrorState message={error} />
-                : <p class="text-sm">Loading the plan...</p>)
-              : (
-                <div data-e2e="billing-plan" data-plan={billing.planId}>
-                  <BillingNoticeBanner
-                    notice={billing.notice}
-                    // A group past its grace shows the free plan; its notice names the paid one.
-                    planName={billing.planId === FREE_PLAN_ID ? "paid" : planName(billing.planId)}
+    <section
+      aria-labelledby="group-billing"
+      class="flex flex-col gap-4"
+      data-e2e="group-section-billing"
+    >
+      <h2 id="group-billing" class="text-base font-semibold">Plan</h2>
+      {billing === null
+        ? (error
+          ? <ErrorState message={error} />
+          : <p class="text-sm text-muted">Loading the plan...</p>)
+        : (
+          <div class="flex flex-col gap-4" data-e2e="billing-plan" data-plan={billing.planId}>
+            <BillingNoticeBanner
+              notice={billing.notice}
+              // A group past its grace shows the free plan; its notice names the paid one.
+              planName={billing.planId === FREE_PLAN_ID ? "paid" : planName(billing.planId)}
+            />
+            {planCard
+              ? (
+                // The fieldset disables the manage button while the portal opens.
+                <fieldset
+                  ref={portal}
+                  disabled={pending}
+                  class="m-0 flex min-w-0 flex-col gap-2 border-0 p-0"
+                >
+                  <PlanCard
+                    planName={planName(billing.planId)}
+                    status={billing.status as 1 | 2 | 3 | 4 | 5}
+                    // A per-member plan shows what the group pays: one seat per member.
+                    price={plan
+                      ? {
+                        amount: plan.amount * (billing.seatPrice?.seats ?? 1),
+                        currency: plan.currency,
+                        interval: BillingInterval.Month,
+                      }
+                      : undefined}
+                    periodEnd={cardDate(billing)}
+                    cancelAtPeriodEnd={billing.cancelAtPeriodEnd}
+                    manageAction={BILLING_PATHS.portal(groupId)}
+                    headingLevel={3}
                   />
-                  {planCard
-                    ? (
-                      // The fieldset disables the manage button while the portal opens.
-                      <fieldset ref={portal} disabled={pending} class="m-0 min-w-0 border-0 p-0">
-                        <PlanCard
-                          planName={planName(billing.planId)}
-                          status={billing.status as 1 | 2 | 3 | 4 | 5}
-                          // A per-member plan shows what the group pays: one seat per member.
-                          price={plan
-                            ? {
-                              amount: plan.amount * (billing.seatPrice?.seats ?? 1),
-                              currency: plan.currency,
-                              interval: BillingInterval.Month,
-                            }
-                            : undefined}
-                          periodEnd={cardDate(billing)}
-                          cancelAtPeriodEnd={billing.cancelAtPeriodEnd}
-                          manageAction={BILLING_PATHS.portal(groupId)}
-                          headingLevel={3}
-                        />
-                        {billing.seatPrice && (
-                          <p class="mt-2 text-sm text-muted" data-e2e="billing-seats">
-                            {seatsText(billing.seatPrice)}
-                          </p>
-                        )}
-                      </fieldset>
-                    )
-                    : (
-                      <Stack>
-                        <p class="text-sm">
-                          This group is on the{" "}
-                          <strong data-e2e="billing-plan-name">{planName(billing.planId)}</strong>
-                          {" "}
-                          plan.
-                        </p>
-                        {!billing.enabled
-                          ? null
-                          : !billing.canManage
-                          ? (
-                            <p class="text-sm text-muted" data-e2e="billing-owner-only">
-                              Only the group's owner can change its plan.
-                            </p>
-                          )
-                          : (
-                            <>
-                              {!billing.subscribed && (
-                                <UpgradePrompt
-                                  href={BILLING_PATHS.pricing(groupId)}
-                                  navigate={navigate}
-                                  headingLevel={3}
-                                  labels={{
-                                    title: "Upgrade the group",
-                                    message: "A paid plan adds priority support for every member.",
-                                    action: "See plans",
-                                  }}
-                                />
-                              )}
-                              {portalOpen && (
-                                <fieldset
-                                  ref={portal}
-                                  disabled={pending}
-                                  class="m-0 min-w-0 border-0 p-0"
-                                >
-                                  <form method="post" action={BILLING_PATHS.portal(groupId)}>
-                                    <Button type="submit" variant="outline">
-                                      Manage billing
-                                    </Button>
-                                  </form>
-                                </fieldset>
-                              )}
-                            </>
-                          )}
-                      </Stack>
-                    )}
-                  <div ref={message} tabIndex={-1} data-e2e="billing-error">
-                    <ErrorState message={error} />
+                  {billing.seatPrice && (
+                    <p class="text-sm text-muted" data-e2e="billing-seats">
+                      {seatsText(billing.seatPrice)}
+                    </p>
+                  )}
+                </fieldset>
+              )
+              : (
+                <Card>
+                  <div class="flex flex-wrap items-center gap-3 px-4 py-4 sm:px-6">
+                    <div class="flex min-w-0 flex-1 flex-col gap-1">
+                      <span class="text-sm font-medium">
+                        <span data-e2e="billing-plan-name">{planName(billing.planId)}</span> plan
+                      </span>
+                      {billing.enabled && !billing.canManage && (
+                        <span class="text-xs text-muted" data-e2e="billing-owner-only">
+                          Only the group's owner can change its plan.
+                        </span>
+                      )}
+                      {billing.enabled && billing.canManage && !billing.subscribed && (
+                        <span class="text-xs text-muted">
+                          A paid plan adds priority support for every member.
+                        </span>
+                      )}
+                    </div>
+                    {action}
                   </div>
-                </div>
+                </Card>
               )}
-          </Stack>
-        </CardBody>
-      </Card>
+            <div ref={message} tabIndex={-1} data-e2e="billing-error">
+              <ErrorState message={error} />
+            </div>
+          </div>
+        )}
     </section>
   )
 }
@@ -298,43 +298,48 @@ export function PricingScreen(
     if (error && billing) message.current?.focus()
   }, [error, errorId])
 
-  const back = (
-    <Link href={GROUP_PATHS.settings(groupId)} navigate={navigate} class="pc-link text-sm">
-      Back to the group
-    </Link>
+  const header = (
+    <PageHeader
+      title={groupName ? `Plans for ${groupName}` : "Plans"}
+      titleDataE2E="pricing-title"
+      back={{ href: GROUP_PATHS.settings(groupId), label: "Back to the group" }}
+      navigate={navigate}
+    />
   )
   if (billing === null) {
     return (
-      <Stack gap="lg">
-        {back}
-        {error
-          ? <ErrorState message={error} />
-          : <EmptyState headingLevel={1} title="Loading the plans..." />}
+      <Stack gap="xl" class="mx-auto w-full max-w-3xl">
+        {header}
+        {error ? <ErrorState message={error} /> : <EmptyState title="Loading the plans..." />}
       </Stack>
     )
   }
   return (
-    <Stack gap="lg">
-      {back}
-      <h1 class="text-xl font-semibold" data-e2e="pricing-title">
-        {groupName ? `Plans for ${groupName}` : "Plans"}
-      </h1>
+    <Stack gap="xl" class="mx-auto w-full max-w-3xl">
+      {header}
       {!billing.enabled
-        ? <p class="text-sm" data-e2e="pricing-off">Every group is on the Free plan.</p>
+        ? <Notice data-e2e="pricing-off">Every group is on the Free plan.</Notice>
         : !billing.canManage
         ? (
-          <p class="text-sm" data-e2e="pricing-owner-only">
+          <Notice data-e2e="pricing-owner-only">
             Only the group's owner can change its plan.
-          </p>
+          </Notice>
         )
         : billing.subscribed
         ? (
-          <p class="text-sm" data-e2e="pricing-paid">
+          <Notice data-e2e="pricing-paid">
             This group already has a subscription. Change or cancel it from the group's settings.
-          </p>
+          </Notice>
         )
         : (
-          <fieldset disabled={pending} class="m-0 min-w-0 border-0 p-0" data-e2e="pricing-plans">
+          <fieldset
+            disabled={pending}
+            // One plan would stretch across the page; it keeps a card's width instead.
+            class={`m-0 w-full min-w-0 border-0 p-0 ${
+              PRICING_PLANS.length === 1 ? "max-w-sm" : ""
+            }`}
+            data-e2e="pricing-plans"
+          >
             <PricingTable
               plans={PRICING_PLANS}
               action={BILLING_PATHS.checkout(groupId)}

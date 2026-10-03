@@ -23,7 +23,6 @@ export function GroupsView() {
       loading={store.loading.value}
       error={store.error.value}
       onCreate={() => void store.create()}
-      onRefresh={() => void store.refreshFromUser()}
       restoreError={failure?.action === "restore" ? failure.message : null}
       restoringId={working?.action === "restore" ? working.groupId : null}
       onRestore={(groupId) => void store.restore(groupId)}
