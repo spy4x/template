@@ -9,7 +9,7 @@ import { createMailSender, mailOffWarning, readMailSetup } from "@server/mail/ma
 import { systemEnv } from "@spy4x/server/config"
 import { readSubscribersSetup, subscribersOffWarning } from "@server/subscribers/subscribers.ts"
 // The API's own reading of the billing variables, so both processes run one provider.
-import { readBillingSetup } from "../api/features/billing/config.ts"
+import { readBillingSetup } from "@server/billing/setup.ts"
 
 const sql = createSqlFromEnv(Deno.env.toObject(), {
   transform: postgres.camel,
@@ -49,8 +49,10 @@ if (subscribersWarning) console.warn(subscribersWarning)
 
 // A per-member subscription's quantity is changed from here, through the outbox, so a provider
 // that is down never holds a new member back. A setup that cannot run stops the worker, as it stops
-// the API.
-const billingSetup = readBillingSetup(systemEnv, Deno.env.get("ENV") === "dev" ? "dev" : "prod")
+// the API. The worker verifies no webhook, so it neither needs nor reads the webhook secret.
+const billingSetup = readBillingSetup(systemEnv, Deno.env.get("ENV") === "dev" ? "dev" : "prod", {
+  webhooks: false,
+})
 
 // A committed group change is announced on a Postgres channel; the API process, which holds the
 // sockets, turns it into a hint for the group's members. The same table holds jobs: a row that

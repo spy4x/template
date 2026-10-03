@@ -546,10 +546,9 @@ services:
       - SMTP_PASS=${SMTP_PASS:-}
       - SMTP_FROM=${SMTP_FROM:-}
       # Billing: the worker changes a per-member subscription's quantity. The same setup as the
-      # API's; see docs/billing.md.
+      # API's, without the webhook secret: only the API verifies webhooks. See docs/billing.md.
       - BILLING_PROVIDER=${BILLING_PROVIDER:-}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - STRIPE_PRICE_PRO=${STRIPE_PRICE_PRO:-}
       - BILLING_GRACE_DAYS=${BILLING_GRACE_DAYS:-}
       - BILLING_TRIAL_REQUIRES_CARD=${BILLING_TRIAL_REQUIRES_CARD:-}

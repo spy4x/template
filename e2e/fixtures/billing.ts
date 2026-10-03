@@ -8,7 +8,7 @@
 
 /**
  * The development provider's webhook secret, the same as `FAKE_WEBHOOK_SECRET` in
- * `apps/api/features/billing/config.ts` (a unit test checks the two match). It is public: only the
+ * `libs/server/billing/setup.ts` (a unit test checks the two match). It is public: only the
  * development provider accepts it, and production refuses that provider.
  */
 export const DEV_WEBHOOK_SECRET = "whsec_template_development_only"

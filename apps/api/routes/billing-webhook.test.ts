@@ -4,7 +4,7 @@ import { Hono } from "hono"
 import { type BillingEvent, BillingEventType, SubscriptionStatus } from "@spy4x/billing"
 import type { BillingApplyOutcome } from "@domain/billing"
 import type { APIContext } from "../_types.ts"
-import { createFakeBilling, FAKE_PRO_PRICE_ID } from "../features/billing/config.ts"
+import { createFakeBilling, FAKE_PRO_PRICE_ID } from "@server/billing/setup.ts"
 import { stripeSignature, subscriptionEvent } from "../../../e2e/fixtures/billing.ts"
 import { createBillingWebhookRoute } from "./billing-webhook.ts"
 
