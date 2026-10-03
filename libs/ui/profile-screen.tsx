@@ -93,7 +93,11 @@ export interface ProfileScreenProps {
   enrolment: TotpEnrolment | null
   pushDevices: readonly UserPushTokenPublic[]
   onSaveProfile?: () => void
+  /** Drops what was typed in the name dialog and its errors, when the person closes it. */
+  onCancelProfile?: () => void
   onChangePassword?: () => void
+  /** Drops what was typed in the password dialog and its errors, when the person closes it. */
+  onCancelPassword?: () => void
   onStartTotp?: () => void
   onFinishTotp?: () => void
   /** Drops an enrolment under way, when the person closes the set-up dialog. */
@@ -125,7 +129,9 @@ export function ProfileScreen(
     enrolment,
     pushDevices,
     onSaveProfile,
+    onCancelProfile,
     onChangePassword,
+    onCancelPassword,
     onStartTotp,
     onFinishTotp,
     onCancelTotp,
@@ -148,6 +154,14 @@ export function ProfileScreen(
   const [editingName, setEditingName] = useState(false)
   const [changingPassword, setChangingPassword] = useState(false)
   const [confirmingDisable, setConfirmingDisable] = useState(false)
+  const cancelName = () => {
+    setEditingName(false)
+    onCancelProfile?.()
+  }
+  const cancelPassword = () => {
+    setChangingPassword(false)
+    onCancelPassword?.()
+  }
 
   useSucceeded(
     pending.profile,
@@ -386,7 +400,7 @@ export function ProfileScreen(
 
       <Modal
         open={editingName}
-        onClose={() => setEditingName(false)}
+        onClose={cancelName}
         title="Edit name"
         cancelLabel="Close"
         dataE2E="profile-dialog"
@@ -431,7 +445,7 @@ export function ProfileScreen(
             </Field>
             <ErrorState message={errors.profile} />
             <DialogButtons
-              onCancel={() => setEditingName(false)}
+              onCancel={cancelName}
               submit={
                 <Button
                   type="submit"
@@ -449,7 +463,7 @@ export function ProfileScreen(
 
       <Modal
         open={changingPassword}
-        onClose={() => setChangingPassword(false)}
+        onClose={cancelPassword}
         title="Change password"
         cancelLabel="Close"
         dataE2E="password-dialog"
@@ -496,7 +510,7 @@ export function ProfileScreen(
             </Field>
             <ErrorState message={errors.password} />
             <DialogButtons
-              onCancel={() => setChangingPassword(false)}
+              onCancel={cancelPassword}
               submit={
                 <Button
                   type="submit"

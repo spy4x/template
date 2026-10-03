@@ -201,7 +201,21 @@ export function ProfileView() {
       enrolment={enrolment}
       pushDevices={profileStore.pushDevices.value}
       onSaveProfile={submitProfile}
+      onCancelProfile={() => {
+        setProfileError(null)
+        setFieldErrors(({ firstName: _first, lastName: _last, ...rest }) => rest)
+        setValues((current) => ({
+          ...current,
+          firstName: session.user?.firstName || "",
+          lastName: session.user?.lastName || "",
+        }))
+      }}
       onChangePassword={submitPassword}
+      onCancelPassword={() => {
+        setPasswordError(null)
+        setFieldErrors(({ currentPassword: _current, newPassword: _new, ...rest }) => rest)
+        setValues((current) => ({ ...current, currentPassword: "", newPassword: "" }))
+      }}
       onStartTotp={startTotp}
       onFinishTotp={finishTotp}
       onCancelTotp={() => {

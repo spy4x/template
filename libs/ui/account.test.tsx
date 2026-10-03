@@ -416,6 +416,26 @@ describe("ProfileScreen", () => {
     expect(cancel.calls).toHaveLength(1)
   })
 
+  for (
+    const [opener, dialog, callback] of [
+      ["profile-edit", "profile-dialog", "onCancelProfile"],
+      ["password-open", "password-dialog", "onCancelPassword"],
+    ] as const
+  ) {
+    it(`asks the app to drop what was typed when the ${dialog} is cancelled or closed`, async () => {
+      const cancel = spy<[]>()
+      await mount(<ProfileScreen {...profileDefaults} {...{ [callback]: cancel.fn }} />)
+
+      await click(`[data-e2e=${opener}]`)
+      await clickInDialog(dialog, "Cancel")
+      expect(isOpen(dialog)).toBe(false)
+      await click(`[data-e2e=${opener}]`)
+      await click(`[data-e2e=${dialog}] button[aria-label=Close]`)
+      expect(isOpen(dialog)).toBe(false)
+      expect(cancel.calls).toHaveLength(2)
+    })
+  }
+
   it("turns two-factor off only once the person confirms, and moves focus to Turn off when it comes on", async () => {
     const disable = spy<[]>()
     const enrolling = { qrcode: "<svg/>", secret: "ABC" }
