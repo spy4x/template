@@ -1,10 +1,15 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
+import { encodeBase64Url } from "@std/encoding"
 import { createKvStore, type RateLimitStore } from "@spy4x/platform/rate-limit"
 import type { SubscriberStore } from "@spy4x/server/subscribers"
 import { createMemorySubscriberStore } from "@spy4x/server/subscribers/memory"
 import type { SubscriberList } from "@domain/subscribers"
-import { createListCrypto, type SubscribersSetup } from "@server/subscribers/subscribers.ts"
+import {
+  createListCrypto,
+  createRecipientLimitKey,
+  type SubscribersSetup,
+} from "@server/subscribers/subscribers.ts"
 import {
   API_URL,
   crossSiteHeaders,
@@ -64,7 +69,12 @@ function buildApp(
     setup,
     store: () => store,
     webAppUrl: WEB_APP_URL,
-    rateLimits: createSubscriberRateLimits({ windowMs: 60_000, strictLimit, store: memoryStore }),
+    rateLimits: createSubscriberRateLimits({
+      windowMs: 60_000,
+      strictLimit,
+      store: memoryStore,
+      recipientKey: async (email) => await (await createRecipientLimitKey(SETUP))(email),
+    }),
     requestConfirmMail: (list, email) => Promise.resolve(void confirmMails.push([list, email])),
     requestWelcomeMail: (list, email) => Promise.resolve(void welcomeMails.push([list, email])),
     log: { error: line, warn: line },
@@ -133,17 +143,22 @@ describe(`POST /api/subscribers`, () => {
     expect(statuses).toEqual([202, 202, 429])
   })
 
-  it(`stops mailing one address after its hourly budget but answers the same 202`, async () => {
+  it(`stops mailing one address after its hourly budget but answers the same 202, headers and body`, async () => {
     const { app, confirmMails } = buildApp()
-    const statuses = []
+    const answers = []
     for (let attempt = 0; attempt <= SUBSCRIBE_MAILS_PER_RECIPIENT; attempt++) {
       // A fresh IP each time, so only the address's budget can run out.
       const headers = { ...sameOriginWithoutCookieHeaders, "x-real-ip": `192.0.2.${attempt + 1}` }
-      statuses.push(
-        (await subscribe(app, { email: `ada@example.com`, list: `news` }, headers)).status,
-      )
+      const response = await subscribe(app, { email: `ada@example.com`, list: `news` }, headers)
+      answers.push({
+        status: response.status,
+        headers: [...response.headers],
+        body: await response.text(),
+      })
     }
-    expect(statuses).toEqual(Array(SUBSCRIBE_MAILS_PER_RECIPIENT + 1).fill(202))
+    // The answer over the budget is the normal 202, byte for byte, headers included.
+    for (const answer of answers) expect(answer).toEqual(answers[0])
+    expect(answers[0].status).toBe(202)
     expect(confirmMails.length).toBe(SUBSCRIBE_MAILS_PER_RECIPIENT)
   })
 
@@ -157,6 +172,17 @@ describe(`POST /api/subscribers`, () => {
       ...crossSiteHeaders,
     })
     expect(crossSite.status).toBe(403)
+    expect(confirmMails).toEqual([])
+  })
+
+  it(`refuses a post without Origin and Sec-Fetch-Site, which only one-click may send`, async () => {
+    const { app, confirmMails } = buildApp()
+
+    const response = await subscribe(app, { email: `ada@example.com`, list: `news` }, {
+      "content-type": `application/json`,
+    })
+
+    expect(response.status).toBe(403)
     expect(confirmMails).toEqual([])
   })
 
@@ -200,6 +226,23 @@ describe(`confirming a subscription`, () => {
     expect(await again.json()).toEqual({ state: `done` })
     expect((await store.list()).map((row) => row.email)).toEqual([`ada@example.com`])
     expect(welcomeMails).toEqual([[`news`, `ada@example.com`]])
+  })
+
+  it(`refuses a cross-site post and one without browser headers, storing nothing`, async () => {
+    const { app, store } = buildApp()
+    const token = await (await createListCrypto(SETUP, `news`)).confirmToken(`ada@example.com`)
+    const post = (headers: Record<string, string>) =>
+      app.request(`${API_URL}/subscribers/confirm`, {
+        method: `POST`,
+        headers,
+        body: JSON.stringify({ list: `news`, token }),
+      })
+
+    const crossSite = await post({ ...crossSiteHeaders })
+    const headerless = await post({ "content-type": `application/json` })
+
+    expect([crossSite.status, headerless.status]).toEqual([403, 403])
+    expect(await store.count()).toBe(0)
   })
 
   it(`refuses a forged token and stores nothing`, async () => {
@@ -307,6 +350,31 @@ describe(`unsubscribing`, () => {
 
     expect(await response.json()).toEqual({ state: `done` })
     expect(await store.count()).toBe(0)
+  })
+
+  it(`refuses a legacy unsigned token on the preview and the POST without reading the list`, async () => {
+    const store = createMemorySubscriberStore()
+    await listed(store, `ada@example.com`)
+    let listReads = 0
+    const list = store.list.bind(store)
+    store.list = () => (listReads++, list())
+    const { app } = buildApp({ store })
+    const legacy = `${encodeBase64Url(JSON.stringify({ version: 1, payload: {} }))}.AAAA`
+
+    const preview = await app.request(
+      `${API_URL}/subscribers/unsubscribe/preview?${linkQuery(legacy)}`,
+    )
+    const post = await app.request(unsubscribeUrl(legacy), {
+      method: `POST`,
+      headers: { "content-type": `application/x-www-form-urlencoded` },
+      body: `List-Unsubscribe=One-Click`,
+    })
+
+    expect([preview.status, post.status]).toEqual([404, 404])
+    expect(await preview.json()).toEqual({ state: `not-recognised` })
+    expect(await post.json()).toEqual({ state: `not-recognised` })
+    expect(listReads).toBe(0)
+    expect(await store.count()).toBe(1)
   })
 
   it(`answers a link whose address is gone the same as a forged one`, async () => {

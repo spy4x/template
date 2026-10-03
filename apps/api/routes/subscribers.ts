@@ -25,6 +25,7 @@ import {
 } from "@domain/subscribers"
 import {
   createListCrypto,
+  isCurrentSubscriberToken,
   subscriberConfirmLink,
   type SubscribersSetup,
   subscriberUnsubscribeLink,
@@ -166,7 +167,9 @@ export function createSubscribersRoute(deps: SubscribersRouteDependencies): Hono
     .get(`/unsubscribe/preview`, deps.rateLimits.tokenByIp, async (c) => {
       noStore(c)
       const link = linkQuery(c)
-      if (!link) return c.json({ state: `not-recognised` }, 404)
+      if (!link || !isCurrentSubscriberToken(link.token)) {
+        return c.json({ state: `not-recognised` }, 404)
+      }
       const preview = await previewUnsubscribe(link.token, await flowsFor(deps.setup!, link.list))
       return unsubscribeAnswer(c, preview)
     })
@@ -174,7 +177,10 @@ export function createSubscribersRoute(deps: SubscribersRouteDependencies): Hono
       noStore(c)
       const list = c.req.query(`list`)
       const token = await unsubscribeTokenFrom(c.req.raw, { maxBytes: UNSUBSCRIBE_FORM_MAX_BYTES })
-      if (!isSubscriberList(list) || !token || token.length > SUBSCRIBER_TOKEN_MAX_LENGTH) {
+      if (
+        !isSubscriberList(list) || !token || token.length > SUBSCRIBER_TOKEN_MAX_LENGTH ||
+        !isCurrentSubscriberToken(token)
+      ) {
         return c.json({ state: `not-recognised` }, 404)
       }
       return unsubscribeAnswer(c, await unsubscribe(token, await flowsFor(deps.setup!, list)))

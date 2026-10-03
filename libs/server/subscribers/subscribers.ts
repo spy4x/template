@@ -1,3 +1,4 @@
+import { decodeBase64Url } from "@std/encoding"
 import { createSubscriptionCrypto, type SubscriptionCrypto } from "@spy4x/server/subscribers"
 import { deriveSecret, MIN_SECRET_LENGTH } from "@spy4x/platform/tokens"
 import type { SubscriberList } from "@domain/subscribers"
@@ -21,8 +22,9 @@ export interface SubscribersSetup {
 /**
  * Reads `SUBSCRIBERS_SECRET` and the comma-separated `SUBSCRIBERS_PREVIOUS_SECRETS`. Unset in
  * development → {@link DEV_SUBSCRIBERS_SECRET}; unset in production → `null`, the feature is off.
- * A secret that is set but unusable (shorter than 32 characters, not printable ASCII, or equal to
- * the cookie secret) throws, so the process stops at start-up. No error names a value.
+ * A secret that is set but unusable (shorter than 32 characters, not printable ASCII, equal to the
+ * cookie secret, or the public development secret outside development) throws, so the process
+ * stops at start-up. No error names a value.
  */
 export function readSubscribersSetup(
   env: { get(name: string): string | undefined },
@@ -36,8 +38,12 @@ export function readSubscribersSetup(
   if (secret === ``) {
     return mode === `dev` ? { secret: DEV_SUBSCRIBERS_SECRET, previousSecrets: [] } : null
   }
-  if (secret === env.get(`AUTH_COOKIE_SECRET`)?.trim()) {
-    throw new Error(`SUBSCRIBERS_SECRET must differ from AUTH_COOKIE_SECRET`)
+  const cookieSecret = env.get(`AUTH_COOKIE_SECRET`)?.trim()
+  if ([secret, ...previousSecrets].some((value) => value === cookieSecret)) {
+    throw new Error(`subscriber secrets must differ from AUTH_COOKIE_SECRET`)
+  }
+  if (mode !== `dev` && [secret, ...previousSecrets].includes(DEV_SUBSCRIBERS_SECRET)) {
+    throw new Error(`subscriber secrets must not be the public development secret outside dev`)
   }
   for (
     const [name, value] of [
@@ -77,6 +83,37 @@ export async function createListCrypto(
       setup.previousSecrets.map((previous) => deriveSecret(previous, label)),
     ),
   })
+}
+
+/** The version of every token the template signs. */
+const CURRENT_TOKEN_VERSION = 2
+
+/**
+ * Whether `token` claims the token format the template signs, read without verifying it. The
+ * library still accepts antonshubin.com's unsigned-lookup version 1 unsubscribe tokens, and checks
+ * one of those against every subscriber row: the routes refuse anything else before the library
+ * sees it, so a forged token costs one lookup at most.
+ */
+export function isCurrentSubscriberToken(token: string): boolean {
+  try {
+    const envelope = JSON.parse(new TextDecoder().decode(decodeBase64Url(token.split(`.`)[0])))
+    return envelope?.version === CURRENT_TOKEN_VERSION
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The key of an address in the per-address confirm mail budget: an HMAC under a key derived from
+ * the secret, so whoever reads Valkey cannot match a key to an address by hashing a guess.
+ */
+export async function createRecipientLimitKey(
+  setup: SubscribersSetup,
+): Promise<(email: string) => Promise<string>> {
+  const crypto = createSubscriptionCrypto({
+    secret: await deriveSecret(setup.secret, `subscribers:recipient-limit`),
+  })
+  return (email) => crypto.subscriberKey(email)
 }
 
 /** The page a confirm link opens. The token rides in the query; the page posts it back. */

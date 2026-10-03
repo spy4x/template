@@ -1,8 +1,12 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
+import { encodeBase64Url } from "@std/encoding"
+import { sha256Hex } from "@spy4x/platform/tokens"
 import {
   createListCrypto,
+  createRecipientLimitKey,
   DEV_SUBSCRIBERS_SECRET,
+  isCurrentSubscriberToken,
   readSubscribersSetup,
   subscriberConfirmLink,
   subscriberUnsubscribeLink,
@@ -52,10 +56,60 @@ describe("subscriber setup", () => {
     }
   })
 
-  it("refuses the cookie secret as the subscribers secret", () => {
+  it("refuses the cookie secret as the subscribers secret or a previous one", () => {
     expect(() =>
       readSubscribersSetup(env({ SUBSCRIBERS_SECRET: SECRET, AUTH_COOKIE_SECRET: SECRET }), `prod`)
     ).toThrow(`must differ from AUTH_COOKIE_SECRET`)
+    expect(() =>
+      readSubscribersSetup(
+        env({
+          SUBSCRIBERS_SECRET: SECRET,
+          SUBSCRIBERS_PREVIOUS_SECRETS: OLD_SECRET,
+          AUTH_COOKIE_SECRET: OLD_SECRET,
+        }),
+        `prod`,
+      )
+    ).toThrow(`must differ from AUTH_COOKIE_SECRET`)
+  })
+
+  it("refuses the public development secret outside development", () => {
+    const values: Record<string, string>[] = [
+      { SUBSCRIBERS_SECRET: DEV_SUBSCRIBERS_SECRET },
+      { SUBSCRIBERS_SECRET: SECRET, SUBSCRIBERS_PREVIOUS_SECRETS: DEV_SUBSCRIBERS_SECRET },
+    ]
+    for (const value of values) {
+      expect(() => readSubscribersSetup(env(value), `prod`)).toThrow(`development secret`)
+      expect(readSubscribersSetup(env(value), `dev`)).not.toBeNull()
+    }
+  })
+
+  it("an unsubscribe token signed before a rotation still verifies after it, for its list only", async () => {
+    const before = await createListCrypto({ secret: OLD_SECRET, previousSecrets: [] }, `news`)
+    const after = await createListCrypto({ secret: SECRET, previousSecrets: [OLD_SECRET] }, `news`)
+    const key = await before.subscriberKey(`ada@example.com`)
+    const token = await before.unsubscribeToken(`ada@example.com`, key)
+    const subscriber = { email: `ada@example.com`, key, subscribedAt: new Date(0) }
+    const findByKey = (wanted: string) => Promise.resolve(wanted === key ? subscriber : undefined)
+
+    expect(
+      await after.verifyUnsubscribeToken(token, { findByKey, list: () => Promise.resolve([]) }),
+    )
+      .toEqual(subscriber)
+    // Previous secrets are derived per list too: an old token for another list stays refused.
+    const otherBefore = await createListCrypto(
+      { secret: OLD_SECRET, previousSecrets: [] },
+      `other` as `news`,
+    )
+    const otherToken = await otherBefore.unsubscribeToken(`ada@example.com`, key)
+    expect(
+      await after.verifyUnsubscribeToken(otherToken, {
+        findByKey,
+        list: () => Promise.resolve([]),
+      }),
+    ).toBeUndefined()
+    // A confirm link is short-lived and is checked with the current secret only.
+    const confirm = await before.confirmToken(`ada@example.com`)
+    expect(await after.verifyConfirmToken(confirm)).toEqual({ ok: false, reason: `invalid` })
   })
 
   it("a confirm token for one list does not verify for another", async () => {
@@ -66,6 +120,28 @@ describe("subscriber setup", () => {
     const token = await news.confirmToken(`ada@example.com`)
     expect((await news.verifyConfirmToken(token)).ok).toBe(true)
     expect(await other.verifyConfirmToken(token)).toEqual({ ok: false, reason: `invalid` })
+  })
+
+  it("knows the token format it signs and refuses a legacy or broken one", async () => {
+    const crypto = await createListCrypto({ secret: SECRET, previousSecrets: [] }, `news`)
+    const key = await crypto.subscriberKey(`ada@example.com`)
+    const legacy = `${encodeBase64Url(JSON.stringify({ version: 1, payload: {} }))}.AAAA`
+
+    expect(isCurrentSubscriberToken(await crypto.unsubscribeToken(`ada@example.com`, key)))
+      .toBe(true)
+    expect(isCurrentSubscriberToken(await crypto.confirmToken(`ada@example.com`))).toBe(true)
+    for (const token of [legacy, `not-a-token`, `!!!.x`, ``]) {
+      expect(isCurrentSubscriberToken(token)).toBe(false)
+    }
+  })
+
+  it("keys the per-address budget with a keyed hash, never the address's plain hash", async () => {
+    const key = await createRecipientLimitKey({ secret: SECRET, previousSecrets: [] })
+    const other = await createRecipientLimitKey({ secret: OLD_SECRET, previousSecrets: [] })
+
+    expect(await key(`Ada@Example.com`)).toBe(await key(`ada@example.com`))
+    expect(await key(`ada@example.com`)).not.toBe(await sha256Hex(`ada@example.com`))
+    expect(await key(`ada@example.com`)).not.toBe(await other(`ada@example.com`))
   })
 
   it("links carry the list and the token in the query", () => {

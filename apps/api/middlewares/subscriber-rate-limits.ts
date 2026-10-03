@@ -5,7 +5,6 @@ import {
   type RateLimitDecision,
   type RateLimitStore,
 } from "@spy4x/platform/rate-limit"
-import { sha256Hex } from "@spy4x/platform/tokens"
 import {
   createRateLimitMiddleware,
   type RateLimitContext,
@@ -27,7 +26,8 @@ export interface SubscriberRateLimits {
   tokenByIp: MiddlewareHandler<APIContext>
   /**
    * Spends one of the address's {@link SUBSCRIBE_MAILS_PER_RECIPIENT} confirm mails, whatever the
-   * IP, so many clients cannot flood one inbox. Keyed by a hash: Valkey never holds an address.
+   * IP, so many clients cannot flood one inbox. Keyed by {@link SubscriberRateLimitSettings.recipientKey}:
+   * Valkey never holds an address.
    */
   mailByRecipient(email: string): Promise<RateLimitDecision>
 }
@@ -37,6 +37,8 @@ export interface SubscriberRateLimitSettings {
   strictLimit: number
   /** Builds the store of one limiter; `name` is its key prefix. See `AuthRateLimitSettings.store`. */
   store: (name: string) => RateLimitStore
+  /** The budget key of an address: a keyed hash, so a key cannot be matched to a guessed address. */
+  recipientKey: (email: string) => Promise<string>
   /** Injected by tests. */
   clock?: Clock
 }
@@ -75,6 +77,6 @@ export function createSubscriberRateLimits(
       keyPrefix: `subscriber-token:`,
     }),
     mailByRecipient: async (email) =>
-      await recipient.check(`subscribe-recipient:${await sha256Hex(email)}`),
+      await recipient.check(`subscribe-recipient:${await settings.recipientKey(email)}`),
   }
 }

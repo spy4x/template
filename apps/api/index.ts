@@ -47,7 +47,11 @@ import {
   SUBSCRIBER_CONFIRM_MAIL_JOB,
   SUBSCRIBER_WELCOME_MAIL_JOB,
 } from "@server/jobs/subscriber-mail.ts"
-import { readSubscribersSetup, subscribersOffWarning } from "@server/subscribers/subscribers.ts"
+import {
+  createRecipientLimitKey,
+  readSubscribersSetup,
+  subscribersOffWarning,
+} from "@server/subscribers/subscribers.ts"
 import { createPostgresSubscriberStore } from "@spy4x/server/subscribers/postgres"
 import "./cqrs/+init.ts"
 
@@ -194,6 +198,10 @@ app.route(
     rateLimits: createSubscriberRateLimits({
       ...config.rateLimiter,
       store: (keyPrefix) => createRedisRateLimitStore(kv, { keyPrefix }),
+      // Without a setup every subscriber route answers 503 before it spends a budget.
+      recipientKey: subscribersSetup
+        ? await createRecipientLimitKey(subscribersSetup)
+        : () => Promise.reject(new Error("subscriptions are off")),
     }),
     requestConfirmMail: (list, email) =>
       enqueueSubscriberMail(sql, SUBSCRIBER_CONFIRM_MAIL_JOB, list, email),
