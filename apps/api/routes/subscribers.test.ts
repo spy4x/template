@@ -214,7 +214,8 @@ describe(`confirming a subscription`, () => {
     expect(await store.count()).toBe(0)
   })
 
-  it(`logs a store failure without the address`, async () => {
+  // The library redacts the address before it logs; the last line only guards that it still does.
+  it(`passes a store failure to the app's log`, async () => {
     const broken = createMemorySubscriberStore()
     broken.add = () => Promise.reject(new Error(`cannot write ada@example.com`))
     const { app, logged } = buildApp({ store: broken })
