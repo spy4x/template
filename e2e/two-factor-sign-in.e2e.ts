@@ -64,9 +64,13 @@ test.describe("two-factor sign-in", () => {
       await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await submitAuthForm(page, "/totp", page.locator("[data-e2e=auth-form-code]"))
-      await gotoApp(page, "/", page.getByRole("heading", { level: 1, name: "Finish MFA" }))
+      await gotoApp(
+        page,
+        "/",
+        page.getByRole("heading", { level: 1, name: "Enter your one-time code" }),
+      )
       await gotoApp(page, "/totp", page.locator("[data-e2e=auth-form-code]"))
-      await expect(page.getByRole("heading", { level: 1, name: "MFA not required" }))
+      await expect(page.getByRole("heading", { level: 1, name: "No code needed" }))
         .toHaveCount(0)
 
       // A code for the step the enrolment used is refused as a replay, so use a later step. The
