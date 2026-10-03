@@ -192,7 +192,7 @@ CREATE UNIQUE INDEX idx_user_push_tokens_live_by_user_device
 CREATE TABLE audit_events (
     id BIGSERIAL PRIMARY KEY,
     event_kind VARCHAR(64) NOT NULL,
-    actor_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    actor_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
     group_id UUID REFERENCES groups(id) ON DELETE SET NULL,
     request_id VARCHAR(128),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,

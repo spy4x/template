@@ -271,22 +271,67 @@ Deno.test("retention: the nightly purge deletes events older than a year and kee
   })
 })
 
-Deno.test("activity: an event outlives the account of the member it names", async () => {
+Deno.test("activity: an event outlives the account of its actor and of the member it names", async () => {
   await withSchema(async (sql) => {
     const { repository, groupId, owner, editor } = await team(sql)
     await nameUser(sql, editor, "Ed")
     await nameUser(sql, owner, "Olga")
     await repository.changeMemberRole(groupId, editor, GroupRole.ADMIN, owner)
+    await repository.rename(groupId, "Crew", editor)
     const activity = new PostgresGroupActivityRepository(sql)
-    expect((await activity.list(groupId, { limit: 1 })).events[0].target?.name).toBe("Ed")
+    const before = (await activity.list(groupId, { limit: 2 })).events
+    expect(before.map((event) => event.actor.name)).toEqual(["Ed", "Olga"])
+    expect(before[1].target?.name).toBe("Ed")
 
     await sql`DELETE FROM group_members WHERE user_id = ${editor}`
     await sql`DELETE FROM groups WHERE owner_user_id = ${editor}`
+    // The outbox keeps its own restricting reference to the actor; this test is about the log.
+    await sql`DELETE FROM outbox_events WHERE actor_user_id = ${editor}`
     await sql`DELETE FROM users WHERE id = ${editor}`
-    const event = (await activity.list(groupId, { limit: 1 })).events[0]
-    expect(event.kind).toBe("group.member_role_changed")
-    expect(event.target).toBeNull()
-    expect(describeActivity(event)).toBe("Olga changed a member from an editor to an admin")
+    const [rename, role] = (await activity.list(groupId, { limit: 2 })).events
+    expect(rename.actor.userId).toBeNull()
+    expect(describeActivity(rename)).toBe("Deleted user renamed the group from “Team” to “Crew”")
+    expect(role.target).toBeNull()
+    expect(describeActivity(role)).toBe("Olga changed Deleted user from an editor to an admin")
+  })
+})
+
+Deno.test("activity: a person with no name reads as their e-mail, as actor and as target", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner, editor } = await team(sql)
+    await sql`UPDATE users SET first_name = NULL, last_name = NULL WHERE id IN (${owner}, ${editor})`
+    for (const [id, email] of [[owner, "olga@example.com"], [editor, "ed@example.com"]] as const) {
+      await sql`
+        INSERT INTO auth_keys (user_id, method, subject, email)
+        VALUES (${id}, 'email', ${email}, ${email})
+      `
+    }
+    await repository.changeMemberRole(groupId, editor, GroupRole.ADMIN, owner)
+    const activity = new PostgresGroupActivityRepository(sql)
+    const [event] = (await activity.list(groupId, { limit: 1 })).events
+    expect(describeActivity(event)).toBe(
+      "olga@example.com changed ed@example.com from an editor to an admin",
+    )
+  })
+})
+
+Deno.test("activity: no stored fact holds an e-mail address", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner, admin, stranger } = await team(sql)
+    const invitations = new PostgresInvitationRepository(sql)
+    await repository.rename(groupId, "Crew", owner)
+    const bound = await invite(invitations, groupId, admin, "sam@example.com")
+    await sql`INSERT INTO auth_email_owners (email, user_id) VALUES ('sam@example.com', ${stranger})`
+    await invitations.decline(bound.lookup, stranger)
+    await invite(invitations, groupId, admin, "other@example.com")
+    const stored = await sql<{ details: string }[]>`
+      SELECT details::text AS details FROM audit_events WHERE event_kind LIKE 'group.invitation_%'
+    `
+    expect(stored.length).toBeGreaterThanOrEqual(3)
+    for (const row of stored) expect(row.details).not.toContain("@")
+    expect(
+      (await sql`SELECT 1 FROM audit_events WHERE details::text LIKE '%@%'`).length,
+    ).toBe(0)
   })
 })
 

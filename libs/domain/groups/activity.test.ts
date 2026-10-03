@@ -52,11 +52,18 @@ Deno.test("activity: a role change names both roles and the member", () => {
   ).toBe("Ada changed Ed from an editor to an admin")
 })
 
-Deno.test("activity: a person with no name reads as Someone and an old event still reads", () => {
-  expect(say("group.renamed", { actor: { userId: null, name: "" } })).toBe(
-    "Someone renamed the group",
-  )
+Deno.test("activity: a person with no name and no e-mail reads as Someone", () => {
+  expect(say("group.renamed", { actor: { userId: 5, name: "" } })).toBe("Someone renamed the group")
   expect(say("future.kind")).toBe("Ada changed something in the group")
+})
+
+Deno.test("activity: an account that is gone reads as Deleted user, as actor and as target", () => {
+  expect(say("group.renamed", { actor: { userId: null, name: "" } })).toBe(
+    "Deleted user renamed the group",
+  )
+  expect(say("group.member_removed", { target: null })).toBe(
+    "Ada removed Deleted user from the group",
+  )
 })
 
 Deno.test("activity: every kind the server writes has its own sentence", () => {
