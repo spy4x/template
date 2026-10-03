@@ -23,6 +23,7 @@ import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView
 import { GroupsView } from "./views/GroupsView.tsx"
 import { SubscribeView, SubscriptionConfirmView, UnsubscribeView } from "./views/SubscribeViews.tsx"
 import { GroupSettingsView } from "./views/GroupSettingsView.tsx"
+import { GroupActivityView } from "./views/GroupActivityView.tsx"
 import { InvitationView } from "./views/InvitationView.tsx"
 import { invitationsStore } from "./state/invitations.ts"
 import { PricingView } from "./views/BillingViews.tsx"
@@ -72,6 +73,9 @@ function Routes() {
       <Route path="/groups" component={GroupsView} />
       <Route path="/groups/:groupId">
         {(params) => <GroupSettingsView groupId={params.groupId} />}
+      </Route>
+      <Route path="/groups/:groupId/activity">
+        {(params) => <GroupActivityView groupId={params.groupId} />}
       </Route>
       <Route path="/groups/:groupId/pricing">
         {(params) => <PricingView groupId={params.groupId} />}
