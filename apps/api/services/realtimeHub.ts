@@ -49,6 +49,7 @@ export const realtime = new Realtime({
       move: (command) => commandBus.execute(command),
       list: (query) => queryBus.execute(query),
       get: (query) => queryBus.execute(query),
+      locate: (query) => queryBus.execute(query),
       cursor: noteListCursor,
     }),
   },

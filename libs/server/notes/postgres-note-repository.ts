@@ -132,6 +132,15 @@ export class PostgresNoteRepository implements NoteRepository {
     return row ? toNote(row) : null
   }
 
+  async groupIdOf(id: string): Promise<string | null> {
+    const row = (
+      await this.sql<{ group_id: string }[]>`
+        SELECT group_id FROM notes WHERE id = ${id} AND deleted_at IS NULL
+      `
+    )[0]
+    return row?.group_id ?? null
+  }
+
   /**
    * The cap is counted after the insert, in the same transaction: the group row that
    * `assertWriterNow` locks makes a second create of the same group wait for this one to commit,

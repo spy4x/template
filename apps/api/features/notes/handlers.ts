@@ -8,6 +8,7 @@ import {
   NoteError,
   NoteGetQuery,
   NoteListQuery,
+  NoteLocateQuery,
   NoteMoveCommand,
   type NoteRepository,
   NoteUpdateCommand,
@@ -122,5 +123,21 @@ export function createNoteGetHandler(
     const note = await notes.get(data.groupId, data.id)
     if (!note) throw new NoteError("NOTE_NOT_FOUND", "Note not found")
     return { note }
+  }
+}
+
+/**
+ * The group of a note, for a person who is a member of it. A note that does not exist and a note
+ * in a group the person is not in get the same `NOTE_NOT_FOUND`, so the answer never says whether
+ * an id is taken.
+ */
+export function createNoteLocateHandler(
+  { notes, groups }: NoteHandlerDependencies,
+): QueryHandler<NoteLocateQuery> {
+  return async ({ data }) => {
+    const groupId = await notes.groupIdOf(data.id)
+    const role = groupId ? await groups.roleOf(groupId, data.actor.userId) : null
+    if (!groupId || role === null) throw new NoteError("NOTE_NOT_FOUND", "Note not found")
+    return { groupId }
   }
 }

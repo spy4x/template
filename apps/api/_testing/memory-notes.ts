@@ -36,6 +36,10 @@ export class MemoryNoteRepository implements NoteRepository {
     return Promise.resolve(note && note.groupId === groupId ? note : null)
   }
 
+  groupIdOf(id: string): Promise<string | null> {
+    return Promise.resolve(this.notes.get(id)?.groupId ?? null)
+  }
+
   create(
     input: NoteCreateInput,
     actorId: number,
