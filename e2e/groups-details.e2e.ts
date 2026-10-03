@@ -59,7 +59,9 @@ test.describe("group details", () => {
 
       memberPage = await personPage(browser, member)
       await gotoApp(memberPage, `/groups/${groupId}`, settingsReady(memberPage))
-      await expect(memberPage.getByRole("main").locator("[data-e2e=group-mark]")).toHaveCount(0)
+      await expect(memberPage.locator("[data-e2e=page-header] [data-e2e=group-mark]")).toHaveCount(
+        0,
+      )
       // A viewer reads the group and has no way to edit its details.
       await memberPage.getByRole("button", { name: "More actions" }).click()
       await expect(memberPage.locator("[data-e2e=group-details-open]")).toHaveCount(0)
@@ -83,14 +85,16 @@ test.describe("group details", () => {
 
       await expect(page.locator("[data-e2e=group-general-description]"))
         .toHaveText("Rent, bills and the shopping list")
-      const mark = page.getByRole("main").locator("[data-e2e=group-mark]")
+      const mark = page.locator("[data-e2e=page-header] [data-e2e=group-mark]")
       await expect(mark).toHaveText("🏠")
       await expect(mark).toHaveAttribute("data-color", "purple")
 
       // Only the worker's announcement, turned into a hint on the socket, can bring it here.
       await expect(memberPage.locator("[data-e2e=group-general-description]"))
         .toHaveText("Rent, bills and the shopping list", { timeout: 3_000 })
-      await expect(memberPage.getByRole("main").locator("[data-e2e=group-mark]")).toHaveText("🏠")
+      await expect(memberPage.locator("[data-e2e=page-header] [data-e2e=group-mark]")).toHaveText(
+        "🏠",
+      )
       expect(loads).toBe(0)
 
       // The list and the picker show the same mark.
