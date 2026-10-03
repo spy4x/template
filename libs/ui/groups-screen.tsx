@@ -10,7 +10,8 @@ import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
 import { Cluster, Section, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
-import { GROUP_RESTORE_DAYS, GroupRole } from "@domain/groups"
+import { GROUP_RESTORE_DAYS, type GroupColor, GroupRole } from "@domain/groups"
+import { GroupMark } from "./group-appearance.tsx"
 import { useClosesWhenDone } from "./group-page.tsx"
 import { PageAction, PageHeader } from "./page-header.tsx"
 import { GROUP_PATHS, type Navigate, ScreenForm } from "./progressive.tsx"
@@ -19,6 +20,12 @@ import { GROUP_PATHS, type Navigate, ScreenForm } from "./progressive.tsx"
 export interface GroupRow {
   id: string
   name: string
+  /** What the group is for; empty or absent when unset. */
+  description?: string
+  /** The group's colour, or absent for none. */
+  color?: GroupColor | null
+  /** The group's emoji, or absent for none. */
+  emoji?: string | null
   role: GroupRole
   /** How many members the group has; the row shows its avatar stack when it is known. */
   memberCount?: number
@@ -259,6 +266,7 @@ function GroupItem(
         onClick={() => onOpen?.(group.id)}
       >
         <span class="flex min-w-0 max-w-full items-center gap-2">
+          <GroupMark color={group.color} emoji={group.emoji} size="sm" />
           <span class="truncate text-sm font-medium" title={group.name} data-e2e="group-item-name">
             {group.name}
           </span>
@@ -268,7 +276,12 @@ function GroupItem(
             </span>
           )}
         </span>
-        <span class="text-xs text-muted">{ROLE_TEXT[group.role]}</span>
+        <span class="max-w-full truncate text-xs text-muted">
+          {ROLE_TEXT[group.role]}
+          {group.description && (
+            <span data-e2e="group-item-description">{` · ${group.description}`}</span>
+          )}
+        </span>
       </button>
       {group.memberCount !== undefined && group.members && (
         <AvatarGroup

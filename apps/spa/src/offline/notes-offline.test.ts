@@ -201,6 +201,7 @@ describe("offline groups", () => {
       create: () => Promise.reject(new Error("not used")),
       fetchDeleted: () => Promise.reject(new Error("not used")),
       rename: () => Promise.reject(new Error("not used")),
+      updateDetails: () => Promise.reject(new Error("not used")),
       remove: () => Promise.reject(new Error("not used")),
       restore: () => Promise.reject(new Error("not used")),
       advance: () => {},
