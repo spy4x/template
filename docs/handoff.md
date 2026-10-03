@@ -507,8 +507,9 @@ then the password, so a refused request spends no password check. One transactio
 owner to admin before it promotes the new one: the partial unique index
 `group_members_one_owner_key` allows one owner row per group and cannot be deferred. The old
 owner's admin links are revoked, and their viewer and editor links stay; the new owner's links stay.
-The new owner gets a web push. A subscription moves with the group, and the settings section says
-so.
+The new owner gets a web push. A subscription that still renews refuses the transfer
+(`SUBSCRIPTION_RENEWS`); after it, the old owner's billing customer is handed over and the new owner
+checks out with their own ([docs/billing.md](billing.md), "Transfer of ownership").
 
 Extraction from the sibling Financy project is tracked separately in
 [docs/financy-extraction-inventory.md](financy-extraction-inventory.md);
