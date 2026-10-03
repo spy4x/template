@@ -1895,7 +1895,7 @@ describe("an MPA on its own domain", () => {
   it("refuses a post from the API's origin before calling the API", async () => {
     const { seen, post } = ownDomainApp()
 
-    const response = await post({ origin: ownDomain.apiOrigin, "sec-fetch-site": "same-site" })
+    const response = await post({ origin: ownDomain.apiOrigin, "sec-fetch-site": "same-origin" })
 
     expect(response.status).toBe(403)
     expect(seen).toEqual([])
