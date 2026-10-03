@@ -420,25 +420,48 @@ Deno.test("deleting one's own account", async (t) => {
       },
     )
 
-    await t.step("revokes the invitations into the person's groups when they ask", async () => {
-      const ned = await signUp(app, "ned")
-      const groupId = crypto.randomUUID()
-      await app.db.group.create({ id: groupId, name: "Ned's club" }, ned.id)
-      const invitationId = crypto.randomUUID()
-      await sql`
-        INSERT INTO group_invitations (id, group_id, token_hash, role, created_by_user_id,
-          expires_at)
-        VALUES (${invitationId}, ${groupId}, ${"b".repeat(64)}, 1, ${ned.id},
-          now() + INTERVAL '1 day')
-      `
+    await t.step(
+      "revokes the invitations into the person's groups and the ones they made elsewhere",
+      async () => {
+        const ned = await signUp(app, "ned")
+        const oli = await signUp(app, "oli")
+        const nedsGroup = crypto.randomUUID()
+        await app.db.group.create({ id: nedsGroup, name: "Ned's club" }, ned.id)
+        const olisGroup = crypto.randomUUID()
+        await app.db.group.create({ id: olisGroup, name: "Oli's club" }, oli.id)
+        await sql`
+          INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+          VALUES (${olisGroup}, ${ned.id}, 3, ${oli.id})
+        `
+        // One into Ned's group made by someone who left it, one Ned made into Oli's group, and
+        // Oli's own, which stays.
+        const [intoHis, byHim, untouched] = [
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+        ]
+        await sql`
+          INSERT INTO group_invitations (id, group_id, token_hash, role, created_by_user_id,
+            expires_at)
+          VALUES
+            (${intoHis}, ${nedsGroup}, ${"b".repeat(64)}, 1, ${oli.id}, now() + INTERVAL '1 day'),
+            (${byHim}, ${olisGroup}, ${"c".repeat(64)}, 1, ${ned.id}, now() + INTERVAL '1 day'),
+            (${untouched}, ${olisGroup}, ${"d".repeat(64)}, 1, ${oli.id}, now() + INTERVAL '1 day')
+        `
 
-      await requestDeletion(app, sql, ned)
+        await requestDeletion(app, sql, ned)
 
-      const [invitation] = await sql<{ revoked: boolean }[]>`
-        SELECT revoked_at IS NOT NULL AS revoked FROM group_invitations WHERE id = ${invitationId}
-      `
-      expect(invitation.revoked).toBe(true)
-    })
+        const invitations = await sql<{ id: string; revoked: boolean }[]>`
+          SELECT id, revoked_at IS NOT NULL AS revoked FROM group_invitations
+          WHERE id IN ${sql([intoHis, byHim, untouched])}
+        `
+        expect(Object.fromEntries(invitations.map((row) => [row.id, row.revoked]))).toEqual({
+          [intoHis]: true,
+          [byHim]: true,
+          [untouched]: false,
+        })
+      },
+    )
 
     await t.step("mails the day it goes to a proven address only, while it waits", async () => {
       const sent: EmailMessage[] = []
