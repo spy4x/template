@@ -1,6 +1,6 @@
 import type { Query } from "@spy4x/platform/cqrs"
 import type { Actor } from "@domain/identity"
-import { canRead, GroupError, GroupRole } from "./+lib.ts"
+import { GroupError, GroupRole } from "./+lib.ts"
 
 /**
  * How long the worker keeps a group's activity: events older than this many days are deleted. A
@@ -108,7 +108,7 @@ export interface GroupActivityRepository {
 
 /** Whether `role` may read the group's activity: an admin or the owner. */
 export function canViewActivity(role: GroupRole): boolean {
-  return canRead(role) && role >= GroupRole.ADMIN
+  return role >= GroupRole.ADMIN
 }
 
 /**
@@ -116,7 +116,7 @@ export function canViewActivity(role: GroupRole): boolean {
  * which answers "group not found" so a stranger cannot tell a group exists.
  */
 export function assertCanViewActivity(role: GroupRole | null): void {
-  if (role === null || !canRead(role)) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
+  if (role === null) throw new GroupError("GROUP_NOT_FOUND", "Group not found")
   if (!canViewActivity(role)) {
     throw new GroupError("ROLE_INSUFFICIENT", "Only an admin or the owner can see the activity")
   }
