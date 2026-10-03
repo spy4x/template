@@ -54,6 +54,7 @@ const ERROR_DEFINITIONS: Record<NoteFeatureErrorCode, ErrorDefinition> = {
   MFA_REQUIRED: { status: 401, message: "Complete MFA to access notes" },
   NOTE_NOT_FOUND: { status: 404, message: "Note not found" },
   REQUEST_ORIGIN_INVALID: { status: 403, message: "Request origin is invalid" },
+  SAME_GROUP: { status: 400, message: "The notes are in that group already" },
   ROLE_INSUFFICIENT: { status: 403, message: "Only an editor can change notes" },
   VERSION_CONFLICT: { status: 409, message: "The note was changed by someone else" },
 }

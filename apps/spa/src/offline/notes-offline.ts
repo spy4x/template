@@ -110,6 +110,14 @@ export function offlineNotes(
       if (outcome.kind === "failed") throw outcome.error
       return undefined
     },
+    async move(input) {
+      const result = await online.move(input)
+      // The moved notes now belong to the other group on this device too. Writes still queued for
+      // them were made in the old group, and the server refuses those as a conflict.
+      const layer = current()
+      if (layer) { for (const note of result.notes) await layer.store.putNote(note) }
+      return result
+    },
     async readLocal(groupId) {
       const layer = current()
       if (!layer) return []

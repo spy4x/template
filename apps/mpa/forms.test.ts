@@ -64,6 +64,20 @@ describe("API_BODIES", () => {
     expect(API_BODIES.noteDelete(form({ version: "1e3" }))).toEqual({ version: "1e3" })
   })
 
+  it("reads every ticked note of the move form, in the order of the page", () => {
+    const data = form({ toGroupId: "g" })
+    data.append("noteIds", "a")
+    data.append("noteIds", "b")
+
+    expect(API_BODIES.noteMoveMany(data)).toEqual({ toGroupId: "g", noteIds: ["a", "b"] })
+  })
+
+  it("names the one note moved by the address, not by a field of the form", () => {
+    const data = form({ toGroupId: "g", noteIds: "other" })
+
+    expect(API_BODIES.noteMoveOne(data, "n")).toEqual({ toGroupId: "g", noteIds: ["n"] })
+  })
+
   it("sends only the fields the API's schema names", () => {
     expect(API_BODIES.noteCreate(form({ id: "n", title: "T", body: "B", extra: "x" })))
       .toEqual({ id: "n", title: "T", body: "B" })

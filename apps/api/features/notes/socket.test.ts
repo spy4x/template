@@ -2,7 +2,12 @@ import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { UserMFAStatus } from "@domain/identity"
-import { type NoteCreateCommand, NoteError, type NoteListQuery } from "@domain/notes"
+import {
+  type NoteCreateCommand,
+  NoteError,
+  type NoteListQuery,
+  type NoteMoveCommand,
+} from "@domain/notes"
 import { createNoteSocketRequests } from "./socket.ts"
 import { DEFAULT_NOTE_LIST_LIMIT } from "./list.ts"
 
@@ -16,10 +21,11 @@ const actor = {
 const signal = new AbortController().signal
 
 function harness() {
-  const seen: { create: NoteCreateCommand | null; list: NoteListQuery | null } = {
-    create: null,
-    list: null,
-  }
+  const seen: {
+    create: NoteCreateCommand | null
+    list: NoteListQuery | null
+    move: NoteMoveCommand | null
+  } = { create: null, list: null, move: null }
   const unused = () => Promise.reject(new Error("not used"))
   const requests = createNoteSocketRequests({
     create(command) {
@@ -28,6 +34,10 @@ function harness() {
     },
     update: unused,
     delete: unused,
+    move(command) {
+      seen.move = command
+      return unused()
+    },
     get: unused,
     list(query) {
       seen.list = query
@@ -47,6 +57,7 @@ describe("note socket requests", () => {
         "note.create": "command",
         "note.update": "command",
         "note.delete": "command",
+        "note.move": "command",
         "note.list": "query",
         "note.get": "query",
       })
@@ -71,6 +82,41 @@ describe("note socket requests", () => {
       body: "b",
       idempotencyKey: "key-1",
     })
+  })
+
+  it("dispatches a move with the payload's group as the source, the request id and the key", async () => {
+    const { requests, seen } = harness()
+    const toGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111003"
+
+    await requests["note.move"].handle({
+      actor,
+      requestId: "req-9",
+      signal,
+      idempotencyKey: "key-9",
+      payload: { groupId, toGroupId, noteIds: [id] },
+    }).catch(() => {})
+
+    expect(seen.move?.data).toEqual({
+      actor,
+      groupId,
+      toGroupId,
+      noteIds: [id],
+      requestId: "req-9",
+      idempotencyKey: "key-9",
+    })
+  })
+
+  it("refuses a move into the group the notes are in, before anything is dispatched", async () => {
+    const { requests, seen } = harness()
+
+    await expect(requests["note.move"].handle({
+      actor,
+      requestId: "req-9",
+      signal,
+      idempotencyKey: "key-9",
+      payload: { groupId, toGroupId: groupId, noteIds: [id] },
+    })).rejects.toMatchObject({ code: "SAME_GROUP" })
+    expect(seen.move).toBe(null)
   })
 
   it("refuses a create payload that names a user, before anything is dispatched", async () => {

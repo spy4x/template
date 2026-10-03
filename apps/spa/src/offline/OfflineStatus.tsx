@@ -7,7 +7,7 @@ import type { NoteEntry } from "./local-store.ts"
 /** What the server holds now, in a conflict: its text, or that the note is gone. */
 function serverSide(entry: NoteEntry): string {
   const server = entry.conflict?.server
-  return server ? `${server.title}\n${server.body}`.trim() : "The note no longer exists."
+  return server ? `${server.title}\n${server.body}`.trim() : "The note is no longer in this group."
 }
 
 /** What this person wrote, in a conflict. */

@@ -5,14 +5,18 @@ import {
   assertCanReadNotes,
   assertCanWriteNotes,
   NOTE_BODY_MAX_LENGTH,
+  NOTE_MOVE_MAX,
   NOTE_TITLE_MAX_LENGTH,
   noteCreatePayloadSchema,
   noteCreateRequestSchema,
   noteDeleteRequestSchema,
   NoteError,
   noteListPayloadSchema,
+  noteMovePayloadSchema,
+  noteMoveRequestSchema,
   noteUpdateRequestSchema,
   NoteVersionConflictError,
+  parseNoteMoveRequest,
   parseNoteRequest,
 } from "./+lib.ts"
 
@@ -113,5 +117,53 @@ describe("note version conflict", () => {
     expect(error).toBeInstanceOf(NoteError)
     expect(error.code).toBe("VERSION_CONFLICT")
     expect(error.currentVersion).toBe(4)
+  })
+})
+
+describe("note move request", () => {
+  const toGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111003"
+
+  it("accepts the target group and one to NOTE_MOVE_MAX distinct note ids", () => {
+    const one = parseNoteMoveRequest(noteMoveRequestSchema, { toGroupId, noteIds: [id] }, groupId)
+    const many = Array.from({ length: NOTE_MOVE_MAX }, () => crypto.randomUUID())
+
+    expect(one).toEqual({ toGroupId, noteIds: [id] })
+    expect(parseNoteMoveRequest(noteMoveRequestSchema, { toGroupId, noteIds: many }, groupId))
+      .toEqual({ toGroupId, noteIds: many })
+  })
+
+  it("refuses an empty list, too many notes, a repeated note and a field it does not know", () => {
+    const tooMany = Array.from({ length: NOTE_MOVE_MAX + 1 }, () => crypto.randomUUID())
+    const refused = [
+      { toGroupId, noteIds: [] },
+      { toGroupId, noteIds: tooMany },
+      { toGroupId, noteIds: [id, id] },
+      { toGroupId, noteIds: [id], extra: 1 },
+      { toGroupId: "not-a-uuid", noteIds: [id] },
+    ]
+
+    for (const value of refused) {
+      expect(codeOf(() => parseNoteMoveRequest(noteMoveRequestSchema, value, groupId))).toBe(
+        "INVALID_REQUEST",
+      )
+    }
+  })
+
+  it("answers SAME_GROUP when the target is the group the notes are in", () => {
+    expect(
+      codeOf(() =>
+        parseNoteMoveRequest(noteMoveRequestSchema, { toGroupId: groupId, noteIds: [id] }, groupId)
+      ),
+    ).toBe("SAME_GROUP")
+  })
+
+  it("reads the source group from the socket payload, not from the body's own claim", () => {
+    const parsed = parseNoteMoveRequest(
+      noteMovePayloadSchema,
+      { groupId, toGroupId, noteIds: [id] },
+      groupId,
+    )
+
+    expect(parsed.groupId).toBe(groupId)
   })
 })

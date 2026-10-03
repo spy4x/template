@@ -75,7 +75,17 @@ the notes screen shows both sides:
 | ---------------------------------- | ------------------------------------------------------------- |
 | The note changed on the server     | **Keep mine** sends the person's text on top of the server's version, or **Use the server's** drops it. |
 | The note was deleted on the server | **Use the server's** removes it locally. The person's text stays on the screen until they choose. |
+| The note was moved to another group | The same as deleted: the old group has no such note, so the entry is a "gone" conflict whose message says "deleted, or moved". |
 | The server refused the write (role) | **Discard mine**.                                            |
+
+**Moving notes is never queued.** A move names two groups and needs edit rights in both, which the
+device cannot know, so it is sent only while the socket is open; offline, the person sees "Moving
+notes needs a connection". A write queued for a note that someone moves meanwhile does **not**
+follow it: the entry names the old group, the server answers "not found" there, and it becomes a
+conflict instead of silently editing the note in a group the person never chose. The person's text
+stays in the entry until they discard it; the note itself is found in its new group. A queued
+delete of a moved note is dropped without a message, like a delete of a note already gone. After a
+successful move the device files the moved notes under their new group.
 
 A write made online that the server refuses is not queued: the notes store shows it as before
 (the "Someone changed this note" message and "Load the latest version").

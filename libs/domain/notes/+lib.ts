@@ -22,7 +22,14 @@ export const NOTE_EVENTS = {
   created: "note.created",
   updated: "note.updated",
   deleted: "note.deleted",
+  /** Written on the group a move takes notes out of. */
+  movedOut: "note.moved_out",
+  /** Written on the group a move puts notes into. */
+  movedIn: "note.moved_in",
 } as const
+
+/** The most notes one move takes: a request for more is refused, not cut short. */
+export const NOTE_MOVE_MAX = 100
 
 export type NoteErrorCode =
   | "GROUP_NOT_FOUND"
@@ -30,6 +37,7 @@ export type NoteErrorCode =
   | "INVALID_CURSOR"
   | "INVALID_REQUEST"
   | "NOTE_NOT_FOUND"
+  | "SAME_GROUP"
   | "ROLE_INSUFFICIENT"
   | "VERSION_CONFLICT"
 
@@ -101,6 +109,17 @@ export type NoteUpdateRequest = typeof noteUpdateRequestSchema.infer
 export const noteDeleteRequestSchema = type({ ...versionField, "+": "reject" })
 export type NoteDeleteRequest = typeof noteDeleteRequestSchema.infer
 
+/**
+ * `POST /api/groups/:groupId/notes/move`: the group to move to and the notes to move, all or none.
+ * The form fields are the same: `toGroupId`, and one `noteIds` per ticked note.
+ */
+export const noteMoveRequestSchema = type({
+  toGroupId: UUID_V4,
+  noteIds: type(UUID_V4).array(),
+  "+": "reject",
+})
+export type NoteMoveRequest = typeof noteMoveRequestSchema.infer
+
 const groupIdField = { groupId: UUID_V4 } as const
 const noteIdField = { id: UUID_V4 } as const
 
@@ -124,6 +143,13 @@ export const noteDeletePayloadSchema = type({
   ...groupIdField,
   ...noteIdField,
   ...versionField,
+  "+": "reject",
+})
+/** The `note.move` socket payload. */
+export const noteMovePayloadSchema = type({
+  ...groupIdField,
+  toGroupId: UUID_V4,
+  noteIds: type(UUID_V4).array(),
   "+": "reject",
 })
 /** The `note.get` socket payload. */
@@ -167,6 +193,31 @@ export function parseNoteRequest<S extends Type<object>>(schema: S, value: unkno
     )
   }
   return { ...parsed, title }
+}
+
+/**
+ * Validates a move request: the schema, then one to {@link NOTE_MOVE_MAX} distinct note ids, and a
+ * group other than the one the notes are in (`groupId`, from the path or the payload). Throws
+ * `NoteError("INVALID_REQUEST")`, or `SAME_GROUP` for a move to the same group.
+ */
+export function parseNoteMoveRequest<S extends Type<{ toGroupId: string; noteIds: string[] }>>(
+  schema: S,
+  value: unknown,
+  fromGroupId: string,
+): S["infer"] {
+  const result = schema(value)
+  if (result instanceof type.errors) throw new NoteError("INVALID_REQUEST", result.summary)
+  const parsed = result as S["infer"]
+  if (parsed.noteIds.length < 1 || parsed.noteIds.length > NOTE_MOVE_MAX) {
+    throw new NoteError("INVALID_REQUEST", `Move 1 to ${NOTE_MOVE_MAX} notes at a time`)
+  }
+  if (new Set(parsed.noteIds).size !== parsed.noteIds.length) {
+    throw new NoteError("INVALID_REQUEST", "A note is named twice")
+  }
+  if (parsed.toGroupId === fromGroupId) {
+    throw new NoteError("SAME_GROUP", "The notes are in that group already")
+  }
+  return parsed
 }
 // #endregion Request schemas
 
@@ -247,6 +298,29 @@ export class NoteDeleteCommand implements Command<NoteDeletePayload, { note: Del
   constructor(public data: NoteDeletePayload) {}
 }
 
+export interface NoteMovePayload {
+  actor: Actor
+  /** The group the notes are in now. */
+  groupId: string
+  /** The group they go to. The actor needs an editor's rights in both. */
+  toGroupId: string
+  noteIds: string[]
+  requestId?: string
+  idempotencyKey?: string
+}
+
+/**
+ * Moves notes from one group to another, all or none. A note keeps its id, text, authors and
+ * dates; its version grows by one, so an edit made on the old version conflicts instead of
+ * landing silently. Counts against the target group's `maxNotes`.
+ */
+export class NoteMoveCommand implements Command<NoteMovePayload, { notes: Note[] }> {
+  __resultType?: { notes: Note[] }
+  /** The target group's cap on notes, set by the entitlement gate; see {@link NoteCreateCommand}. */
+  allowance?: number | null
+  constructor(public data: NoteMovePayload) {}
+}
+
 /** Where a page of notes starts: after this `updatedAt` and `id`, newest first. */
 export interface NoteListPageKey {
   updatedAt: Date
@@ -308,6 +382,13 @@ export interface NoteDeleteInput {
   expectedVersion: number
 }
 
+export interface NoteMoveInput {
+  fromGroupId: string
+  toGroupId: string
+  noteIds: string[]
+  requestId?: string
+}
+
 /**
  * Where notes are kept. Every write records a change on the group in its own transaction (the
  * group's sequence and an outbox row). The handlers check who may write before they call it; a
@@ -329,6 +410,13 @@ export interface NoteRepository {
   update(input: NoteUpdateInput, actorId: number): Promise<Note>
   /** Throws `NOTE_NOT_FOUND`, or {@link NoteVersionConflictError} for a stale version. */
   delete(input: NoteDeleteInput, actorId: number): Promise<DeletedNote>
+  /**
+   * Throws `GROUP_NOT_FOUND` or `ROLE_INSUFFICIENT` unless the actor is an editor or above in both
+   * groups (checked on the locked membership rows), `NOTE_NOT_FOUND` when any note is not live in
+   * the source group, and a `PlanError` when the target would pass `allowance` notes (`null` for
+   * no cap). Records one change on each group and one audit event in each.
+   */
+  move(input: NoteMoveInput, actorId: number, allowance: number | null): Promise<Note[]>
 }
 
 /** The actor's role in a group, or `null` when they are not an active member of an active group. */

@@ -33,6 +33,7 @@ function harness(overrides: {
   delete?: () => Promise<unknown>
   get?: () => Promise<{ note: NoteItem }>
   create?: () => Promise<{ note: NoteItem }>
+  move?: () => Promise<{ notes: NoteItem[] }>
 } = {}) {
   const pages = [...(overrides.pages ?? [])]
   const reads: { groupId: string; cursor: string | null }[] = []
@@ -61,6 +62,10 @@ function harness(overrides: {
       calls.push({ name: "delete", input })
       return overrides.delete?.() ?? Promise.resolve({})
     },
+    move(input) {
+      calls.push({ name: "move", input })
+      return overrides.move?.() ?? Promise.resolve({ notes: [] })
+    },
     newId: () => `new-${++ids}`,
   })
   return { store, reads, calls }
@@ -75,6 +80,7 @@ describe("notes store", () => {
       create: () => Promise.reject(new Error("unused")),
       update: () => Promise.reject(new Error("unused")),
       delete: () => Promise.reject(new Error("unused")),
+      move: () => Promise.reject(new Error("unused")),
       newId: () => "id",
       readLocal: () => Promise.resolve([item("cached")]),
     })
@@ -335,5 +341,109 @@ describe("notes store", () => {
     expect(store.notes.value).toEqual([])
     expect(store.draft.value).toEqual({ title: "", body: "" })
     expect(reads.map((read) => read.groupId)).toEqual([groupId, "g-2"])
+  })
+
+  describe("moving notes", () => {
+    const pages = [{ notes: [item("a"), item("b"), item("c")], nextCursor: null }]
+
+    it("moves the ticked notes, takes them off the list and closes the open one", async () => {
+      const { store, calls } = harness({ pages })
+      await store.open(groupId, "a")
+
+      expect(await store.move("g-2", ["a", "b"])).toBe(true)
+
+      expect(calls.at(-1)).toEqual({
+        name: "move",
+        input: { groupId, toGroupId: "g-2", noteIds: ["a", "b"] },
+      })
+      expect(store.notes.value.map((note) => note.id)).toEqual(["c"])
+      expect(store.editing.value).toBe(null)
+      expect(store.moveError.value).toBe(null)
+    })
+
+    it("asks for a tick and sends nothing when no note is selected", async () => {
+      const { store, calls } = harness({ pages })
+      await store.open(groupId, null)
+
+      expect(await store.move("g-2", [])).toBe(false)
+
+      expect(store.moveError.value).toBe(NOTE_MESSAGES.moveNone)
+      expect(calls).toEqual([])
+      expect(store.notes.value).toHaveLength(3)
+    })
+
+    it("refuses to move a note with unsaved changes, keeping the typed text", async () => {
+      const { store, calls } = harness({ pages })
+      await store.open(groupId, "a")
+      store.editing.value = { ...store.editing.value!, title: "Typed but not saved" }
+
+      expect(await store.move("g-2", ["a"])).toBe(false)
+
+      expect(store.moveError.value).toBe(NOTE_MESSAGES.moveUnsaved)
+      expect(calls.filter((call) => call.name === "move")).toEqual([])
+      expect(store.editing.value?.title).toBe("Typed but not saved")
+      expect(store.notes.value).toHaveLength(3)
+    })
+
+    it("keeps the list and shows the server's refusal when the move is refused", async () => {
+      const { store } = harness({
+        pages,
+        move: () => Promise.reject(new RealtimeRequestError("forbidden", "Not an editor there")),
+      })
+      await store.open(groupId, null)
+
+      expect(await store.move("g-2", ["a"])).toBe(false)
+
+      expect(store.moveError.value).toBe("Not an editor there")
+      expect(store.notes.value).toHaveLength(3)
+    })
+
+    it("says moving needs a connection when the socket is down, and keeps the list", async () => {
+      const { store } = harness({
+        pages,
+        move: () => Promise.reject(new TypeError("Failed to fetch")),
+      })
+      await store.open(groupId, null)
+
+      expect(await store.move("g-2", ["a"])).toBe(false)
+
+      expect(store.moveError.value).toBe(NOTE_MESSAGES.moveOffline)
+      expect(store.notes.value).toHaveLength(3)
+    })
+
+    it("refuses a second move while the first is still on its way", async () => {
+      let settle: () => void = () => {}
+      const { store, calls } = harness({
+        pages,
+        move: () => new Promise((resolve) => (settle = () => resolve({ notes: [] }))),
+      })
+      await store.open(groupId, null)
+
+      const first = store.move("g-2", ["a"])
+      expect(store.moving.value).toBe(true)
+      expect(await store.move("g-2", ["b"])).toBe(false)
+      settle()
+      expect(await first).toBe(true)
+
+      expect(calls.filter((call) => call.name === "move")).toHaveLength(1)
+      expect(store.moving.value).toBe(false)
+    })
+
+    it("rereads the list when a ticked note is no longer there", async () => {
+      const { store, reads } = harness({
+        pages: [...pages, { notes: [item("c")], nextCursor: null }],
+        move: () =>
+          Promise.reject(
+            new RealtimeRequestError("not_found", "gone", { code: "NOTE_NOT_FOUND" }),
+          ),
+      })
+      await store.open(groupId, null)
+
+      expect(await store.move("g-2", ["a"])).toBe(false)
+
+      expect(store.moveError.value).toBe(NOTE_MESSAGES.moveGone)
+      expect(reads).toHaveLength(2)
+      expect(store.notes.value.map((note) => note.id)).toEqual(["c"])
+    })
   })
 })

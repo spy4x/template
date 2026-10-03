@@ -177,7 +177,7 @@ answers.
 | Key            | Kind    | Free    | Pro     | Enforced                                                     |
 | -------------- | ------- | ------- | ------- | ------------------------------------------------------------ |
 | `memberRoles`  | feature | no      | yes     | Promoting a member (`GroupMemberRoleCommand`)                |
-| `maxNotes`     | limit   | 10      | no cap  | Creating a note (`NoteCreateCommand`)                        |
+| `maxNotes`     | limit   | 10      | no cap  | Creating a note (`NoteCreateCommand`), or moving notes into the group (`NoteMoveCommand`; the gate reserves room for one, the repository counts all)                 |
 | `maxMembers`   | limit   | 3       | 50      | Inviting (`GroupInvitationCreateCommand`) and accepting      |
 | `storageBytes` | limit   | 50 MiB  | 10 GiB  | Not yet: the key ships for attachments (#157)                |
 

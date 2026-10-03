@@ -9,6 +9,7 @@ import {
   NoteError,
   type NoteListPage,
   type NoteListResult,
+  type NoteMoveInput,
   type NoteRepository,
   type NoteUpdateInput,
   NoteVersionConflictError,
@@ -83,6 +84,29 @@ export class MemoryNoteRepository implements NoteRepository {
       version: note.version + 1,
       changeSequence: String(this.#sequence++),
     })
+  }
+
+  move(input: NoteMoveInput, actorId: number, allowance: number | null): Promise<Note[]> {
+    const notes = input.noteIds.map((id) => {
+      const note = this.notes.get(id)
+      if (!note || note.groupId !== input.fromGroupId) {
+        throw new NoteError("NOTE_NOT_FOUND", "gone")
+      }
+      return note
+    })
+    const used = [...this.notes.values()].filter((note) => note.groupId === input.toGroupId).length
+    assertRoomFor("maxNotes", allowance, used + notes.length - 1, GroupRole.EDITOR)
+    const sequence = String(this.#sequence++)
+    const moved = notes.map((note): Note => ({
+      ...note,
+      groupId: input.toGroupId,
+      version: note.version + 1,
+      changeSequence: sequence,
+      updatedByUserId: actorId,
+    }))
+    for (const note of moved) this.notes.set(note.id, note)
+    this.writes++
+    return Promise.resolve(moved)
   }
 
   #current(groupId: string, id: string, expectedVersion: number): Note {

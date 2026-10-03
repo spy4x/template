@@ -43,6 +43,7 @@ import { parseInvitationCreateBody, parseInvitationRef } from "@domain/groups"
 import {
   noteCreateRequestSchema,
   noteDeleteRequestSchema,
+  noteMoveRequestSchema,
   noteUpdateRequestSchema,
 } from "@domain/notes"
 import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
@@ -1033,7 +1034,36 @@ const notesDefaults: NotesScreenProps = {
   nextPageHref: null,
 }
 
+const otherGroup = { id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111003", name: "Family" }
+
 describe("NotesScreen without JavaScript", () => {
+  it("posts the ticked notes and the target group to the move route with the API's field names", () => {
+    const screen = <NotesScreen {...notesDefaults} moveTargets={[otherGroup]} />
+    const surface = noScriptSurface(screen)
+    const html = renderToString(screen)
+
+    expect(surface.forms).toEqual([
+      {
+        action: NOTE_PATHS.moveMany(groupId),
+        method: "post",
+        fields: schemaKeys(noteMoveRequestSchema),
+      },
+    ])
+    expect(html).toContain(`name="noteIds" value="${noteRow.id}"`)
+    expect(html).toContain(`value="${otherGroup.id}"`)
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("offers no move to a viewer, or to a person with no other group to write to", () => {
+    const viewer = { id: groupId, name: "Team", canWrite: false }
+
+    expect(noScriptSurface(<NotesScreen {...notesDefaults} moveTargets={[]} />).forms).toEqual([])
+    expect(
+      noScriptSurface(<NotesScreen {...notesDefaults} group={viewer} moveTargets={[otherGroup]} />)
+        .forms,
+    ).toEqual([])
+  })
+
   it("has no form: a link opens the create page and each note's own page", () => {
     const surface = noScriptSurface(<NotesScreen {...notesDefaults} />)
 
@@ -1112,6 +1142,30 @@ describe("NoteEditorScreen without JavaScript", () => {
     )
     expect(html).toContain('name="version" value="2"')
     expect(html).toContain('value="Groceries"')
+  })
+
+  it("posts a move to the note's own move route with the target group's name", () => {
+    const screen = (
+      <NoteEditorScreen
+        {...editorDefaults}
+        note={existing}
+        value={noteRow}
+        moveTargets={[otherGroup]}
+      />
+    )
+    const surface = noScriptSurface(screen)
+
+    expect(formAt(surface, NOTE_PATHS.move(noteRow.id)).fields).toEqual(["toGroupId"])
+    expect(renderToString(screen)).toContain("Family")
+    expect(surface.scriptOnlyButtons).toEqual([])
+  })
+
+  it("offers no move on the create page", () => {
+    const surface = noScriptSurface(
+      <NoteEditorScreen {...editorDefaults} moveTargets={[otherGroup]} />,
+    )
+
+    expect(surface.forms.map((form) => form.action)).toEqual([NOTE_PATHS.create(groupId)])
   })
 
   it("links Delete to a page that asks first, instead of deleting on one click", () => {

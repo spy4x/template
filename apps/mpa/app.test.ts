@@ -11,6 +11,8 @@ import { handler as home } from "./routes/index.tsx"
 import { handler as password } from "./routes/profile/password.ts"
 import { handler as notes } from "./routes/notes/index.tsx"
 import { handler as note } from "./routes/notes/[noteId]/index.tsx"
+import { handler as moveNotes } from "./routes/notes/move.ts"
+import { handler as moveNote } from "./routes/notes/[noteId]/move.ts"
 import { handler as selectGroup } from "./routes/groups/select.ts"
 import { handler as groupsPage } from "./routes/groups/index.tsx"
 import { handler as groupSettings } from "./routes/groups/[groupId]/index.tsx"
@@ -70,8 +72,10 @@ function appWith(fetch: typeof globalThis.fetch) {
     .post("/sign-out", signOut.POST!)
     .get("/notes", notes.GET!)
     .post("/notes", notes.POST!)
+    .post("/notes/move", moveNotes.POST!)
     .get("/notes/:noteId", note.GET!)
     .post("/notes/:noteId", note.POST!)
+    .post("/notes/:noteId/move", moveNote.POST!)
     .post("/groups/select", selectGroup.POST!)
     .get("/groups", groupsPage.GET!)
     .get("/groups/:groupId", groupSettings.GET!)
@@ -687,6 +691,132 @@ describe("creating a note", () => {
     expect(html).toContain(`data-e2e="plan-refusal"`)
     expect(html).toContain(`href="/groups/${groupId}/pricing"`)
     expect(html).toContain("Tent")
+  })
+})
+
+describe("moving notes", () => {
+  const second = "0f4a3c1e-9d2b-4e8f-a6c5-1b2d3e4f5a6c"
+  const listed = () =>
+    Response.json({
+      notes: [{ id: noteId, groupId, title: "Tent", body: "", version: 1 }],
+      nextCursor: null,
+    })
+  const movable = (rest: (path: string, method: string) => Response = () => listed()) =>
+    fakeApi((path, method) => {
+      if (path === "/api/auth/me") return Response.json({ firstName: "Ada", lastName: "", mfa: 1 })
+      if (path === "/api/groups") {
+        return Response.json({
+          groups: [
+            { id: groupId, name: "Trip", role: 4 },
+            { id: otherGroupId, name: "Work", role: 2 },
+          ],
+          nextCursor: null,
+        })
+      }
+      if (path === "/api/groups/selected") return Response.json({ groupId, version: 1 })
+      return rest(path, method)
+    })
+  const posts = (calls: { method: string }[]) => calls.filter((call) => call.method === "POST")
+
+  it("offers the list a move form with the groups the person may write to", async () => {
+    const { fetch } = movable()
+
+    const html = await (await appWith(fetch)(new Request(`${config.webAppOrigin}/notes`), info))
+      .text()
+
+    expect(html).toContain(`action="/notes/move?group=${groupId}"`)
+    expect(html).toContain(`name="noteIds" value="${noteId}"`)
+    expect(html).toContain(`<option value="${otherGroupId}">Work</option>`)
+  })
+
+  it("posts the ticked notes to the API in one call and returns to the list", async () => {
+    const { calls, fetch } = movable()
+    const body = new URLSearchParams([
+      ["toGroupId", otherGroupId],
+      ["noteIds", noteId],
+      ["noteIds", second],
+    ])
+
+    const response = await appWith(fetch)(
+      new Request(`${config.webAppOrigin}/notes/move?group=${groupId}`, {
+        method: "POST",
+        headers: sameOrigin,
+        body,
+      }),
+      info,
+    )
+
+    expect([response.status, response.headers.get("location")]).toEqual([303, "/notes"])
+    expect(posts(calls)).toEqual([{
+      method: "POST",
+      path: `/api/groups/${groupId}/notes/move`,
+      body: { toGroupId: otherGroupId, noteIds: [noteId, second] },
+    }])
+  })
+
+  it("moves nothing when the selected group is no longer the one the page showed", async () => {
+    const { calls, fetch } = movable()
+
+    const response = await appWith(fetch)(
+      formPost(`/notes/move?group=${otherGroupId}`, { toGroupId: otherGroupId, noteIds: noteId }),
+      info,
+    )
+
+    expect(response.status).toBe(409)
+    expect(posts(calls)).toEqual([])
+    expect(await response.text()).toContain("Nothing was moved")
+  })
+
+  it("asks for a tick, and calls no API, when no note is ticked", async () => {
+    const { calls, fetch } = movable()
+
+    const response = await appWith(fetch)(
+      formPost(`/notes/move?group=${groupId}`, { toGroupId: otherGroupId }),
+      info,
+    )
+
+    expect(response.status).toBe(400)
+    expect(posts(calls)).toEqual([])
+    expect(await response.text()).toContain("Tick the notes you want to move.")
+  })
+
+  it("moves one note from its page, naming it by the address", async () => {
+    const { calls, fetch } = movable()
+
+    const response = await appWith(fetch)(
+      formPost(`/notes/${noteId}/move`, { toGroupId: otherGroupId }),
+      info,
+    )
+
+    expect([response.status, response.headers.get("location")]).toEqual([303, "/notes"])
+    expect(posts(calls)).toEqual([{
+      method: "POST",
+      path: `/api/groups/${groupId}/notes/move`,
+      body: { toGroupId: otherGroupId, noteIds: [noteId] },
+    }])
+  })
+
+  it("shows the note's page again with the API's reason when the move is refused", async () => {
+    const { fetch } = movable((path, method) =>
+      method === "POST"
+        ? Response.json(
+          { error: { code: "ROLE_INSUFFICIENT", message: "Only an editor can move notes there" } },
+          { status: 403 },
+        )
+        : path.endsWith("/notes")
+        ? notesList()
+        : Response.json({
+          note: { id: noteId, groupId, title: "Tent", body: "", version: 2 },
+        })
+    )
+
+    const response = await appWith(fetch)(
+      formPost(`/notes/${noteId}/move`, { toGroupId: otherGroupId }),
+      info,
+    )
+
+    expect(response.status).toBe(403)
+    expect(await response.text()).toContain("Only an editor can move notes there")
   })
 })
 

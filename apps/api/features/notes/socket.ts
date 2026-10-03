@@ -8,9 +8,12 @@ import {
   noteGetPayloadSchema,
   NoteGetQuery,
   noteListPayloadSchema,
+  NoteMoveCommand,
+  noteMovePayloadSchema,
   NoteUpdateCommand,
   noteUpdatePayloadSchema,
   type NoteWriteResult,
+  parseNoteMoveRequest,
   parseNoteRequest,
 } from "@domain/notes"
 import type { SocketRequests } from "../../services/realtime.ts"
@@ -22,6 +25,7 @@ export interface NoteSocketDependencies extends NoteListDependencies {
   update(command: NoteUpdateCommand): Promise<{ note: Note }>
   delete(command: NoteDeleteCommand): Promise<{ note: DeletedNote }>
   get(query: NoteGetQuery): Promise<{ note: Note }>
+  move(command: NoteMoveCommand): Promise<{ notes: Note[] }>
 }
 
 /**
@@ -55,6 +59,17 @@ export function createNoteSocketRequests(dependencies: NoteSocketDependencies): 
           payload,
         )
         return await dependencies.delete(new NoteDeleteCommand({ actor, ...input, idempotencyKey }))
+      },
+    },
+    "note.move": {
+      kind: "command",
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
+        // A payload with no group id fails the schema; the group of a bad payload is not needed.
+        const fromGroupId = (payload as { groupId?: string } | null)?.groupId ?? ""
+        const input = parseNoteMoveRequest(noteMovePayloadSchema, payload, fromGroupId)
+        return await dependencies.move(
+          new NoteMoveCommand({ actor, ...input, requestId, idempotencyKey }),
+        )
       },
     },
     "note.list": {

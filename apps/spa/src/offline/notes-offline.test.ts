@@ -61,6 +61,7 @@ function network(pages: NoteItem[][]) {
     create: () => Promise.reject(new Error("the store must not call the network to write")),
     update: () => Promise.reject(new Error("the store must not call the network to write")),
     delete: () => Promise.reject(new Error("the store must not call the network to write")),
+    move: () => Promise.reject(new Error("the test moves nothing")),
     newId: () => "id",
   }
   return { state, online }
@@ -146,6 +147,36 @@ describe("offline notes writes", () => {
     })
     expect(created.title).toBe("T")
     expect(layer.entries.value.length).toBe(1)
+  })
+})
+
+describe("offline notes moves", () => {
+  it("files the moved notes under their new group on the device", async () => {
+    const layer = layerWith({ socket: true })
+    const { online } = network([[note("a")]])
+    online.move = (input) =>
+      Promise.resolve({
+        notes: input.noteIds.map((id) => ({ ...note(id, 2), groupId: input.toGroupId })),
+      })
+    const deps = offlineNotes(online, () => layer)
+    await layer.store.putNote(note("a"))
+
+    await deps.move({ groupId, toGroupId: "g-2", noteIds: ["a"] })
+
+    expect((await layer.store.readNotes(groupId)).map((n) => n.id)).toEqual([])
+    expect((await layer.store.readNotes("g-2")).map((n) => n.id)).toEqual(["a"])
+  })
+
+  it("leaves the device alone when the server refuses the move", async () => {
+    const layer = layerWith({ socket: true })
+    const { online } = network([[note("a")]])
+    online.move = () => Promise.reject(new Error("refused"))
+    await layer.store.putNote(note("a"))
+
+    await offlineNotes(online, () => layer).move({ groupId, toGroupId: "g-2", noteIds: ["a"] })
+      .catch(() => {})
+
+    expect((await layer.store.readNotes(groupId)).map((n) => n.id)).toEqual(["a"])
   })
 })
 

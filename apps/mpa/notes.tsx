@@ -2,6 +2,8 @@ import type { FreshContext } from "fresh"
 import { canMutateNotes } from "@domain/groups"
 import { NoteEditorScreen, type NoteTarget } from "@ui/note-editor-screen.tsx"
 import {
+  type MoveTarget,
+  moveTargetsOf,
   type NoteDraft,
   type NoteFormErrors,
   type NoteRow,
@@ -27,6 +29,8 @@ const NO_ERRORS: NoteFormErrors = { title: null, form: null }
 /** What the list page shows besides the list: the error of the last post. */
 export interface NotesPageState {
   listError?: string | null
+  /** The refusal of a move, shown by the list's move button. */
+  moveError?: string | null
   status?: number
 }
 
@@ -95,7 +99,9 @@ export async function selectedGroupOrPage(
 /** Who the person is and which group the notes pages show, or the sign-in redirect to give. */
 async function readPage(
   ctx: FreshContext<State>,
-): Promise<Response | { session: Session; group: NotesGroup | null }> {
+): Promise<
+  Response | { session: Session; group: NotesGroup | null; moveTargets: MoveTarget[] }
+> {
   const { api } = ctx.state
   const session = await readSession(api)
   if (!session.user) return ctx.redirect(signInPath(session, ctx.req), 303)
@@ -108,7 +114,9 @@ async function readPage(
   const group: NotesGroup | null = membership
     ? { id: membership.id, name: membership.name, canWrite: canMutateNotes(membership.role) }
     : null
-  return { session, group }
+  // The groups the picker lists, where the person may write: the places a note can move to.
+  const moveTargets = group?.canWrite ? moveTargetsOf(picker?.groups ?? [], group.id) : []
+  return { session, group, moveTargets }
 }
 
 /**
@@ -122,7 +130,7 @@ export async function renderNotes(
 ): Promise<Response> {
   const read = await readPage(ctx)
   if (read instanceof Response) return read
-  const { session, group } = read
+  const { session, group, moveTargets } = read
   const cursor = ctx.url.searchParams.get("cursor")
   const list = group
     ? await listNotes(ctx.state.api, group.id, cursor)
@@ -134,6 +142,8 @@ export async function renderNotes(
         notes={list.notes}
         loading={false}
         listError={page.listError ?? list.error}
+        moveTargets={moveTargets}
+        moveError={page.moveError}
         nextPageHref={list.nextCursor
           ? `${NOTE_PATHS.list}?${new URLSearchParams({ cursor: list.nextCursor })}`
           : null}
@@ -154,6 +164,8 @@ export interface NoteEditorPageState {
   notFound?: boolean
   /** Show "delete this note?" in place of the form. */
   confirmingDelete?: boolean
+  /** The refusal of a move, shown in the note page's move form. */
+  moveError?: string | null
   status?: number
 }
 
@@ -167,7 +179,7 @@ export async function renderNoteEditor(
 ): Promise<Response> {
   const read = await readPage(ctx)
   if (read instanceof Response) return read
-  const { session, group } = read
+  const { session, group, moveTargets } = read
   const notFound = page.notFound ?? false
   return ctx.render(
     <Frame session={session} path={ctx.url.pathname}>
@@ -182,6 +194,8 @@ export async function renderNoteEditor(
         saving={false}
         deleting={false}
         confirmingDelete={page.confirmingDelete}
+        moveTargets={moveTargets}
+        moveError={page.moveError}
       />
     </Frame>,
     { status: page.status ?? (group && !notFound ? 200 : 404) },
@@ -198,7 +212,12 @@ export async function renderNoteOfSelectedGroup(
   ctx: FreshContext<State>,
   groupId: string,
   noteId: string,
-  options: { confirming?: boolean; errors?: NoteFormErrors; status?: number } = {},
+  options: {
+    confirming?: boolean
+    errors?: NoteFormErrors
+    moveError?: string
+    status?: number
+  } = {},
 ): Promise<Response> {
   const answer = await ctx.state.api.call("GET", notesApiPath(groupId, noteId))
   const note = noteOf(answer)
@@ -216,6 +235,7 @@ export async function renderNoteOfSelectedGroup(
     value: { title: note.title, body: note.body },
     errors: options.errors,
     confirmingDelete: options.confirming,
+    moveError: options.moveError,
     status: options.status,
   })
 }

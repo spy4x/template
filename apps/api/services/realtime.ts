@@ -133,6 +133,7 @@ const NOTE_ERROR_CODES: Record<
   INVALID_REQUEST: "bad_request",
   NOTE_NOT_FOUND: "not_found",
   ROLE_INSUFFICIENT: "forbidden",
+  SAME_GROUP: "bad_request",
   VERSION_CONFLICT: "conflict",
 }
 

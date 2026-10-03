@@ -5,7 +5,7 @@ import {
   GroupMemberRoleCommand,
   invitableRoles,
 } from "@domain/groups"
-import { NoteCreateCommand } from "@domain/notes"
+import { NoteCreateCommand, NoteMoveCommand } from "@domain/notes"
 import { type EntitlementNeeds, needsFeature, needsRoom } from "./entitlement-gate.ts"
 
 /**
@@ -18,6 +18,19 @@ export const ENTITLEMENT_NEEDS: EntitlementNeeds = new Map([
     "maxNotes",
     (command) => command.data.groupId,
     (actor) => canMutateNotes(actor),
+  ),
+  // A move adds its notes to the target group: the gate checks room for one there, and the write
+  // counts all of them. A person who cannot write in the source is not judged, so the handler
+  // answers "not an editor" (403) before a full target's plan answers 402.
+  needsRoom(
+    NoteMoveCommand,
+    "maxNotes",
+    (command) => command.data.toGroupId,
+    async (actor, command, _roleOf, roleIn) => {
+      if (!canMutateNotes(actor)) return false
+      const source = await roleIn(command.data.groupId, command.data.actor.userId)
+      return source !== null && canMutateNotes(source)
+    },
   ),
   // Pending invitations take no seat: the cap counts members, here and again when one accepts.
   needsRoom(

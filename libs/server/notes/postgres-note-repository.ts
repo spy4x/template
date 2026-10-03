@@ -11,6 +11,7 @@ import {
   NoteError,
   type NoteListPage,
   type NoteListResult,
+  type NoteMoveInput,
   type NoteRepository,
   type NoteUpdateInput,
   NoteVersionConflictError,
@@ -250,6 +251,64 @@ export class PostgresNoteRepository implements NoteRepository {
   }
 
   /**
+   * Both groups are locked in id order, so two moves in opposite directions wait for each other
+   * instead of deadlocking, and each role is read on its locked membership row. The cap is counted
+   * after the update, in the same transaction, like a create's.
+   */
+  async move(input: NoteMoveInput, actorId: number, allowance: number | null): Promise<Note[]> {
+    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const roles = new Map<string, GroupRole>()
+      for (const groupId of [input.fromGroupId, input.toGroupId].sort()) {
+        roles.set(groupId, await assertWriterNow(transaction, groupId, actorId))
+      }
+      const moved = await transaction<{ id: string }[]>`
+        UPDATE notes
+        SET group_id = ${input.toGroupId},
+            version = version + 1,
+            updated_by_user_id = ${actorId},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id IN ${transaction(input.noteIds)}
+          AND group_id = ${input.fromGroupId}
+          AND deleted_at IS NULL
+        RETURNING id
+      `
+      // One missing note refuses the whole move, and the transaction takes the others back.
+      if (moved.length !== input.noteIds.length) {
+        throw new NoteError("NOTE_NOT_FOUND", "Note not found")
+      }
+      if (allowance !== null) {
+        const used = await new PostgresNoteRepository(transaction).count(input.toGroupId) - 1
+        assertRoomFor("maxNotes", allowance, used, roles.get(input.toGroupId)!)
+      }
+      await recordNoteChange(transaction, input.fromGroupId, actorId, NOTE_EVENTS.movedOut)
+      const sequence = await recordNoteChange(
+        transaction,
+        input.toGroupId,
+        actorId,
+        NOTE_EVENTS.movedIn,
+      )
+      for (
+        const [groupId, kind] of [
+          [input.fromGroupId, NOTE_EVENTS.movedOut],
+          [input.toGroupId, NOTE_EVENTS.movedIn],
+        ] as const
+      ) {
+        await transaction`
+          INSERT INTO audit_events (event_kind, actor_user_id, group_id, request_id)
+          VALUES (${kind}, ${actorId}, ${groupId}, ${input.requestId || null})
+        `
+      }
+      const rows = await transaction<NoteRow[]>`
+        UPDATE notes SET change_sequence = ${sequence}::bigint
+        WHERE id IN ${transaction(input.noteIds)}
+        RETURNING ${this.columnsOn(transaction)}
+      `
+      const byId = new Map(rows.map((row) => [row.id, toNote(row)]))
+      return input.noteIds.map((id) => byId.get(id)!)
+    })
+  }
+
+  /**
    * Records the change of a note written in this transaction on its group, stores the sequence on
    * the note and returns the note as it now reads.
    */
@@ -288,7 +347,11 @@ export class PostgresNoteRepository implements NoteRepository {
   }
 
   private columns() {
-    return this.sql`
+    return this.columnsOn(this.sql)
+  }
+
+  private columnsOn(sql: postgres.Sql | postgres.TransactionSql) {
+    return sql`
       id,
       group_id,
       title,

@@ -35,6 +35,7 @@ import {
 } from "./group-transfer.tsx"
 import { GroupsScreen, type GroupsScreenProps } from "./groups-screen.tsx"
 import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
+import { NotesScreen } from "./notes-screen.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
 import { FORM_ACTIONS, GROUP_PATHS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 import {
@@ -426,6 +427,83 @@ async function clickDialogButton(label: string): Promise<void> {
     button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }) as unknown as Event)
   })
 }
+
+const targets = [
+  { id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111003", name: "Family" },
+  { id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111004", name: "Work" },
+]
+
+describe("moving notes in the browser", () => {
+  const list = {
+    group: { id: groupId, name: "Team", canWrite: true },
+    notes: [note, { ...note, id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111005", title: "Trip" }],
+    loading: false,
+    listError: null,
+    nextPageHref: null,
+    moveTargets: targets,
+  }
+
+  async function tick(selector: string): Promise<void> {
+    const box = find<HTMLInputElement>(selector)
+    box.checked = true
+    await act(() => {
+      box.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event)
+    })
+  }
+
+  it("hands the app the ticked notes and the chosen group, and cancels the native post", async () => {
+    const move = spy<[{ toGroupId: string; noteIds: string[] }]>()
+    await mount(<NotesScreen {...list} onMove={move.fn} />)
+
+    await tick(`[data-e2e=note-${list.notes[1].id}] [data-e2e=note-select]`)
+    const select = find<HTMLSelectElement>("[data-e2e=notes-move-to]")
+    select.value = targets[1].id
+    await act(() => {
+      select.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event)
+    })
+
+    expect(await submit(NOTE_PATHS.moveMany(groupId))).toBe(true)
+    expect(move.calls).toEqual([[{ toGroupId: targets[1].id, noteIds: [list.notes[1].id] }]])
+  })
+
+  it("posts natively when the app takes nothing over", async () => {
+    await mount(<NotesScreen {...list} />)
+
+    expect(await submit(NOTE_PATHS.moveMany(groupId))).toBe(false)
+  })
+
+  it("moves one note from its page with the chosen group", async () => {
+    const move = spy<[string]>()
+    await mount(
+      <NoteEditorScreen
+        {...editorDefaults}
+        note={existing}
+        value={note}
+        moveTargets={targets}
+        onMove={move.fn}
+      />,
+    )
+
+    expect(await submit(NOTE_PATHS.move(note.id))).toBe(true)
+    expect(move.calls).toEqual([[targets[0].id]])
+  })
+
+  it("shows the refusal beside the move button", async () => {
+    await mount(<NotesScreen {...list} moveError="Tick the notes you want to move." />)
+
+    expect(find("[data-e2e=notes-move]").parentElement?.textContent).toContain(
+      "Tick the notes you want to move.",
+    )
+  })
+
+  it("refuses a second move while the first is pending", async () => {
+    const move = spy<[{ toGroupId: string; noteIds: string[] }]>()
+    await mount(<NotesScreen {...list} moving onMove={move.fn} />)
+
+    expect(await submit(NOTE_PATHS.moveMany(groupId))).toBe(true)
+    expect(move.calls).toEqual([])
+  })
+})
 
 describe("NoteEditorScreen in the browser", () => {
   it("reports the typed title and creates the note through the app's callbacks", async () => {
