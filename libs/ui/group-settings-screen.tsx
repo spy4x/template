@@ -14,6 +14,7 @@ import {
   canLeave,
   canManageInvitations,
   canRename,
+  canViewActivity,
   GROUP_RESTORE_DAYS,
   type GroupDetails,
   GroupRole,
@@ -24,7 +25,8 @@ import { type GroupMemberRow, GroupMembersSection, type MemberError } from "./gr
 import { FocusedError, useClosesWhenDone, useFreshError } from "./group-page.tsx"
 import { PageAction, PageHeader } from "./page-header.tsx"
 import { transferCandidates } from "./group-transfer.tsx"
-import { type Navigate, SCREEN_PATHS } from "./progressive.tsx"
+import { NavigateItem } from "./notes-screen.tsx"
+import { GROUP_PATHS, type Navigate, SCREEN_PATHS } from "./progressive.tsx"
 
 export interface GroupSettingsScreenProps {
   /** The group, or `null` while it is read or when the person has no such group. */
@@ -178,6 +180,15 @@ export function GroupSettingsScreen(
 
   const menu = (
     <>
+      {canViewActivity(group.role) && (
+        <NavigateItem
+          href={GROUP_PATHS.activity(group.id)}
+          navigate={navigate}
+          dataE2E="group-activity-open"
+        >
+          Activity
+        </NavigateItem>
+      )}
       {canRename(group.role) && onUpdateDetails && (
         <DropdownItem
           dataE2E="group-details-open"

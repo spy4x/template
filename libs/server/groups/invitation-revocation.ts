@@ -1,5 +1,6 @@
 import type postgres from "postgres"
 import { type GroupRole, invitableRoles } from "@domain/groups"
+import { writeAuditEvent } from "./audit.ts"
 
 /** The audit and change kinds an invitation writes. */
 export const INVITATION_EVENTS = {
@@ -39,11 +40,15 @@ export async function revokeInvitationsOf(
       ${kept.length > 0 ? tx`AND role NOT IN ${tx(kept)}` : tx``}
     RETURNING id
   `
-  for (const _ of revoked) {
-    await tx`
-      INSERT INTO audit_events (event_kind, actor_user_id, group_id, request_id)
-      VALUES (${INVITATION_EVENTS.revoked}, ${actorId}, ${groupId}, ${requestId || null})
-    `
+  for (const { id } of revoked) {
+    await writeAuditEvent(tx, {
+      eventKind: INVITATION_EVENTS.revoked,
+      actorId,
+      groupId,
+      requestId,
+      entityType: "invitation",
+      entityId: id,
+    })
   }
   return revoked.length
 }

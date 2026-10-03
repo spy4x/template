@@ -13,6 +13,7 @@ import { createAuthRoute } from "./routes/auth.ts"
 import { createPushNotificationRoute } from "./routes/pushNotification.ts"
 import { createUsersRoute } from "./routes/users.ts"
 import { wsRoute } from "./routes/ws.ts"
+import { createGroupActivityRoute } from "./routes/group-activity.ts"
 import { createGroupsRoute } from "./routes/groups.ts"
 import { createNotesRoute } from "./routes/notes.ts"
 import {
@@ -33,6 +34,7 @@ import { queryBus } from "./services/queryBus.ts"
 import { listenForGroupNews } from "./services/group-news.ts"
 import { groupListCursor } from "./services/group-list-cursor.ts"
 import { noteListCursor } from "./services/note-list-cursor.ts"
+import { activityCursor } from "./services/activity-cursor.ts"
 import { realtime } from "./services/realtimeHub.ts"
 import { createHealthRoute } from "./routes/health.ts"
 import { isCacheConnected, kv } from "./services/cache.ts"
@@ -130,6 +132,14 @@ app.route(
     get: (query) => queryBus.execute(query),
     cursor: noteListCursor,
     expectedOrigin,
+  }),
+)
+// Before "/groups" too, for the same reason.
+app.route(
+  "/groups/:groupId/activity",
+  createGroupActivityRoute({
+    list: (query) => queryBus.execute(query),
+    cursor: activityCursor,
   }),
 )
 const invitationRoutes: InvitationsRouteDependencies = {

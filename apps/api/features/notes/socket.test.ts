@@ -70,7 +70,7 @@ describe("note socket requests", () => {
       })
   })
 
-  it("dispatches a create with the socket's actor and idempotency key", async () => {
+  it("dispatches a create with the socket's actor, request id and idempotency key", async () => {
     const { requests, seen } = harness()
 
     await requests["note.create"].handle({
@@ -87,6 +87,7 @@ describe("note socket requests", () => {
       id,
       title: "Plan",
       body: "b",
+      requestId: "req-1",
       idempotencyKey: "key-1",
     })
   })

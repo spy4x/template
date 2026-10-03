@@ -13,6 +13,7 @@ import {
 } from "@api/cqrs/commands.ts"
 import { PushListQuery, UserProfileGetQuery } from "@api/cqrs/queries.ts"
 import {
+  GroupActivityQuery,
   GroupCreateCommand,
   GroupDeleteCommand,
   GroupDeletedListQuery,
@@ -62,6 +63,7 @@ import { groupRestoreHandler } from "@api/cqrs/command-handlers/group-restore.ts
 import { groupDeletedListHandler } from "@api/cqrs/query-handlers/group-deleted-list.ts"
 import { groupSelectedHandler } from "@api/cqrs/query-handlers/group-selected.ts"
 import { groupMembersHandler } from "@api/cqrs/query-handlers/group-members.ts"
+import { groupActivityHandler } from "@api/cqrs/query-handlers/group-activity.ts"
 import { groupMemberRoleHandler } from "@api/cqrs/command-handlers/group-member-role.ts"
 import { groupMemberRemoveHandler } from "@api/cqrs/command-handlers/group-member-remove.ts"
 import { groupLeaveHandler } from "@api/cqrs/command-handlers/group-leave.ts"
@@ -172,6 +174,7 @@ queryBus.register(GroupGetQuery, groupGetHandler)
 queryBus.register(GroupSelectedQuery, groupSelectedHandler)
 queryBus.register(GroupDeletedListQuery, groupDeletedListHandler)
 queryBus.register(GroupMembersQuery, groupMembersHandler)
+queryBus.register(GroupActivityQuery, groupActivityHandler)
 queryBus.register(GroupInvitationsQuery, createInvitationListHandler(invitationDependencies))
 queryBus.register(InvitationPreviewQuery, createInvitationPreviewHandler(invitationDependencies))
 queryBus.register(MyInvitationsQuery, createMyInvitationsHandler(invitationDependencies))

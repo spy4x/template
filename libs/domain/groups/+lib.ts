@@ -2,6 +2,7 @@
 import type { Command, Query } from "@spy4x/platform/cqrs"
 import type { Actor } from "@domain/identity"
 
+export * from "./activity.ts"
 export * from "./invitations.ts"
 
 /**

@@ -5,6 +5,7 @@ import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import type { SessionStore } from "@spy4x/server/sign-in"
 import type { AuthAuditBase, User, UserBase } from "@domain/identity"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
+import { PostgresGroupActivityRepository } from "@server/groups/postgres-activity-repository.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
 import { emailChanges } from "@server/auth/email-verification.ts"
@@ -63,6 +64,11 @@ export class AppDbBase extends DbServiceBase {
    */
   get group(): PostgresGroupRepository {
     return new PostgresGroupRepository(this.sql)
+  }
+
+  /** The read side of a group's activity log. Built per access, like `group`. */
+  get groupActivity(): PostgresGroupActivityRepository {
+    return new PostgresGroupActivityRepository(this.sql)
   }
 
   /** The notes repository. Built per access, like `group`, so inside `begin()` it uses the transaction. */

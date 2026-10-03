@@ -192,10 +192,14 @@ CREATE UNIQUE INDEX idx_user_push_tokens_live_by_user_device
 CREATE TABLE audit_events (
     id BIGSERIAL PRIMARY KEY,
     event_kind VARCHAR(64) NOT NULL,
-    actor_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    actor_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
     group_id UUID REFERENCES groups(id) ON DELETE SET NULL,
     request_id VARCHAR(128),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    target_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
+    entity_type VARCHAR(32),
+    entity_id UUID,
+    details JSONB DEFAULT '{}' NOT NULL,
     CONSTRAINT audit_events_kind_check CHECK (length(btrim(event_kind)) BETWEEN 1 AND 64)
 );
 
@@ -205,6 +209,8 @@ CREATE INDEX idx_audit_events_group_kind_created
     ON audit_events (group_id, event_kind, created_at DESC);
 CREATE INDEX idx_audit_events_actor_created
     ON audit_events (actor_user_id, created_at DESC, id DESC);
+CREATE INDEX idx_audit_events_group_id_desc ON audit_events (group_id, id DESC);
+CREATE INDEX idx_audit_events_created ON audit_events (created_at);
 
 CREATE TABLE outbox_events (
     id UUID PRIMARY KEY,

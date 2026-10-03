@@ -87,6 +87,8 @@ export function afterSignIn(next: string | null): string {
 export const GROUP_PATHS = {
   /** The group's settings page. */
   settings: (groupId: string) => `/groups/${encodeURIComponent(groupId)}`,
+  /** The group's activity log, for its admins and owner. */
+  activity: (groupId: string) => `/groups/${encodeURIComponent(groupId)}/activity`,
 } as const
 
 /** `EnhancedForm` announces nothing itself: each screen shows its own busy button and error. */

@@ -37,7 +37,13 @@ export function createNoteCreateHandler(
     }
     assertCanWriteNotes(await groups.roleOf(data.groupId, data.actor.userId))
     return await notes.create(
-      { groupId: data.groupId, id: data.id, title: data.title, body: data.body },
+      {
+        groupId: data.groupId,
+        id: data.id,
+        title: data.title,
+        body: data.body,
+        requestId: data.requestId,
+      },
       data.actor.userId,
       allowance,
     )
@@ -69,7 +75,12 @@ export function createNoteDeleteHandler(
   return async ({ data }) => {
     assertCanWriteNotes(await groups.roleOf(data.groupId, data.actor.userId))
     const note = await notes.delete(
-      { groupId: data.groupId, id: data.id, expectedVersion: data.version },
+      {
+        groupId: data.groupId,
+        id: data.id,
+        expectedVersion: data.version,
+        requestId: data.requestId,
+      },
       data.actor.userId,
     )
     return { note }
