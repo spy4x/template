@@ -73,8 +73,10 @@ ADR 002 is recent and reverses part of ADR 001. In short:
 - `apps/spa` speaks **WebSocket** for mutations, queries and realtime. It uses
   REST only for bootstrap and the auth endpoints that must exist before a socket
   can open.
-- `apps/mpa` is the public website, not a second client of the product (#265). It speaks
-  REST only, for the newsletter, and has no session.
+- `apps/mpa` is the public website, not a second client of the product (#265): home page,
+  pricing (from the `PLANS` catalog), privacy, terms, `robots.txt`, `sitemap.xml` and the
+  newsletter. It speaks REST only, for the newsletter, and has no session; its sign-in and sign-up
+  links open the SPA at `DOMAIN`.
 - Every transport is a thin adapter over **one set of CQRS handlers**. A transport parses,
   authenticates and dispatches; it holds no business rule.
 - **Session strength is checked on the buses, not in a transport.** Every
@@ -406,9 +408,9 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    `libs/ui`, one `<section>` per concern. General shows the name and the role, and a rename form
    for an admin or the owner (`PATCH /api/groups/:id`, `group.rename`). A "Delete group"
    section, for the owner only, holds the confirmation text and the delete
-   (`DELETE /api/groups/:id`, `group.delete`). Each later issue (members, roles and leaving #130; invitations #131; ownership #132; moving notes
-   #133; the extra fields #134) adds its own section to that screen, shown only to the roles that
-   may use it.
+   (`DELETE /api/groups/:id`, `group.delete`). Each later issue (members, roles and leaving #130;
+   invitations #131; ownership #132; moving notes #133; the extra fields #134) adds its own section
+   to that screen, shown only to the roles that may use it.
 9. **Deleting a group.** A delete is soft: `groups.deleted_at` is set and the row, its members and
    its notes stay. The server refuses it with `LAST_GROUP` (409) when it is the actor's last active
    group, and the settings page then shows the button disabled with the reason. A member whose only
@@ -483,9 +485,10 @@ owner and admins (`canSeeMemberEmails`); other members get no `email` field.
 Invitations (#131): only `sha256(token)` is stored (`group_invitations.token_hash`), so a link
 is shown once, in the answer to its create, and never again: the create sends no
 `Idempotency-Key`, since the idempotency store would keep the token. The link is
-`/invite/:token`; the API takes the token only in a JSON body, never in a URL it logs, and the SPA sends no referrer from the
-invitation page. Pending invitations take no seat: the create is refused by the entitlement gate
-when the members alone fill the plan's `maxMembers`, and the accept counts the members again
+`/invite/:token`; the API takes the token only in a JSON body, never in a URL it logs, and the SPA
+sends no referrer from the invitation page. Pending invitations take no seat: the create is refused
+by the entitlement gate when the members alone fill the plan's `maxMembers`, and the accept counts
+the members again
 under the group row's lock (`PostgresInvitationRepository.accept`). An address-bound invitation is
 accepted only by an account that proved that address (`provenAddressOwner`). Create, accept and
 revoke write their audit rows in their own transaction. Creates are capped per user per hour,
