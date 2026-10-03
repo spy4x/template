@@ -409,8 +409,8 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    for an admin or the owner (`PATCH /api/groups/:id`, `group.rename`). A "Delete group"
    section, for the owner only, holds the confirmation text and the delete
    (`DELETE /api/groups/:id`, `group.delete`). Each later issue (members, roles and leaving #130;
-   invitations #131; ownership #132; moving notes #133; the extra fields #134) adds its own section to that screen, shown only to the roles that
-   may use it.
+   invitations #131; ownership #132; moving notes #133; the extra fields #134) adds its own section
+   to that screen, shown only to the roles that may use it.
 9. **Deleting a group.** A delete is soft: `groups.deleted_at` is set and the row, its members and
    its notes stay. The server refuses it with `LAST_GROUP` (409) when it is the actor's last active
    group, and the settings page then shows the button disabled with the reason. A member whose only
@@ -486,8 +486,9 @@ Invitations (#131): only `sha256(token)` is stored (`group_invitations.token_has
 is shown once, in the answer to its create, and never again: the create sends no
 `Idempotency-Key`, since the idempotency store would keep the token. The link is
 `/invite/:token`; the API takes the token only in a JSON body, never in a URL it logs, and the SPA
-sends no referrer from the invitation page. Pending invitations take no seat: the create is refused by the entitlement gate
-when the members alone fill the plan's `maxMembers`, and the accept counts the members again
+sends no referrer from the invitation page. Pending invitations take no seat: the create is refused
+by the entitlement gate when the members alone fill the plan's `maxMembers`, and the accept counts
+the members again
 under the group row's lock (`PostgresInvitationRepository.accept`). An address-bound invitation is
 accepted only by an account that proved that address (`provenAddressOwner`). Create, accept and
 revoke write their audit rows in their own transaction. Creates are capped per user per hour,
