@@ -75,6 +75,14 @@ deleted: the subscription stays stored as past due, and everything over a Free c
   customer's favour, and only by as long as Stripe's delivery was delayed.
 - Any other status clears it. A payment that makes the subscription active again brings the plan
   back at once; a later failure starts a new grace period.
+- Only a subscription that has paid gets the grace period
+  ([#247](https://github.com/spy4x/template/issues/247)). `subscriptions.ever_active` turns true at
+  the subscription's first active event and stays true while the same subscription is held; a new
+  subscription starts without it. A trial whose first charge fails goes from trialing straight to
+  past due, never active, so the group is on Free from that failure, which is the trial's end. The
+  grace exists to keep a paying customer whose card expired, not to lengthen a free trial.
+- An active event that Stripe delivers after a newer past-due one is stale and changes nothing
+  else, but it still sets `ever_active`: it proves that the subscription paid.
 - `effectivePlanId(subscription, now, graceDays)` in `libs/domain/billing/+lib.ts` decides. The
   command bus's plan check and the billing read both take the current time and the grace period
   from `planClockOf` (`apps/api/features/billing/config.ts`), so the cut-off is exact to the
@@ -105,7 +113,9 @@ group goes back to Free.
 The webhook stores the trial's end (`subscriptions.trial_end`). The group has the plan while the
 subscription is trialing and the stored end is still ahead, and gets Free from that instant on,
 even before Stripe's next event arrives. When the trial converts, Stripe reports the subscription
-active and the plan stays.
+active and the plan stays. When the charge at the trial's end fails, the subscription goes past due
+without ever having been active, so it gets no grace period ("Failed payments" above): the group
+stays on Free while Stripe retries, and a payment that goes through brings the plan back.
 
 ## Cancelling and undoing
 
@@ -130,6 +140,10 @@ apps. Other members see neither.
 
 `billingNoticeOf` (`libs/domain/billing/+lib.ts`) decides the banner from the stored subscription
 and the request clock. A failed payment wins over the other two.
+
+A failed trial has no grace, so its banner and mail say the group is already on Free and that
+updating the card brings the plan back; a failed renewal's say the plan is kept for the grace
+period.
 
 The webhook queues each mail as a job in the outbox, in the transaction that stores the event
 (`libs/server/billing/billing-notices.ts`): a failed payment and a cancellation at once, a trial's

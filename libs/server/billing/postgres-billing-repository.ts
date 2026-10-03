@@ -81,7 +81,8 @@ export class PostgresBillingRepository implements BillingRepository {
           cancel_at_period_end,
           past_due_since,
           trial_end,
-          quantity
+          quantity,
+          ever_active
         FROM subscriptions
         WHERE group_id = ${groupId}
       `
@@ -97,6 +98,7 @@ export class PostgresBillingRepository implements BillingRepository {
         pastDueSince: row.pastDueSince,
         trialEnd: row.trialEnd,
         quantity: row.quantity,
+        everActive: row.everActive,
       }
       : null
   }
@@ -163,6 +165,9 @@ export class PostgresBillingRepository implements BillingRepository {
       // (Stripe's `unpaid` arrives as past due too) keeps the stored start, and any other status
       // clears it.
       const pastDue = subscription.status === SubscriptionStatus.PastDue
+      // Only a subscription that has paid gets the grace period (#247): `ever_active` turns true at
+      // its first active event and stays true while the same subscription is held.
+      const active = subscription.status === SubscriptionStatus.Active
       const before = (
         await transaction<HeldRow[]>`
           SELECT plan_id, status, cancel_at_period_end, trial_end
@@ -181,7 +186,8 @@ export class PostgresBillingRepository implements BillingRepository {
           provider_event_rank,
           past_due_since,
           trial_end,
-          quantity
+          quantity,
+          ever_active
         ) VALUES (
           ${group.id},
           ${subscription.id},
@@ -193,7 +199,8 @@ export class PostgresBillingRepository implements BillingRepository {
           ${rank},
           ${pastDue ? event.occurredAt : null},
           ${subscription.trialEnd},
-          ${subscription.quantity}
+          ${subscription.quantity},
+          ${active}
         )
         ON CONFLICT (group_id) DO UPDATE SET
           provider_subscription_id = EXCLUDED.provider_subscription_id,
@@ -211,6 +218,10 @@ export class PostgresBillingRepository implements BillingRepository {
           END,
           trial_end = EXCLUDED.trial_end,
           quantity = EXCLUDED.quantity,
+          ever_active = EXCLUDED.ever_active OR (
+            subscriptions.ever_active
+            AND subscriptions.provider_subscription_id = EXCLUDED.provider_subscription_id
+          ),
           updated_at = CURRENT_TIMESTAMP
         WHERE (subscriptions.provider_event_at, subscriptions.provider_event_rank)
             <= (EXCLUDED.provider_event_at, EXCLUDED.provider_event_rank)
@@ -219,7 +230,17 @@ export class PostgresBillingRepository implements BillingRepository {
             OR ${paying})
         RETURNING group_id
       `
-      if (written.length === 0) return "stale"
+      if (written.length === 0) {
+        // A late active event changes nothing else, but still proves that the subscription paid.
+        if (active) {
+          await transaction`
+            UPDATE subscriptions SET ever_active = TRUE, updated_at = CURRENT_TIMESTAMP
+            WHERE group_id = ${group.id} AND provider_subscription_id = ${subscription.id}
+              AND NOT ever_active
+          `
+        }
+        return "stale"
+      }
 
       // One customer pays for one group. A customer another group already holds stays with it, so
       // an event naming it is still applied instead of failing on the unique index forever.

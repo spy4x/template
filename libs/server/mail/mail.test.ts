@@ -201,6 +201,7 @@ describe("billingNoticeMail", () => {
       planName: "Pro",
       at: new Date("2026-10-15T23:30:00Z"),
       link,
+      planKept: true,
     })
 
   it("says when a trial ends, in UTC, and that it is charged unless cancelled", () => {
@@ -217,6 +218,21 @@ describe("billingNoticeMail", () => {
 
     expect(failed.subject).toBe("A payment for Pro failed")
     expect(failed.text).toContain("Update the card from the group's page to keep it.")
+  })
+
+  it("tells a failed trial's owner the group is already on the free plan", () => {
+    const failedTrial = billingNoticeMail(brand, {
+      to: "ann@example.com",
+      kind: BillingNoticeKind.PaymentFailed,
+      groupName: "Tea club",
+      planName: "Pro",
+      at: new Date("2026-10-15T23:30:00Z"),
+      link,
+      planKept: false,
+    })
+
+    expect(failedTrial.text).toContain("The group is now on the free plan.")
+    expect(failedTrial.text).not.toContain("kept for a few days")
   })
 
   it("says when a cancelled plan ends and that it can still be renewed", () => {

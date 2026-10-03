@@ -385,6 +385,9 @@ CREATE TABLE subscriptions (
     -- The seats the provider last reported the subscription bills (#205). A per-member plan bills
     -- one per member; the worker changes the subscription when the member count differs.
     quantity INTEGER,
+    -- Whether this subscription was ever active, so it has paid at least once (#247). Only then
+    -- does a failed payment get the grace period; a trial whose first charge fails gets none.
+    ever_active BOOLEAN DEFAULT FALSE NOT NULL,
     CONSTRAINT subscriptions_status_check CHECK (status BETWEEN 1 AND 6),
     CONSTRAINT subscriptions_provider_event_rank_check CHECK (provider_event_rank BETWEEN 1 AND 3),
     CONSTRAINT subscriptions_past_due_since_check

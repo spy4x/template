@@ -213,6 +213,11 @@ export interface BillingNoticeMailInput {
   at: Date
   /** The group's page, where the owner opens the provider's portal. */
   link: string
+  /**
+   * For a failed payment: whether the plan is kept for the grace period. A trial whose first charge
+   * failed has none (`false`): the group is already on the free plan. Unused for the other notices.
+   */
+  planKept: boolean
 }
 
 /**
@@ -222,7 +227,7 @@ export interface BillingNoticeMailInput {
  */
 export function billingNoticeMail(
   brand: MailBrand,
-  { to, kind, groupName, planName, at, link }: BillingNoticeMailInput,
+  { to, kind, groupName, planName, at, link, planKept }: BillingNoticeMailInput,
 ): EmailMessage {
   const group = `"${groupName}"`
   const date = billingDate(at)
@@ -235,7 +240,9 @@ export function billingNoticeMail(
     [BillingNoticeKind.PaymentFailed]: [
       `A payment for ${planName} failed`,
       `A payment for the ${planName} plan of ${group} failed.`,
-      `The plan is kept for a few days while the payment is retried. Update the card from the group's page to keep it.`,
+      planKept
+        ? `The plan is kept for a few days while the payment is retried. Update the card from the group's page to keep it.`
+        : `The group is now on the free plan. Update the card from the group's page to get the plan back.`,
     ],
     [BillingNoticeKind.PlanEnding]: [
       `Your ${planName} plan ends on ${date}`,

@@ -72,6 +72,7 @@ export function billingNoticeMailJob(
       planName: findPlan(subscription.planId ?? "")?.name ?? "paid",
       at: accessEndsAt(subscription) ?? new Date(runAt),
       link: new URL(`/groups/${encodeURIComponent(groupId)}`, brand.webAppUrl).href,
+      planKept: subscription.everActive,
     }))
     if (!result.ok) {
       log("error: a billing notice mail was not sent and will be retried")

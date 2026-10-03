@@ -176,6 +176,11 @@ export interface StoredSubscription {
   trialEnd: Date | null
   /** The seats the provider last reported it bills, or `null` when it reported none. */
   quantity: number | null
+  /**
+   * Whether the provider ever reported this subscription active, so it has paid at least once. Only
+   * then does a failed payment keep the plan for the grace period.
+   */
+  everActive: boolean
 }
 
 /**
@@ -194,11 +199,13 @@ export function accessEndsAt(subscription: StoredSubscription): Date | null {
 
 /**
  * The moment a past-due subscription stops keeping its plan: `graceDays` after it first became past
- * due. `null` for any other status. A past-due subscription with no recorded start has no grace.
+ * due. `null` for any other status. A past-due subscription with no recorded start has no grace, and
+ * neither has one that never was active: a trial whose first charge fails ends when it fails.
  */
 export function graceEndsAt(subscription: StoredSubscription, graceDays: number): Date | null {
   if (subscription.status !== BillingStatus.PastDue) return null
   if (subscription.pastDueSince === null) return new Date(0)
+  if (!subscription.everActive) return subscription.pastDueSince
   return new Date(subscription.pastDueSince.getTime() + graceDays * DAY_MS)
 }
 

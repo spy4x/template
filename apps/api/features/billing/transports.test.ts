@@ -149,6 +149,7 @@ const PRO: StoredSubscription = {
   pastDueSince: null,
   trialEnd: null,
   quantity: 1,
+  everActive: true,
 }
 
 async function code(response: Response): Promise<string> {

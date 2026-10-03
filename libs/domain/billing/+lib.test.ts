@@ -47,6 +47,7 @@ const subscription = (status: BillingStatus, planId: string | null = PRO_PLAN_ID
     pastDueSince: status === BillingStatus.PastDue ? FAILED_AT : null,
     trialEnd: null,
     quantity: 1,
+    everActive: status !== BillingStatus.Trialing,
   }) satisfies StoredSubscription
 
 /** When the trial and the period end in the tests of trials and cancellations. */
@@ -107,6 +108,15 @@ describe("billing domain", () => {
     const unmarked = { ...subscription(BillingStatus.PastDue), pastDueSince: null }
 
     expect(effectivePlanId(unmarked, FAILED_AT, DEFAULT_GRACE_DAYS)).toBe(FREE_PLAN_ID)
+  })
+
+  it("gives no grace to a trial whose first charge failed: it is free from the failure on", () => {
+    const failedTrial = { ...subscription(BillingStatus.PastDue), everActive: false }
+
+    expect(graceEndsAt(failedTrial, DEFAULT_GRACE_DAYS)).toEqual(FAILED_AT)
+    expect(effectivePlanId(failedTrial, FAILED_AT, DEFAULT_GRACE_DAYS)).toBe(FREE_PLAN_ID)
+    expect(billingNoticeOf(failedTrial, FAILED_AT, DEFAULT_GRACE_DAYS))
+      .toEqual({ kind: BillingNoticeKind.PaymentFailed, at: FAILED_AT, daysLeft: 0 })
   })
 
   it("ends the grace period the configured number of days after it began, only when past due", () => {
