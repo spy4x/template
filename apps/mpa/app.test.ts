@@ -41,7 +41,11 @@ import { EMAIL_FAILURES } from "@ui/email-screen.tsx"
 import { pageMiddleware } from "./middleware.ts"
 import type { State } from "./utils.ts"
 
-const config = { apiUrl: "http://api:8000", webAppOrigin: "https://app.example.com" }
+const config = {
+  apiUrl: "http://api:8000",
+  webAppOrigin: "https://app.example.com",
+  apiOrigin: "https://app.example.com",
+}
 const sameOrigin = { origin: config.webAppOrigin, "sec-fetch-site": "same-origin" }
 const info = {
   remoteAddr: { transport: "tcp", hostname: "192.0.2.7", port: 4000 },
@@ -1853,5 +1857,55 @@ describe("the subscription pages", () => {
     expect(response.status).toBe(429)
     expect(response.headers.get("retry-after")).toBe("30")
     expect(await response.text()).toContain("Could not unsubscribe")
+  })
+})
+
+describe("an MPA on its own domain", () => {
+  const ownDomain = { ...config, webAppOrigin: "https://www.example.com" }
+
+  /** An app whose one action calls the API, with a fake API that records each call's headers. */
+  function ownDomainApp() {
+    const seen: Headers[] = []
+    const fetch = (input: string | URL | Request, init?: RequestInit) => {
+      seen.push(new Request(input, init).headers)
+      return Promise.resolve(Response.json({}))
+    }
+    const handler = new App<State>()
+      .use(pageMiddleware(ownDomain, fetch as typeof globalThis.fetch))
+      .post("/act", async (ctx) => {
+        await ctx.state.api.call("POST", "/api/auth/sign-out")
+        return new Response(null, { status: 204 })
+      })
+      .handler()
+    const post = (headers: Record<string, string>) =>
+      handler(new Request(`${ownDomain.webAppOrigin}/act`, { method: "POST", headers }), info)
+    return { seen, post }
+  }
+
+  it("presents its own posts to the API as coming from the API's origin", async () => {
+    const { seen, post } = ownDomainApp()
+
+    const response = await post({ origin: ownDomain.webAppOrigin, "sec-fetch-site": "same-origin" })
+
+    expect(response.status).toBe(204)
+    expect(seen[0].get("origin")).toBe(ownDomain.apiOrigin)
+    expect(seen[0].get("sec-fetch-site")).toBe("same-origin")
+  })
+
+  it("refuses a post from the API's origin before calling the API", async () => {
+    const { seen, post } = ownDomainApp()
+
+    const response = await post({ origin: ownDomain.apiOrigin, "sec-fetch-site": "same-origin" })
+
+    expect(response.status).toBe(403)
+    expect(seen).toEqual([])
+  })
+
+  it("passes an origin of null on unchanged for the API to judge", async () => {
+    const { seen, post } = ownDomainApp()
+
+    await post({ origin: "null", "sec-fetch-site": "same-origin" })
+
+    expect(seen[0].get("origin")).toBe("null")
   })
 })

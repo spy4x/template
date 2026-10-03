@@ -11,7 +11,11 @@ describe("readMpaConfig", () => {
     expect(
       readMpaConfig(env({ ENV: "prod", DOMAIN: "app.example.com", API_URL: "http://api:8000" })),
     )
-      .toEqual({ apiUrl: "http://api:8000", webAppOrigin: "https://app.example.com" })
+      .toEqual({
+        apiUrl: "http://api:8000",
+        webAppOrigin: "https://app.example.com",
+        apiOrigin: "https://app.example.com",
+      })
   })
 
   it("expects the browser at plain http in development", () => {
@@ -19,6 +23,19 @@ describe("readMpaConfig", () => {
       readMpaConfig(env({ ENV: "dev", DOMAIN: "app.localhost:8080", API_URL: "http://api:8000" }))
         .webAppOrigin,
     ).toBe("http://app.localhost:8080")
+  })
+
+  it("serves its own domain when MPA_DOMAIN is set, and keeps the API's origin for the API", () => {
+    const config = readMpaConfig(
+      env({
+        ENV: "prod",
+        DOMAIN: "app.example.com",
+        MPA_DOMAIN: "www.example.com",
+        API_URL: "http://api:8000",
+      }),
+    )
+    expect(config.webAppOrigin).toBe("https://www.example.com")
+    expect(config.apiOrigin).toBe("https://app.example.com")
   })
 
   it("refuses to start without the API's address", () => {

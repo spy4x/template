@@ -10,7 +10,8 @@ import { createSameOriginCheck } from "@spy4x/server/http/same-origin"
  * 1. refuses a post from another site with 403 before anything else runs: the API's own rule
  *    (`Sec-Fetch-Site: same-origin`, and `Origin` equal to `webAppOrigin` or `null`), without its
  *    session cookie check, since the sign-in and sign-up forms post before there is a session;
- * 2. gives the route an API client bound to this request;
+ * 2. gives the route an API client bound to this request, which presents an MPA on its own domain
+ *    to the API as the API's origin once step 1 has passed;
  * 3. hands the browser every cookie the API set, exactly as the API wrote it (`HttpOnly`, `Secure`
  *    outside development, `SameSite=Lax`);
  * 4. answers a form it cannot read with {@link FormRejected}'s status;
@@ -36,6 +37,9 @@ export function pageMiddleware(
       request: ctx.req,
       remoteAddress: remoteAddress(ctx.info),
       setCookies,
+      origins: config.webAppOrigin === config.apiOrigin
+        ? undefined
+        : { page: config.webAppOrigin, api: config.apiOrigin },
       fetch,
     })
     let response: Response

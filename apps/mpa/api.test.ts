@@ -50,6 +50,31 @@ describe("createApi", () => {
     expect(await sent.json()).toEqual({ username: "ada", password: "pw" })
   })
 
+  it("swaps only the page's own origin for the API's when given origins", async () => {
+    const origins = { page: "https://www.example.com", api: "https://app.example.com" }
+    const sent = async (origin: string) => {
+      const { seen, fetch } = fakeFetch(Response.json({}))
+      const request = new Request("https://www.example.com/act", {
+        method: "POST",
+        headers: { origin },
+      })
+      await createApi({
+        apiUrl: "http://api:8000",
+        request,
+        remoteAddress: "",
+        setCookies: [],
+        origins,
+        fetch,
+      })
+        .call("POST", "/api/auth/sign-out")
+      return seen[0].headers.get("origin")
+    }
+
+    expect(await sent("https://www.example.com")).toBe("https://app.example.com")
+    expect(await sent("https://evil.example.net")).toBe("https://evil.example.net")
+    expect(await sent("null")).toBe("null")
+  })
+
   it("keeps the client address a proxy in front already set", async () => {
     const { seen, fetch } = fakeFetch(Response.json({}))
     const request = new Request("https://app.example.com/", {

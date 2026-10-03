@@ -1,8 +1,9 @@
 import { type PlanRefusal, readPlanRefusal } from "@domain/billing"
 /**
- * The browser's request headers the API needs, passed on unchanged: the session cookie, the two
- * headers the API's cross-site guard checks, and what its audit log and rate limits record. The
- * MPA never writes `Origin` or `Sec-Fetch-Site` itself, so it cannot vouch for a post the browser
+ * The browser's request headers the API needs: the session cookie, the two headers the API's
+ * cross-site guard checks, and what its audit log and rate limits record. All pass on unchanged,
+ * except an `Origin` equal to the MPA's own when the MPA has its own domain (see `createApi`). The
+ * MPA never adds `Origin` or `Sec-Fetch-Site` itself, so it cannot vouch for a post the browser
  * did not make.
  */
 const FORWARDED_HEADERS = [
@@ -34,11 +35,17 @@ export interface Api {
  *
  * `remoteAddress` fills `X-Real-IP` when no proxy in front of the MPA set it, so the API's rate
  * limits count the browser, not the MPA.
+ *
+ * `origins` is set when the MPA has its own domain (`MPA_DOMAIN`). The API accepts posts only from
+ * its own origin, so a browser `Origin` equal to `origins.page` reaches the API as `origins.api`.
+ * That is safe because `pageMiddleware` has already refused every post whose `Origin` is not the
+ * MPA's own; any other value, `null` included, passes on unchanged for the API to judge.
  */
 export function createApi(
-  { apiUrl, request, remoteAddress, setCookies, fetch = globalThis.fetch }: {
+  { apiUrl, request, remoteAddress, setCookies, origins, fetch = globalThis.fetch }: {
     apiUrl: string
     request: Request
+    origins?: { page: string; api: string }
     remoteAddress: string
     setCookies: string[]
     fetch?: typeof globalThis.fetch
@@ -51,6 +58,7 @@ export function createApi(
         const value = request.headers.get(name)
         if (value !== null) headers.set(name, value)
       }
+      if (origins && headers.get("origin") === origins.page) headers.set("origin", origins.api)
       if (!headers.has("x-real-ip") && remoteAddress) headers.set("x-real-ip", remoteAddress)
       if (json !== undefined) headers.set("content-type", "application/json")
       const response = await fetch(new URL(path, apiUrl), {

@@ -3,15 +3,21 @@ export interface MpaConfig {
   /** Where the MPA reaches the API from the server, such as `http://api:8000`. Never a browser URL. */
   apiUrl: string
   /**
-   * The origin the browser sends, such as `https://app.example.com`: the same value the API derives
-   * from `ENV` and `DOMAIN`, so both refuse the same cross-site posts.
+   * The origin the browser sees the MPA at, such as `https://www.example.com`: `MPA_DOMAIN` when set,
+   * else `DOMAIN`. The MPA refuses a post from any other origin.
    */
   webAppOrigin: string
+  /**
+   * The origin the API accepts posts from, such as `https://app.example.com`: the value the API
+   * derives from `ENV` and `DOMAIN`. Equal to `webAppOrigin` when the MPA serves `DOMAIN` itself.
+   */
+  apiOrigin: string
 }
 
 /**
- * Reads the configuration from the environment: `ENV`, `DOMAIN` (as the API reads them) and
- * `API_URL`. Throws when one is missing, so a misconfigured MPA refuses to start.
+ * Reads the configuration from the environment: `ENV`, `DOMAIN` (as the API reads them), `API_URL`
+ * and the optional `MPA_DOMAIN`. Throws when a required one is missing, so a misconfigured MPA
+ * refuses to start.
  */
 export function readMpaConfig(env: { get(name: string): string | undefined }): MpaConfig {
   const required = (name: string): string => {
@@ -19,9 +25,12 @@ export function readMpaConfig(env: { get(name: string): string | undefined }): M
     if (!value) throw new Error(`${name} is required: the MPA cannot start without it`)
     return value
   }
-  const isDev = required("ENV") === "dev"
+  const scheme = required("ENV") === "dev" ? "http" : "https"
+  const apiOrigin = new URL(`${scheme}://${required("DOMAIN")}`).origin
+  const mpaDomain = env.get("MPA_DOMAIN")
   return {
     apiUrl: new URL(required("API_URL")).origin,
-    webAppOrigin: new URL(`http${isDev ? "" : "s"}://${required("DOMAIN")}`).origin,
+    webAppOrigin: mpaDomain ? new URL(`${scheme}://${mpaDomain}`).origin : apiOrigin,
+    apiOrigin,
   }
 }
