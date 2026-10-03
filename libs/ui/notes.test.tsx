@@ -12,7 +12,7 @@ import { renderToString } from "preact-render-to-string"
 import type { PlanRefusal } from "@domain/billing"
 import { BILLING_PATHS } from "./billing-screen.tsx"
 import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
-import { NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
+import { type NoteRow, NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
 import { NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
@@ -119,6 +119,11 @@ function focused(): string | undefined {
   return element?.getAttribute("data-e2e") ?? element?.tagName
 }
 
+/** The row of the list that holds what has focus: its `data-e2e`. */
+function focusedRow(): string | null | undefined {
+  return document.activeElement?.closest("li")?.getAttribute("data-e2e")
+}
+
 /** The opening tag of the element marked `data-e2e="<hook>"` in `html`, or a failure naming it. */
 function tagOf(html: string, hook: string): string {
   const tag = html.match(new RegExp(`<[a-z]+\\b[^>]*data-e2e="${hook}"[^>]*>`))?.[0]
@@ -143,6 +148,7 @@ const groceries = {
   updatedAt: "2026-10-01T10:00:00.000Z",
 }
 const trip = { ...groceries, id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111005", title: "Trip", body: "" }
+const plan = { ...groceries, id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111006", title: "Plan", body: "" }
 const targets = [
   { id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111003", name: "Family" },
   { id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111004", name: "Work" },
@@ -153,7 +159,6 @@ const listDefaults: NotesScreenProps = {
   notes: [groceries, trip],
   loading: false,
   listError: null,
-  nextPageHref: null,
   moveTargets: targets,
   onMove: () => {},
   onDelete: () => {},
@@ -326,6 +331,78 @@ describe("NotesScreen in the browser", () => {
     expect(count("[data-e2e=note-select]")).toBe(2)
     expect(find("[data-e2e=notes-move]").textContent).toContain("Could not move the notes")
   })
+  it("moves focus to the next row's menu after a confirmed delete, else the previous row's, else More actions", async () => {
+    const listOf = (notes: NoteRow[]) => <NotesScreen {...listDefaults} notes={notes} />
+    const deleteRow = async (note: NoteRow) => {
+      await click(`${row(note)} [data-e2e=note-menu]`)
+      await click(`${row(note)} [data-e2e=note-delete]`)
+      await clickText("Delete", "[data-e2e=note-delete-dialog]")
+    }
+    await mount(listOf([groceries, trip, plan]))
+
+    await deleteRow(trip)
+    await rerender(listOf([groceries, plan]))
+    expect(focusedRow()).toBe(`note-${plan.id}`)
+
+    await deleteRow(plan)
+    await rerender(listOf([groceries]))
+    expect(focusedRow()).toBe(`note-${groceries.id}`)
+
+    await deleteRow(groceries)
+    await rerender(listOf([]))
+    expect(focused()).toBe("notes-menu")
+  })
+
+  it("moves focus to the next row's menu once a move from a row's menu goes through", async () => {
+    await mount(<NotesScreen {...listDefaults} />)
+
+    await click(`${row(groceries)} [data-e2e=note-menu]`)
+    await clickText("Move to Work", row(groceries))
+    await rerender(<NotesScreen {...listDefaults} notes={[trip]} />)
+
+    expect(focusedRow()).toBe(`note-${trip.id}`)
+    expect(focused()).toBe("note-menu")
+  })
+
+  it("moves focus to More actions when the selection ends by Cancel or by a move", async () => {
+    await mount(<NotesScreen {...listDefaults} />)
+    await click("[data-e2e=notes-menu]")
+    await click("[data-e2e=notes-select]")
+
+    await click("[data-e2e=notes-select-cancel]")
+    expect(focused()).toBe("notes-menu")
+
+    await click("[data-e2e=notes-menu]")
+    await click("[data-e2e=notes-select]")
+    find<HTMLElement>("[data-e2e=note-select]").focus()
+    await rerender(<NotesScreen {...listDefaults} moving />)
+    await rerender(<NotesScreen {...listDefaults} moving={false} />)
+    expect(focused()).toBe("notes-menu")
+  })
+
+  it("ticks a note from a tap anywhere on its row while selecting, and opens nothing", async () => {
+    await mount(<NotesScreen {...listDefaults} />)
+    await click("[data-e2e=notes-menu]")
+    await click("[data-e2e=notes-select]")
+
+    expect(count(`${row(trip)} a`)).toBe(0)
+    await click(`${row(trip)} [data-e2e=note-item-title]`)
+
+    expect(find<HTMLInputElement>(`${row(trip)} [data-e2e=note-select]`).checked).toBe(true)
+    expect(find("[data-e2e=notes-move]").textContent).toContain("1 selected")
+  })
+
+  it("disables Move in a row's menu while a move is pending", async () => {
+    const move = spy<[{ toGroupId: string; noteIds: string[] }]>()
+    await mount(<NotesScreen {...listDefaults} onMove={move.fn} moving />)
+
+    await click(`${row(groceries)} [data-e2e=note-menu]`)
+
+    const items = document.querySelectorAll<HTMLButtonElement>(
+      `${row(groceries)} [data-e2e=note-move]`,
+    )
+    expect([...items].map((item) => item.disabled)).toEqual([true, true])
+  })
 })
 
 const editorDefaults: NoteEditorScreenProps = {
@@ -334,7 +411,6 @@ const editorDefaults: NoteEditorScreenProps = {
   notFound: false,
   note: null,
   value: { title: "", body: "" },
-  draftId: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111009",
   errors: { title: null, form: null },
   saving: false,
   deleting: false,
@@ -564,5 +640,13 @@ describe("NoteEditorScreen in the browser", () => {
     expect(focused()).toBe("plan-refusal")
     expect(await click("[data-e2e=plan-refusal] a")).toBe(true)
     expect(navigate.calls).toEqual([[BILLING_PATHS.pricing(groupId)]])
+  })
+
+  it("disables Delete in the page's menu while a delete is pending", async () => {
+    await mount(<NoteEditorScreen {...editing} deleting />)
+
+    await click("[data-e2e=note-menu]")
+
+    expect(find<HTMLButtonElement>("[data-e2e=note-delete]").disabled).toBe(true)
   })
 })

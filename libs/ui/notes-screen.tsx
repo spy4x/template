@@ -1,4 +1,4 @@
-import type { ComponentChildren, JSX } from "preact"
+import type { ComponentChildren, JSX, Ref } from "preact"
 import { useEffect, useRef, useState } from "preact/hooks"
 import { Button, buttonClasses } from "@spy4x/preact-ui/button"
 import { Checkbox } from "@spy4x/preact-ui/checkbox"
@@ -14,6 +14,15 @@ import { timeAgo } from "@spy4x/platform/universal/time"
 import type { PlanRefusal } from "@domain/billing"
 import { canMutateNotes, type GroupRole } from "@domain/groups"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
+
+/**
+ * Where focus goes once the list changes: after the row of note `id` (at `index`) leaves, the row
+ * now in its place; with no `id`, the header's "More actions".
+ */
+interface FocusAfter {
+  id: string | null
+  index: number
+}
 
 /** One note as the screen shows it. */
 export interface NoteRow {
@@ -125,8 +134,6 @@ export interface NotesScreenProps {
   loading: boolean
   /** The error of the list itself, such as a failed read. */
   listError: string | null
-  /** The next page of the list; `null` when this is the last. */
-  nextPageHref: string | null
   /**
    * The other groups the person may move notes to. Empty (or left out) hides every move, so a
    * person with nowhere to move to sees a plain list.
@@ -155,16 +162,34 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
   const [selecting, setSelecting] = useState(false)
   const [ticked, setTicked] = useState<readonly string[]>([])
   const [deleting, setDeleting] = useState<NoteRow | null>(null)
+  const page = useRef<HTMLDivElement>(null)
+  const [focusAfter, setFocusAfter] = useState<FocusAfter | null>(null)
 
   // A finished move with no refusal ends the selection: the ticked notes have left the list.
   const wasMoving = useRef(props.moving)
   useEffect(() => {
     if (wasMoving.current && !props.moving && !props.moveError) {
+      if (selecting) setFocusAfter({ id: null, index: 0 })
       setSelecting(false)
       setTicked([])
     }
     wasMoving.current = props.moving
   }, [props.moving, props.moveError])
+
+  // A row that left the list, or a selection that ended, would leave focus on the page's body.
+  // Focus goes to the next row's menu, else the previous row's, else the header's "More actions".
+  useEffect(() => {
+    if (!focusAfter) return
+    if (props.moveError) return setFocusAfter(null)
+    if (focusAfter.id && notes.some((note) => note.id === focusAfter.id)) return
+    const root = page.current
+    const menus = root?.querySelectorAll<HTMLElement>("[data-e2e=note-menu]")
+    const row = focusAfter.id && menus
+      ? menus[focusAfter.index] ?? menus[focusAfter.index - 1]
+      : undefined
+    ;(row ?? root?.querySelector<HTMLElement>("[data-e2e=notes-menu]"))?.focus()
+    setFocusAfter(null)
+  }, [focusAfter, notes, props.moveError])
 
   if (!group) {
     return (
@@ -188,7 +213,10 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
   const stopSelecting = () => {
     setSelecting(false)
     setTicked([])
+    setFocusAfter({ id: null, index: 0 })
   }
+  const leaving = (note: NoteRow) =>
+    setFocusAfter({ id: note.id, index: notes.findIndex((row) => row.id === note.id) })
 
   const list = (
     <ul
@@ -209,7 +237,10 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
               note={note}
               moveTargets={moveTargets}
               onMove={props.onMove &&
-                ((toGroupId) => props.onMove?.({ toGroupId, noteIds: [note.id] }))}
+                ((toGroupId) => {
+                  leaving(note)
+                  props.onMove?.({ toGroupId, noteIds: [note.id] })
+                })}
               onDelete={onDelete && (() => setDeleting(note))}
               disabled={props.moving}
             />
@@ -220,7 +251,7 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
   )
 
   return (
-    <ListPage>
+    <ListPage pageRef={page}>
       <NotesPageHeader
         title="Notes"
         subtitle={group.name}
@@ -303,13 +334,6 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
           </ScreenForm>
         )
         : list}
-      {props.nextPageHref && (
-        <div>
-          <Button href={props.nextPageHref} navigate={navigate} variant="ghost">
-            Older notes
-          </Button>
-        </div>
-      )}
       {deleting && (
         <ConfirmDialog
           title="Delete this note?"
@@ -320,6 +344,7 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
           dataE2E="note-delete-dialog"
           onConfirm={() => {
             setDeleting(null)
+            leaving(deleting)
             onDelete?.({ id: deleting.id, version: deleting.version })
           }}
           onCancel={() => setDeleting(null)}
@@ -330,9 +355,11 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
 }
 
 /** The list page's column: the full content width, about 64 rem. */
-function ListPage({ children }: { children?: ComponentChildren }): JSX.Element {
+function ListPage(
+  { children, pageRef }: { children?: ComponentChildren; pageRef?: Ref<HTMLDivElement> },
+): JSX.Element {
   return (
-    <div class="mx-auto w-full max-w-5xl">
+    <div class="mx-auto w-full max-w-5xl" ref={pageRef}>
       <Stack gap="lg">{children}</Stack>
     </div>
   )
@@ -406,25 +433,11 @@ function NoteItem(
     menu: ComponentChildren
   },
 ): JSX.Element {
-  return (
-    <li
-      class="relative flex min-h-16 items-center gap-3 px-4 py-3 transition-colors hover:bg-hover"
-      data-e2e={`note-${note.id}`}
-    >
-      {selecting && (
-        <Checkbox
-          name="noteIds"
-          value={note.id}
-          checked={ticked}
-          onChange={(event) => onTick(event.currentTarget.checked)}
-          aria-label={`Tick ${note.title}`}
-          class="relative z-1"
-          data-e2e="note-select"
-        />
-      )}
-      <div class="min-w-0 flex-1">
-        <div class="flex items-baseline gap-3">
-          <h2 class="min-w-0 flex-1 truncate text-sm font-medium" data-e2e="note-item-title">
+  const summary = (
+    <div class="min-w-0 flex-1">
+      <div class="flex items-baseline gap-3">
+        <h2 class="min-w-0 flex-1 truncate text-sm font-medium" data-e2e="note-item-title">
+          {selecting ? note.title : (
             <Link
               href={NOTE_PATHS.note(note.id)}
               navigate={navigate}
@@ -432,18 +445,42 @@ function NoteItem(
             >
               {note.title}
             </Link>
-          </h2>
-          {note.updatedAt && (
-            <time class="shrink-0 text-xs text-muted" dateTime={note.updatedAt}>
-              {timeAgo(note.updatedAt)}
-            </time>
           )}
-        </div>
-        {note.body && (
-          <p class="truncate text-sm text-muted" data-e2e="note-item-body">{note.body}</p>
+        </h2>
+        {note.updatedAt && (
+          <time class="shrink-0 text-xs text-muted" dateTime={note.updatedAt}>
+            {timeAgo(note.updatedAt)}
+          </time>
         )}
       </div>
-      {menu && <div class="relative -my-2 -mr-2 shrink-0">{menu}</div>}
+      {note.body && (
+        <p class="truncate text-sm font-normal text-muted" data-e2e="note-item-body">{note.body}</p>
+      )}
+    </div>
+  )
+  return (
+    <li class="relative transition-colors hover:bg-hover" data-e2e={`note-${note.id}`}>
+      {selecting
+        // While selecting, the whole row is the tick box's label: a tap anywhere on it ticks.
+        ? (
+          <Checkbox
+            name="noteIds"
+            value={note.id}
+            checked={ticked}
+            onChange={(event) => onTick(event.currentTarget.checked)}
+            aria-label={`Tick ${note.title}`}
+            labelClass="flex min-h-16 w-full cursor-pointer px-4 py-3"
+            data-e2e="note-select"
+          >
+            {summary}
+          </Checkbox>
+        )
+        : (
+          <div class="flex min-h-16 items-center gap-3 px-4 py-3">
+            {summary}
+            {menu && <div class="relative -my-2 -mr-2 shrink-0">{menu}</div>}
+          </div>
+        )}
     </li>
   )
 }

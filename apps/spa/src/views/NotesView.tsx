@@ -38,7 +38,6 @@ export function NotesView() {
         notes={store.notes.value}
         loading={store.loading.value || groupsStore.loading.value || groupId === null}
         listError={store.listError.value}
-        nextPageHref={null}
         moveTargets={membership && canMutateNotes(membership.role)
           ? moveTargetsOf(groupsStore.groups.value, membership.id)
           : []}
