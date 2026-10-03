@@ -171,7 +171,7 @@ describe("GroupSettingsView", () => {
       notice: null,
       seatPrice: null,
     }
-    const sentence = "stays on your card"
+    const sentence = "your card is not charged again"
 
     expect(render(known.id)).not.toContain(sentence)
     billingStore.current.value = { groupId: strangerId, billing: subscribed }

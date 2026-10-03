@@ -42,7 +42,7 @@ export interface GroupTransferSectionProps {
   role: GroupRole
   /** The members, oldest first; `null` while they are read. The owner is left out of the picker. */
   members: readonly GroupMemberRow[] | null
-  /** The group has a live subscription, which moves with it: the section says so. */
+  /** The group has a live subscription, which must be cancelled first: the section says so. */
   hasSubscription?: boolean
   draft: TransferDraft
   onDraftChange?: (draft: TransferDraft) => void
@@ -138,7 +138,7 @@ export function GroupTransferSection(
                           to another member. They become the owner and you become an admin. Only the
                           owner can delete the group, manage its plan or transfer it again.
                           {hasSubscription &&
-                            " The subscription moves with the group and stays on your card. The new owner can change its plan and see its billing details, and you can no longer cancel it. Ask them to add their own card."}
+                            " A subscription that renews blocks the transfer: cancel it under Manage billing first. The group keeps its plan until the paid period ends and your card is not charged again. The new owner subscribes with their own card and does not see your billing details."}
                         </p>
                         <Field id="group-transfer-member" label="New owner">
                           <Select

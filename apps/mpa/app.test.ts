@@ -1256,7 +1256,7 @@ describe("the groups pages", () => {
       return html.slice(start, html.indexOf("</p>", start))
     }
 
-    expect(await explanation(true)).toContain("stays on your card")
+    expect(await explanation(true)).toContain("your card is not charged again")
     expect(await explanation(false)).not.toContain("subscription")
   })
 
