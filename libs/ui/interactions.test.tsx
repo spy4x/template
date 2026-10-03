@@ -45,6 +45,15 @@ import {
   type ResetPasswordScreenProps,
 } from "./password-reset-screen.tsx"
 import {
+  SUBSCRIBE_FAILURES,
+  SubscribeForm,
+  type SubscribeFormProps,
+  SubscriptionConfirmScreen,
+  type SubscriptionConfirmScreenProps,
+  UnsubscribeScreen,
+  type UnsubscribeScreenProps,
+} from "./subscribe-screen.tsx"
+import {
   EMAIL_FAILURES,
   EmailScreen,
   type EmailScreenProps,
@@ -1334,5 +1343,162 @@ describe("GroupTransferSection in the browser", () => {
       <GroupTransferSection {...defaults} error={{ field: null, message: "Not a member" }} />,
     )
     expect(focused()).toBe("group-transfer-error")
+  })
+})
+
+const subscribeDefaults: SubscribeFormProps = {
+  email: "",
+  onEmailChange: () => {},
+  list: "news",
+  sent: false,
+  error: null,
+  pending: false,
+}
+
+describe("SubscribeForm in the browser", () => {
+  it("reports the typed address and subscribes through the app's callback", async () => {
+    const change = spy<[string]>()
+    const send = spy<[]>()
+    await mount(
+      <SubscribeForm {...subscribeDefaults} onEmailChange={change.fn} onSubmit={send.fn} />,
+    )
+
+    await type("[data-e2e=subscribe-email]", "ada@example.com")
+
+    expect(change.calls).toEqual([["ada@example.com"]])
+    expect(await submit(FORM_ACTIONS.subscribe)).toBe(true)
+    expect(send.calls).toHaveLength(1)
+  })
+
+  it("posts the address and the list natively when the app takes nothing over", async () => {
+    await mount(<SubscribeForm {...subscribeDefaults} email="ada@example.com" />)
+
+    const form = find<HTMLFormElement>(`form[action="${FORM_ACTIONS.subscribe}"]`)
+    expect(Object.fromEntries(new FormData(form))).toEqual({
+      list: "news",
+      email: "ada@example.com",
+    })
+    expect(await submit(FORM_ACTIONS.subscribe)).toBe(false)
+  })
+
+  it("ties an error to the address field and moves focus there", async () => {
+    await mount(<SubscribeForm {...subscribeDefaults} />)
+    find("[data-e2e=subscribe-submit]").focus()
+
+    await rerender(<SubscribeForm {...subscribeDefaults} error="Enter a valid e-mail address" />)
+
+    const field = find("[data-e2e=subscribe-email]")
+    const describedBy = field.getAttribute("aria-describedby") ?? ""
+    expect(describedBy.split(" ").map((id) => document.getElementById(id)?.textContent))
+      .toContain("Enter a valid e-mail address")
+    expect(focused()).toBe("subscribe-email")
+  })
+
+  it("moves focus to the outcome once the link is sent", async () => {
+    await mount(<SubscribeForm {...subscribeDefaults} />)
+    find("[data-e2e=subscribe-submit]").focus()
+
+    await rerender(<SubscribeForm {...subscribeDefaults} sent />)
+
+    expect(focused()).toBe("subscribe-sent-status")
+  })
+
+  it("leaves focus alone on a page that opens on the outcome", async () => {
+    await mount(<SubscribeForm {...subscribeDefaults} sent />)
+
+    expect(focused()).not.toBe("subscribe-sent-status")
+  })
+})
+
+const confirmDefaults: SubscriptionConfirmScreenProps = {
+  state: "confirm",
+  list: "news",
+  token: "token-from-the-link",
+  error: null,
+  pending: false,
+}
+
+describe("SubscriptionConfirmScreen in the browser", () => {
+  it("confirms through the app's callback", async () => {
+    const confirm = spy<[]>()
+    await mount(<SubscriptionConfirmScreen {...confirmDefaults} onSubmit={confirm.fn} />)
+
+    expect(await submit(FORM_ACTIONS.subscribeConfirm)).toBe(true)
+    expect(confirm.calls).toHaveLength(1)
+  })
+
+  it("posts the link's list and token natively when the app takes nothing over", async () => {
+    await mount(<SubscriptionConfirmScreen {...confirmDefaults} />)
+
+    const form = find<HTMLFormElement>(`form[action="${FORM_ACTIONS.subscribeConfirm}"]`)
+    expect(Object.fromEntries(new FormData(form)))
+      .toEqual({ list: "news", token: "token-from-the-link" })
+    expect(await submit(FORM_ACTIONS.subscribeConfirm)).toBe(false)
+  })
+
+  it("shows a failed confirm under the form and moves focus there", async () => {
+    await mount(<SubscriptionConfirmScreen {...confirmDefaults} />)
+    find("[data-e2e=subscription-confirm-submit]").focus()
+
+    await rerender(<SubscriptionConfirmScreen {...confirmDefaults} state="error" />)
+
+    expect(find("[data-e2e=subscription-confirm-error]").textContent)
+      .toBe(SUBSCRIBE_FAILURES.confirm)
+    expect(focused()).toBe("subscription-confirm-error")
+  })
+
+  it("moves focus to the outcome once the subscription is confirmed", async () => {
+    await mount(<SubscriptionConfirmScreen {...confirmDefaults} />)
+    find("[data-e2e=subscription-confirm-submit]").focus()
+
+    await rerender(<SubscriptionConfirmScreen {...confirmDefaults} state="done" />)
+
+    expect(focused()).toBe("subscription-confirm-done-status")
+  })
+})
+
+const unsubscribeDefaults: UnsubscribeScreenProps = {
+  state: "confirm",
+  list: "news",
+  token: "token-from-the-link",
+  error: null,
+  pending: false,
+}
+
+describe("UnsubscribeScreen in the browser", () => {
+  it("unsubscribes through the app's callback", async () => {
+    const leave = spy<[]>()
+    await mount(<UnsubscribeScreen {...unsubscribeDefaults} onSubmit={leave.fn} />)
+
+    expect(await submit(FORM_ACTIONS.unsubscribe)).toBe(true)
+    expect(leave.calls).toHaveLength(1)
+  })
+
+  it("posts the link's list and token natively when the app takes nothing over", async () => {
+    await mount(<UnsubscribeScreen {...unsubscribeDefaults} />)
+
+    const form = find<HTMLFormElement>(`form[action="${FORM_ACTIONS.unsubscribe}"]`)
+    expect(Object.fromEntries(new FormData(form)))
+      .toEqual({ list: "news", token: "token-from-the-link" })
+    expect(await submit(FORM_ACTIONS.unsubscribe)).toBe(false)
+  })
+
+  it("shows a failed unsubscribe under the form and moves focus there", async () => {
+    await mount(<UnsubscribeScreen {...unsubscribeDefaults} />)
+    find("[data-e2e=unsubscribe-submit]").focus()
+
+    await rerender(<UnsubscribeScreen {...unsubscribeDefaults} state="error" />)
+
+    expect(find("[data-e2e=unsubscribe-error]").textContent).toBe(SUBSCRIBE_FAILURES.unsubscribe)
+    expect(focused()).toBe("unsubscribe-error")
+  })
+
+  it("moves focus to the outcome once the address is removed", async () => {
+    await mount(<UnsubscribeScreen {...unsubscribeDefaults} />)
+    find("[data-e2e=unsubscribe-submit]").focus()
+
+    await rerender(<UnsubscribeScreen {...unsubscribeDefaults} state="done" />)
+
+    expect(focused()).toBe("unsubscribe-done-status")
   })
 })

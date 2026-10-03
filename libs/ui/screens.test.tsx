@@ -50,6 +50,8 @@ import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-scre
 import { NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
 import { ForgotPasswordScreen, ResetPasswordScreen } from "./password-reset-screen.tsx"
 import { EmailBanner, EmailScreen, type EmailScreenProps } from "./email-screen.tsx"
+import { subscribeSchema, subscriptionConfirmSchema, unsubscribeSchema } from "@domain/subscribers"
+import { SubscribeForm, SubscriptionConfirmScreen, UnsubscribeScreen } from "./subscribe-screen.tsx"
 import {
   EMPTY_INVITATION_DRAFT,
   GroupInvitationsSection,
@@ -1748,5 +1750,104 @@ describe("GroupTransferSection without JavaScript", () => {
     expect(html.indexOf("group-section-transfer")).toBeLessThan(
       html.indexOf("group-section-danger"),
     )
+  })
+})
+
+describe("SubscribeForm without JavaScript", () => {
+  const props = { email: "", onEmailChange: () => {}, list: "news", error: null, pending: false }
+
+  it("posts the address and the list to the subscribe route", () => {
+    const node = <SubscribeForm {...props} sent={false} />
+    const surface = noScriptSurface(node)
+    expect(surface.forms).toEqual([
+      { action: FORM_ACTIONS.subscribe, method: "post", fields: schemaKeys(subscribeSchema) },
+    ])
+    expect(surface.scriptOnlyButtons).toEqual([])
+    expect(renderToString(node)).toContain(`name="list" value="news"`)
+  })
+
+  it("says the link is on its way and asks nothing more once it is sent", () => {
+    const surface = noScriptSurface(<SubscribeForm {...props} sent />)
+    expect(surface.forms).toEqual([])
+  })
+})
+
+describe("SubscriptionConfirmScreen without JavaScript", () => {
+  const props = {
+    state: "confirm" as const,
+    list: "news",
+    token: "token-from-the-link",
+    error: null,
+    pending: false,
+  }
+
+  it("posts the link's list and token to the confirm route", () => {
+    const node = <SubscriptionConfirmScreen {...props} />
+    const surface = noScriptSurface(node)
+    expect(surface.forms).toEqual([
+      {
+        action: FORM_ACTIONS.subscribeConfirm,
+        method: "post",
+        fields: schemaKeys(subscriptionConfirmSchema),
+      },
+    ])
+    expect(surface.scriptOnlyButtons).toEqual([])
+    const html = renderToString(node)
+    expect(html).toContain(`name="list" value="news"`)
+    expect(html).toContain(`name="token" value="token-from-the-link"`)
+  })
+
+  it("keeps the form after a failed confirm, so the click can be tried again", () => {
+    const surface = noScriptSurface(<SubscriptionConfirmScreen {...props} state="error" />)
+    expect(formAt(surface, FORM_ACTIONS.subscribeConfirm).fields)
+      .toEqual(schemaKeys(subscriptionConfirmSchema))
+  })
+
+  it("offers a new link instead of a form when the link expired, broke or lacks its token", () => {
+    for (
+      const broken of [{ state: "expired" as const }, { state: "invalid" as const }, { token: "" }]
+    ) {
+      const surface = noScriptSurface(<SubscriptionConfirmScreen {...props} {...broken} />)
+      expect(surface.forms).toEqual([])
+      expect(surface.links).toEqual([SCREEN_PATHS.subscribe])
+    }
+  })
+
+  it("asks nothing more once the subscription is confirmed", () => {
+    const surface = noScriptSurface(<SubscriptionConfirmScreen {...props} state="done" />)
+    expect(surface.forms).toEqual([])
+    expect(surface.links).toEqual([])
+  })
+})
+
+describe("UnsubscribeScreen without JavaScript", () => {
+  const props = {
+    state: "confirm" as const,
+    list: "news",
+    token: "token-from-the-link",
+    error: null,
+    pending: false,
+  }
+
+  it("posts the link's list and token to the unsubscribe route", () => {
+    const node = <UnsubscribeScreen {...props} />
+    const surface = noScriptSurface(node)
+    expect(surface.forms).toEqual([
+      { action: FORM_ACTIONS.unsubscribe, method: "post", fields: schemaKeys(unsubscribeSchema) },
+    ])
+    expect(surface.scriptOnlyButtons).toEqual([])
+    expect(renderToString(node)).toContain(`name="token" value="token-from-the-link"`)
+  })
+
+  it("links to subscribing again once the address is removed", () => {
+    const surface = noScriptSurface(<UnsubscribeScreen {...props} state="done" />)
+    expect(surface.forms).toEqual([])
+    expect(surface.links).toEqual([SCREEN_PATHS.subscribe])
+  })
+
+  it("shows no form for a link it does not recognise", () => {
+    for (const broken of [{ state: "not-recognised" as const }, { token: "" }]) {
+      expect(noScriptSurface(<UnsubscribeScreen {...props} {...broken} />).forms).toEqual([])
+    }
   })
 })

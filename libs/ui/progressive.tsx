@@ -41,6 +41,12 @@ export const FORM_ACTIONS = {
   invitationAccept: "/invite/accept",
   /** Declines an invitation: `{ token }` or `{ invitationId }`, like the accept. */
   invitationDecline: "/invite/decline",
+  /** Asks for a confirm link to join a mailing list: `{ email, list }`. */
+  subscribe: "/subscribe",
+  /** Confirms a subscription with its link's token: `{ list, token }`. */
+  subscribeConfirm: "/subscribe/confirm",
+  /** Leaves a mailing list with its link's token: `{ list, token }`. */
+  unsubscribe: "/unsubscribe",
 } as const
 
 /** The page an invitation's link opens: the group, the inviter and the role, to accept or decline. */
@@ -89,6 +95,8 @@ export const SCREEN_PATHS = {
   groups: "/groups",
   /** The e-mail address: its code, a new code, a change. */
   email: "/email",
+  /** Asks for the address to send news to. */
+  subscribe: "/subscribe",
 } as const
 
 /**
