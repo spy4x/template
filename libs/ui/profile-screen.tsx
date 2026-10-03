@@ -566,6 +566,7 @@ export function ProfileScreen(
                   autocomplete="one-time-code"
                   value={values.otp}
                   onInput={(e) => onValueChange("otp", e.currentTarget.value)}
+                  required
                 />
               </Field>
               <ErrorState message={errors.totp} />

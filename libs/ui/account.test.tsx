@@ -416,6 +416,13 @@ describe("ProfileScreen", () => {
     expect(cancel.calls).toHaveLength(1)
   })
 
+  it("marks the enrolment code as required, so the browser refuses an empty submit", async () => {
+    const enrolling = { qrcode: "<svg/>", secret: "ABC" }
+    await mount(<ProfileScreen {...profileDefaults} enrolment={enrolling} />)
+
+    expect(find<HTMLInputElement>("[data-e2e=totp-connect-otp]").required).toBe(true)
+  })
+
   for (
     const [opener, dialog, callback] of [
       ["profile-edit", "profile-dialog", "onCancelProfile"],
