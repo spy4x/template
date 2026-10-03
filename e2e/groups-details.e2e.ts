@@ -98,7 +98,7 @@ test.describe("group details", () => {
       expect(loads).toBe(0)
 
       // The list and the picker show the same mark.
-      await gotoApp(page, "/groups", page.locator("[data-e2e=group-item-name]"))
+      await gotoApp(page, "/groups", page.locator("[data-e2e=group-item-name]").first())
       await expect(page.locator(`[data-e2e=group-${groupId}] [data-e2e=group-mark]`))
         .toHaveText("🏠")
       await expect(page.locator(`[data-e2e=group-${groupId}] [data-e2e=group-item-description]`))
