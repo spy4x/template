@@ -14,8 +14,11 @@ import { isSpaPath } from "./spa-paths.ts"
 /**
  * Wires the note page to the notes store: `/notes/new` (no `noteId`) creates a note in the
  * person's selected group, `/notes/:noteId` edits one of that group's notes. A note that is not in
- * the selected group is "not found": a link never changes the selection, so a note of another
- * group opens after the person picks that group. Leaving with unsaved text asks first.
+ * the selected group is never opened by the link itself: a link must not change the selection. A
+ * note in another of the person's groups names that group and offers "Switch to <group>", which
+ * selects it through the group store's own command, and the note then opens. Any other note is
+ * "not found", whether it does not exist or sits in a group the person is not in. Leaving with
+ * unsaved text asks first.
  */
 export function NoteEditorView({ noteId = null }: { noteId?: string | null }) {
   const [, navigate] = useLocation()
@@ -32,6 +35,10 @@ export function NoteEditorView({ noteId = null }: { noteId?: string | null }) {
   const editing = store.editing.value
   const missing = store.missing.value
   const listError = store.listError.value
+  const elsewhereId = store.elsewhere.value
+  const elsewhereGroup = elsewhereId
+    ? groupsStore.groups.value.find((group) => group.id === elsewhereId)
+    : undefined
   // The open note is read once the list is: until then it is neither found nor missing.
   const readingNote = !creating && editing === null && !missing && listError === null
   const errors = creating ? store.createErrors.value : store.editErrors.value
@@ -49,6 +56,9 @@ export function NoteEditorView({ noteId = null }: { noteId?: string | null }) {
           : null}
         loading={groupsStore.loading.value || groupId === null || readingNote}
         notFound={missing || (!creating && editing === null && listError !== null)}
+        elsewhere={missing && elsewhereGroup ? { name: elsewhereGroup.name } : null}
+        onSwitchGroup={elsewhereGroup && (() => void selectionStore.select(elsewhereGroup.id))}
+        switching={selectionStore.pending.value}
         note={editing && { id: editing.id, version: editing.version, conflict: editing.conflict }}
         value={editing ?? store.draft.value}
         onChange={(value) => {

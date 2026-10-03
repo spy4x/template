@@ -154,6 +154,8 @@ export const noteMovePayloadSchema = type({
 })
 /** The `note.get` socket payload. */
 export const noteGetPayloadSchema = type({ ...groupIdField, ...noteIdField, "+": "reject" })
+/** The `note.locate` socket payload: a note id, with no group. */
+export const noteLocatePayloadSchema = type({ ...noteIdField, "+": "reject" })
 /** The `note.list` socket payload. */
 export const noteListPayloadSchema = type({
   ...groupIdField,
@@ -358,6 +360,21 @@ export class NoteGetQuery implements Query<NoteGetPayload, { note: Note }> {
   __resultType?: { note: Note }
   constructor(public data: NoteGetPayload) {}
 }
+
+export interface NoteLocatePayload {
+  actor: Actor
+  id: string
+}
+
+/**
+ * Finds the group of a note from its id alone, for a link to a note of another of the actor's
+ * groups. It answers only when the actor is a member of that group: a note that does not exist and
+ * a note in a group the actor is not in both fail with the same `NOTE_NOT_FOUND`.
+ */
+export class NoteLocateQuery implements Query<NoteLocatePayload, { groupId: string }> {
+  __resultType?: { groupId: string }
+  constructor(public data: NoteLocatePayload) {}
+}
 // #endregion Commands and queries
 
 // #region Ports
@@ -397,6 +414,12 @@ export interface NoteMoveInput {
 export interface NoteRepository {
   list(groupId: string, page: NoteListPage): Promise<NoteListResult>
   get(groupId: string, id: string): Promise<Note | null>
+  /**
+   * The group a live note is in, when the user is an active member of that group. `null` for a
+   * note that does not exist, a deleted one and one in a group the user is not in alike, found by
+   * one lookup in every case so that no case is slower than another.
+   */
+  groupIdOfForMember(id: string, userId: number): Promise<string | null>
   /**
    * Throws `ID_ALREADY_EXISTS` when the id holds a different note, and a `PlanError` when the group
    * already holds `allowance` notes (`null` for no cap), counted in the write's own transaction.

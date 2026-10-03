@@ -12,6 +12,7 @@ import {
   NoteGetQuery,
   type NoteListPageKey,
   NoteListQuery,
+  NoteLocateQuery,
   NoteMoveCommand,
   NoteUpdateCommand,
   NoteVersionConflictError,
@@ -27,6 +28,7 @@ import {
   createNoteDeleteHandler,
   createNoteGetHandler,
   createNoteListHandler,
+  createNoteLocateHandler,
   createNoteMoveHandler,
   createNoteUpdateHandler,
   type NoteHandlerDependencies,
@@ -124,6 +126,7 @@ function buses(sql: postgres.Sql) {
   queries.use(createSessionGate([]))
   queries.register(NoteListQuery, createNoteListHandler(dependencies))
   queries.register(NoteGetQuery, createNoteGetHandler(dependencies))
+  queries.register(NoteLocateQuery, createNoteLocateHandler(dependencies))
   return { commands, queries, groups }
 }
 
@@ -484,6 +487,33 @@ Deno.test("notes against Postgres", async (t) => {
         "GROUP_NOT_FOUND",
       ])
     })
+
+    await t.step(
+      "a note is located for a member of its group, and for no one else or once deleted",
+      async () => {
+        const { groupId, owner, viewer, stranger } = await seedGroup(sql)
+        const id = crypto.randomUUID()
+        await commands.execute(
+          new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Plan", body: "" }),
+        )
+        const locate = (userId: number, noteId: string) =>
+          queries.execute(new NoteLocateQuery({ actor: actor(userId), id: noteId }))
+
+        expect(await locate(viewer, id)).toEqual({ groupId })
+        const foreign = await refusal(locate(stranger, id))
+        const unknown = await refusal(locate(owner, crypto.randomUUID()))
+        expect([(foreign as NoteError).code, (foreign as NoteError).message]).toEqual([
+          "NOTE_NOT_FOUND",
+          "Note not found",
+        ])
+        expect(foreign).toEqual(unknown)
+
+        await commands.execute(
+          new NoteDeleteCommand({ actor: actor(owner), groupId, id, version: 1 }),
+        )
+        expect(((await refusal(locate(owner, id))) as NoteError).code).toBe("NOTE_NOT_FOUND")
+      },
+    )
 
     await t.step(
       "a create retried with the same idempotency key answers the first result without writing",

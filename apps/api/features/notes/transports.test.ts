@@ -10,6 +10,7 @@ import {
   NoteDeleteCommand,
   NoteGetQuery,
   NoteListQuery,
+  NoteLocateQuery,
   NoteMoveCommand,
   NoteUpdateCommand,
 } from "@domain/notes"
@@ -26,6 +27,7 @@ import {
   createNoteDeleteHandler,
   createNoteGetHandler,
   createNoteListHandler,
+  createNoteLocateHandler,
   createNoteMoveHandler,
   createNoteUpdateHandler,
 } from "./handlers.ts"
@@ -48,17 +50,15 @@ const OWNER = 1
 const VIEWER = 2
 
 function stack(plan = FREE_PLAN_ID, plans: Record<string, string> = {}) {
-  const notes = new MemoryNoteRepository()
-  const dependencies = {
-    notes,
-    groups: roles({
-      [`${groupId}:${OWNER}`]: GroupRole.OWNER,
-      [`${groupId}:${VIEWER}`]: GroupRole.VIEWER,
-      [`${editableGroupId}:${OWNER}`]: GroupRole.EDITOR,
-      [`${editableGroupId}:${VIEWER}`]: GroupRole.EDITOR,
-      [`${readOnlyGroupId}:${OWNER}`]: GroupRole.VIEWER,
-    }),
-  }
+  const groups = roles({
+    [`${groupId}:${OWNER}`]: GroupRole.OWNER,
+    [`${groupId}:${VIEWER}`]: GroupRole.VIEWER,
+    [`${editableGroupId}:${OWNER}`]: GroupRole.EDITOR,
+    [`${editableGroupId}:${VIEWER}`]: GroupRole.EDITOR,
+    [`${readOnlyGroupId}:${OWNER}`]: GroupRole.VIEWER,
+  })
+  const notes = new MemoryNoteRepository(groups)
+  const dependencies = { notes, groups }
   const commands = new CommandBus()
   commands.use(createSessionGate([]))
   commands.use(createEntitlementGate({
@@ -79,6 +79,7 @@ function stack(plan = FREE_PLAN_ID, plans: Record<string, string> = {}) {
   queries.use(createSessionGate([]))
   queries.register(NoteListQuery, createNoteListHandler(dependencies))
   queries.register(NoteGetQuery, createNoteGetHandler(dependencies))
+  queries.register(NoteLocateQuery, createNoteLocateHandler(dependencies))
   const buses = {
     create: (command: NoteCreateCommand) => commands.execute(command),
     update: (command: NoteUpdateCommand) => commands.execute(command),
@@ -86,6 +87,7 @@ function stack(plan = FREE_PLAN_ID, plans: Record<string, string> = {}) {
     move: (command: NoteMoveCommand) => commands.execute(command),
     list: (query: NoteListQuery) => queries.execute(query),
     get: (query: NoteGetQuery) => queries.execute(query),
+    locate: (query: NoteLocateQuery) => queries.execute(query),
     cursor: {
       encode: () => Promise.resolve("next"),
       decode: () => Promise.resolve({ updatedAt: new Date(0), id: noteId }),
@@ -155,7 +157,12 @@ function socket(buses: ReturnType<typeof stack>["buses"], userId: number) {
     await drainMicrotasks()
     return ws.frames().find((frame) => (frame as { requestId?: string }).requestId === name)
   }
-  return { command, shutdown: () => realtime.shutdown() }
+  const query = async (name: string, payload: unknown) => {
+    ws.receive(JSON.stringify({ kind: "client.query", id: name, name, payload }))
+    await drainMicrotasks()
+    return ws.frames().find((frame) => (frame as { requestId?: string }).requestId === name)
+  }
+  return { command, query, shutdown: () => realtime.shutdown() }
 }
 
 describe("notes over both transports", () => {
@@ -541,6 +548,57 @@ describe("notes over both transports", () => {
       expect(response.status).toBe(402)
       expect((await response.json()).error.code).toBe("PLAN_LIMIT_REACHED")
       expect(notes.writes).toBe(0)
+    })
+  })
+
+  describe("finding the group of a note by its id", () => {
+    it("tells a member the group of a note in any of their groups", async () => {
+      const { notes, buses } = stack()
+      await seedNote(notes)
+      const ws = socket(buses, VIEWER)
+
+      const frame = await ws.query("note.locate", { id: noteId })
+
+      expect(frame).toMatchObject({ kind: "server.result", payload: { groupId } })
+      ws.shutdown()
+    })
+
+    it("answers a note in a group the person is not in exactly as a note that does not exist", async () => {
+      const { notes, buses } = stack()
+      await seedNote(notes)
+      // OWNER is in `groupId` only through the roles above; this note is in a group nobody is in.
+      const foreignId = crypto.randomUUID()
+      await notes.create(
+        { groupId: strangerGroupId, id: foreignId, title: "Secret", body: "" },
+        OWNER,
+        null,
+      )
+      const ws = socket(buses, OWNER)
+
+      const foreign = await ws.query("note.locate", { id: foreignId })
+      const missing = await ws.query("note.locate", { id: crypto.randomUUID() })
+
+      expect(foreign).toMatchObject({
+        kind: "server.error",
+        code: "not_found",
+        details: { code: "NOTE_NOT_FOUND" },
+      })
+      // Same frame but for the request id, which is the call's name in both.
+      expect(JSON.stringify(foreign)).toBe(JSON.stringify(missing))
+      expect(JSON.stringify(foreign)).not.toContain(strangerGroupId)
+      ws.shutdown()
+    })
+
+    it("answers a note that was deleted as not found", async () => {
+      const { notes, buses } = stack()
+      await seedNote(notes)
+      await notes.delete({ groupId, id: noteId, expectedVersion: 2 }, OWNER)
+      const ws = socket(buses, OWNER)
+
+      const frame = await ws.query("note.locate", { id: noteId })
+
+      expect(frame).toMatchObject({ kind: "server.error", details: { code: "NOTE_NOT_FOUND" } })
+      ws.shutdown()
     })
   })
 })

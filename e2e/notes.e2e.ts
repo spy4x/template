@@ -241,7 +241,7 @@ test.describe("notes in a shared group", () => {
     }
   })
 
-  test("a note of another group is not found, and opening it does not change the selected group", async ({ browser, request }) => {
+  test("a note of another of my groups offers a switch, which selects the group and opens the note", async ({ browser, request }) => {
     const owner = "e2e_notes_other_group@example.com"
     await cleanup(request, owner)
     const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
@@ -265,17 +265,77 @@ test.describe("notes in a shared group", () => {
       expect(selectedBefore.groupId).not.toBe(otherGroup)
 
       await gotoApp(page, `/notes/${noteId}`, page.locator("[data-e2e=shell-ws-status]"))
-      await expect(page.getByRole("heading", { level: 1, name: "Note not found" })).toBeVisible()
-      await expect(page.locator("[data-e2e=note-not-found]")).toBeVisible()
+      await expect(page.locator("[data-e2e=note-elsewhere]")).toContainText("Other team")
+      await expect(page.getByRole("button", { name: "Switch to Other team" })).toBeVisible()
       await expect(page.locator("[data-e2e=note-title]")).toHaveCount(0)
-      const selectedAfter = await (await page.request.get(`${apiBase}/api/groups/selected`)).json()
-      expect(selectedAfter.groupId).toBe(selectedBefore.groupId)
+      // The page load alone changed nothing: the selection is still the one from before.
+      const selectedAfterLoad = await (await page.request.get(`${apiBase}/api/groups/selected`))
+        .json()
+      expect(selectedAfterLoad.groupId).toBe(selectedBefore.groupId)
 
-      await page.locator("[data-e2e=page-back]").click()
-      await expect(page).toHaveURL("/notes")
+      await page.getByRole("button", { name: "Switch to Other team" }).click()
+      await expect(page.locator("[data-e2e=note-title]")).toHaveValue("Elsewhere")
+      await expect(page).toHaveURL(`/notes/${noteId}`)
+      await expect.poll(async () =>
+        (await (await page.request.get(`${apiBase}/api/groups/selected`)).json()).groupId
+      ).toBe(otherGroup)
     } finally {
       await context.close()
       await cleanup(request, owner)
+    }
+  })
+
+  test("a note in a group I am not in looks exactly like a note that does not exist", async ({ browser, request }) => {
+    const owner = "e2e_notes_stranger_owner@example.com"
+    const stranger = "e2e_notes_stranger@example.com"
+    await cleanup(request, owner)
+    await cleanup(request, stranger)
+    const ownerContext = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    const strangerContext = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    try {
+      await signUp(request, owner)
+      await signUp(request, stranger)
+      const strangerPage = await strangerContext.newPage()
+      await signInOnline(strangerPage, stranger)
+      const theirGroup = crypto.randomUUID()
+      const created = await strangerPage.request.post(`${apiBase}/api/groups`, {
+        headers,
+        data: { id: theirGroup, name: "Their secret group" },
+      })
+      expect(created.status(), await created.text()).toBe(201)
+      const theirNote = crypto.randomUUID()
+      const note = await strangerPage.request.post(`${apiBase}/api/groups/${theirGroup}/notes`, {
+        headers,
+        data: { id: theirNote, title: "Theirs", body: "" },
+      })
+      expect(note.status(), await note.text()).toBe(201)
+
+      const page = await ownerContext.newPage()
+      await signInOnline(page, owner)
+      const selectedBefore = await (await page.request.get(`${apiBase}/api/groups/selected`)).json()
+      const pageOf = async (id: string) => {
+        await gotoApp(page, `/notes/${id}`, page.locator("[data-e2e=shell-ws-status]"))
+        await expect(page.getByRole("heading", { level: 1, name: "Note not found" }))
+          .toBeVisible()
+        await expect(page.locator("[data-e2e=note-not-found]")).toBeVisible()
+        await expect(page.locator("[data-e2e=note-switch-group]")).toHaveCount(0)
+        await expect(page.locator("[data-e2e=note-title]")).toHaveCount(0)
+        return await page.locator("main").innerText()
+      }
+      const foreign = await pageOf(theirNote)
+      const missing = await pageOf(crypto.randomUUID())
+
+      expect(foreign).toBe(missing)
+      expect(foreign).not.toContain("Their secret group")
+      const selectedAfter = await (await page.request.get(`${apiBase}/api/groups/selected`)).json()
+      expect(selectedAfter.groupId).toBe(selectedBefore.groupId)
+      await page.locator("[data-e2e=page-back]").click()
+      await expect(page).toHaveURL("/notes")
+    } finally {
+      await ownerContext.close()
+      await strangerContext.close()
+      await cleanup(request, owner)
+      await cleanup(request, stranger)
     }
   })
 

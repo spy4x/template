@@ -6,6 +6,7 @@ import {
   type NoteCreateCommand,
   NoteError,
   type NoteListQuery,
+  type NoteLocateQuery,
   type NoteMoveCommand,
 } from "@domain/notes"
 import { createNoteSocketRequests } from "./socket.ts"
@@ -24,8 +25,9 @@ function harness() {
   const seen: {
     create: NoteCreateCommand | null
     list: NoteListQuery | null
+    locate: NoteLocateQuery | null
     move: NoteMoveCommand | null
-  } = { create: null, list: null, move: null }
+  } = { create: null, list: null, locate: null, move: null }
   const unused = () => Promise.reject(new Error("not used"))
   const requests = createNoteSocketRequests({
     create(command) {
@@ -39,6 +41,10 @@ function harness() {
       return unused()
     },
     get: unused,
+    locate(query) {
+      seen.locate = query
+      return Promise.resolve({ groupId })
+    },
     list(query) {
       seen.list = query
       return Promise.resolve({ notes: [], nextPageKey: null })
@@ -60,6 +66,7 @@ describe("note socket requests", () => {
         "note.move": "command",
         "note.list": "query",
         "note.get": "query",
+        "note.locate": "query",
       })
   })
 
@@ -130,6 +137,32 @@ describe("note socket requests", () => {
       payload: { groupId, id, title: "Plan", body: "", userId: 999 },
     })).rejects.toBeInstanceOf(NoteError)
     expect(seen.create).toBe(null)
+  })
+
+  it("dispatches a locate with the socket's actor and the note id, and nothing else", async () => {
+    const { requests, seen } = harness()
+
+    const found = await requests["note.locate"].handle({
+      actor,
+      requestId: "req-3",
+      signal,
+      payload: { id },
+    })
+
+    expect(seen.locate?.data).toEqual({ actor, id })
+    expect(found).toEqual({ groupId })
+  })
+
+  it("refuses a locate payload that names a group, before anything is dispatched", async () => {
+    const { requests, seen } = harness()
+
+    await expect(requests["note.locate"].handle({
+      actor,
+      requestId: "req-3",
+      signal,
+      payload: { id, groupId },
+    })).rejects.toBeInstanceOf(NoteError)
+    expect(seen.locate).toBe(null)
   })
 
   it("lists the first page of the default size when the payload names only the group", async () => {

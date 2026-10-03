@@ -25,6 +25,9 @@ export class MemoryNoteRepository implements NoteRepository {
   writes = 0
   #sequence = 1
 
+  /** Who is in which group, for `groupIdOfForMember`; without it no one is a member. */
+  constructor(private readonly groups?: GroupRoleLookup) {}
+
   list(groupId: string, page: NoteListPage): Promise<NoteListResult> {
     const notes = [...this.notes.values()].filter((note) => note.groupId === groupId)
       .slice(0, page.limit)
@@ -34,6 +37,12 @@ export class MemoryNoteRepository implements NoteRepository {
   get(groupId: string, id: string): Promise<Note | null> {
     const note = this.notes.get(id)
     return Promise.resolve(note && note.groupId === groupId ? note : null)
+  }
+
+  async groupIdOfForMember(id: string, userId: number): Promise<string | null> {
+    const groupId = this.notes.get(id)?.groupId
+    if (!groupId || !this.groups) return null
+    return await this.groups.roleOf(groupId, userId) === null ? null : groupId
   }
 
   create(

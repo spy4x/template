@@ -71,6 +71,7 @@ import {
   NoteDeleteCommand,
   NoteGetQuery,
   NoteListQuery,
+  NoteLocateQuery,
   NoteMoveCommand,
   NoteUpdateCommand,
 } from "@domain/notes"
@@ -80,6 +81,7 @@ import { noteDeleteHandler } from "@api/cqrs/command-handlers/note-delete.ts"
 import { noteMoveHandler } from "@api/cqrs/command-handlers/note-move.ts"
 import { noteListHandler } from "@api/cqrs/query-handlers/note-list.ts"
 import { noteGetHandler } from "@api/cqrs/query-handlers/note-get.ts"
+import { noteLocateHandler } from "@api/cqrs/query-handlers/note-locate.ts"
 import { BillingCheckoutCommand, BillingGetQuery, BillingPortalCommand } from "@domain/billing"
 import { billingCheckoutHandler } from "@api/cqrs/command-handlers/billing-checkout.ts"
 import { billingPortalHandler } from "@api/cqrs/command-handlers/billing-portal.ts"
@@ -175,6 +177,7 @@ queryBus.register(InvitationPreviewQuery, createInvitationPreviewHandler(invitat
 queryBus.register(MyInvitationsQuery, createMyInvitationsHandler(invitationDependencies))
 queryBus.register(NoteListQuery, noteListHandler)
 queryBus.register(NoteGetQuery, noteGetHandler)
+queryBus.register(NoteLocateQuery, noteLocateHandler)
 queryBus.register(BillingGetQuery, billingGetHandler)
 
 console.log("✅ CQRS handlers initialized")

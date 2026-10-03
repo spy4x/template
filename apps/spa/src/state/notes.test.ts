@@ -27,11 +27,16 @@ function conflict(currentVersion: number) {
   })
 }
 
+function notFound() {
+  return new RealtimeRequestError("not_found", "Note not found", { code: "NOTE_NOT_FOUND" })
+}
+
 function harness(overrides: {
   pages?: NotePage[]
   update?: () => Promise<{ note: NoteItem }>
   delete?: () => Promise<unknown>
   get?: () => Promise<{ note: NoteItem }>
+  locate?: (id: string) => Promise<{ groupId: string }>
   create?: () => Promise<{ note: NoteItem }>
   move?: () => Promise<{ notes: NoteItem[] }>
 } = {}) {
@@ -47,6 +52,10 @@ function harness(overrides: {
     get(forGroup, id) {
       calls.push({ name: "get", input: { groupId: forGroup, id } })
       return overrides.get?.() ?? Promise.resolve({ note: item(id) })
+    },
+    locate(id) {
+      calls.push({ name: "locate", input: { id } })
+      return overrides.locate?.(id) ?? Promise.reject(notFound())
     },
     create(input) {
       calls.push({ name: "create", input })
@@ -281,6 +290,97 @@ describe("notes store", () => {
     expect(store.listError.value).toBe(null)
 
     await store.open(groupId, "a")
+    expect(store.missing.value).toBe(false)
+  })
+
+  it("names the other group of a note that is in one of the person's groups, and stays missing", async () => {
+    const { store, calls } = harness({
+      pages: [{ notes: [item("a")], nextCursor: null }],
+      get: () => Promise.reject(notFound()),
+      locate: () => Promise.resolve({ groupId: "g-2" }),
+    })
+
+    await store.open(groupId, "elsewhere")
+
+    expect(calls.filter((call) => call.name === "locate")).toEqual([
+      { name: "locate", input: { id: "elsewhere" } },
+    ])
+    expect(store.elsewhere.value).toBe("g-2")
+    expect(store.missing.value).toBe(true)
+    expect(store.editing.value).toBe(null)
+  })
+
+  it("names no group when the lookup finds none, or cannot be asked", async () => {
+    const lookups = [
+      () => Promise.reject(notFound()),
+      () => Promise.reject(new TypeError("offline")),
+      () => Promise.resolve({ groupId }),
+    ]
+    for (const locate of lookups) {
+      const { store } = harness({
+        pages: [{ notes: [], nextCursor: null }],
+        get: () => Promise.reject(notFound()),
+        locate,
+      })
+
+      await store.open(groupId, "elsewhere")
+
+      expect(store.elsewhere.value).toBe(null)
+      expect(store.missing.value).toBe(true)
+    }
+  })
+
+  it("ignores a late lookup for a note that is no longer the one being opened", async () => {
+    let answer!: (found: { groupId: string }) => void
+    const late = new Promise<{ groupId: string }>((resolve) => answer = resolve)
+    const { store } = harness({
+      pages: [{ notes: [item("a")], nextCursor: null }],
+      get: () => Promise.reject(notFound()),
+      locate: () => late,
+    })
+    await store.open(groupId, null)
+    const gone = store.open(groupId, "gone")
+    await new Promise((resolve) => setTimeout(resolve, 0)) // the lookup is now on its way
+    await store.open(groupId, "a")
+
+    answer({ groupId: "g-2" })
+    await gone
+
+    expect(store.editing.value?.id).toBe("a")
+    expect(store.missing.value).toBe(false)
+    expect(store.elsewhere.value).toBe(null)
+  })
+
+  it("keeps the open note when a read of an earlier note fails late", async () => {
+    let fail!: (cause: unknown) => void
+    const reads = [new Promise<{ note: NoteItem }>((_, reject) => fail = reject)]
+    const { store, calls } = harness({
+      pages: [{ notes: [item("a")], nextCursor: null }],
+      get: () => reads.shift() ?? Promise.resolve({ note: item("a") }),
+    })
+    await store.open(groupId, null)
+    const gone = store.open(groupId, "gone")
+    await store.open(groupId, "a")
+
+    fail(notFound())
+    await gone
+
+    expect(store.editing.value?.id).toBe("a")
+    expect(store.missing.value).toBe(false)
+    expect(calls.some((call) => call.name === "locate")).toBe(false)
+  })
+
+  it("drops the other group when another note opens", async () => {
+    const { store } = harness({
+      pages: [{ notes: [item("a")], nextCursor: null }],
+      get: () => Promise.reject(notFound()),
+      locate: () => Promise.resolve({ groupId: "g-2" }),
+    })
+    await store.open(groupId, "elsewhere")
+
+    await store.open(groupId, "a")
+
+    expect(store.elsewhere.value).toBe(null)
     expect(store.missing.value).toBe(false)
   })
 

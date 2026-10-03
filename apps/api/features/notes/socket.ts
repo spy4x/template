@@ -8,6 +8,8 @@ import {
   noteGetPayloadSchema,
   NoteGetQuery,
   noteListPayloadSchema,
+  noteLocatePayloadSchema,
+  NoteLocateQuery,
   NoteMoveCommand,
   noteMovePayloadSchema,
   NoteUpdateCommand,
@@ -25,6 +27,7 @@ export interface NoteSocketDependencies extends NoteListDependencies {
   update(command: NoteUpdateCommand): Promise<{ note: Note }>
   delete(command: NoteDeleteCommand): Promise<{ note: DeletedNote }>
   get(query: NoteGetQuery): Promise<{ note: Note }>
+  locate(query: NoteLocateQuery): Promise<{ groupId: string }>
   move(command: NoteMoveCommand): Promise<{ notes: Note[] }>
 }
 
@@ -93,6 +96,13 @@ export function createNoteSocketRequests(dependencies: NoteSocketDependencies): 
           payload,
         )
         return await dependencies.get(new NoteGetQuery({ actor, ...input }))
+      },
+    },
+    "note.locate": {
+      kind: "query",
+      handle: async ({ actor, payload }) => {
+        const input = parseNoteRequest(noteLocatePayloadSchema, payload)
+        return await dependencies.locate(new NoteLocateQuery({ actor, ...input }))
       },
     },
   }
