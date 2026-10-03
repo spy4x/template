@@ -1,3 +1,4 @@
+/// <reference lib="es2022.intl" />
 import type { Command, Query } from "@spy4x/platform/cqrs"
 import type { Actor } from "@domain/identity"
 
