@@ -31,6 +31,12 @@
  *   `auth_audits` row inside the transaction that changes the session, so a failed row undoes the
  *   action. Sign-in checks the password with the package's `checkCredentials` first and creates
  *   the session itself, so the transaction holds no connection while a hash is verified.
+ * - **Deleting the account (#144).** `deleteAccount` soft-deletes the profile, writes the waiting
+ *   request with its two jobs and signs out every session, in one transaction, after checking
+ *   again under row locks that no group stops it (`@server/auth/account-deletion.ts`). A correct
+ *   password during the wait restores the account before the sign-in goes on as usual, second
+ *   factor included: the password alone cancels the deletion but still lets nobody in who lacks
+ *   the second factor.
  *
  * Reads no environment and imports no singleton, so the integration tests construct it against
  * their own schema.
@@ -72,6 +78,7 @@ import {
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
 import { GroupError } from "@domain/groups"
 import {
+  type AccountDeletionBlocker,
   type AuthAuditBase,
   AuthAuditEventType,
   type EmailStatus,
@@ -144,6 +151,13 @@ export interface SignInOptions {
   hasher?: PasswordHasher
 }
 
+/** What {@link SignIn.deleteAccount} did. */
+export type AccountDeleteResult =
+  /** The account waits to be deleted until `deleteAfter`; every session is signed out. */
+  | { deleteAfter: Date; blockers?: undefined }
+  /** These groups stop it; nothing changed. */
+  | { deleteAfter?: undefined; blockers: AccountDeletionBlocker[] }
+
 /** The sign-in operations the routes call. */
 export interface SignIn {
   /** Middleware and guards from `createAuth`. */
@@ -206,6 +220,21 @@ export interface SignIn {
    * someone else, asks for it. `false` for an account with no password.
    */
   checkPassword(userId: number, password: string): Promise<boolean>
+  /**
+   * Whether `code` is the user's current authenticator code, spending it so it never works twice.
+   * Leaves the session as it is: for a step that asks for the code again, such as deleting the
+   * account. `false` without a confirmed enrolment.
+   */
+  verifyTotpCode(state: AppAuthState, code: string): Promise<boolean>
+  /** The groups that stop the user from deleting their account now. */
+  accountDeletionBlockers(state: AppAuthState): Promise<AccountDeletionBlocker[]>
+  /**
+   * Starts the deletion of the user's account, in one transaction under row locks: checks the
+   * blockers again, soft-deletes the profile, writes the request and its jobs, signs out every
+   * session and writes the audit row. Then clears the cookie. The caller checks the password and
+   * the second factor first, and announces the sign-out.
+   */
+  deleteAccount(c: Context, state: AppAuthState): Promise<AccountDeleteResult>
   /** Where the user's address stands. */
   emailStatus(state: AppAuthState): Promise<EmailStatus>
   /**
@@ -326,6 +355,26 @@ export function createSignIn(options: SignInOptions): SignIn {
       ? SecondFactorStatus.Pending
       : SecondFactorStatus.NotRequired
   })
+  /**
+   * Restores the account of `userId` when it waits to be deleted, before a sign-in goes on: the
+   * request goes, the profile comes back and the audit row is written, in one transaction. `true`
+   * when the sign-in may go on: the profile is live, or was just restored (by this sign-in or one
+   * running alongside it). `false` for a profile deleted with no request waiting: one disabled
+   * some other way, or deleted for good while this sign-in ran.
+   */
+  async function restoreIfWaiting(c: Context, userId: number): Promise<boolean> {
+    const profile = await db.user.findOne({ id: userId, includeDeleted: true })
+    if (!profile || profile.deletedAt === null) return true
+    return await db.begin(async (tx) => {
+      if (!(await tx.accountDeletion.cancel(userId))) {
+        return (await tx.user.findOne({ id: userId })) !== null
+      }
+      await tx.user.undeleteOne({ id: userId })
+      await tx.authAudit.insert(auditRow(c, userId, AuthAuditEventType.ACCOUNT_RESTORED))
+      return true
+    })
+  }
+
   // Sign-in only checks the password through these; it creates the session itself (`signIn`).
   const signInOptions = { store: db.authStore, sessions }
   const signInByAddress = passwordsOver(signInOptions)
@@ -410,6 +459,7 @@ export function createSignIn(options: SignInOptions): SignIn {
       try {
         // The hash is verified before `db.begin()`, so no pool connection waits on it.
         checked = await provider.checkCredentials({ email: login, password })
+        if (!(await restoreIfWaiting(c, checked.user.id))) return null
         secondFactor = await signInSecondFactor(checked.user)
       } catch (error) {
         if (error instanceof PasswordSignInError || error instanceof MissingProfileError) {
@@ -604,6 +654,40 @@ export function createSignIn(options: SignInOptions): SignIn {
     async checkPassword(userId, password) {
       const key = await passwordKeyOf(db.authStore, userId)
       return !!key?.secret && (await hasher.verify(password, key.secret)).valid
+    },
+
+    async verifyTotpCode({ user }, code) {
+      const enrolment = await db.userTotp.find(user.id)
+      if (!enrolment || enrolment.confirmedAt === null) return false
+      const step = verifyTotp(enrolment.secret, code, {
+        lastAcceptedStep: enrolment.lastAcceptedStep,
+      })
+      return step !== null && await db.userTotp.acceptStep(user.id, step)
+    },
+
+    async accountDeletionBlockers({ user }) {
+      return await db.accountDeletion.blockers(user.id)
+    },
+
+    async deleteAccount(c, { user }) {
+      const result = await db.begin(async (tx): Promise<AccountDeleteResult> => {
+        // Gone or already deleted by a request running alongside: that one signed this out too.
+        if (!(await tx.accountDeletion.lock(user.id))) return { blockers: [] }
+        const blockers = await tx.accountDeletion.blockers(user.id)
+        if (blockers.length > 0) return { blockers }
+        await tx.user.deleteOne({ id: user.id })
+        const request = await tx.accountDeletion.request(user.id)
+        await sessionsOver(tx.sessionStore).signOutUser(user.id)
+        await tx.authAudit.insert(
+          auditRow(c, user.id, AuthAuditEventType.ACCOUNT_DELETION_REQUESTED),
+        )
+        return { deleteAfter: request.deleteAfter }
+      })
+      if (result.deleteAfter) {
+        cookie.clear(c)
+        c.set("auth", null)
+      }
+      return result
     },
 
     async emailStatus({ user }) {

@@ -12,6 +12,14 @@ import { noteMovable } from "@server/notes/note-movable.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
 import { emailChanges } from "@server/auth/email-verification.ts"
+import {
+  accountDeletionBlockers,
+  cancelAccountDeletion,
+  lockAccountForDeletion,
+  recordAccountDeletion,
+} from "@server/auth/account-deletion.ts"
+import { scheduleAccountDeletionJobs } from "@server/jobs/account-deletion.ts"
+import type { AccountDeletionBlocker } from "@domain/identity"
 
 /** A user's authenticator-app enrolment, one row of `user_totp`. */
 export interface UserTotp {
@@ -150,6 +158,29 @@ export class AppDbBase extends DbServiceBase {
           VALUES (${row.userId}, ${row.eventType}, ${row.identifier}, ${ip}, ${userAgent})
         `
       },
+    }
+  }
+
+  /**
+   * Deleting one's own account (`@server/auth/account-deletion.ts`). Built per access, like
+   * `group`: `lock`, `request` and `cancel` belong inside `begin()`.
+   */
+  get accountDeletion() {
+    const sql = this.sql
+    return {
+      /** The groups that stop the user from deleting their account. */
+      blockers: (userId: number): Promise<AccountDeletionBlocker[]> =>
+        accountDeletionBlockers(sql, userId),
+      /** Locks the live user row and their groups; `false` when the user is not live. */
+      lock: (userId: number): Promise<boolean> => lockAccountForDeletion(sql, userId),
+      /** Writes the waiting request and queues its mail and its delete for good. */
+      request: async (userId: number) => {
+        const request = await recordAccountDeletion(sql, userId)
+        await scheduleAccountDeletionJobs(sql, request)
+        return request
+      },
+      /** Removes the waiting request; `true` when there was one. */
+      cancel: (userId: number): Promise<boolean> => cancelAccountDeletion(sql, userId),
     }
   }
 
