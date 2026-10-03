@@ -462,3 +462,61 @@ Deno.test("invitations: the sweep deletes ones dead over 30 days and keeps the r
     expect(await purgeDeadInvitations(sql)).toBe(0)
   })
 })
+
+Deno.test("invitations: the sweep keeps a partly used link and dates a used-up one by its last use", async () => {
+  await withSchema(async (sql) => {
+    const { groupId, owner } = await team(sql)
+    const invitations = new PostgresInvitationRepository(sql)
+    const setAge = async (id: string, column: string, days: number) => {
+      await sql`
+        UPDATE group_invitations SET ${sql(column)} = now() - make_interval(days => ${days})
+        WHERE id = ${id}
+      `
+    }
+    const ageAcceptances = async (id: string, days: number[]) => {
+      const rows = await sql<{ userId: number }[]>`
+        SELECT user_id FROM group_invitation_acceptances WHERE invitation_id = ${id}
+        ORDER BY user_id
+      `
+      for (const [index, row] of rows.entries()) {
+        await sql`
+          UPDATE group_invitation_acceptances SET accepted_at = now() - make_interval(days => ${
+          days[index]
+        })
+          WHERE invitation_id = ${id} AND user_id = ${row.userId}
+        `
+      }
+    }
+
+    // Three of ten uses, all long ago, created long ago, not expired: still open, so kept.
+    const partly = await invite(invitations, groupId, owner, { maxUses: 10, expiresInDays: 90 })
+    for (let uses = 0; uses < 3; uses++) {
+      await invitations.accept(partly.lookup, await insertUser(sql), NO_LIMITS)
+    }
+    await setAge(partly.invitation.id, "created_at", 60)
+    await ageAcceptances(partly.invitation.id, [50, 45, 40])
+
+    // Used up by two people, the first 40 days ago and the last 5 days ago: dead for 5 days.
+    const lastUseRecent = await invite(invitations, groupId, owner, { maxUses: 2 })
+    for (let uses = 0; uses < 2; uses++) {
+      await invitations.accept(lastUseRecent.lookup, await insertUser(sql), NO_LIMITS)
+    }
+    await ageAcceptances(lastUseRecent.invitation.id, [40, 5])
+
+    // Used up, then every acceptor deleted their account: dated by creation instead.
+    const orphaned = async (createdDaysAgo: number) => {
+      const used = await invite(invitations, groupId, owner)
+      await invitations.accept(used.lookup, await insertUser(sql), NO_LIMITS)
+      await sql`DELETE FROM group_invitation_acceptances WHERE invitation_id = ${used.invitation.id}`
+      await setAge(used.invitation.id, "created_at", createdDaysAgo)
+      return used.invitation.id
+    }
+    await orphaned(31)
+    const orphanedRecent = await orphaned(29)
+
+    expect(await purgeDeadInvitations(sql)).toBe(1)
+
+    expect((await sql<{ id: string }[]>`SELECT id FROM group_invitations`).map((r) => r.id).sort())
+      .toEqual([partly.invitation.id, lastUseRecent.invitation.id, orphanedRecent].sort())
+  })
+})

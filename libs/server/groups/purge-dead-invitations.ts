@@ -6,7 +6,8 @@ export const INVITATION_RETENTION_DAYS = 30
 /**
  * Deletes every invitation that has been dead for more than {@link INVITATION_RETENTION_DAYS}
  * days and returns how many. An invitation dies at the earliest of: its expiry, being revoked,
- * being declined, and its last use when every use is taken. Live ones, and ones dead for less
+ * being declined, and its last use when every use is taken. A used-up invitation whose acceptors
+ * all deleted their accounts has no use left to date, so it falls back to its creation time. Live ones, and ones dead for less
  * than that, stay. The audit events stay: they are tied to the group, not to the invitation. The
  * database removes the invitation's acceptance rows with it, and its link already refuses.
  *
