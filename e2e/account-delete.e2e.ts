@@ -42,7 +42,12 @@ test("deleting my account signs me out on every device, and signing in during th
   try {
     await signUp(request, email)
     other = await browser.newContext({ baseURL: test.info().project.use.baseURL })
-    await signIn(await other.newPage(), email, password)
+    // The other device is not open: an open tab would sign itself out on the announcement, and
+    // the server's own sign-out would go untested.
+    const otherPage = await other.newPage()
+    await signIn(otherPage, email, password)
+    await otherPage.close()
+    expect((await other.request.get(`${apiBase}/api/auth/me`)).status()).toBe(200)
     await signIn(page, email, password)
 
     await openDeletion(page)
@@ -57,13 +62,13 @@ test("deleting my account signs me out on every device, and signing in during th
     await expect(page).toHaveURL("/sign-in")
     await expect(page.locator("[data-e2e=account-deleted]")).toContainText("Account deleted")
     expect((await page.request.get(`${apiBase}/api/auth/me`)).status()).toBe(401)
-    // The other device's session ended at the same moment.
-    expect((await other.request.get(`${apiBase}/api/auth/me`)).status()).toBe(401)
 
     await signIn(page, email, password)
     await expect(page.locator("[data-e2e=danger-zone]")).toBeAttached()
     expect((await page.request.get(`${apiBase}/api/auth/me`)).status()).toBe(200)
-    // The restore brings back the account, not the other device's old session.
+    // The other device's session ended with the request: the restore brings back the account,
+    // not that session. It is not asked during the wait, since a request refused for a deleted
+    // user could end the session by itself.
     expect((await other.request.get(`${apiBase}/api/auth/me`)).status()).toBe(401)
   } finally {
     await other?.close()
