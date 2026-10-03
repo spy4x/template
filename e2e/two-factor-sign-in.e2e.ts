@@ -39,15 +39,14 @@ test.describe("two-factor sign-in", () => {
       await gotoApp(page, "/email", page.locator("[data-e2e=email-code]"))
       await page.locator("[data-e2e=email-code]").fill(code)
       await page.locator("[data-e2e=email-verify]").click()
-      await expect(page.locator("[data-e2e=email-current]")).toContainText("which is verified")
+      await expect(page.locator("[data-e2e=email-state]")).toHaveText("Verified")
 
       // Turn two-factor auth on through the profile screen and read the secret it shows.
       // Without an authenticator app the page offers Enable only, never Disable next to it.
       await gotoApp(page, "/", page.locator("[data-e2e=totp-start]"))
       await expect(page.locator("[data-e2e=totp-disable]")).toHaveCount(0)
       await page.locator("[data-e2e=totp-start]").click()
-      const shown = await page.getByText(/^Secret: /).innerText()
-      const secret = shown.replace("Secret: ", "").trim()
+      const secret = (await page.locator("[data-e2e=totp-secret]").innerText()).trim()
       const enrolStep = currentStep()
       await page.locator("[data-e2e=totp-connect-otp]").fill(await totpCode(secret, enrolStep))
       await page.locator("[data-e2e=totp-connect-finish]").click()
@@ -65,9 +64,13 @@ test.describe("two-factor sign-in", () => {
       await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await submitAuthForm(page, "/totp", page.locator("[data-e2e=auth-form-code]"))
-      await gotoApp(page, "/", page.getByRole("heading", { level: 1, name: "Finish MFA" }))
+      await gotoApp(
+        page,
+        "/",
+        page.getByRole("heading", { level: 1, name: "Enter your one-time code" }),
+      )
       await gotoApp(page, "/totp", page.locator("[data-e2e=auth-form-code]"))
-      await expect(page.getByRole("heading", { level: 1, name: "MFA not required" }))
+      await expect(page.getByRole("heading", { level: 1, name: "No code needed" }))
         .toHaveCount(0)
 
       // A code for the step the enrolment used is refused as a replay, so use a later step. The

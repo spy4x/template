@@ -1,14 +1,19 @@
 import type { JSX } from "preact"
-import { useEffect, useRef } from "preact/hooks"
+import { useEffect, useRef, useState } from "preact/hooks"
+import { Badge } from "@spy4x/preact-ui/badge"
 import { Button } from "@spy4x/preact-ui/button"
-import { Card, CardBody, CardHeader } from "@spy4x/preact-ui/card"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
-import { Stack } from "@spy4x/preact-ui/layout"
-import { Link } from "@spy4x/preact-ui/link"
+import { Cluster, Stack } from "@spy4x/preact-ui/layout"
+import { Modal } from "@spy4x/preact-ui/modal"
+import { Notice } from "@spy4x/preact-ui/notice"
 import { type EmailStatus, emailToVerify } from "@domain/identity"
+import { ACCOUNT_COLUMN } from "./frame.tsx"
+import { PageHeader, TOUCH_TARGET } from "./page-header.tsx"
 import { FORM_ACTIONS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
+import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
+import { useSucceeded } from "./use-succeeded.ts"
 
 /** The messages shown when an action failed without a message of its own. */
 export const EMAIL_FAILURES = {
@@ -19,8 +24,8 @@ export const EMAIL_FAILURES = {
 } as const
 
 /**
- * The banner a signed-in page shows while an address waits for its code. Nothing when there is
- * none. The link opens the page where the code goes.
+ * The notice a signed-in page shows while an address waits for its code. Nothing when there is
+ * none. Its action opens the page where the code goes.
  */
 export function EmailBanner(
   { status, navigate }: { status: EmailStatus | null; navigate?: Navigate },
@@ -28,18 +33,23 @@ export function EmailBanner(
   const email = status && emailToVerify(status)
   if (!email) return null
   return (
-    <section
-      aria-label="Verify your e-mail address"
-      class="mb-6 rounded-lg border border-subtle bg-primary-muted px-4 py-3 text-sm"
+    <Notice
+      tone="warning"
       data-e2e="email-banner"
-    >
-      <p>
-        Verify your e-mail address <strong>{email}</strong> with the code we mail there.{" "}
-        <Link href={SCREEN_PATHS.email} navigate={navigate} class="pc-link">
+      action={
+        <Button
+          href={SCREEN_PATHS.email}
+          navigate={navigate}
+          variant="outline"
+          size="sm"
+          class={TOUCH_TARGET}
+        >
           Enter the code
-        </Link>
-      </p>
-    </section>
+        </Button>
+      }
+    >
+      Verify <strong class="wrap-anywhere">{email}</strong> with the code we mail there.
+    </Notice>
   )
 }
 
@@ -112,9 +122,9 @@ function useFocusOnError(error: string | null) {
 }
 
 /**
- * The person's e-mail address: the code that proves it, a new code, and a change of address that
- * waits for the new one's code. Every form posts to its route without JavaScript (`{ code }`, no
- * fields, `{ email, password }`); with its callback the app takes the submit over.
+ * The person's e-mail address: a row with the address and its state, the code that proves it while
+ * one waits, and a change of address in a dialog that opens only when asked. A change closes the
+ * dialog and moves focus to the code for the new address.
  */
 export function EmailScreen(
   {
@@ -133,6 +143,20 @@ export function EmailScreen(
   const target = emailToVerify(status)
   const codeField = useFocusOnError(errors.verify)
   const emailField = useFocusOnError(errors.change)
+  // The change dialog closes once its request went through, even one that asks again for the
+  // address already waiting, where nothing else on the page changes. Focus then moves on to the
+  // code, after the dialog has handed it back to its opener.
+  const [changing, setChanging] = useState(false)
+  const focusCode = useRef(false)
+  useSucceeded(pending.change, Boolean(errors.change), () => {
+    focusCode.current = changing
+    setChanging(false)
+  })
+  useEffect(() => {
+    if (changing || !focusCode.current) return
+    focusCode.current = false
+    codeField.current?.focus()
+  }, [changing])
 
   // A change just asked for, or a code just used: focus moves on to the step that follows.
   const shown = useRef(target)
@@ -142,162 +166,181 @@ export function EmailScreen(
     if (target) codeField.current?.focus()
   }, [target])
 
+  const hasEmail = status.email !== null
   return (
-    <Stack gap="lg">
-      <Card>
-        <CardHeader>
-          <h1 class="text-lg font-semibold">E-mail address</h1>
-        </CardHeader>
-        <CardBody>
-          <p class="text-sm" data-e2e="email-current">
-            {status.email === null
-              ? "Your account signs in with a username and has no e-mail address yet."
-              : (
-                <>
-                  You sign in with <strong>{status.email}</strong>
-                  {status.proven ? ", which is verified." : ", which is not verified yet."}
-                </>
-              )}
-          </p>
-        </CardBody>
-      </Card>
+    <Stack gap="lg" class={ACCOUNT_COLUMN}>
+      <PageHeader
+        title="E-mail address"
+        back={{ href: SCREEN_PATHS.profile, label: "Back to profile" }}
+        navigate={navigate}
+      />
+
+      <SettingList>
+        <SettingRow
+          label="Address"
+          value={
+            <span class="flex flex-wrap items-center gap-2">
+              <span class="wrap-anywhere" data-e2e="email-current">
+                {hasEmail ? status.email : "None yet. You sign in with your username."}
+              </span>
+              {hasEmail && <EmailState proven={status.proven} />}
+            </span>
+          }
+          action={
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              class={TOUCH_TARGET}
+              data-e2e="email-change-open"
+              onClick={() => setChanging(true)}
+            >
+              {hasEmail ? "Change" : "Add"} <span class="sr-only">e-mail address</span>
+            </Button>
+          }
+        />
+      </SettingList>
 
       {target && (
-        <Card data-e2e="email-verify-card">
-          <CardHeader title="Enter the code" headingLevel={2} />
-          <CardBody>
-            <p class="mb-4 text-sm">
+        <SettingGroup
+          title="Enter the code"
+          description={
+            <>
               Enter the code from the mail to{" "}
-              <strong>{target}</strong>. A code works once, for 10 minutes; if none arrived, ask for
-              a new one.
-              {status.pending && " Your address changes once you enter it."}
-            </p>
-            <ScreenForm
-              action={FORM_ACTIONS.emailVerify}
-              pending={pending.verify}
-              onSubmit={onVerify}
-            >
-              <Stack>
-                <Field id="email-code" label="Code" error={errors.verify} required>
-                  <Input
-                    ref={codeField}
-                    data-e2e="email-code"
-                    name="code"
-                    autocomplete="one-time-code"
-                    autocapitalize="off"
-                    spellcheck={false}
-                    value={values.code}
-                    onInput={(e) => onValueChange("code", e.currentTarget.value)}
-                    required
-                  />
-                </Field>
-                <div>
-                  <Button
-                    type="submit"
-                    data-e2e="email-verify"
-                    busy={pending.verify}
-                    busyLabel="Checking..."
-                  >
-                    Verify
-                  </Button>
-                </div>
-              </Stack>
-            </ScreenForm>
-            <ScreenForm
-              action={FORM_ACTIONS.emailSend}
-              pending={pending.send}
-              onSubmit={onSend}
-              class="mt-4"
-            >
-              <Stack>
-                <ErrorState message={errors.send} />
-                {notices.send && (
-                  <p class="text-sm" role="status" data-e2e="email-send-notice">{notices.send}</p>
-                )}
-                <div>
-                  <Button
-                    type="submit"
-                    variant="outline"
-                    data-e2e="email-send"
-                    busy={pending.send}
-                    busyLabel="Sending..."
-                  >
-                    Send a new code
-                  </Button>
-                </div>
-              </Stack>
-            </ScreenForm>
-          </CardBody>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader
-          title={status.email === null ? "Add an address" : "Change your address"}
-          headingLevel={2}
-        />
-        <CardBody>
-          <p class="mb-4 text-sm">
-            We send a code to the new address. {status.email === null
-              ? "Once you enter it, you sign in with that address instead of your username."
-              : `You keep signing in with ${status.email} until you enter it.`}
-          </p>
+              <strong class="wrap-anywhere">{target}</strong>. It works once, for 10 minutes; if
+              none arrived, ask for a new one.{status.pending &&
+                " Your address changes once you enter it."}
+            </>
+          }
+          e2e="email-verify-card"
+        >
+          {notices.change && (
+            <p class="text-sm" role="status" data-e2e="email-change-notice">{notices.change}</p>
+          )}
           <ScreenForm
-            action={FORM_ACTIONS.emailChange}
-            pending={pending.change}
-            onSubmit={onChange}
+            action={FORM_ACTIONS.emailVerify}
+            pending={pending.verify}
+            onSubmit={onVerify}
           >
-            <Stack>
-              <Field id="email-new" label="New e-mail address" required>
+            <Stack class="max-w-sm">
+              <Field id="email-code" label="Code" error={errors.verify} required>
                 <Input
-                  ref={emailField}
-                  data-e2e="email-new"
-                  name="email"
-                  type="email"
-                  autocomplete="email"
-                  value={values.email}
-                  onInput={(e) => onValueChange("email", e.currentTarget.value)}
+                  ref={codeField}
+                  data-e2e="email-code"
+                  name="code"
+                  autocomplete="one-time-code"
+                  autocapitalize="off"
+                  spellcheck={false}
+                  value={values.code}
+                  onInput={(e) => onValueChange("code", e.currentTarget.value)}
                   required
                 />
               </Field>
-              <Field id="email-password" label="Current password" required>
-                <Input
-                  data-e2e="email-password"
-                  name="password"
-                  type="password"
-                  autocomplete="current-password"
-                  value={values.password}
-                  onInput={(e) => onValueChange("password", e.currentTarget.value)}
-                  required
-                />
-              </Field>
-              {/* The API's refusal names no field: the password, the address or the limit. */}
-              <ErrorState message={errors.change} />
-              {notices.change && (
-                <p class="text-sm" role="status" data-e2e="email-change-notice">
-                  {notices.change}
-                </p>
-              )}
-              <div>
+              <Cluster>
                 <Button
                   type="submit"
-                  variant="secondary"
-                  data-e2e="email-change"
-                  busy={pending.change}
-                  busyLabel="Sending..."
+                  data-e2e="email-verify"
+                  busy={pending.verify}
+                  busyLabel="Checking..."
                 >
-                  Send a code to the new address
+                  Verify
                 </Button>
-              </div>
+              </Cluster>
             </Stack>
           </ScreenForm>
-          <p class="mt-4 text-sm">
-            <Link href={SCREEN_PATHS.profile} navigate={navigate} class="pc-link">
-              Back to the profile
-            </Link>
-          </p>
-        </CardBody>
-      </Card>
+          <ScreenForm action={FORM_ACTIONS.emailSend} pending={pending.send} onSubmit={onSend}>
+            <Stack gap="sm">
+              <p class="text-sm text-muted">
+                No mail?{" "}
+                <Button
+                  type="submit"
+                  variant="ghost"
+                  size="sm"
+                  class={TOUCH_TARGET}
+                  data-e2e="email-send"
+                  busy={pending.send}
+                  busyLabel="Sending..."
+                >
+                  Send a new code
+                </Button>
+              </p>
+              <ErrorState message={errors.send} />
+              {notices.send && (
+                <p class="text-sm" role="status" data-e2e="email-send-notice">{notices.send}</p>
+              )}
+            </Stack>
+          </ScreenForm>
+        </SettingGroup>
+      )}
+
+      <Modal
+        open={changing}
+        onClose={() => setChanging(false)}
+        title={hasEmail ? "Change e-mail address" : "Add an e-mail address"}
+        cancelLabel="Close"
+        dataE2E="email-change-dialog"
+      >
+        <ScreenForm action={FORM_ACTIONS.emailChange} pending={pending.change} onSubmit={onChange}>
+          <Stack>
+            <p class="text-sm text-muted">
+              We send a code to the new address. {hasEmail
+                ? `You keep signing in with ${status.email} until you enter it.`
+                : "Once you enter it, you sign in with that address."}
+            </p>
+            <Field id="email-new" label="New e-mail address" required>
+              <Input
+                ref={emailField}
+                data-e2e="email-new"
+                name="email"
+                type="email"
+                autocomplete="email"
+                value={values.email}
+                onInput={(e) => onValueChange("email", e.currentTarget.value)}
+                required
+              />
+            </Field>
+            <Field id="email-password" label="Current password" required>
+              <Input
+                data-e2e="email-password"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                value={values.password}
+                onInput={(e) => onValueChange("password", e.currentTarget.value)}
+                required
+              />
+            </Field>
+            {/* The API's refusal names no field: the password, the address or the limit. */}
+            <ErrorState message={errors.change} />
+            <Cluster justify="end">
+              <Button type="button" variant="ghost" onClick={() => setChanging(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                data-e2e="email-change"
+                busy={pending.change}
+                busyLabel="Sending..."
+              >
+                Send code
+              </Button>
+            </Cluster>
+          </Stack>
+        </ScreenForm>
+      </Modal>
     </Stack>
+  )
+}
+
+/** Whether the address is proven, as a quiet badge beside it. */
+function EmailState({ proven }: { proven: boolean }): JSX.Element {
+  return (
+    <span data-e2e="email-state">
+      <Badge
+        text={proven ? "Verified" : "Not verified"}
+        color={proven ? "green" : "orange"}
+        type="outline"
+      />
+    </span>
   )
 }

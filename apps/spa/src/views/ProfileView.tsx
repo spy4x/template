@@ -15,7 +15,7 @@ import {
   totpDisconnect,
 } from "../state/auth.ts"
 import { sessionState } from "../state/session.ts"
-import { connectionDisplay } from "../state/realtime.ts"
+import { emailStore } from "../state/email.ts"
 import { apiFetch } from "../state/api.ts"
 import { profileStore } from "../state/profile.ts"
 import { toasts } from "../state/toasts.ts"
@@ -110,6 +110,11 @@ export function ProfileView() {
       return
     }
     setValues((current) => ({ ...current, currentPassword: "", newPassword: "" }))
+    toasts.success({
+      title: "Password changed",
+      body: "Use the new password next time you sign in.",
+      dataE2E: "password-saved",
+    })
   }
 
   const startTotp = async () => {
@@ -182,7 +187,7 @@ export function ProfileView() {
     <ProfileScreen
       user={session.user}
       isMfaRequired={session.isMfaRequired}
-      connection={connectionDisplay(session)}
+      email={emailStore.status.value}
       values={values}
       onValueChange={setValue}
       errors={{
@@ -196,9 +201,28 @@ export function ProfileView() {
       enrolment={enrolment}
       pushDevices={profileStore.pushDevices.value}
       onSaveProfile={submitProfile}
+      onCancelProfile={() => {
+        setProfileError(null)
+        setFieldErrors(({ firstName: _first, lastName: _last, ...rest }) => rest)
+        setValues((current) => ({
+          ...current,
+          firstName: session.user?.firstName || "",
+          lastName: session.user?.lastName || "",
+        }))
+      }}
       onChangePassword={submitPassword}
+      onCancelPassword={() => {
+        setPasswordError(null)
+        setFieldErrors(({ currentPassword: _current, newPassword: _new, ...rest }) => rest)
+        setValues((current) => ({ ...current, currentPassword: "", newPassword: "" }))
+      }}
       onStartTotp={startTotp}
       onFinishTotp={finishTotp}
+      onCancelTotp={() => {
+        setEnrolment(null)
+        setTotpError(null)
+        setValue("otp", "")
+      }}
       onDisableTotp={disableTotp}
       onRegisterPush={registerPush}
       onRemovePush={removePush}

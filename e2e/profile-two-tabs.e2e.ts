@@ -83,14 +83,14 @@ test.describe("profile over the socket", () => {
 
       await expect.poll(() => profileGetAnswered).toBe(true)
 
+      await first.locator("[data-e2e=profile-edit]").click()
       await first.locator("[data-e2e=profile-first-name]").fill("Ada")
       await first.locator("[data-e2e=profile-last-name]").fill("Lovelace")
       await first.locator("[data-e2e=profile-save]").click()
       await first.locator("[data-e2e=profile-saved]").getByText("Saved", { exact: true }).waitFor()
 
       // The second tab was neither reloaded nor touched: the server's hint made it read again.
-      await expect(second.locator("[data-e2e=profile-first-name]")).toHaveValue("Ada")
-      await expect(second.locator("[data-e2e=profile-last-name]")).toHaveValue("Lovelace")
+      await expect(second.locator("[data-e2e=profile-name]")).toHaveText("Ada Lovelace")
 
       // The server sent tab 2 the hint for this person's own changes, and the tab acted on it.
       expect(
@@ -106,12 +106,13 @@ test.describe("profile over the socket", () => {
       // The first save's notice closes on its own five seconds after it opened. While it is still
       // open, the second save's notice makes the "Saved" text below match twice.
       await expect(first.locator("[data-e2e=profile-saved]")).toHaveCount(0, { timeout: 10_000 })
+      await first.locator("[data-e2e=profile-edit]").click()
       await first.locator("[data-e2e=profile-first-name]").fill("Grace")
       await first.locator("[data-e2e=profile-save]").click()
       await first.locator("[data-e2e=profile-saved]").getByText("Saved", { exact: true }).waitFor()
-      await expect(second.locator("[data-e2e=profile-first-name]")).toHaveValue("Ada")
+      await expect(second.locator("[data-e2e=profile-name]")).toHaveText("Ada Lovelace")
       socketBlocked = false
-      await expect(second.locator("[data-e2e=profile-first-name]")).toHaveValue("Grace", {
+      await expect(second.locator("[data-e2e=profile-name]")).toHaveText("Grace Lovelace", {
         timeout: 30_000,
       })
 

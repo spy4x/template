@@ -36,12 +36,12 @@ test.describe("auth profile ws push flow", () => {
       await page.locator("[data-e2e=auth-form-login]").fill(email)
       await page.locator("[data-e2e=auth-form-password]").fill(password)
       await submitAuthForm(page, "/", page.locator("[data-e2e=shell-ws-status]"))
-      await page.locator("[data-e2e=ws-status]", { hasText: "open" }).waitFor()
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 
       // The signed-in layout: the skip link is the first thing Tab reaches, and the navigation
       // marks the page you are on as the current one.
       await page.keyboard.press("Tab")
-      await expect(page.locator("[data-e2e=shell-skip-link]")).toBeFocused()
+      await expect(page.locator("[data-e2e=rail-shell-skip-link]")).toBeFocused()
       const nav = page.getByRole("navigation", { name: "Main navigation" })
       await expect(nav.getByRole("link", { name: "Profile" })).toHaveAttribute(
         "aria-current",
@@ -52,7 +52,7 @@ test.describe("auth profile ws push flow", () => {
       // Ctrl-click (Cmd on macOS) is left to the browser, which opens the link in a new tab.
       await page.evaluate(() => Object.assign(globalThis, { e2ePageMarker: true }))
       await nav.getByRole("link", { name: "Profile" }).click()
-      await page.locator("[data-e2e=ws-status]", { hasText: "open" }).waitFor()
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
       expect(await page.evaluate(() => "e2ePageMarker" in globalThis)).toBe(true)
       const newTab = page.context().waitForEvent("page", { timeout: 5_000 })
       await nav.getByRole("link", { name: "Profile" }).click({ modifiers: ["ControlOrMeta"] })
@@ -60,10 +60,29 @@ test.describe("auth profile ws push flow", () => {
 
       await expect(page.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible()
       await expect(page.getByRole("heading", { level: 2, name: "Push devices" })).toBeVisible()
-      await page.locator("[data-e2e=profile-first-name]").fill(firstName)
-      await page.locator("[data-e2e=profile-last-name]").fill(lastName)
+      // Cancelling the name dialog drops what was typed and the error it caused.
+      const firstNameField = page.locator("[data-e2e=profile-first-name]")
+      const lastNameField = page.locator("[data-e2e=profile-last-name]")
+      await page.locator("[data-e2e=profile-edit]").click()
+      const savedFirstName = await firstNameField.inputValue()
+      const savedLastName = await lastNameField.inputValue()
+      await firstNameField.fill("x".repeat(51))
+      await lastNameField.fill(lastName)
+      await page.locator("[data-e2e=profile-save]").click()
+      await expect(firstNameField).toHaveAttribute("aria-invalid", "true")
+      await page.locator("[data-e2e=profile-dialog]").getByRole("button", { name: "Cancel" })
+        .click()
+      await page.locator("[data-e2e=profile-edit]").click()
+      await expect(firstNameField).toHaveValue(savedFirstName)
+      await expect(lastNameField).toHaveValue(savedLastName)
+      await expect(firstNameField).not.toHaveAttribute("aria-invalid", "true")
+
+      await firstNameField.fill(firstName)
+      await lastNameField.fill(lastName)
       await page.locator("[data-e2e=profile-save]").click()
       await page.locator("[data-e2e=profile-saved]").getByText("Saved", { exact: true }).waitFor()
+      await expect(page.locator("[data-e2e=profile-dialog]")).toHaveCount(0)
+      await expect(page.locator("[data-e2e=profile-name]")).toHaveText(`${firstName} ${lastName}`)
 
       await page.locator("[data-e2e=shell-user-menu-button]").click()
       await page.getByRole("menuitem", { name: "Sign out" }).click()
