@@ -688,6 +688,54 @@ Deno.test("billing events against Postgres", async (t) => {
     )
 
     await t.step(
+      "a late active event of an old subscription does not earn grace for the new one's failed trial",
+      async () => {
+        const { groupId } = await seedGroup(sql)
+        const day = (n: number) => new Date(T0.getTime() + n * 24 * 60 * 60_000)
+        const apply = (
+          id: string,
+          subscriptionId: string,
+          type: SubscriptionEvent["type"],
+          status: SubscriptionStatus,
+          at: Date,
+        ) =>
+          billing.applyEvent(
+            event({
+              id,
+              reference: groupId,
+              customerId: "cus_tx",
+              subscriptionId,
+              type,
+              status,
+              at,
+            }),
+          )
+        const { SubscriptionCreated: created, SubscriptionUpdated: updated } = BillingEventType
+        await apply("evt_tx1", "sub_tx_a", created, SubscriptionStatus.Trialing, T0)
+        await apply(
+          "evt_tx2",
+          "sub_tx_a",
+          BillingEventType.SubscriptionCanceled,
+          SubscriptionStatus.Canceled,
+          day(30),
+        )
+        await apply("evt_tx3", "sub_tx_b", created, SubscriptionStatus.Trialing, day(40))
+        await apply("evt_tx4", "sub_tx_b", updated, SubscriptionStatus.PastDue, day(54))
+
+        // Subscription A's payment, from before its cancellation, is delivered only now.
+        const late = await apply("evt_tx5", "sub_tx_a", updated, SubscriptionStatus.Active, day(14))
+
+        expect(late).toBe("stale")
+        expect(await billing.get(groupId)).toMatchObject({
+          providerSubscriptionId: "sub_tx_b",
+          status: SubscriptionStatus.PastDue,
+          everActive: false,
+        })
+        expect(effectivePlanId(await billing.get(groupId), day(54), 7)).toBe(FREE_PLAN_ID)
+      },
+    )
+
+    await t.step(
       "a new subscription that follows a past-due one does not inherit its grace start",
       async () => {
         const { groupId } = await seedGroup(sql)
