@@ -143,6 +143,11 @@ export function EmailScreen(
   )
   const changing = opened !== null && opened.target === target && opened.notice === notices.change
   const setChanging = (open: boolean) => setOpened(open ? { target, notice: notices.change } : null)
+  // Once closed that way, it forgets what it opened with, so a later return to the same address
+  // and notice, such as proving the new address, does not open it again.
+  useEffect(() => {
+    if (opened !== null && !changing) setOpened(null)
+  }, [changing])
 
   // A change just asked for, or a code just used: focus moves on to the step that follows.
   const shown = useRef(target)

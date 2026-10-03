@@ -495,6 +495,20 @@ describe("EmailScreen", () => {
     expect(find("[data-e2e=email-verify-card]").textContent).toContain("new@example.com")
   })
 
+  it("keeps the change dialog closed once the new address is proven", async () => {
+    const proven = { email: "ann@example.com", proven: true, pending: null }
+    await mount(<EmailScreen {...emailDefaults} status={proven} />)
+    await click("[data-e2e=email-change-open]")
+    await rerender(
+      <EmailScreen {...emailDefaults} status={{ ...proven, pending: "new@example.com" }} />,
+    )
+
+    await rerender(
+      <EmailScreen {...emailDefaults} status={{ ...proven, email: "new@example.com" }} />,
+    )
+    expect(isOpen("email-change-dialog")).toBe(false)
+  })
+
   it("keeps the dialog open and moves focus to the new address when a change is refused", async () => {
     await mount(<EmailScreen {...emailDefaults} />)
     await click("[data-e2e=email-change-open]")
