@@ -292,7 +292,7 @@ Deno.test("activity: an event outlives the account of its actor and of the membe
     expect(rename.actor.userId).toBeNull()
     expect(describeActivity(rename)).toBe("Deleted user renamed the group from “Team” to “Crew”")
     expect(role.target).toBeNull()
-    expect(describeActivity(role)).toBe("Olga changed Deleted user from an editor to an admin")
+    expect(describeActivity(role)).toBe("Olga changed a member from an editor to an admin")
   })
 })
 

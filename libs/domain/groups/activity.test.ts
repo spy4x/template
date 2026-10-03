@@ -57,12 +57,12 @@ Deno.test("activity: a person with no name and no e-mail reads as Someone", () =
   expect(say("future.kind")).toBe("Ada changed something in the group")
 })
 
-Deno.test("activity: an account that is gone reads as Deleted user, as actor and as target", () => {
+Deno.test("activity: a gone actor reads as Deleted user, a missing target as a member", () => {
   expect(say("group.renamed", { actor: { userId: null, name: "" } })).toBe(
     "Deleted user renamed the group",
   )
   expect(say("group.member_removed", { target: null })).toBe(
-    "Ada removed Deleted user from the group",
+    "Ada removed a member from the group",
   )
 })
 

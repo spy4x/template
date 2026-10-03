@@ -152,17 +152,19 @@ function quoted(value: unknown): string {
 
 /**
  * One event in plain language, such as "Ada moved 3 notes to Family". A person with no name reads
- * as their e-mail (the server fills it in), and "Someone" if they have neither; an account that is
- * gone reads "Deleted user". An event whose facts were not kept (one written before the log
- * existed) gets the shortest true sentence; a kind this code does not know still reads as an event, never as a code.
+ * as their e-mail (the server fills it in), and "Someone" if they have neither. An actor whose
+ * account is gone reads "Deleted user"; a missing target reads "a member". An event whose facts
+ * were not kept (one written before the log existed) gets the shortest true sentence; a kind this
+ * code does not know still reads as an event, never as a code.
  */
 export function describeActivity(
   event: Pick<ActivityEvent, "kind" | "actor" | "target" | "details">,
 ): string {
   const who = event.actor.userId === null ? "Deleted user" : event.actor.name || "Someone"
-  // Only the kinds about a member read the target, and they always wrote one: a missing target
-  // means the member's account was deleted afterwards.
-  const target = event.target?.userId == null ? "Deleted user" : event.target.name || "a member"
+  // A missing actor can only be a deleted account: the column was required until the log existed.
+  // A missing target is either a deleted account or an event written before targets were kept, so
+  // it reads "a member", which is true of both.
+  const target = event.target?.userId == null ? "a member" : event.target.name || "a member"
   const { details } = event
   switch (event.kind) {
     case "group.created":
