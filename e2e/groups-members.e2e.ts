@@ -51,6 +51,51 @@ async function teamWith(
   return groupId
 }
 
+/**
+ * Makes every WebSocket the page opens from now on start `ms` late, so the page has read the
+ * group over REST well before the server adopts its socket. A page on a slow machine is in this
+ * state for a moment after every load.
+ */
+async function delaySockets(page: Page, ms: number) {
+  await page.addInitScript((delay) => {
+    const Native = globalThis.WebSocket
+    class Delayed extends EventTarget {
+      readyState = 0
+      binaryType = "blob"
+      real: WebSocket | null = null
+      constructor(url: string, protocols?: string | string[]) {
+        super()
+        setTimeout(() => {
+          const real = new Native(url, protocols)
+          this.real = real
+          for (const type of ["open", "message", "close", "error"]) {
+            real.addEventListener(type, (event) => {
+              this.readyState = real.readyState
+              const copy = event instanceof MessageEvent
+                ? new MessageEvent(type, { data: event.data })
+                : event instanceof CloseEvent
+                ? new CloseEvent(type, { code: event.code, reason: event.reason })
+                : new Event(type)
+              this.dispatchEvent(copy)
+              ;(this as unknown as Record<string, ((e: Event) => void) | undefined>)[`on${type}`]?.(
+                copy,
+              )
+            })
+          }
+        }, delay)
+      }
+      send(data: string) {
+        this.real?.send(data)
+      }
+      close(code?: number, reason?: string) {
+        this.real?.close(code, reason)
+      }
+    }
+    Object.assign(Delayed, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 })
+    Object.assign(globalThis, { WebSocket: Delayed })
+  }, ms)
+}
+
 const settingsReady = (page: Page) => page.locator("[data-e2e=group-general-name]")
 
 test.describe("group members", () => {
@@ -94,6 +139,43 @@ test.describe("group members", () => {
       expect(await memberPage.evaluate(() => "notReloaded" in globalThis)).toBe(true)
       const refused = await memberPage.request.get(`${apiBase}/api/groups/${groupId}/members`)
       expect(refused.status()).toBe(404)
+    } finally {
+      await memberPage?.context().close()
+      await cleanup(request, owner, { soft: true })
+      await cleanup(request, member, { soft: true })
+    }
+  })
+
+  test("a member's page that opens its socket late still learns of a role change made before it", async ({ page, browser, request }) => {
+    const owner = "e2e_members_late_owner@example.com"
+    const member = "e2e_members_late_member@example.com"
+    await cleanup(request, owner)
+    await cleanup(request, member)
+    let memberPage: Page | null = null
+    try {
+      await signUp(request, owner)
+      await signUp(request, member)
+      await signIn(page, owner, password)
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+      const groupId = await teamWith(page, request, member, 2)
+
+      memberPage = await personPage(browser, member)
+      await delaySockets(memberPage, 2_500)
+      await gotoApp(memberPage, `/groups/${groupId}`, settingsReady(memberPage))
+      await expect(memberPage.locator("[data-e2e=group-general-role]")).toHaveText("Editor")
+      await expect(memberPage.locator("[data-e2e=shell-ws-status]")).not.toHaveText("Online")
+
+      // The member's page has its answer from REST, and its socket is not yet known to the server.
+      await gotoApp(page, `/groups/${groupId}`, settingsReady(page))
+      const row = page.locator("[data-e2e=group-member]").filter({ hasText: member })
+      await row.getByLabel(`Role of ${member}`).selectOption({ label: "Viewer" })
+      await row.getByRole("button", { name: "Change role" }).click()
+      await expect(row.locator("[data-e2e=group-member-role]")).toHaveText("Viewer")
+      await expect(memberPage.locator("[data-e2e=shell-ws-status]")).not.toHaveText("Online")
+
+      await expect(memberPage.locator("[data-e2e=group-general-role]")).toHaveText("Viewer", {
+        timeout: 15_000,
+      })
     } finally {
       await memberPage?.context().close()
       await cleanup(request, owner, { soft: true })

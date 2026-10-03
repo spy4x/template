@@ -123,7 +123,7 @@ function cursorsFor(userId: number): PersistentCursorStore {
  * page up to date: the transport calls it after every reconnect and for every hint that is news.
  * Calling it again for the same user does nothing.
  */
-export function connectRealtime(userId: number, pull: (gap: GapReport) => void | Promise<void>) {
+export function connectRealtime(userId: number, pull: (gap?: GapReport) => void | Promise<void>) {
   if (current?.userId === userId) return
   disconnectRealtime()
   const cursors = cursorsFor(userId)
@@ -135,9 +135,19 @@ export function connectRealtime(userId: number, pull: (gap: GapReport) => void |
     pull,
     gate: sessionGate(userId),
   })
+  // The socket receives hints only once the server has adopted it, so a change made after the
+  // start-up read and before that moment reaches this page by no hint. The transport pulls after a
+  // reconnect but not after its first open, so the first open pulls here.
+  let opened = false
   const stopStatus = transport.onStatus((snapshot) => {
     const wsStatus = STATUS_TEXT[snapshot.status]
-    if (wsStatus === "open") clearResumeNotice()
+    if (wsStatus === "open") {
+      clearResumeNotice()
+      if (!opened) {
+        opened = true
+        void Promise.resolve(pull()).catch(() => {})
+      }
+    }
     sessionState.value = { ...sessionState.value, wsStatus }
   })
   // The app came back (shown again, back online, restored from the back-forward cache): do not
