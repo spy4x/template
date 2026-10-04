@@ -35,6 +35,7 @@ import {
   recordGroupChange,
 } from "./group-change-log.ts"
 import { type AuditEventInput, writeAuditEvent } from "./audit.ts"
+import { notifyOwnershipReceived, notifyRemoved, notifyRoleChanged } from "./group-notifications.ts"
 import { revokeInvitationsOf } from "./invitation-revocation.ts"
 
 interface GroupRow extends postgres.Row {
@@ -810,6 +811,7 @@ export class PostgresGroupRepository implements GroupRepository {
           targetUserId: userId,
           details: { from: roles.get(userId)!, to: role },
         })
+        await notifyRoleChanged(transaction, groupId, userId, roles.get(userId)!, role)
         // A demoted member's links must not let anyone in above what they may now invite with.
         await revokeInvitationsOf(transaction, groupId, userId, role, actorId, requestId)
         // A demoted member can still read the group, so nobody loses access: the raised revision
@@ -839,6 +841,7 @@ export class PostgresGroupRepository implements GroupRepository {
       await repository.audit(groupId, actorId, MEMBER_REMOVED_EVENT, requestId, {
         targetUserId: userId,
       })
+      await notifyRemoved(transaction, groupId, userId)
       // Their own links would let them back in.
       await revokeInvitationsOf(transaction, groupId, userId, null, actorId, requestId)
       await recordAccessChange(transaction, groupId, actorId, MEMBER_REMOVED_EVENT, [userId])
@@ -882,6 +885,7 @@ export class PostgresGroupRepository implements GroupRepository {
       await repository.audit(groupId, actorId, OWNERSHIP_TRANSFERRED_EVENT, requestId, {
         targetUserId: userId,
       })
+      await notifyOwnershipReceived(transaction, groupId, userId)
       // The old owner is now an admin: their admin links go, their viewer and editor links stay.
       // The new owner may invite with every role, so their links all stay.
       await revokeInvitationsOf(transaction, groupId, actorId, GroupRole.ADMIN, actorId, requestId)

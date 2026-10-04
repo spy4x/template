@@ -8,6 +8,7 @@
     "./libs/domain/groups",
     "./libs/domain/identity",
     "./libs/domain/notes",
+    "./libs/domain/notifications",
     "./libs/domain/subscribers",
     "./libs/server/auth",
     "./libs/server/billing",
@@ -15,6 +16,7 @@
     "./libs/server/jobs",
     "./libs/server/mail",
     "./libs/server/notes",
+    "./libs/server/notifications",
     "./libs/server/subscribers",
     "./libs/ui"
   ],
@@ -117,6 +119,7 @@
     "@domain/groups": "./libs/domain/groups/+lib.ts",
     "@domain/identity": "./libs/domain/identity/+lib.ts",
     "@domain/notes": "./libs/domain/notes/+lib.ts",
+    "@domain/notifications": "./libs/domain/notifications/+lib.ts",
     "@domain/subscribers": "./libs/domain/subscribers/+lib.ts",
     "@server/auth/": "./libs/server/auth/",
     "@server/billing/": "./libs/server/billing/",
@@ -124,6 +127,7 @@
     "@server/jobs/": "./libs/server/jobs/",
     "@server/mail/": "./libs/server/mail/",
     "@server/notes/": "./libs/server/notes/",
+    "@server/notifications/": "./libs/server/notifications/",
     "@server/subscribers/": "./libs/server/subscribers/",
     "@client/vite/": "./libs/client/vite/",
     // #endregion Aliases
