@@ -214,7 +214,10 @@ describe("POST /notifications/read-all", () => {
     const response = await post(app, "/read-all")
 
     expect(await response.json()).toEqual({ unreadCount: 0 })
-    expect(await (await post(buildApp(), "/read-all")).json()).toEqual({ unreadCount: 0 })
+    // Read back through the same inbox: the session's person had their rows marked, no one else.
+    expect(await (await app.request("/notifications/unread-count")).json()).toEqual({
+      unreadCount: 0,
+    })
   })
 
   it("leaves another person's notifications unread", async () => {
