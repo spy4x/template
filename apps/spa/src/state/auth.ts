@@ -2,6 +2,8 @@ import {
   type AccountDeletionBlocker,
   type AccountDeletionStatus,
   type ApiSuccessResponse,
+  type SignedInDevice,
+  type SignedInDevicesResponse,
   type TotpConnectStartResponse,
   type User,
   UserMFAStatus,
@@ -225,17 +227,46 @@ export async function checkTotp(otp: string): Promise<{ ok: boolean; error?: str
   return { ok: true }
 }
 
+/** Changes the password; `signOutOthers` also ends every other session of the person. */
 export async function changePassword(
   password: string,
   newPassword: string,
+  signOutOthers = true,
 ): Promise<{ ok: boolean; error?: string }> {
   const result = await apiFetch<ApiSuccessResponse>("/api/auth/password/change", {
     method: "POST",
-    body: JSON.stringify({ password, newPassword }),
+    body: JSON.stringify({ password, newPassword, signOutOthers }),
   })
   if (!result.ok) {
     return { ok: false, error: result.error.message }
   }
+  return { ok: true }
+}
+
+/** The devices the person is signed in on, this one first. */
+export async function listSessions(): Promise<
+  { ok: true; sessions: SignedInDevice[] } | { ok: false; error: string }
+> {
+  const result = await apiFetch<SignedInDevicesResponse>("/api/auth/sessions")
+  if (!result.ok) return { ok: false, error: result.error.message }
+  return { ok: true, sessions: result.data.sessions }
+}
+
+/** Signs one other device out. */
+export async function endSession(sessionId: number): Promise<{ ok: boolean; error?: string }> {
+  const result = await apiFetch<ApiSuccessResponse>(`/api/auth/sessions/${sessionId}`, {
+    method: "DELETE",
+  })
+  if (!result.ok) return { ok: false, error: result.error.message }
+  return { ok: true }
+}
+
+/** Signs out every device but this one. */
+export async function endOtherSessions(): Promise<{ ok: boolean; error?: string }> {
+  const result = await apiFetch<ApiSuccessResponse>("/api/auth/sessions/others", {
+    method: "DELETE",
+  })
+  if (!result.ok) return { ok: false, error: result.error.message }
   return { ok: true }
 }
 
