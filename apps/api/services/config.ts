@@ -13,6 +13,7 @@ export class Config {
   authTotp = env.AUTH_TOTP
   devEmail = env.DEV_EMAIL
   vapidKeysPath = "./vapid.json"
+  errorReportDsn = env.ERROR_REPORT_DSN
   timeZone = env.TIMEZONE
   authSaltRounds = 12 // balance between security and performance
   authSessionLength = 32

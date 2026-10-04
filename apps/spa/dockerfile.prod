@@ -9,6 +9,9 @@ USER 1000:1000
 
 ARG VITE_ENV=prod
 ENV VITE_ENV=${VITE_ENV}
+# Public by design: the browser sends reports with it. Empty means no reporting.
+ARG VITE_ERROR_REPORT_DSN=
+ENV VITE_ERROR_REPORT_DSN=${VITE_ERROR_REPORT_DSN}
 RUN deno task spa:build
 
 # Production stage with nginx

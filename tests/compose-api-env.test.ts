@@ -59,3 +59,7 @@ for (const service of ["api", "worker"]) {
     expect(names).toContain("SUBSCRIBERS_PREVIOUS_SECRETS")
   })
 }
+
+Deno.test("the api container receives the error tracker's DSN", async () => {
+  expect(await environmentOf("api")).toContain("ERROR_REPORT_DSN")
+})

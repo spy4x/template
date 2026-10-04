@@ -18,6 +18,8 @@ export const envSchema = type({
   KV_HOSTNAME: "string > 0",
   KV_PORT: "string.integer.parse",
   KV_PASSWORD: "string > 0",
+  /** `https://<key>@<host>/<project>` of an error tracker; unset or empty turns reporting off. */
+  "ERROR_REPORT_DSN?": "string",
 })
 
 /** Reads and checks the API's environment. Throws a `ConfigError` naming every bad variable. */

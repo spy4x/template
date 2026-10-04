@@ -34,3 +34,15 @@ Deno.test("the API environment carries KV_PASSWORD through", () => {
   const env = readApiEnv(createEnvReader({ ...REQUIRED_ENV, KV_PASSWORD: `a-test-password` }))
   expect(env.KV_PASSWORD).toBe(`a-test-password`)
 })
+
+Deno.test("the API environment starts without ERROR_REPORT_DSN and carries it through when set", () => {
+  const withKv = { ...REQUIRED_ENV, KV_PASSWORD: `kv-secret` }
+
+  expect(readApiEnv(createEnvReader(withKv)).ERROR_REPORT_DSN).toBeUndefined()
+  expect(readApiEnv(createEnvReader({ ...withKv, ERROR_REPORT_DSN: `` })).ERROR_REPORT_DSN)
+    .toBeUndefined()
+  expect(
+    readApiEnv(createEnvReader({ ...withKv, ERROR_REPORT_DSN: `https://k@e.example/1` }))
+      .ERROR_REPORT_DSN,
+  ).toBe(`https://k@e.example/1`)
+})
