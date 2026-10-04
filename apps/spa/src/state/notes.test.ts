@@ -577,8 +577,8 @@ describe("notes store", () => {
 
       expect(store.undo.value?.id).toBe("a")
       expect(store.undo.value?.title).toBe("Plan")
-      expect(store.undo.value!.until - before).toBeGreaterThanOrEqual(UNDO_MS)
-      expect(store.undo.value!.until - Date.now()).toBeLessThanOrEqual(UNDO_MS)
+      expect(store.undo.value!.until - before).toBeGreaterThanOrEqual(10_000)
+      expect(store.undo.value!.until - Date.now()).toBeLessThanOrEqual(10_000)
     })
 
     it("offers no Undo for a delete that was refused", async () => {
