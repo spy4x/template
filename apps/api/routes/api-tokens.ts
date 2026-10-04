@@ -52,6 +52,8 @@ export function createApiTokensRoute(dependencies: ApiTokensRouteDependencies): 
     .post(`/`, async (c) => {
       const request = parseApiTokenCreateRequest(await readApiJson(c))
       const created = await dependencies.tokens.create(c, c.get("auth")!.user.id, request)
+      // The only answer that carries the secret: no cache may keep it.
+      c.header(`Cache-Control`, `no-store`)
       return c.json(created, 201)
     })
     .delete(`/:id`, async (c) => {

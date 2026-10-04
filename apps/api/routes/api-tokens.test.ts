@@ -82,11 +82,12 @@ describe("API token routes", () => {
     expect(calls).toEqual([["list", 7]])
   })
 
-  it("creates a token for the signed-in person and answers its secret once, with 201", async () => {
+  it("creates a token for the signed-in person and answers its secret once, uncached, with 201", async () => {
     const { app, calls } = buildApp()
     const response = await post(app, valid)
 
     expect(response.status).toBe(201)
+    expect(response.headers.get("cache-control")).toBe("no-store")
     expect(await response.json()).toEqual({ token, secret: "tpl_secret" })
     expect(calls).toEqual([["create", 7, { ...valid, name: "Zapier" }]])
   })
