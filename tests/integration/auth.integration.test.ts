@@ -44,6 +44,10 @@ const AUDIT_IDENTIFIER_MIGRATION = "2026_10_10_0001_auth_audit_identifier_320.sq
 const APPEARANCE_MIGRATION = "2026_10_18_0001_group_appearance.sql"
 /** Adds what a session remembers about its device, which every sign-in writes (#151). */
 const SESSION_DEVICES_MIGRATION = "2026_10_23_0002_auth_session_devices.sql"
+/** Lets an outbox row be a job, with no group (#165: sign-up queues one). */
+const OUTBOX_JOBS_MIGRATION = "2026_10_03_0002_outbox_jobs.sql"
+/** Sign-up writes a starter data request and queues its job (#165). */
+const STARTER_DATA_MIGRATION = "2026_10_26_0001_starter_data.sql"
 // A reset also deletes every API token of the person, so the reset tests need their table (#167).
 const API_TOKENS_MIGRATION = "2026_10_25_0001_api_tokens.sql"
 const MASTER_MIGRATIONS = [
@@ -84,7 +88,11 @@ async function withSchema(
     await applyMigration(sql, "2026_10_22_0001_notifications.sql")
     // The device columns need the package's session table; a test that starts before it applies
     // this migration itself, right after the auth migration.
-    if (migrations.includes(AUTH_MIGRATION)) await applyMigration(sql, SESSION_DEVICES_MIGRATION)
+    if (migrations.includes(AUTH_MIGRATION)) {
+      await applyMigration(sql, SESSION_DEVICES_MIGRATION)
+      await applyMigration(sql, OUTBOX_JOBS_MIGRATION)
+      await applyMigration(sql, STARTER_DATA_MIGRATION)
+    }
     await body(sql)
   } finally {
     await sql.end({ timeout: 5 })
@@ -210,6 +218,8 @@ async function signUpRowCounts(sql: postgres.Sql): Promise<number[]> {
     UNION ALL SELECT COUNT(*)::int FROM groups
     UNION ALL SELECT COUNT(*)::int FROM group_members
     UNION ALL SELECT COUNT(*)::int FROM auth_sessions
+    UNION ALL SELECT COUNT(*)::int FROM starter_data_requests
+    UNION ALL SELECT COUNT(*)::int FROM outbox_events WHERE event_kind = 'onboarding.starter-data'
   `
   return rows.map((row: CountRow) => row.count)
 }
@@ -223,29 +233,32 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
   await withSchema([...MASTER_MIGRATIONS, AUTH_MIGRATION, KIND_MIGRATION], async (sql) => {
     const signIn = buildSignIn(sql)
 
-    await t.step("sign-up creates auth user, key, profile, group and session", async () => {
-      const client = buildApp(signIn)
-      const before = await signUpRowCounts(sql)
-      const response = await client.request("POST", "/sign-up", {
-        email: "  Alice@Example.com  ",
-        password: "Passw0rd!",
-      })
-      expect(response.status).toBe(200)
-      const user = await response.json()
-      expect(await signUpRowCounts(sql)).toEqual(before.map((count) => count + 1))
-      const [key] = await sql<
-        { userId: number; email: string; secret: string; provenAt: Date | null }[]
-      >`
+    await t.step(
+      "sign-up creates auth user, key, profile, group, session and the starter data job",
+      async () => {
+        const client = buildApp(signIn)
+        const before = await signUpRowCounts(sql)
+        const response = await client.request("POST", "/sign-up", {
+          email: "  Alice@Example.com  ",
+          password: "Passw0rd!",
+        })
+        expect(response.status).toBe(200)
+        const user = await response.json()
+        expect(await signUpRowCounts(sql)).toEqual(before.map((count) => count + 1))
+        const [key] = await sql<
+          { userId: number; email: string; secret: string; provenAt: Date | null }[]
+        >`
         SELECT user_id AS "userId", email, secret, proven_at AS "provenAt" FROM auth_keys
         WHERE subject = 'alice@example.com'
       `
-      expect(key.userId).toBe(user.id)
-      // The address is kept on the key, normalised, and unproven until a reset link proves it.
-      expect(key.email).toBe("alice@example.com")
-      expect(key.provenAt).toBeNull()
-      expect(key.secret).toMatch(/^pbkdf2-sha256\$600000\$/)
-      expect((await client.request("GET", "/me")).status).toBe(200)
-    })
+        expect(key.userId).toBe(user.id)
+        // The address is kept on the key, normalised, and unproven until a reset link proves it.
+        expect(key.email).toBe("alice@example.com")
+        expect(key.provenAt).toBeNull()
+        expect(key.secret).toMatch(/^pbkdf2-sha256\$600000\$/)
+        expect((await client.request("GET", "/me")).status).toBe(200)
+      },
+    )
 
     await t.step("a taken address is refused and writes nothing", async () => {
       const before = await signUpRowCounts(sql)
@@ -733,6 +746,8 @@ Deno.test("the auth migration applies on top of the previous schema", async () =
     // Every later migration runs before the next sign-up, as a deploy applies them in order.
     await applyMigration(sql, KIND_MIGRATION)
     await applyMigration(sql, SESSION_DEVICES_MIGRATION)
+    await applyMigration(sql, OUTBOX_JOBS_MIGRATION)
+    await applyMigration(sql, STARTER_DATA_MIGRATION)
 
     const [authUser] = await sql<{ id: number; createdAt: Date }[]>`
       SELECT id, created_at FROM auth_users
