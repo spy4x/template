@@ -98,12 +98,12 @@ test.describe("signed-in devices", () => {
       await expect(phoneRow).toHaveCount(0)
 
       expect(await signedIn(phone)).toBe(false)
-      // The open page is signed out by the server closing its socket, well before the hub's
-      // periodic check every 15 seconds would have.
+      // The server closes the phone's socket as soon as the session ends (about 20 ms here). The
+      // hub's periodic check every 15 seconds would land within half a second of it only by chance.
       await expect(phonePage.locator("[data-e2e=signin-required]")).toBeVisible({ timeout: 8_000 })
       await expect(phonePage.locator("[data-e2e=shell-ws-status]")).toHaveCount(0)
       expect(socketClosedAt).toBeGreaterThan(0)
-      expect(socketClosedAt - endedAt).toBeLessThan(8_000)
+      expect(socketClosedAt - endedAt).toBeLessThan(500)
       expect(await signedIn(page.context())).toBe(true)
     } finally {
       await phone?.close()
