@@ -118,8 +118,10 @@ const GROUP_ERROR_CODES: Record<
   LAST_OWNER: "conflict",
   MEMBER_NOT_FOUND: "not_found",
   NAME_MISMATCH: "bad_request",
+  NOTHING_TO_MOVE: "conflict",
   PASSWORD_INVALID: "bad_request",
   ROLE_INSUFFICIENT: "forbidden",
+  SAME_GROUP: "bad_request",
   SUBSCRIPTION_RENEWS: "conflict",
   USER_NOT_ACTIVE: "unauthorized",
 }

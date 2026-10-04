@@ -43,6 +43,18 @@ Deno.test("activity: a move reads as a sentence with the count and the group", (
   )
 })
 
+Deno.test("activity: moving all of a group's data reads as a sentence in both groups", () => {
+  expect(say("group.data_moved_out", { details: { count: 5, groupName: "Family" } })).toBe(
+    "Ada moved all the group's data (5 items) to Family",
+  )
+  expect(say("group.data_moved_out", { details: { count: 1 } })).toBe(
+    "Ada moved all the group's data (1 item) to another group",
+  )
+  expect(say("group.data_moved_in", { details: { count: 5 } })).toBe(
+    "Ada moved all of another group's data (5 items) here",
+  )
+})
+
 Deno.test("activity: a role change names both roles and the member", () => {
   expect(
     say("group.member_role_changed", {

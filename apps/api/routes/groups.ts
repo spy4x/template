@@ -17,6 +17,8 @@ import {
   GroupMembersQuery,
   type GroupMembersResult,
   type GroupMemberSummary,
+  GroupMoveAllCommand,
+  type GroupMoveAllResult,
   GroupRenameCommand,
   GroupRestoreCommand,
   GroupSelectCommand,
@@ -30,6 +32,7 @@ import {
   parseGroupIdRequest,
   parseMemberRoleBody,
   parseMemberUserIdParam,
+  parseMoveAllBody,
   parseRenameGroupBody,
   parseTransferBody,
   type SelectedGroup,
@@ -57,6 +60,7 @@ export interface GroupsRouteDependencies {
   removeMember(command: GroupMemberRemoveCommand): Promise<{ removed: true }>
   leave(command: GroupLeaveCommand): Promise<{ left: true }>
   transfer(command: GroupTransferCommand): Promise<{ transferred: true }>
+  moveAll(command: GroupMoveAllCommand): Promise<GroupMoveAllResult>
   /**
    * The limit a transfer spends before its password is checked: the per-user budget a password
    * change spends, so the two together cannot be used to guess the password faster.
@@ -229,6 +233,21 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
           new GroupLeaveCommand({
             actor: actorFromAuth(c.get("auth")!),
             groupId,
+            requestId: c.get("requestId"),
+            idempotencyKey: c.req.header("idempotency-key"),
+          }),
+        ),
+      )
+    })
+    .post("/:groupId/move-all", requireSameOrigin, async (c) => {
+      const groupId = parseGroupId(c.req.param("groupId"))
+      const { toGroupId } = parseMoveAllBody(await readJsonBody(c), groupId)
+      return c.json(
+        await dependencies.moveAll(
+          new GroupMoveAllCommand({
+            actor: actorFromAuth(c.get("auth")!),
+            groupId,
+            toGroupId,
             requestId: c.get("requestId"),
             idempotencyKey: c.req.header("idempotency-key"),
           }),

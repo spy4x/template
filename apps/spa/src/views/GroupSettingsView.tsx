@@ -11,6 +11,7 @@ import {
 } from "@domain/groups"
 import { entitlementsOf } from "@domain/billing"
 import type { GroupRow } from "@ui/groups-screen.tsx"
+import { moveTargetsOf } from "@ui/notes-screen.tsx"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { groupsStore } from "../state/groups.ts"
 import { membersStore } from "../state/members.ts"
@@ -175,6 +176,8 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
   const working = store.working.value
   // An error of another group's page is not this page's.
   const failure = store.actionError.value?.groupId === groupId ? store.actionError.value : null
+  const movedAll = store.moved.value?.groupId === groupId ? store.moved.value : null
+  const movedTo = movedAll && store.groups.value.find((other) => other.id === movedAll.toGroupId)
   return (
     <GroupSettingsScreen
       group={group}
@@ -218,6 +221,14 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
           await selectionStore.refresh().catch(() => {})
           navigate(SCREEN_PATHS.groups)
         })}
+      moveTargets={moveTargetsOf(store.groups.value, groupId)}
+      onMoveAll={(toGroupId) => void store.moveAll(groupId, toGroupId)}
+      movingAll={working?.groupId === groupId && working.action === "moveAll"}
+      moveAllError={failure?.action === "moveAll" ? failure.message : null}
+      moveAllResult={movedAll &&
+        { count: movedAll.count, toName: movedTo?.name ?? "the other group" }}
+      moveAllRefusal={failure?.action === "moveAll" ? failure.plan ?? null : null}
+      onMoveAllClose={() => store.forgetMoveAll()}
       billing={group && <GroupBillingCard groupId={groupId} />}
       invite={group
         ? (close) => (

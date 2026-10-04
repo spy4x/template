@@ -110,3 +110,46 @@ export async function listenForLosses(sql: postgres.Sql, groupId: string) {
   }
   return { heard, stop }
 }
+
+/**
+ * Runs two moves of opposite direction while another connection holds the lock of `heldGroupId`,
+ * the group the first move starts from. It starts the first move and waits until it waits on that
+ * lock, starts the second and waits the same way, then lets go. The first is then ahead in the
+ * queue, so a pair that locks `from` before `to` deadlocks on release (the first takes the held
+ * group and wants the second's group, which the second holds and wants the first's), while a pair
+ * that locks in id order finishes. Resolves to how each run settled, in `runs` order.
+ */
+export async function runBlockedOnLock<T>(
+  sql: postgres.Sql,
+  heldGroupId: string,
+  runs: readonly [() => Promise<T>, () => Promise<T>],
+): Promise<PromiseSettledResult<T>[]> {
+  const holder = await sql.reserve()
+  const started: Promise<PromiseSettledResult<T>>[] = []
+  try {
+    await holder`BEGIN`
+    await holder`SELECT id FROM groups WHERE id = ${heldGroupId} FOR UPDATE`
+    for (const [index, run] of runs.entries()) {
+      started.push(
+        run().then(
+          (value): PromiseSettledResult<T> => ({ status: "fulfilled", value }),
+          (reason): PromiseSettledResult<T> => ({ status: "rejected", reason }),
+        ),
+      )
+      const deadline = Date.now() + 10_000
+      while (true) {
+        const [{ waiting }] = await sql<{ waiting: number }[]>`
+          SELECT count(*)::int AS waiting FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'
+        `
+        if (waiting > index) break
+        if (Date.now() > deadline) throw new Error(`move ${index + 1} never waited on the lock`)
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+    }
+  } finally {
+    await holder`COMMIT`.catch(() => {})
+    holder.release()
+  }
+  return await Promise.all(started)
+}

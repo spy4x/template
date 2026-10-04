@@ -4,6 +4,7 @@ import type { Actor } from "@domain/identity"
 
 export * from "./activity.ts"
 export * from "./invitations.ts"
+export * from "./move-all.ts"
 
 /**
  * The aggregate a group's changes are recorded and announced under: the `aggregate_type` of its
@@ -50,8 +51,10 @@ export type GroupErrorCode =
   | "LAST_OWNER"
   | "MEMBER_NOT_FOUND"
   | "NAME_MISMATCH"
+  | "NOTHING_TO_MOVE"
   | "PASSWORD_INVALID"
   | "ROLE_INSUFFICIENT"
+  | "SAME_GROUP"
   | "SUBSCRIPTION_RENEWS"
   | "USER_NOT_ACTIVE"
 

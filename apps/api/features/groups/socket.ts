@@ -8,6 +8,7 @@ import {
   GroupMemberRemoveCommand,
   GroupMemberRoleCommand,
   GroupMembersQuery,
+  GroupMoveAllCommand,
   GroupRenameCommand,
   GroupRestoreCommand,
   GroupSelectCommand,
@@ -19,6 +20,7 @@ import {
   parseGroupIdRequest,
   parseMemberRequest,
   parseMemberRoleRequest,
+  parseMoveAllRequest,
   parseRenameGroupRequest,
 } from "@domain/groups"
 import type {
@@ -27,6 +29,7 @@ import type {
   GroupGetResult,
   GroupMembersResult,
   GroupMemberSummary,
+  GroupMoveAllResult,
   GroupSummary,
   SelectedGroup,
 } from "@domain/groups"
@@ -48,6 +51,7 @@ export interface GroupSocketDependencies extends GroupListDependencies {
   setRole(command: GroupMemberRoleCommand): Promise<{ member: GroupMemberSummary }>
   removeMember(command: GroupMemberRemoveCommand): Promise<{ removed: true }>
   leave(command: GroupLeaveCommand): Promise<{ left: true }>
+  moveAll(command: GroupMoveAllCommand): Promise<GroupMoveAllResult>
 }
 
 /**
@@ -165,6 +169,15 @@ export function createGroupSocketRequests(dependencies: GroupSocketDependencies)
         const { groupId } = parseGroupIdRequest(payload)
         return await dependencies.leave(
           new GroupLeaveCommand({ actor, groupId, requestId, idempotencyKey }),
+        )
+      },
+    },
+    "group.moveAll": {
+      kind: "command",
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
+        const { groupId, toGroupId } = parseMoveAllRequest(payload)
+        return await dependencies.moveAll(
+          new GroupMoveAllCommand({ actor, groupId, toGroupId, requestId, idempotencyKey }),
         )
       },
     },

@@ -31,6 +31,7 @@ export const realtime = new Realtime({
       setRole: (command) => commandBus.execute(command),
       removeMember: (command) => commandBus.execute(command),
       leave: (command) => commandBus.execute(command),
+      moveAll: (command) => commandBus.execute(command),
       cursor: groupListCursor,
     }),
     ...createProfileSocketRequests({

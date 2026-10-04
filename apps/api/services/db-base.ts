@@ -6,6 +6,9 @@ import type { SessionStore } from "@spy4x/server/sign-in"
 import type { AuthAuditBase, User, UserBase } from "@domain/identity"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { PostgresGroupActivityRepository } from "@server/groups/postgres-activity-repository.ts"
+import { PostgresGroupDataMover } from "@server/groups/postgres-group-data-mover.ts"
+import type { MovableAggregate } from "@server/groups/movable.ts"
+import { noteMovable } from "@server/notes/note-movable.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
 import { emailChanges } from "@server/auth/email-verification.ts"
@@ -20,6 +23,13 @@ export interface UserTotp {
   /** Time step of the last accepted code, or `null` when none was accepted yet. */
   lastAcceptedStep: number | null
 }
+
+/**
+ * The aggregates "move all of a group's data" moves, in the order it moves them. A new aggregate
+ * joins here (`docs/aggregates.md`, "Making an aggregate movable"): put one that other aggregates
+ * point at before the ones that point at it.
+ */
+export const MOVABLE_AGGREGATES: readonly MovableAggregate[] = [noteMovable]
 
 /** A cache that stores nothing: every read goes to the database. */
 const noCache: RowCache<User> = {
@@ -69,6 +79,11 @@ export class AppDbBase extends DbServiceBase {
   /** The read side of a group's activity log. Built per access, like `group`. */
   get groupActivity(): PostgresGroupActivityRepository {
     return new PostgresGroupActivityRepository(this.sql)
+  }
+
+  /** Moves all of a group's data to another group. Built per access, like `group`. */
+  get groupData(): PostgresGroupDataMover {
+    return new PostgresGroupDataMover(this.sql, MOVABLE_AGGREGATES)
   }
 
   /** The notes repository. Built per access, like `group`, so inside `begin()` it uses the transaction. */

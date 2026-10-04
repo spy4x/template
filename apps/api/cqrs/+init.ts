@@ -28,6 +28,7 @@ import {
   GroupMemberRemoveCommand,
   GroupMemberRoleCommand,
   GroupMembersQuery,
+  GroupMoveAllCommand,
   GroupRenameCommand,
   GroupRestoreCommand,
   GroupSelectCommand,
@@ -67,6 +68,7 @@ import { groupActivityHandler } from "@api/cqrs/query-handlers/group-activity.ts
 import { groupMemberRoleHandler } from "@api/cqrs/command-handlers/group-member-role.ts"
 import { groupMemberRemoveHandler } from "@api/cqrs/command-handlers/group-member-remove.ts"
 import { groupLeaveHandler } from "@api/cqrs/command-handlers/group-leave.ts"
+import { groupMoveAllHandler } from "@api/cqrs/command-handlers/group-move-all.ts"
 import { groupTransferHandler } from "@api/cqrs/command-handlers/group-transfer.ts"
 import {
   NoteCreateCommand,
@@ -145,6 +147,7 @@ commandBus.register(GroupMemberRoleCommand, groupMemberRoleHandler)
 commandBus.register(GroupMemberRemoveCommand, groupMemberRemoveHandler)
 commandBus.register(GroupLeaveCommand, groupLeaveHandler)
 commandBus.register(GroupTransferCommand, groupTransferHandler)
+commandBus.register(GroupMoveAllCommand, groupMoveAllHandler)
 commandBus.register(
   GroupInvitationCreateCommand,
   createInvitationCreateHandler(invitationDependencies),

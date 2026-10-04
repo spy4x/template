@@ -17,6 +17,7 @@ import {
   NoteUpdateCommand,
   NoteVersionConflictError,
 } from "@domain/notes"
+import { runBlockedOnLock } from "./group-team.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { createIdempotencyMiddleware, PostgresIdempotencyStore } from "@spy4x/server/idempotency"
@@ -830,9 +831,9 @@ Deno.test("notes against Postgres", async (t) => {
         }),
       )
 
-      const results = await Promise.allSettled([
-        move(editor, groupId, toGroupId, ids),
-        move(editor, toGroupId, groupId, [back]),
+      const results = await runBlockedOnLock(sql, groupId, [
+        () => move(editor, groupId, toGroupId, ids),
+        () => move(editor, toGroupId, groupId, [back]),
       ])
 
       expect(results.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"])

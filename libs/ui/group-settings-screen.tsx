@@ -13,6 +13,7 @@ import {
   canDelete,
   canLeave,
   canManageInvitations,
+  canMutateNotes,
   canRename,
   canViewActivity,
   GROUP_RESTORE_DAYS,
@@ -25,7 +26,9 @@ import { type GroupMemberRow, GroupMembersSection, type MemberError } from "./gr
 import { FocusedError, useClosesWhenDone, useFreshError } from "./group-page.tsx"
 import { PageAction, PageHeader } from "./page-header.tsx"
 import { transferCandidates } from "./group-transfer.tsx"
-import { NavigateItem } from "./notes-screen.tsx"
+import type { PlanRefusal } from "@domain/billing"
+import { GroupMoveAllForm, type MoveAllResult } from "./group-move-all.tsx"
+import { type MoveTarget, NavigateItem } from "./notes-screen.tsx"
 import { GROUP_PATHS, type Navigate, SCREEN_PATHS } from "./progressive.tsx"
 
 export interface GroupSettingsScreenProps {
@@ -102,6 +105,23 @@ export interface GroupSettingsScreenProps {
    * closes it. The menu offers it to the owner of a group with someone to hand it to.
    */
   transfer?: (close: () => void) => ComponentChildren
+  /**
+   * The groups the person may write to, other than this one. The menu offers "Move all data to..."
+   * to an editor or above, and only when there is a group to move to and `onMoveAll` is given.
+   */
+  moveTargets?: readonly MoveTarget[]
+  /** Moves every note of the group to the chosen group. */
+  onMoveAll?: (toGroupId: string) => void
+  /** A move of all the data is in flight. */
+  movingAll?: boolean
+  /** Why the move was refused, shown in its dialog, or `null`. */
+  moveAllError?: string | null
+  /** The target group's plan refused the move; shown in the dialog as the plan notice. */
+  moveAllRefusal?: PlanRefusal | null
+  /** The finished move, shown in its dialog with the choice to delete the group; or `null`. */
+  moveAllResult?: MoveAllResult | null
+  /** The move dialog closed: the app forgets the finished move and any error. */
+  onMoveAllClose?: () => void
 }
 
 /** Which of the header menu's dialogs is open. */
@@ -110,6 +130,7 @@ enum Dialog {
   LEAVE = 2,
   DELETE = 3,
   DETAILS = 4,
+  MOVE_ALL = 5,
 }
 
 /**
@@ -147,11 +168,21 @@ export function GroupSettingsScreen(
     invite,
     pendingInvitations,
     transfer,
+    moveTargets = [],
+    onMoveAll,
+    movingAll = false,
+    moveAllError = null,
+    moveAllResult = null,
+    moveAllRefusal = null,
+    onMoveAllClose,
   }: GroupSettingsScreenProps,
 ): JSX.Element {
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [inviting, setInviting] = useState(false)
-  const close = () => setDialog(null)
+  const close = () => {
+    if (dialog === Dialog.MOVE_ALL) onMoveAllClose?.()
+    setDialog(null)
+  }
   useClosesWhenDone(leaving, leaveError !== null, close)
   useClosesWhenDone(deleting, deleteError !== null, close)
   const [freshLeaveError, leaveOpened] = useFreshError(leaveError, leaving)
@@ -177,6 +208,9 @@ export function GroupSettingsScreen(
     transferCandidates(group.role, members).length > 0
   const subscriptionBlocks = hasSubscription ? "Cancel its subscription first" : null
   const deleteBlocked = isLastGroup ? "It is your only group" : subscriptionBlocks
+
+  const canMoveAll = onMoveAll !== undefined && moveTargets.length > 0 &&
+    canMutateNotes(group.role)
 
   const menu = (
     <>
@@ -208,6 +242,14 @@ export function GroupSettingsScreen(
             hint={subscriptionBlocks}
             hintDataE2E="group-transfer-why"
           />
+        </DropdownItem>
+      )}
+      {canMoveAll && (
+        <DropdownItem
+          dataE2E="group-move-all-open"
+          onClick={() => setDialog(Dialog.MOVE_ALL)}
+        >
+          Move all data to...
         </DropdownItem>
       )}
       {canLeave(group.role) && (
@@ -366,6 +408,36 @@ export function GroupSettingsScreen(
           dataE2E="group-transfer-dialog"
         >
           {transfer(close)}
+        </Modal>
+      )}
+
+      {dialog === Dialog.MOVE_ALL && canMoveAll && (
+        <Modal
+          open
+          title={`Move all data of "${group.name}"`}
+          cancelLabel="Close"
+          closeOnBackdrop={false}
+          onClose={close}
+          dataE2E="group-move-all-dialog"
+        >
+          <GroupMoveAllForm
+            groupName={group.name}
+            targets={moveTargets}
+            moving={movingAll}
+            error={moveAllError}
+            refusal={moveAllRefusal}
+            navigate={navigate}
+            result={moveAllResult}
+            onMove={onMoveAll}
+            onCancel={close}
+            onDelete={canDelete(group.role) && deleteBlocked === null
+              ? () => {
+                onMoveAllClose?.()
+                deleteOpened()
+                setDialog(Dialog.DELETE)
+              }
+              : undefined}
+          />
         </Modal>
       )}
 

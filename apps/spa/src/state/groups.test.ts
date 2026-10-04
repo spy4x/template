@@ -32,6 +32,7 @@ const UNUSED = {
   updateDetails: () => Promise.reject(new Error("unused")),
   remove: () => Promise.reject(new Error("unused")),
   restore: () => Promise.reject(new Error("unused")),
+  moveAll: () => Promise.reject(new Error("unused")),
 }
 
 function deferred<T>() {
@@ -52,6 +53,9 @@ function harness(
     ) => Promise<{ group: GroupItem }>
     remove?: (input: { groupId: string }) => Promise<{ group: DeletedGroupItem }>
     restore?: (input: { groupId: string }) => Promise<{ group: GroupItem }>
+    moveAll?: (
+      input: { groupId: string; toGroupId: string },
+    ) => Promise<{ moved: number; counts: Record<string, number> }>
   },
 ) {
   const pages = [...(overrides.pages ?? [{ groups: [], nextCursor: null }])]
@@ -65,6 +69,7 @@ function harness(
     ...(overrides.updateDetails && { updateDetails: overrides.updateDetails }),
     ...(overrides.remove && { remove: overrides.remove }),
     ...(overrides.restore && { restore: overrides.restore }),
+    ...(overrides.moveAll && { moveAll: overrides.moveAll }),
     fetchPage(cursor, via) {
       reads.push({ cursor, via })
       if (overrides.read) return overrides.read()
@@ -194,7 +199,7 @@ describe("groups store", () => {
 
   it("keeps the name and shows the server's message when a create is refused", async () => {
     const { store } = harness({
-      create: () => Promise.reject(new RealtimeRequestError("conflict", "Group id is in use")),
+      create: () => Promise.reject(new RealtimeRequestError("forbidden", "Group id is in use")),
     })
     store.name.value = "Trip"
 
@@ -350,7 +355,7 @@ describe("groups store", () => {
       pages: [{ groups: [item("a", "1")], nextCursor: null }],
       remove: () =>
         Promise.reject(
-          new RealtimeRequestError("conflict", "A person must keep at least one group"),
+          new RealtimeRequestError("forbidden", "A person must keep at least one group"),
         ),
     })
     await store.refresh()
@@ -361,6 +366,68 @@ describe("groups store", () => {
     expect(store.groups.value.map((group) => group.id)).toEqual(["a"])
     expect(store.deleted.value).toEqual([])
     expect(store.actionError.value?.message).toBe("A person must keep at least one group")
+  })
+
+  it("moves all of a group's data and remembers how many items went", async () => {
+    const sent: { groupId: string; toGroupId: string }[] = []
+    const { store } = harness({
+      moveAll: (input) => {
+        sent.push(input)
+        return Promise.resolve({ moved: 7, counts: { notes: 7 } })
+      },
+    })
+
+    const worked = await store.moveAll("a", "b")
+
+    expect(worked).toBe(true)
+    expect(sent).toEqual([{ groupId: "a", toGroupId: "b" }])
+    expect(store.moved.value).toEqual({ groupId: "a", toGroupId: "b", count: 7 })
+    expect(store.working.value).toBeNull()
+    store.forgetMoveAll()
+    expect(store.moved.value).toBeNull()
+  })
+
+  it("shows why a move of all the data was refused, and forgets it when the dialog closes", async () => {
+    const { store } = harness({
+      moveAll: () =>
+        Promise.reject(new RealtimeRequestError("forbidden", "This group has nothing to move.")),
+    })
+
+    const worked = await store.moveAll("a", "b")
+
+    expect(worked).toBe(false)
+    expect(store.moved.value).toBeNull()
+    expect(store.actionError.value).toEqual({
+      groupId: "a",
+      action: "moveAll",
+      message: "This group has nothing to move.",
+    })
+    store.forgetMoveAll()
+    expect(store.actionError.value).toBeNull()
+  })
+
+  it("keeps the plan refusal of a move, so the dialog can show the upgrade notice", async () => {
+    const refusal = {
+      code: "PLAN_LIMIT_REACHED",
+      entitlement: "maxNotes",
+      limit: 10,
+      canUpgrade: true,
+    }
+    const { store } = harness({
+      moveAll: () =>
+        Promise.reject(
+          new RealtimeRequestError("forbidden", "Free groups hold 10 notes.", refusal),
+        ),
+    })
+
+    await store.moveAll("a", "b")
+
+    expect(store.actionError.value).toEqual({
+      groupId: "a",
+      action: "moveAll",
+      message: "Free groups hold 10 notes.",
+      plan: refusal,
+    })
   })
 
   it("moves a restored group from the deleted groups back to the list", async () => {

@@ -36,6 +36,8 @@ export const ACTIVITY_KINDS = [
   "group.invitation_accepted",
   "group.invitation_revoked",
   "group.invitation_declined",
+  "group.data_moved_out",
+  "group.data_moved_in",
   "note.created",
   "note.deleted",
   "note.moved_out",
@@ -146,6 +148,10 @@ function notes(count: unknown): string {
   return count === 1 ? "1 note" : `${typeof count === "number" ? count : "some"} notes`
 }
 
+function items(count: unknown): string {
+  return count === 1 ? "1 item" : `${typeof count === "number" ? count : "some"} items`
+}
+
 function quoted(value: unknown): string {
   return typeof value === "string" && value !== "" ? `“${value}”` : ""
 }
@@ -208,6 +214,14 @@ export function describeActivity(
       return `${who} withdrew an invitation`
     case "group.invitation_declined":
       return `${who} declined an invitation`
+    case "group.data_moved_out": {
+      const to = typeof details.groupName === "string" && details.groupName !== ""
+        ? details.groupName
+        : "another group"
+      return `${who} moved all the group's data (${items(details.count)}) to ${to}`
+    }
+    case "group.data_moved_in":
+      return `${who} moved all of another group's data (${items(details.count)}) here`
     case "note.created": {
       const title = quoted(details.title)
       return title ? `${who} added the note ${title}` : `${who} added a note`
