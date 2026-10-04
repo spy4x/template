@@ -7,7 +7,7 @@ import { PostgresGroupDataMover } from "@server/groups/postgres-group-data-mover
 import type { MovableAggregate } from "@server/groups/movable.ts"
 import { noteMovable } from "@server/notes/note-movable.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
-import { insertUser, withSchema } from "./group-team.ts"
+import { insertUser, runBlockedOnLock, withSchema } from "./group-team.ts"
 
 /**
  * Moving all of a group's data against a real Postgres: one transaction, rights in both groups on
@@ -72,6 +72,16 @@ Deno.test("moving all of a group's data", async (t) => {
       async () => {
         const { editor, from, to, ids, notes } = await seed(sql, ["a", "b", "c"])
         await notes.delete({ groupId: from, id: ids[2], expectedVersion: 1 }, editor)
+        // The target has changes of its own, so its sequence differs from the source's and a note
+        // stamped with the wrong group's number shows.
+        for (const title of ["x", "y"]) {
+          await notes.create(
+            { groupId: to, id: crypto.randomUUID(), title, body: "" },
+            editor,
+            null,
+          )
+        }
+        expect(await sequenceOf(sql, to)).not.toBe(await sequenceOf(sql, from))
         const [fromBefore, toBefore] = [await sequenceOf(sql, from), await sequenceOf(sql, to)]
 
         const result = await mover.moveAll(
@@ -82,9 +92,11 @@ Deno.test("moving all of a group's data", async (t) => {
 
         expect(result).toEqual({ moved: 2, counts: { notes: 2 } })
         const moved = await notes.list(to, { limit: 10 })
-        expect(moved.notes.map((note) => [note.id, note.version]).sort()).toEqual(
-          [[ids[0], 2], [ids[1], 2]].sort(),
-        )
+        expect(
+          moved.notes.filter((note) => ids.includes(note.id)).map((note) => [note.id, note.version])
+            .sort(),
+        ).toEqual([[ids[0], 2], [ids[1], 2]].sort())
+        expect(moved.notes).toHaveLength(4)
         expect(await notes.count(from)).toBe(0)
         // The deleted note was not moved: it stays behind with the group.
         const [{ count }] = await sql<{ count: number }[]>`
@@ -212,12 +224,16 @@ Deno.test("moving all of a group's data", async (t) => {
         null,
       )
 
-      const results = await Promise.all([
-        mover.moveAll({ fromGroupId: from, toGroupId: to }, editor, NO_CAP),
-        mover.moveAll({ fromGroupId: to, toGroupId: from }, editor, NO_CAP),
+      const results = await runBlockedOnLock(sql, [from, to], [
+        () => mover.moveAll({ fromGroupId: from, toGroupId: to }, editor, NO_CAP),
+        () => mover.moveAll({ fromGroupId: to, toGroupId: from }, editor, NO_CAP),
       ])
 
-      expect(results.map((result) => result.moved)).toEqual([1, 2])
+      expect(results.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"])
+      const moved = results.map((result) =>
+        (result as PromiseFulfilledResult<{ moved: number }>).value.moved
+      )
+      expect(moved.sort()).toEqual([1, 2])
       expect((await notes.count(from)) + (await notes.count(to))).toBe(2)
     })
   })

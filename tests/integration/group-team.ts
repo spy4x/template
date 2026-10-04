@@ -110,3 +110,38 @@ export async function listenForLosses(sql: postgres.Sql, groupId: string) {
   }
   return { heard, stop }
 }
+
+/**
+ * Starts every `runs` entry while another connection holds the lock of the group with the lower id,
+ * waits until each of them waits on a lock, then lets go. Both moves of a pair then contend for the
+ * same two rows at once, so two moves that lock in different orders deadlock, which a pair that
+ * starts one after the other seldom shows. Resolves to how each run settled, in `runs` order.
+ */
+export async function runBlockedOnLock<T>(
+  sql: postgres.Sql,
+  groupIds: readonly [string, string],
+  runs: readonly [() => Promise<T>, () => Promise<T>],
+): Promise<PromiseSettledResult<T>[]> {
+  const lower = [...groupIds].sort()[0]
+  const holder = await sql.reserve()
+  let settled: Promise<PromiseSettledResult<T>[]> | null = null
+  try {
+    await holder`BEGIN`
+    await holder`SELECT id FROM groups WHERE id = ${lower} FOR UPDATE`
+    settled = Promise.allSettled(runs.map((run) => run()))
+    const deadline = Date.now() + 10_000
+    while (true) {
+      const [{ waiting }] = await sql<{ waiting: number }[]>`
+        SELECT count(*)::int AS waiting FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+      `
+      if (waiting >= 2) break
+      if (Date.now() > deadline) throw new Error(`only ${waiting} of 2 moves waited on the lock`)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  } finally {
+    await holder`COMMIT`.catch(() => {})
+    holder.release()
+  }
+  return await settled
+}
