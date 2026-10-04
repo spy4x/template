@@ -31,6 +31,7 @@ COPY libs/server/mail/deno.json ./libs/server/mail/deno.json
 COPY libs/server/notes/deno.json ./libs/server/notes/deno.json
 COPY libs/server/notifications/deno.json ./libs/server/notifications/deno.json
 COPY libs/server/subscribers/deno.json ./libs/server/subscribers/deno.json
+COPY libs/platform/deno.json ./libs/platform/deno.json
 COPY libs/ui/deno.json ./libs/ui/deno.json
 
 # Install dependencies (this layer will be cached if deno.jsonc doesn't change)
