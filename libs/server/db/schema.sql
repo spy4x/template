@@ -576,6 +576,7 @@ CREATE TABLE notifications (
         AND link LIKE '/%'
         AND link NOT LIKE '//%'
         AND position('\' IN link) = 0
+        AND link !~ '[[:space:][:cntrl:]]'
     )
 );
 

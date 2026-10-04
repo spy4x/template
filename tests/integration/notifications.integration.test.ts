@@ -106,6 +106,58 @@ Deno.test("notifications: an invitation tells the existing account that proved t
   })
 })
 
+Deno.test("notifications: each writer's notification is written in its change's transaction", async () => {
+  await withSchema(async (sql) => {
+    const { repository, groupId, owner, admin, editor, onlyHere, stranger } = await team(sql)
+    await sql`INSERT INTO auth_email_owners (email, user_id) VALUES ('sam@example.com', ${stranger})`
+    // Test-only: every change below ends in a failure at commit, after its notification was written.
+    await sql.unsafe(`
+      CREATE FUNCTION force_commit_failure() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'forced failure at commit'; END $$;
+      CREATE CONSTRAINT TRIGGER fail_member_change AFTER UPDATE OR DELETE ON group_members
+        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION force_commit_failure();
+      CREATE CONSTRAINT TRIGGER fail_group_change AFTER UPDATE ON groups
+        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION force_commit_failure();
+      CREATE CONSTRAINT TRIGGER fail_invitation AFTER INSERT ON group_invitations
+        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION force_commit_failure();
+    `)
+    const heard: number[] = []
+    const stop = await listenForInboxNews(sql, { notifyUserChange: (id) => heard.push(id) })
+    try {
+      const invitations = new PostgresInvitationRepository(sql)
+      const changes: Record<string, () => Promise<unknown>> = {
+        "role change": () => repository.changeMemberRole(groupId, editor, GroupRole.VIEWER, owner),
+        "removal": () => repository.removeMember(groupId, onlyHere, admin),
+        "ownership transfer": () => repository.transferOwnership(groupId, admin, owner),
+        "invitation": async () =>
+          await invitations.create(
+            {
+              groupId,
+              role: GroupRole.EDITOR,
+              expiresInDays: 7,
+              maxUses: 1,
+              email: "sam@example.com",
+              tokenHash: await sha256Hex(newInvitationToken()),
+            },
+            admin,
+            NO_LIMITS,
+          ),
+      }
+      for (const [name, change] of Object.entries(changes)) {
+        await expect(change(), name).rejects.toThrow()
+      }
+      await sleep(300)
+      const [{ count }] = await sql<
+        { count: number }[]
+      >`SELECT count(*)::int AS count FROM notifications`
+      expect(count).toBe(0)
+      expect(heard).toEqual([])
+    } finally {
+      await stop()
+    }
+  })
+})
+
 Deno.test("notifications: a change that rolls back leaves no notification and no hint", async () => {
   await withSchema(async (sql) => {
     const { owner } = await team(sql)
@@ -274,12 +326,29 @@ Deno.test("notifications: a deleted account takes its notifications with it", as
 Deno.test("notifications: a link that leaves the app is refused before it is stored", async () => {
   await withSchema(async (sql) => {
     const { owner } = await team(sql)
-    for (const link of ["https://evil.example/", "//evil.example", "/\\evil.example", ""]) {
+    for (
+      const link of [
+        "https://evil.example/",
+        "//evil.example",
+        "/\\evil.example",
+        "",
+        "/\t/evil.example",
+      ]
+    ) {
       await expect(
         createNotification(sql, { userId: owner, kind: "x", link, payload: {} }),
       ).rejects.toThrow()
     }
     expect(await inboxOf(sql, owner)).toEqual([])
+    // The database refuses them too, whatever writes the row: a browser drops a tab, a line feed
+    // or a carriage return inside a link, so "/\t/evil.example" would open https://evil.example.
+    for (const link of ["/\t/evil.example", "/\n/evil.example", "/\r/evil.example"]) {
+      await expect(
+        sql`INSERT INTO notifications (user_id, kind, link, payload)
+            VALUES (${owner}, 'x', ${link}, '{}')`,
+        JSON.stringify(link),
+      ).rejects.toThrow(/notifications_link_check/)
+    }
   })
 })
 
