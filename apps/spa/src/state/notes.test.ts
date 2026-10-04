@@ -1,7 +1,7 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { RealtimeRequestError } from "@spy4x/realtime"
-import { createNotesStore, NOTE_MESSAGES, type NoteItem, type NotePage, UNDO_MS } from "./notes.ts"
+import { createNotesStore, NOTE_MESSAGES, type NoteItem, type NotePage } from "./notes.ts"
 
 const groupId = "g-1"
 
