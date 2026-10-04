@@ -71,6 +71,13 @@ describe("notification request parsing", () => {
     expect(parseNotificationId("42")).toBe("42")
   })
 
+  it("accepts the largest bigint id and refuses one above it", () => {
+    expect(parseNotificationId("9223372036854775807")).toBe("9223372036854775807")
+    for (const big of ["9223372036854775808", "9999999999999999999"]) {
+      expect(codeOf(() => parseNotificationId(big))).toBe("INVALID_REQUEST")
+    }
+  })
+
   it("refuses an id that is not a plain positive integer", () => {
     for (const bad of ["", "0", "-1", "1.5", "abc", "1 OR 1=1", "01", 5, null, undefined]) {
       expect(codeOf(() => parseNotificationId(bad))).toBe("INVALID_REQUEST")

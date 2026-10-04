@@ -118,11 +118,15 @@ export interface NotificationRepository {
   markAllRead(userId: number): Promise<void>
 }
 
+/** The largest id Postgres `bigint` holds; a larger one would fail its cast. */
+const MAX_BIGINT = 9223372036854775807n
 const NOTIFICATION_ID = /^[1-9][0-9]{0,18}$/
 
 /** Reads a notification id of a URL or a payload; anything else is `INVALID_REQUEST`. */
 export function parseNotificationId(value: unknown): string {
-  if (typeof value !== "string" || !NOTIFICATION_ID.test(value)) {
+  if (
+    typeof value !== "string" || !NOTIFICATION_ID.test(value) || BigInt(value) > MAX_BIGINT
+  ) {
     throw new NotificationError("INVALID_REQUEST", "Notification id is invalid")
   }
   return value
