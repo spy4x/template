@@ -409,7 +409,7 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    for an admin or the owner (`PATCH /api/groups/:id`, `group.rename`). A "Delete group"
    section, for the owner only, holds the confirmation text and the delete
    (`DELETE /api/groups/:id`, `group.delete`). Each later issue (members, roles and leaving #130;
-   invitations #131; ownership #132; moving notes #133; the extra fields #134) adds its own section
+   invitations #131; ownership #132; moving notes #133; moving all of a group's data #260; the extra fields #134) adds its own section
    to that screen, shown only to the roles that may use it.
 9. **Deleting a group.** A delete is soft: `groups.deleted_at` is set and the row, its members and
    its notes stay. The server refuses it with `LAST_GROUP` (409) when it is the actor's last active
@@ -509,6 +509,17 @@ owner's admin links are revoked, and their viewer and editor links stay; the new
 The new owner gets a web push. A subscription that still renews refuses the transfer
 (`SUBSCRIPTION_RENEWS`); after it, the old owner's billing customer is handed over and the new owner
 checks out with their own ([docs/billing.md](billing.md), "Transfer of ownership").
+
+Moving all of a group's data (#260): `POST /api/groups/:id/move-all` takes `{ toGroupId }`, and the
+socket command `group.moveAll` takes `{ groupId, toGroupId }`. One transaction locks both groups in
+id order, checks edit rights in both on the locked rows, records a change in each
+(`group.data_moved_out`, `group.data_moved_in`), runs every aggregate in `MOVABLE_AGGREGATES`
+(`apps/api/services/db-base.ts`) and writes one audit event per group; any failure rolls back the
+lot. A group with nothing to move is refused (`NOTHING_TO_MOVE`), moving into the same group is
+`SAME_GROUP`, and notes deleted earlier stay behind. The target's note cap is read by the gate and
+counted by the repository, which refuses with the plan refusal. The settings menu offers it as
+"Move all data to...", then the delete confirmation. A new aggregate registers as described in
+[docs/aggregates.md](aggregates.md), "Register it for move all data".
 
 Extraction from the sibling Financy project is tracked separately in
 [docs/financy-extraction-inventory.md](financy-extraction-inventory.md);

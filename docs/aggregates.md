@@ -204,9 +204,11 @@ register, or its rows stay behind and are lost when the group is deleted.
 2. Add it to `MOVABLE_AGGREGATES` in `apps/api/services/db-base.ts`. The order is the order of the
    moves; the mover has already recorded both groups' changes, locked both groups and checked edit
    rights in both.
-3. An aggregate with a plan cap gets its limit in `MoveAllAllowances` (`libs/domain/groups`) and in
-   the command's `allowance`, read by the gate in `apps/api/cqrs/entitlement-needs.ts`; count it
-   against the target under the lock, as `moveNoteRows` does with `assertRoomFor`.
+3. Only the notes cap is wired today. The entitlement gate reads one cap for one command and hands
+   it over as one number, `allowance` (`apps/api/cqrs/entitlement-needs.ts`), so the handler passes
+   `{ maxNotes: allowance }`. A second capped aggregate needs the gate to read several caps for one
+   command first; that is not built. Count the rows against the target under the lock, as
+   `moveNoteRows` does with `assertRoomFor`.
 4. Add a case to `tests/integration/group-move-all.integration.test.ts`: the rows moved, and a
    failure after your aggregate leaves nothing moved.
 
