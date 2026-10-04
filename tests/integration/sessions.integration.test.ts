@@ -58,7 +58,10 @@ async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<v
 /** A device: the headers its requests carry. */
 interface Device {
   userAgent: string
+  /** What the proxy in front of the API puts in `X-Real-IP`. */
   ip: string
+  /** Any other header, such as one the client forged. */
+  headers?: Record<string, string>
 }
 
 const laptop: Device = { userAgent: FIREFOX_LINUX, ip: "203.0.113.42" }
@@ -112,6 +115,7 @@ function buildApp(sql: postgres.Sql) {
       headers: {
         "content-type": "application/json",
         "user-agent": device.userAgent,
+        ...device.headers,
         "x-real-ip": device.ip,
         ...(init.cookie ? { cookie: init.cookie } : {}),
       },
@@ -168,6 +172,19 @@ Deno.test("each device is listed by name and masked address, this one marked", a
     const stored = await sql`SELECT * FROM auth_sessions`
     expect(JSON.stringify(stored)).not.toContain("203.0.113.42")
     expect(JSON.stringify(stored)).not.toContain("Mozilla")
+  })
+})
+
+Deno.test("a client cannot choose the address shown for its session with CF-Connecting-IP", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql)
+    // Traefik rewrites X-Real-IP but passes a client's CF-Connecting-IP through untouched.
+    const forger: Device = { ...laptop, headers: { "cf-connecting-ip": "198.51.100.77" } }
+    const signed = await signUp(app, "ada@example.com", forger)
+
+    const listed = await (await app.request("/sessions", forger, { cookie: signed.cookie })).json()
+
+    expect(listed.map((row: { ipHint: string }) => row.ipHint)).toEqual(["203.0.113.*"])
   })
 })
 

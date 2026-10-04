@@ -323,7 +323,9 @@ function auditRow(
 
 /** The device a request comes from, as a new session records it. */
 function deviceOf(c: Context): SessionDevice {
-  const request = requestInfoFromContext(c, { trustedProxy: true })
+  // Only `X-Real-IP`: Traefik rewrites it, but passes a client's `CF-Connecting-IP` through, so
+  // trusting every header would let a client choose the address shown for its session.
+  const request = requestInfoFromContext(c, { trustedProxy: "x-real-ip" })
   return { deviceName: deviceName(request.userAgent), ipHint: ipHint(request.ip) }
 }
 
