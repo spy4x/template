@@ -11,6 +11,12 @@ Before writing a component, helper or library here, search
 ["Shared libs before local code"][shared-libs] says what belongs in each library; code only this
 repo needs stays here.
 
+Reusable code is written in the library first, never here with an issue to move it later. A change
+that needs it makes the library change in that library's own worktree (under
+`/home/spy4x/sync/code/worktrees/<library>/`), has it reviewed, merged and released, then imports
+the released version here. A blocked library change blocks the change here too; there is no local
+stand-in.
+
 [shared-libs]: https://github.com/spy4x/dotfiles/blob/main/ai-harnesses/AGENTS.md
 
 ## Three layers of UI
