@@ -107,16 +107,20 @@ export function createNotificationsStore(dependencies: NotificationDependencies)
   /**
    * Drops every read still on its way: its answer was asked for before this write and could undo
    * what the write shows. The spinners go with it, as a dropped read never clears them itself.
+   * Answers whether the first page was still loading with nothing shown yet: the caller reads it
+   * again after the write, or the page would stay empty until the next hint.
    */
-  function supersedeReads(): void {
+  function supersedeReads(): boolean {
+    const firstPagePending = loading.value && notifications.value.length === 0
     reads++
     loading.value = false
     loadingMore.value = false
+    return firstPagePending
   }
 
   /** Marks one read: it shows as read at once, and the server's count replaces the bell's. */
   async function markRead(id: string): Promise<void> {
-    supersedeReads()
+    const reread = supersedeReads()
     const readAt = new Date().toISOString()
     const before = notifications.value
     notifications.value = before.map((n) => n.id === id && n.readAt === null ? { ...n, readAt } : n)
@@ -126,11 +130,12 @@ export function createNotificationsStore(dependencies: NotificationDependencies)
       notifications.value = before
       error.value = cause instanceof Error ? cause.message : "Could not mark it as read"
     }
+    if (reread && watching) await readFirstPage()
   }
 
   /** Marks every notification read. */
   async function markAllRead(): Promise<void> {
-    supersedeReads()
+    const reread = supersedeReads()
     const readAt = new Date().toISOString()
     const before = notifications.value
     notifications.value = before.map((n) => n.readAt === null ? { ...n, readAt } : n)
@@ -140,6 +145,7 @@ export function createNotificationsStore(dependencies: NotificationDependencies)
       notifications.value = before
       error.value = cause instanceof Error ? cause.message : "Could not mark them as read"
     }
+    if (reread && watching) await readFirstPage()
   }
 
   /** Signed out: drops everything. */

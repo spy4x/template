@@ -125,6 +125,26 @@ describe("notifications store", () => {
     expect(store.loading.value).toBe(false)
   })
 
+  it("still shows the list when every notification is marked read while it first loads", async () => {
+    const first = deferred<NotificationPageResult>()
+    let reads = 0
+    const store = createNotificationsStore(dependencies({
+      list: () =>
+        ++reads === 1
+          ? first.promise
+          : Promise.resolve({ notifications: [row(2), row(1)], nextCursor: "c", unreadCount: 0 }),
+      markAllRead: () => Promise.resolve(0),
+    }))
+    const opening = store.open()
+
+    await store.markAllRead()
+    first.resolve({ notifications: [row(2), row(1)], nextCursor: "c", unreadCount: 2 })
+    await opening
+
+    expect(store.notifications.value.map((n) => n.id)).toEqual(["2", "1"])
+    expect(store.nextCursor.value).toBe("c")
+  })
+
   it("puts a notification back to unread and says why when the server refuses to mark it", async () => {
     const store = createNotificationsStore(dependencies({
       list: () => Promise.resolve({ notifications: [row(1)], nextCursor: null, unreadCount: 1 }),
