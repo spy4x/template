@@ -2,11 +2,12 @@
 import { expect } from "@std/expect"
 import { Hono } from "hono"
 import postgres from "postgres"
+import * as OTPAuth from "@hectorm/otpauth"
 import type { EmailMessage } from "@spy4x/email/message"
 import type { EmailSender } from "@spy4x/email/sender"
 import type { OutboxEvent } from "@spy4x/server/outbox"
 import { BillingStatus } from "@domain/billing"
-import { AccountDeletionBlockReason } from "@domain/identity"
+import { AccountDeletionBlockReason, UserMFAStatus } from "@domain/identity"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
@@ -18,7 +19,9 @@ import {
 import {
   ACCOUNT_DELETION_MAIL_JOB,
   ACCOUNT_HARD_DELETE_JOB,
+  ACCOUNT_RESTORED_MAIL_JOB,
   accountDeletionMailJob,
+  accountRestoredMailJob,
 } from "../../libs/server/jobs/account-deletion.ts"
 import { requireDbConnection } from "./db-connection.ts"
 
@@ -37,6 +40,18 @@ const MIGRATIONS_DIR = "libs/server/db/migrations"
 const PEPPER = "integration-test-only-pepper-0123456789"
 const COOKIE_SECRET = "integration-test-only-cookie-secret-0123456789"
 const PASSWORD = "Passw0rd!"
+// A test-only authenticator secret, in base32 as the enrolment stores it.
+const TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+
+/** The authenticator code of {@link TOTP_SECRET} at `timestamp`. */
+function totpCode(timestamp: number): string {
+  return new OTPAuth.TOTP({
+    secret: OTPAuth.Secret.fromBase32(TOTP_SECRET),
+    algorithm: "SHA1",
+    digits: 6,
+    period: 30,
+  }).generate({ timestamp })
+}
 
 /** Runs `body` against a fresh schema with every migration applied, and drops the schema after. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
@@ -88,6 +103,13 @@ function buildApp(sql: postgres.Sql) {
     return result ? c.json(result.user) : c.json({ error: "refused" }, 401)
   })
   app.get("/me", (c) => c.get("auth") ? c.json(c.get("auth")!.user) : c.json({}, 401))
+  // Stands for every route that needs the second factor.
+  app.post("/strong", signIn.auth.isAuthenticated2FA, (c) => c.json({ ok: true }))
+  app.post("/totp/check", signIn.auth.isAuthenticated1FA, async (c) => {
+    const { otp } = await c.req.json()
+    const ok = await signIn.checkTotp(c, c.get("auth")!, otp)
+    return ok ? c.json({ ok }) : c.json({ error: "Invalid token" }, 401)
+  })
   app.post("/delete", async (c) => {
     const auth = c.get("auth")
     if (!auth) return c.json({ error: "signed out" }, 401)
@@ -148,6 +170,12 @@ async function requestDeletion(
     SELECT id FROM account_deletions WHERE user_id = ${user.id}
   `
   return { id: row.id, deleteAfter: body.deleteAfter! }
+}
+
+/** Proves `<name>@example.com` as the address of `userId`, as a verified sign-up would. */
+async function proveAddress(sql: postgres.Sql, userId: number, name: string): Promise<void> {
+  await sql`INSERT INTO auth_email_owners (email, user_id) VALUES (${`${name}@example.com`}, ${userId})`
+  await sql`UPDATE auth_keys SET proven_at = now() WHERE user_id = ${userId}`
 }
 
 /** Moves the user's waiting request into the past, as if its 7 days were over. */
@@ -335,6 +363,52 @@ Deno.test("deleting one's own account", async (t) => {
       },
     )
 
+    await t.step(
+      "with two-factor on, the password alone leaves the deletion waiting and the code restores",
+      async () => {
+        const quinn = await signUp(app, "quinn")
+        await sql`UPDATE users SET mfa = ${UserMFAStatus.CONFIGURED} WHERE id = ${quinn.id}`
+        await sql`
+          INSERT INTO user_totp (user_id, secret, confirmed_at)
+          VALUES (${quinn.id}, ${TOTP_SECRET}, now())
+        `
+        const { id } = await requestDeletion(app, sql, quinn)
+        const state = () =>
+          sql<{ request: string | null; deletedAt: Date | null; restores: number }[]>`
+            SELECT
+              (SELECT id FROM account_deletions WHERE user_id = ${quinn.id}) AS request,
+              (SELECT deleted_at FROM users WHERE id = ${quinn.id}) AS "deletedAt",
+              (SELECT count(*)::int FROM account_restorations WHERE user_id = ${quinn.id})
+                AS restores
+          `
+        const [before] = await state()
+        expect(before.deletedAt).not.toBeNull()
+
+        const response = await signIn(app, "quinn")
+        expect(response.status).toBe(200)
+        const cookie = cookieOf(response)
+
+        expect(await state()).toEqual([{ ...before, request: id }])
+        expect((await app.request("/strong", { body: {}, cookie })).status).toBe(401)
+        const wrong = await app.request("/totp/check", {
+          body: { otp: totpCode(Date.now() + 10 * 60_000) },
+          cookie,
+        })
+        expect(wrong.status).toBe(401)
+        expect(await state()).toEqual([before])
+
+        const right = await app.request("/totp/check", {
+          body: { otp: totpCode(Date.now()) },
+          cookie,
+        })
+
+        expect(right.status).toBe(200)
+        expect(await state()).toEqual([{ request: null, deletedAt: null, restores: 1 }])
+        expect((await app.request("/strong", { body: {}, cookie })).status).toBe(200)
+        expect(await hardDeleteAccount(sql, id)).toBe(HardDeleteOutcome.NothingDue)
+      },
+    )
+
     await t.step("a deleted account with no request waiting stays refused at sign-in", async () => {
       const gus = await signUp(app, "gus")
       await sql`UPDATE users SET deleted_at = now() WHERE id = ${gus.id}`
@@ -507,6 +581,52 @@ Deno.test("deleting one's own account", async (t) => {
       expect((await signIn(app, "ola")).status).toBe(200)
       await job(event(proven.id))
       expect(sent).toHaveLength(1)
+    })
+
+    await t.step("a restore mails the proven address once, then forgets the restore", async () => {
+      const sent: EmailMessage[] = []
+      const logged: string[] = []
+      const job = accountRestoredMailJob({
+        sql,
+        sender: {
+          send: (message: EmailMessage) => (
+            sent.push(message),
+              Promise.resolve({ ok: true, accepted: [message.to], duplicates: [] })
+          ),
+        } as unknown as EmailSender,
+        brand: { webAppUrl: "https://app.example.com" },
+        log: (line) => void logged.push(line),
+      })
+      const restoresOf = (userId: number) =>
+        sql<{ id: string }[]>`SELECT id FROM account_restorations WHERE user_id = ${userId}`
+
+      const rae = await signUp(app, "rae")
+      await proveAddress(sql, rae.id, "rae")
+      await requestDeletion(app, sql, rae)
+      const sam = await signUp(app, "sam")
+      await requestDeletion(app, sql, sam)
+      expect((await signIn(app, "rae")).status).toBe(200)
+      expect((await signIn(app, "sam")).status).toBe(200)
+      const [raeRestore] = await restoresOf(rae.id)
+      const [samRestore] = await restoresOf(sam.id)
+      const [queued] = await sql<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM outbox_events
+        WHERE event_kind = ${ACCOUNT_RESTORED_MAIL_JOB}
+          AND aggregate_id IN (${raeRestore.id}, ${samRestore.id})
+      `
+      expect(queued.count).toBe(2)
+
+      await job({ aggregateId: raeRestore.id } as OutboxEvent)
+      await job({ aggregateId: samRestore.id } as OutboxEvent)
+      await job({ aggregateId: raeRestore.id } as OutboxEvent)
+
+      expect(sent.map((mail) => [mail.to, mail.subject])).toEqual([
+        ["rae@example.com", "Your account was restored"],
+      ])
+      expect(logged).toEqual([
+        "warn: an account restored mail was not sent: the account has no proven address",
+      ])
+      expect([...await restoresOf(rae.id), ...await restoresOf(sam.id)]).toEqual([])
     })
   })
 })

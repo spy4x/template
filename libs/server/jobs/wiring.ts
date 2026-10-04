@@ -21,8 +21,10 @@ import { hardDeleteDueAccounts } from "../auth/account-deletion.ts"
 import {
   ACCOUNT_DELETION_MAIL_JOB,
   ACCOUNT_HARD_DELETE_JOB,
+  ACCOUNT_RESTORED_MAIL_JOB,
   accountDeletionMailJob,
   accountHardDeleteJob,
+  accountRestoredMailJob,
 } from "./account-deletion.ts"
 import { billingNoticeMailJob } from "./billing-notice-mail.ts"
 import {
@@ -124,6 +126,7 @@ export function createOutboxProcessor(
       [PASSWORD_RESET_MAIL_JOB]: passwordResetMailJob({ sql, ...mail }),
       [EMAIL_CODE_MAIL_JOB]: emailCodeMailJob({ sql, ...mail }),
       [ACCOUNT_DELETION_MAIL_JOB]: accountDeletionMailJob({ sql, ...mail }),
+      [ACCOUNT_RESTORED_MAIL_JOB]: accountRestoredMailJob({ sql, ...mail }),
       [ACCOUNT_HARD_DELETE_JOB]: accountHardDeleteJob({ sql, log: mail.log }),
       ...billingNoticeJobs(sql, mail),
       [SUBSCRIBER_CONFIRM_MAIL_JOB]: subscriberConfirmMailJob({ sql, ...mail, setup: subscribers }),

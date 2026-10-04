@@ -214,7 +214,7 @@ export function accountDeletionMail(
   const host = new URL(brand.webAppUrl).host
   const date = billingDate(deleteAfter)
   const asked = `Your account at ${host} will be deleted for good on ${date}, as you asked.`
-  const keep = "Changed your mind? Sign in before then and your account is restored as it was."
+  const keep = "Changed your mind? Sign in before then and your account is restored."
   const notYou =
     "If you did not ask for this, sign in now to keep your account, then change your password."
   const link = new URL("/sign-in", brand.webAppUrl).href
@@ -229,6 +229,31 @@ export function accountDeletionMail(
         `<p>${escapeHtml(keep)}</p>`,
         `<p><a href="${escapeHtml(link)}">Sign in</a></p>`,
         `<p>${escapeHtml(notYou)}</p>`,
+      ].join("\n"),
+    ),
+  }
+}
+
+/**
+ * The mail sent when a sign-in restores an account that was waiting to be deleted, so a person who
+ * did not sign in learns that someone else knows their password.
+ */
+export function accountRestoredMail(brand: MailBrand, { to }: { to: string }): EmailMessage {
+  const host = new URL(brand.webAppUrl).host
+  const restored =
+    `Your account at ${host} was restored by a sign-in, so it will no longer be deleted.`
+  const notYou = "If this wasn't you, sign in, delete your account again and change your password."
+  const link = new URL("/sign-in", brand.webAppUrl).href
+  return {
+    to,
+    subject: "Your account was restored",
+    text: `${restored}\n\n${notYou}\n\n${link}\n`,
+    html: mailHtml(
+      brand,
+      [
+        `<p>${escapeHtml(restored)}</p>`,
+        `<p>${escapeHtml(notYou)}</p>`,
+        `<p><a href="${escapeHtml(link)}">Sign in</a></p>`,
       ].join("\n"),
     ),
   }

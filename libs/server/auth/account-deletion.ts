@@ -151,6 +151,15 @@ export async function cancelAccountDeletion(tx: postgres.Sql, userId: number): P
   return removed.length === 1
 }
 
+/** `true` while `userId` has a deletion request waiting. */
+export async function isAccountDeletionWaiting(
+  sql: postgres.Sql,
+  userId: number,
+): Promise<boolean> {
+  const rows = await sql`SELECT 1 FROM account_deletions WHERE user_id = ${userId}`
+  return rows.length === 1
+}
+
 /**
  * Deletes for good the account of request `deletionId` once its wait is over, in one transaction.
  * Nothing happens when the request is gone (the person signed in) or not due yet. When something

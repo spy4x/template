@@ -15,10 +15,14 @@ import { emailChanges } from "@server/auth/email-verification.ts"
 import {
   accountDeletionBlockers,
   cancelAccountDeletion,
+  isAccountDeletionWaiting,
   lockAccountForDeletion,
   recordAccountDeletion,
 } from "@server/auth/account-deletion.ts"
-import { scheduleAccountDeletionJobs } from "@server/jobs/account-deletion.ts"
+import {
+  scheduleAccountDeletionJobs,
+  scheduleAccountRestoredMail,
+} from "@server/jobs/account-deletion.ts"
 import type { AccountDeletionBlocker } from "@domain/identity"
 
 /** A user's authenticator-app enrolment, one row of `user_totp`. */
@@ -181,6 +185,10 @@ export class AppDbBase extends DbServiceBase {
       },
       /** Removes the waiting request; `true` when there was one. */
       cancel: (userId: number): Promise<boolean> => cancelAccountDeletion(sql, userId),
+      /** `true` while the user has a request waiting. */
+      waiting: (userId: number): Promise<boolean> => isAccountDeletionWaiting(sql, userId),
+      /** Records that a sign-in restored the account and queues the mail that says so. */
+      restored: (userId: number): Promise<void> => scheduleAccountRestoredMail(sql, userId),
     }
   }
 

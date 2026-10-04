@@ -261,7 +261,7 @@ export function createAuthRoute(
           c,
           totpFailures,
           authData.user.id,
-          () => signIn.checkTotp(authData, validationResult.data.otp),
+          () => signIn.checkTotp(c, authData, validationResult.data.otp),
           () => c.json({ error: "Invalid token" }, 401),
         )
         return outcome === true ? c.json(authData.user) : outcome

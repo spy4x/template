@@ -4,6 +4,7 @@ import type { Sql } from "@spy4x/server/db"
 import { BillingNoticeKind } from "@domain/billing"
 import {
   accountDeletionMail,
+  accountRestoredMail,
   billingNoticeMail,
   createMailSender,
   emailCodeMail,
@@ -142,6 +143,20 @@ describe("accountDeletionMail", () => {
     expect(mail.text).toContain("deleted for good on October 11, 2026")
     expect(mail.text).toContain("Sign in before then and your account is restored")
     expect(mail.text).toContain("https://app.example.com/sign-in")
+    expect(mail.html).toContain(`href="https://app.example.com/sign-in"`)
+  })
+})
+
+describe("accountRestoredMail", () => {
+  const mail = accountRestoredMail({ webAppUrl: "https://app.example.com" }, {
+    to: "ann@example.com",
+  })
+
+  it("says a sign-in restored the account and what to do if it was someone else", () => {
+    expect(mail.to).toBe("ann@example.com")
+    expect(mail.subject).toBe("Your account was restored")
+    expect(mail.text).toContain("app.example.com was restored by a sign-in")
+    expect(mail.text).toContain("If this wasn't you, sign in, delete your account again and change")
     expect(mail.html).toContain(`href="https://app.example.com/sign-in"`)
   })
 })
