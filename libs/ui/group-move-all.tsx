@@ -10,7 +10,7 @@ import type { MoveTarget } from "./notes-screen.tsx"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
 
-/** What a finished move tells the person: how many items went, and where. */
+/** What a finished move tells the person: how many notes went, and where. */
 export interface MoveAllResult {
   count: number
   toName: string
@@ -46,7 +46,7 @@ export interface GroupMoveAllFormProps {
 
 /**
  * Moving all of a group's data to another group, in a dialog. The person picks the group and
- * confirms. Afterwards the dialog says how many items moved and offers to delete the emptied group,
+ * confirms. Afterwards the dialog says how many notes moved and offers to delete the emptied group,
  * or to keep it. Pure: the app owns the request.
  */
 export function GroupMoveAllForm(
