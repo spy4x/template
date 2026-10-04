@@ -1,6 +1,6 @@
 import { type APIRequestContext, type Page } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
-import { gotoApp, signIn } from "./fixtures/app.ts"
+import { signIn } from "./fixtures/app.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
