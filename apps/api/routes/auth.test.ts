@@ -249,8 +249,22 @@ const anonymousRoutes: (MutationCase & { operation: string })[] = [
   { method: "POST", path: "/auth/password/reset", body: resetBody, operation: "resetPassword" },
 ]
 
+/**
+ * A route behind a session. `calls` lists what a route that runs more than its `operation` calls,
+ * when its checks pass and when they fail.
+ */
+interface SessionRoute extends MutationCase {
+  operation: string
+  calls?: { succeeded: string[]; failed: string[] }
+}
+
+/** What `route` calls once, when its checks pass (`succeeded`) or fail. */
+function callsOf(route: SessionRoute, succeeded: boolean): string[] {
+  return route.calls?.[succeeded ? "succeeded" : "failed"] ?? [route.operation]
+}
+
 /** Routes behind `isAuthenticated1FA` or `isAuthenticated2FA`. */
-const sessionRoutes: (MutationCase & { operation: string })[] = [
+const sessionRoutes: SessionRoute[] = [
   { method: "POST", path: "/auth/totp/check", body: { otp: "123456" }, operation: "checkTotp" },
   {
     method: "POST",
@@ -285,6 +299,16 @@ const sessionRoutes: (MutationCase & { operation: string })[] = [
     body: { email: "new@example.com", password: "correct-horse" },
     operation: "requestEmailChange",
   },
+  {
+    method: "POST",
+    path: "/auth/account/delete",
+    body: { password: "correct-horse" },
+    operation: "deleteAccount",
+    calls: {
+      succeeded: ["accountDeletionBlockers", "checkPassword", "deleteAccount"],
+      failed: ["accountDeletionBlockers", "checkPassword"],
+    },
+  },
 ]
 
 describe("auth routes refuse cross-site requests", () => {
@@ -318,7 +342,7 @@ describe("auth routes behind a session", () => {
       const response = await send(app, route, sameOriginHeaders)
 
       expect(response.ok).toBe(true)
-      expect(calls).toEqual([route.operation])
+      expect(calls).toEqual(callsOf(route, true))
     })
 
     it(`answers ${route.method} ${route.path} without a session with 401, not 403`, async () => {
@@ -462,7 +486,7 @@ describe("auth routes rate-limit", () => {
 
       expect(statuses.slice(3)).toEqual([429])
       expect(statuses.slice(0, 3)).not.toContain(429)
-      expect(calls).toEqual([route.operation, route.operation, route.operation])
+      expect(calls).toEqual([1, 2, 3].flatMap(() => callsOf(route, false)))
     })
   }
 
@@ -603,7 +627,7 @@ describe("auth routes rate-limit", () => {
       const sameOrigin = await send(app, route, headers)
 
       expect(sameOrigin.status).not.toBe(429)
-      expect(calls).toEqual([route.operation])
+      expect(calls).toEqual(callsOf(route, false))
     })
   }
 
