@@ -97,7 +97,7 @@ test.describe("moving all of a group's data", () => {
       await dialog.locator("[data-e2e=group-move-all-to]").selectOption({ label: "Target" })
       await dialog.locator("[data-e2e=group-move-all-submit]").click()
       await expect(dialog.locator("[data-e2e=group-move-all-done]")).toContainText(
-        `Moved 3 items from "Source" to "Target".`,
+        `Moved 3 notes from "Source" to "Target".`,
       )
       await expect(watcherPage.locator("[data-e2e=note-item-title]")).toHaveCount(3, {
         timeout: 5_000,

@@ -484,6 +484,30 @@ describe("GroupSettingsScreen header", () => {
       expect(find("[data-e2e=group-move-all-dialog]").textContent).toContain(
         "Free groups hold 10 notes.",
       )
+      expect(focused()).toBe("group-move-all-error")
+    })
+
+    it("shows the target's plan notice, with whose limit it is, and moves focus to it", async () => {
+      const screen = (props: Partial<GroupSettingsScreenProps>) => (
+        <GroupSettingsScreen {...mover} onMoveAll={() => {}} {...props} />
+      )
+      await mount(screen({}))
+      await click("[data-e2e=group-move-all-open]")
+      await rerender(screen({
+        moveAllError: "Free groups hold 10 notes.",
+        moveAllRefusal: {
+          code: "PLAN_LIMIT_REACHED",
+          entitlement: "maxNotes",
+          limit: 10,
+          canUpgrade: true,
+        },
+      }))
+      const dialog = find("[data-e2e=group-move-all-dialog]")
+      expect(dialog.textContent).toContain("This group has reached its note limit")
+      expect(dialog.textContent).toContain("the plan of the group you picked, not this one's")
+      expect(find("[data-e2e=plan-refusal] a").getAttribute("href")).toContain("g2")
+      expect(has("[data-e2e=group-move-all-error]")).toBe(false)
+      expect(focused()).toBe("plan-refusal")
     })
 
     it("says how many items moved and offers to delete the group or keep it", async () => {
@@ -502,8 +526,9 @@ describe("GroupSettingsScreen header", () => {
       await click("[data-e2e=group-move-all-open]")
       await rerender(screen({ moveAllResult: { count: 3, toName: "Archive" } }))
       expect(find("[data-e2e=group-move-all-done]").textContent).toContain(
-        `Moved 3 items from "Team" to "Archive"`,
+        `Moved 3 notes from "Team" to "Archive"`,
       )
+      expect(focused()).toBe("group-move-all-keep")
 
       await click("[data-e2e=group-move-all-delete]")
       expect(closed.calls).toHaveLength(1)
@@ -534,7 +559,7 @@ describe("GroupSettingsScreen header", () => {
         />,
       )
       expect(has("[data-e2e=group-move-all-delete]")).toBe(false)
-      expect(find("[data-e2e=group-move-all-done]").textContent).toContain("Moved 1 item ")
+      expect(find("[data-e2e=group-move-all-done]").textContent).toContain("Moved 1 note ")
       await click("[data-e2e=group-move-all-keep]")
       expect(closed.calls).toHaveLength(1)
       expect(has("[data-e2e=group-move-all-dialog]")).toBe(false)

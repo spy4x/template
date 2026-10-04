@@ -406,6 +406,30 @@ describe("groups store", () => {
     expect(store.actionError.value).toBeNull()
   })
 
+  it("keeps the plan refusal of a move, so the dialog can show the upgrade notice", async () => {
+    const refusal = {
+      code: "PLAN_LIMIT_REACHED",
+      entitlement: "maxNotes",
+      limit: 10,
+      canUpgrade: true,
+    }
+    const { store } = harness({
+      moveAll: () =>
+        Promise.reject(
+          new RealtimeRequestError("forbidden", "Free groups hold 10 notes.", refusal),
+        ),
+    })
+
+    await store.moveAll("a", "b")
+
+    expect(store.actionError.value).toEqual({
+      groupId: "a",
+      action: "moveAll",
+      message: "Free groups hold 10 notes.",
+      plan: refusal,
+    })
+  })
+
   it("moves a restored group from the deleted groups back to the list", async () => {
     const { store } = harness({
       pages: [{ groups: [item("a", "1")], nextCursor: null }],

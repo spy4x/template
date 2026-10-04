@@ -1,12 +1,14 @@
 import type { JSX } from "preact"
-import { useState } from "preact/hooks"
+import { useEffect, useRef, useState } from "preact/hooks"
 import { Button } from "@spy4x/preact-ui/button"
-import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Select } from "@spy4x/preact-ui/input"
 import { Cluster, Stack } from "@spy4x/preact-ui/layout"
+import type { PlanRefusal } from "@domain/billing"
+import { FocusedError } from "./group-page.tsx"
 import type { MoveTarget } from "./notes-screen.tsx"
-import { ScreenForm } from "./progressive.tsx"
+import { PlanRefusalNotice } from "./plan-refusal.tsx"
+import { type Navigate, ScreenForm } from "./progressive.tsx"
 
 /** What a finished move tells the person: how many items went, and where. */
 export interface MoveAllResult {
@@ -22,6 +24,13 @@ export interface GroupMoveAllFormProps {
   moving?: boolean
   /** Why the move was refused, or `null`. */
   error?: string | null
+  /**
+   * The target's plan refused the move: shown as the plan notice, in place of `error`. The limit is
+   * the picked group's, not this group's.
+   */
+  refusal?: PlanRefusal | null
+  /** Follows the notice's "See plans" link without a page load. */
+  navigate?: Navigate
   /** The finished move, or `null` while there is none. */
   result?: MoveAllResult | null
   /** Moves everything to the chosen group. */
@@ -41,16 +50,99 @@ export interface GroupMoveAllFormProps {
  * or to keep it. Pure: the app owns the request.
  */
 export function GroupMoveAllForm(
-  { groupName, targets, moving = false, error = null, result = null, onMove, onCancel, onDelete }:
-    GroupMoveAllFormProps,
+  {
+    groupName,
+    targets,
+    moving = false,
+    error = null,
+    refusal = null,
+    navigate,
+    result = null,
+    onMove,
+    onCancel,
+    onDelete,
+  }: GroupMoveAllFormProps,
 ): JSX.Element {
   const [toGroupId, setToGroupId] = useState(targets[0]?.id ?? ``)
   if (result) {
-    return (
+    return <Done groupName={groupName} result={result} onCancel={onCancel} onDelete={onDelete} />
+  }
+  return (
+    <ScreenForm
+      pending={moving}
+      onSubmit={() => {
+        if (toGroupId) onMove?.(toGroupId)
+      }}
+    >
+      <Stack gap="lg">
+        <p class="text-sm text-muted" data-e2e="group-move-all-explanation">
+          Every note in "{groupName}" moves to the group you pick, and its members stop seeing them.
+          Members of the other group see them right away. The ids and history stay. Nothing moves if
+          any of it fails.
+        </p>
+        <Field id="group-move-all-to" label="Move everything to">
+          <Select
+            name="toGroupId"
+            data-e2e="group-move-all-to"
+            value={toGroupId}
+            onChange={(event) => setToGroupId(event.currentTarget.value)}
+            options={targets.map((target) => ({ value: target.id, label: target.name }))}
+          />
+        </Field>
+        {refusal
+          ? (
+            <>
+              <PlanRefusalNotice groupId={toGroupId} refusal={refusal} navigate={navigate} />
+              <p class="text-sm text-muted" data-e2e="group-move-all-limit-owner">
+                The limit is the plan of the group you picked, not this one's.
+              </p>
+            </>
+          )
+          : <FocusedError message={error} dataE2E="group-move-all-error" />}
+        <Cluster gap="md" class="justify-end">
+          <Button
+            type="button"
+            variant="ghost"
+            class="min-h-11 sm:min-h-9"
+            onClick={onCancel}
+            data-e2e="group-move-all-cancel"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            class="min-h-11 sm:min-h-9"
+            busy={moving}
+            busyLabel="Moving..."
+            data-e2e="group-move-all-submit"
+          >
+            Move everything
+          </Button>
+        </Cluster>
+      </Stack>
+    </ScreenForm>
+  )
+}
+
+/** What a finished move says; focus lands on "Keep the group", the safe way on. */
+function Done(
+  { groupName, result, onCancel, onDelete }: {
+    groupName: string
+    result: MoveAllResult
+    onCancel?: () => void
+    onDelete?: () => void
+  },
+): JSX.Element {
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    box.current?.querySelector<HTMLElement>("[data-e2e=group-move-all-keep]")?.focus()
+  }, [])
+  return (
+    <div ref={box}>
       <Stack gap="lg">
         <p class="text-sm" role="status" data-e2e="group-move-all-done">
-          Moved {result.count} {result.count === 1 ? `item` : `items`} from "{groupName}" to "
-          {result.toName}". Deleted items stay behind and go with the group.
+          Moved {result.count} {result.count === 1 ? `note` : `notes`} from "{groupName}" to "
+          {result.toName}". Notes you deleted earlier stay in this group and are deleted with it.
         </p>
         <Cluster gap="md" class="justify-end">
           <Button
@@ -75,52 +167,6 @@ export function GroupMoveAllForm(
           )}
         </Cluster>
       </Stack>
-    )
-  }
-  return (
-    <ScreenForm
-      pending={moving}
-      onSubmit={() => {
-        if (toGroupId) onMove?.(toGroupId)
-      }}
-    >
-      <Stack gap="lg">
-        <p class="text-sm text-muted" data-e2e="group-move-all-explanation">
-          Every note in "{groupName}" moves to the group you pick, and its members stop seeing them.
-          Members of the other group see them right away. The ids and history stay. Nothing moves if
-          any of it fails.
-        </p>
-        <Field id="group-move-all-to" label="Move everything to">
-          <Select
-            name="toGroupId"
-            data-e2e="group-move-all-to"
-            value={toGroupId}
-            onChange={(event) => setToGroupId(event.currentTarget.value)}
-            options={targets.map((target) => ({ value: target.id, label: target.name }))}
-          />
-        </Field>
-        <ErrorState message={error} />
-        <Cluster gap="md" class="justify-end">
-          <Button
-            type="button"
-            variant="ghost"
-            class="min-h-11 sm:min-h-9"
-            onClick={onCancel}
-            data-e2e="group-move-all-cancel"
-          >
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            class="min-h-11 sm:min-h-9"
-            busy={moving}
-            busyLabel="Moving..."
-            data-e2e="group-move-all-submit"
-          >
-            Move everything
-          </Button>
-        </Cluster>
-      </Stack>
-    </ScreenForm>
+    </div>
   )
 }

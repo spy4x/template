@@ -1,6 +1,7 @@
 import { signal } from "@preact/signals"
 import { RealtimeRequestError } from "@spy4x/realtime"
 import type { GroupColor, GroupDetails, GroupMoveAllResult, GroupRole } from "@domain/groups"
+import { type PlanRefusal, readPlanRefusal } from "@domain/billing"
 import { apiFetch } from "./api.ts"
 import { advanceGroupCursor, realtimeCommand, realtimeQuery } from "./realtime.ts"
 import { offlineGroups } from "../offline/groups-offline.ts"
@@ -87,9 +88,9 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
   /** The group a rename, delete or restore is in flight for, and which of the three. */
   const working = signal<{ groupId: string; action: GroupAction } | null>(null)
   /** Why the last rename, delete or restore was refused. */
-  const actionError = signal<{ groupId: string; action: GroupAction; message: string } | null>(
-    null,
-  )
+  const actionError = signal<
+    { groupId: string; action: GroupAction; message: string; plan?: PlanRefusal } | null
+  >(null)
   /** The last move of a group's data that worked, until the person closes its dialog. */
   const moved = signal<{ groupId: string; toGroupId: string; count: number } | null>(null)
   const loading = signal(false)
@@ -204,7 +205,13 @@ export function createGroupsStore(dependencies: GroupsDependencies) {
       await run()
       return true
     } catch (cause) {
-      actionError.value = { groupId, action, message: describe(cause, fallback) }
+      const plan = cause instanceof RealtimeRequestError ? readPlanRefusal(cause.details) : null
+      actionError.value = {
+        groupId,
+        action,
+        message: describe(cause, fallback),
+        ...(plan && { plan }),
+      }
       return false
     } finally {
       working.value = null

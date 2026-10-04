@@ -26,6 +26,7 @@ import { type GroupMemberRow, GroupMembersSection, type MemberError } from "./gr
 import { FocusedError, useClosesWhenDone, useFreshError } from "./group-page.tsx"
 import { PageAction, PageHeader } from "./page-header.tsx"
 import { transferCandidates } from "./group-transfer.tsx"
+import type { PlanRefusal } from "@domain/billing"
 import { GroupMoveAllForm, type MoveAllResult } from "./group-move-all.tsx"
 import { type MoveTarget, NavigateItem } from "./notes-screen.tsx"
 import { GROUP_PATHS, type Navigate, SCREEN_PATHS } from "./progressive.tsx"
@@ -115,6 +116,8 @@ export interface GroupSettingsScreenProps {
   movingAll?: boolean
   /** Why the move was refused, shown in its dialog, or `null`. */
   moveAllError?: string | null
+  /** The target group's plan refused the move; shown in the dialog as the plan notice. */
+  moveAllRefusal?: PlanRefusal | null
   /** The finished move, shown in its dialog with the choice to delete the group; or `null`. */
   moveAllResult?: MoveAllResult | null
   /** The move dialog closed: the app forgets the finished move and any error. */
@@ -170,6 +173,7 @@ export function GroupSettingsScreen(
     movingAll = false,
     moveAllError = null,
     moveAllResult = null,
+    moveAllRefusal = null,
     onMoveAllClose,
   }: GroupSettingsScreenProps,
 ): JSX.Element {
@@ -421,6 +425,8 @@ export function GroupSettingsScreen(
             targets={moveTargets}
             moving={movingAll}
             error={moveAllError}
+            refusal={moveAllRefusal}
+            navigate={navigate}
             result={moveAllResult}
             onMove={onMoveAll}
             onCancel={close}
