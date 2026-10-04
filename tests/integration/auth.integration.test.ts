@@ -44,6 +44,8 @@ const AUDIT_IDENTIFIER_MIGRATION = "2026_10_10_0001_auth_audit_identifier_320.sq
 const APPEARANCE_MIGRATION = "2026_10_18_0001_group_appearance.sql"
 /** Adds what a session remembers about its device, which every sign-in writes (#151). */
 const SESSION_DEVICES_MIGRATION = "2026_10_23_0002_auth_session_devices.sql"
+// A reset also deletes every API token of the person, so the reset tests need their table (#167).
+const API_TOKENS_MIGRATION = "2026_10_25_0001_api_tokens.sql"
 const MASTER_MIGRATIONS = [
   "2026_01_26_0001_init.sql",
   "2026_01_26_0002_auth_profiles_audit.sql",
@@ -423,7 +425,7 @@ Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) 
 
 Deno.test("username accounts and the password reset link", async (t) => {
   await withSchema(
-    [...MASTER_MIGRATIONS, AUTH_MIGRATION, KIND_MIGRATION, EMAIL_MIGRATION],
+    [...MASTER_MIGRATIONS, AUTH_MIGRATION, KIND_MIGRATION, EMAIL_MIGRATION, API_TOKENS_MIGRATION],
     async (sql) => {
       const signIn = buildSignIn(sql)
       const db = new AppDbBase({ sql })
