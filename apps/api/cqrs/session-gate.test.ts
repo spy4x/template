@@ -3,7 +3,9 @@ import { describe, it } from "@std/testing/bdd"
 import { type Command, CommandBus } from "@spy4x/platform/cqrs"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { AccessError, type Actor, UserMFAStatus } from "@domain/identity"
+import { ApiTokenError } from "@domain/api-tokens"
 import { assertSecondFactorSatisfied, createSessionGate } from "./session-gate.ts"
+import { TOKEN_MESSAGES, TokenNeed } from "./token-scope.ts"
 
 function actor(overrides: Partial<Actor> = {}): Actor {
   return {
@@ -97,6 +99,112 @@ describe("createSessionGate", () => {
       AccessError,
     )
     expect(handled).toEqual(["SignInCommand"])
+  })
+})
+
+class ReadGroupQuery implements Command<{ actor: Actor; groupId: string }, string> {
+  readonly __resultType?: string
+  constructor(public data: { actor: Actor; groupId: string }) {}
+}
+
+class WriteGroupCommand implements Command<{ actor: Actor; groupId: string }, string> {
+  readonly __resultType?: string
+  constructor(public data: { actor: Actor; groupId: string }) {}
+}
+
+class UnlistedGroupCommand implements Command<{ actor: Actor; groupId: string }, string> {
+  readonly __resultType?: string
+  constructor(public data: { actor: Actor; groupId: string }) {}
+}
+
+const TOKEN_GROUP = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
+const OTHER_GROUP = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111003"
+
+function tokenActor(canWrite: boolean): Actor {
+  return actor({
+    sessionSecondFactor: SecondFactorStatus.Completed,
+    token: { tokenId: "token-1", groupId: TOKEN_GROUP, canWrite },
+  })
+}
+
+function tokenBus() {
+  const handled: string[] = []
+  const commandBus = new CommandBus()
+  commandBus.use(
+    createSessionGate(
+      [],
+      new Map([[ReadGroupQuery, TokenNeed.READ], [WriteGroupCommand, TokenNeed.WRITE]]),
+    ),
+  )
+  for (const message of [ReadGroupQuery, WriteGroupCommand, UnlistedGroupCommand]) {
+    commandBus.register(message, () => {
+      handled.push(message.name)
+      return Promise.resolve("handled")
+    })
+  }
+  return { commandBus, handled }
+}
+
+async function scopeRefusal(run: Promise<unknown>): Promise<string> {
+  try {
+    await run
+  } catch (error) {
+    if (error instanceof ApiTokenError) return error.code
+    throw error
+  }
+  throw new Error("the gate let the message through")
+}
+
+describe("createSessionGate with an API token", () => {
+  it("lets a token read and write in its own group", async () => {
+    const { commandBus, handled } = tokenBus()
+    const writer = tokenActor(true)
+    await commandBus.execute(new ReadGroupQuery({ actor: writer, groupId: TOKEN_GROUP }))
+    await commandBus.execute(new WriteGroupCommand({ actor: writer, groupId: TOKEN_GROUP }))
+    expect(handled).toEqual(["ReadGroupQuery", "WriteGroupCommand"])
+  })
+
+  it("refuses a token in another group, even for a read", async () => {
+    const { commandBus, handled } = tokenBus()
+    expect(
+      await scopeRefusal(
+        commandBus.execute(new ReadGroupQuery({ actor: tokenActor(true), groupId: OTHER_GROUP })),
+      ),
+    ).toBe("TOKEN_SCOPE")
+    expect(handled).toEqual([])
+  })
+
+  it("lets a read-only token read but refuses its write", async () => {
+    const { commandBus, handled } = tokenBus()
+    const reader = tokenActor(false)
+    await commandBus.execute(new ReadGroupQuery({ actor: reader, groupId: TOKEN_GROUP }))
+    expect(
+      await scopeRefusal(
+        commandBus.execute(new WriteGroupCommand({ actor: reader, groupId: TOKEN_GROUP })),
+      ),
+    ).toBe("TOKEN_SCOPE")
+    expect(handled).toEqual(["ReadGroupQuery"])
+  })
+
+  it("refuses a token any message that is not listed, while a session still sends it", async () => {
+    const { commandBus, handled } = tokenBus()
+    expect(
+      await scopeRefusal(
+        commandBus.execute(
+          new UnlistedGroupCommand({ actor: tokenActor(true), groupId: TOKEN_GROUP }),
+        ),
+      ),
+    ).toBe("TOKEN_SCOPE")
+    await commandBus.execute(new UnlistedGroupCommand({ actor: actor(), groupId: TOKEN_GROUP }))
+    expect(handled).toEqual(["UnlistedGroupCommand"])
+  })
+
+  it("lists only note reads and note creation for tokens by default", () => {
+    expect([...TOKEN_MESSAGES].map(([message, need]) => [message.name, need])).toEqual([
+      ["NoteListQuery", TokenNeed.READ],
+      ["NoteGetQuery", TokenNeed.READ],
+      ["NoteCreateCommand", TokenNeed.WRITE],
+    ])
   })
 })
 

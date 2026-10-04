@@ -18,6 +18,11 @@ import { notificationCursor } from "./services/notification-cursor.ts"
 import { createGroupActivityRoute } from "./routes/group-activity.ts"
 import { createGroupsRoute } from "./routes/groups.ts"
 import { createNotesRoute } from "./routes/notes.ts"
+import { createApiTokensRoute } from "./routes/api-tokens.ts"
+import { createTokenApiRoute } from "./routes/token-api.ts"
+import { createApiTokens } from "./services/api-tokens.ts"
+import { createTokenRateLimits } from "./middlewares/token-rate-limits.ts"
+import { deriveSecret } from "@spy4x/platform/tokens"
 import {
   createGroupInvitationsRoute,
   createInvitationsRoute,
@@ -120,6 +125,40 @@ app.route(
     mutationGuards,
     getProfile: (query) => queryBus.execute(query),
     updateProfile: (command) => commandBus.execute(command),
+  }),
+)
+// Personal API tokens (#167). The hash key comes from the pepper, so it needs no secret of its own;
+// changing the pepper makes every token stop working, as it ends every password.
+const apiTokens = createApiTokens({
+  db,
+  key: await deriveSecret(config.authPepper, "api-tokens"),
+  logError: (message, error) => log(message, error),
+})
+app.route(
+  "/tokens",
+  createApiTokensRoute({
+    auth: signIn.auth,
+    mutationGuards,
+    limit: rateLimits.normal,
+    tokens: apiTokens,
+  }),
+)
+const tokenRateLimits = createTokenRateLimits({
+  ...config.rateLimiter,
+  store: (keyPrefix) => createRedisRateLimitStore(kv, { keyPrefix }),
+  onStoreError: (error) => log("error: API token rate limit store failed and was let pass", error),
+})
+// The only routes that accept a token, and they accept nothing else.
+app.route(
+  "/v1",
+  createTokenApiRoute({
+    authenticate: (c, presented) => apiTokens.authenticate(c, presented),
+    list: (query) => queryBus.execute(query),
+    get: (query) => queryBus.execute(query),
+    create: (command) => commandBus.execute(command),
+    cursor: noteListCursor,
+    limitByIp: tokenRateLimits.failuresByIp,
+    limitByToken: tokenRateLimits.byToken,
   }),
 )
 // Awaited here so a missing VAPID keys file stops the API at start-up, not at the first push call.
