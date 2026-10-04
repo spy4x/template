@@ -1,0 +1,6 @@
+# The only container variables the SPA's `/config.json` may carry, one per line: the variable's
+# name, then the key it gets in the file. Everything here is sent to every visitor's browser, so
+# list a public value only, never a secret. `tests/spa-runtime-config.test.ts` rejects names that
+# look like secrets. See docs/stack.md, "Runtime configuration".
+SPA_ENV env
+SPA_ERROR_REPORT_DSN errorReportDsn
