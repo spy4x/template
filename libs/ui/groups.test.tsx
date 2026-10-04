@@ -503,14 +503,49 @@ describe("GroupSettingsScreen header", () => {
         },
       }))
       const dialog = find("[data-e2e=group-move-all-dialog]")
-      expect(dialog.textContent).toContain("This group has reached its note limit")
-      expect(dialog.textContent).toContain("the plan of the group you picked, not this one's")
+      expect(find("[data-e2e=plan-refusal]").textContent).toContain(
+        "Archive has reached its note limit",
+      )
+      expect(dialog.textContent).not.toContain("not this one's")
       expect(find("[data-e2e=plan-refusal] a").getAttribute("href")).toContain("g2")
       expect(has("[data-e2e=group-move-all-error]")).toBe(false)
       expect(focused()).toBe("plan-refusal")
     })
 
-    it("says how many items moved and offers to delete the group or keep it", async () => {
+    it("tells the app when the target changes, and the notice then names that group", async () => {
+      const changed = spy<[]>()
+      const refusal = {
+        code: "PLAN_LIMIT_REACHED",
+        entitlement: "maxNotes",
+        limit: 10,
+        canUpgrade: true,
+      } as const
+      const screen = (props: Partial<GroupSettingsScreenProps>) => (
+        <GroupSettingsScreen
+          {...mover}
+          onMoveAll={() => {}}
+          onMoveAllTargetChange={changed.fn}
+          {...props}
+        />
+      )
+      await mount(screen({}))
+      await click("[data-e2e=group-move-all-open]")
+      await rerender(
+        screen({ moveAllError: "Free groups hold 10 notes.", moveAllRefusal: refusal }),
+      )
+      expect(changed.calls).toHaveLength(0)
+
+      await choose("[data-e2e=group-move-all-to]", "g3")
+      expect(changed.calls).toHaveLength(1)
+      expect(find("[data-e2e=plan-refusal]").textContent).toContain(
+        "Home has reached its note limit",
+      )
+      // The app answers the callback by clearing the refusal.
+      await rerender(screen({}))
+      expect(has("[data-e2e=plan-refusal]")).toBe(false)
+    })
+
+    it("says how many notes moved and offers to delete the group or keep it", async () => {
       const closed = spy<[]>()
       const remove = spy<[]>()
       const screen = (props: Partial<GroupSettingsScreenProps>) => (
