@@ -35,6 +35,7 @@ const MIGRATIONS = [
   "2026_10_18_0001_group_appearance.sql",
   "2026_10_19_0001_audit_activity.sql",
   "2026_10_22_0001_notifications.sql",
+  "2026_10_23_0001_auth_session_devices.sql",
 ]
 const RETRY_MS = 50
 const KV_PASSWORD = "integration-test-only-valkey-password"
