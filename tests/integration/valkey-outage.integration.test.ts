@@ -30,12 +30,14 @@ const MIGRATIONS = [
   "2026_08_18_0001_group_core.sql",
   "2026_08_18_0002_personal_group_backfill.sql",
   "2026_09_24_0001_auth_package_tables.sql",
+  "2026_10_03_0002_outbox_jobs.sql",
   "2026_10_07_0001_group_kind_removed.sql",
   "2026_10_08_0001_audit_outlives_group.sql",
   "2026_10_18_0001_group_appearance.sql",
   "2026_10_19_0001_audit_activity.sql",
   "2026_10_22_0001_notifications.sql",
   "2026_10_23_0002_auth_session_devices.sql",
+  "2026_10_26_0001_starter_data.sql",
 ]
 const RETRY_MS = 50
 const KV_PASSWORD = "integration-test-only-valkey-password"
