@@ -402,11 +402,15 @@ Deno.test("a user's last-seen time moves at most once every five minutes, whatev
 /** A database whose last-used write always fails, as during a short Postgres outage. */
 class FailingTouchDb extends AppDbBase {
   override get sessionDevices() {
-    return { ...super.sessionDevices, touch: () => Promise.reject(new Error("database is down")) }
+    return {
+      ...super.sessionDevices,
+      touch: () => Promise.reject(new Error("database is down")),
+      touchUser: () => Promise.reject(new Error("database is down")),
+    }
   }
 }
 
-Deno.test("a failed last-used write is only logged, and the request still succeeds", async () => {
+Deno.test("a failed last-used or last-seen write is only logged, and the request still succeeds", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql, new FailingTouchDb({ sql }))
     const onLaptop = await signUp(app, "ada@example.com", laptop)
