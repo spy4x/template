@@ -100,14 +100,20 @@ export async function deleteOwnSession(
   return rows.length > 0
 }
 
-/** Deletes every session of `userId` except `keepId`. Returns how many it deleted. */
+/**
+ * Deletes every live session of `userId` except `keepId`: the ones the devices list shows, so the
+ * count matches what the person saw. Returns how many it deleted.
+ */
 export async function deleteOtherSessions(
   sql: postgres.Sql,
   userId: number,
   keepId: number,
 ): Promise<number> {
   const rows = await sql`
-    DELETE FROM auth_sessions WHERE user_id = ${userId} AND id <> ${keepId} RETURNING id
+    DELETE FROM auth_sessions
+    WHERE user_id = ${userId} AND id <> ${keepId} AND status = ${SessionStatus.Active}
+      AND expires_at > now()
+    RETURNING id
   `
   return rows.length
 }

@@ -3,6 +3,7 @@ import { expect } from "@std/expect"
 import { Hono } from "hono"
 import postgres from "postgres"
 import { AuthAuditEventType } from "@domain/identity"
+import { SessionStatus } from "@spy4x/server/sign-in"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
@@ -240,10 +241,21 @@ Deno.test("signing out of all other devices keeps only this one", async () => {
     const onPhone = await signIn(app, "ada@example.com", phone)
     const onTablet = await signIn(app, "ada@example.com", { ...phone, ip: "198.51.100.9" })
     const bob = await signUp(app, "bob@example.com", phone)
+    // Sessions the list does not show: one expired, one signed out. They are not counted.
+    const onOldPhone = await signIn(app, "ada@example.com", phone)
+    const onOldTablet = await signIn(app, "ada@example.com", phone)
+    await sql`UPDATE auth_sessions SET expires_at = now() - interval '1 minute'
+      WHERE id = ${onOldPhone.id}`
+    await sql`UPDATE auth_sessions SET status = ${SessionStatus.SignedOut}
+      WHERE id = ${onOldTablet.id}`
 
     const response = await app.request("/end-others", laptop, { cookie: onLaptop.cookie })
 
     expect(await response.json()).toEqual({ ended: 2 })
+    const [audit] = await sql<{ identifier: string }[]>`
+      SELECT identifier FROM auth_audits WHERE event_type = ${AuthAuditEventType.SESSIONS_ENDED}
+    `
+    expect(audit).toEqual({ identifier: "all other sessions" })
     expect(await app.signIn.entitledSession(onPhone.id)).toBeNull()
     expect(await app.signIn.entitledSession(onTablet.id)).toBeNull()
     expect(await app.signIn.entitledSession(onLaptop.id)).not.toBeNull()
