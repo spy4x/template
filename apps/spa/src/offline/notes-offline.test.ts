@@ -61,6 +61,7 @@ function network(pages: NoteItem[][]) {
     create: () => Promise.reject(new Error("the store must not call the network to write")),
     update: () => Promise.reject(new Error("the store must not call the network to write")),
     delete: () => Promise.reject(new Error("the store must not call the network to write")),
+    restore: () => Promise.reject(new Error("the test restores nothing")),
     move: () => Promise.reject(new Error("the test moves nothing")),
     newId: () => "id",
   }
@@ -177,6 +178,42 @@ describe("offline notes moves", () => {
       .catch(() => {})
 
     expect((await layer.store.readNotes(groupId)).map((n) => n.id)).toEqual(["a"])
+  })
+
+  it("restores a note on the server, keeps it on the device and queues nothing", async () => {
+    const layer = layerWith({ socket: true })
+    const { online } = network([[]])
+    online.restore = (input) => Promise.resolve({ note: note(input.id, 3) })
+    const deps = offlineNotes(online, () => layer)
+
+    const { note: restored } = await deps.restore({ groupId, id: "a" })
+
+    expect(restored.version).toBe(3)
+    expect((await layer.store.readNotes(groupId)).map((n) => n.id)).toEqual(["a"])
+    expect(await layer.store.readOutbox()).toEqual([])
+  })
+
+  it("refuses to restore with the network down instead of queueing the restore", async () => {
+    const layer = layerWith({ socket: false })
+    const { online } = network([[]])
+    online.restore = () => Promise.reject(new TypeError("Failed to fetch"))
+
+    await expect(offlineNotes(online, () => layer).restore({ groupId, id: "a" })).rejects
+      .toThrow(TypeError)
+
+    expect(await layer.store.readOutbox()).toEqual([])
+    expect(await layer.store.readNotes(groupId)).toEqual([])
+  })
+
+  it("reads the deleted notes from the server only, and never stores them as live notes", async () => {
+    const layer = layerWith({ socket: true })
+    const { online } = network([[note("live")]])
+    const deps = offlineNotes(online, () => layer)
+
+    const page = await deps.fetchPage(groupId, null, true)
+
+    expect(page.notes.map((n) => n.id)).toEqual(["live"])
+    expect(await layer.store.readNotes(groupId)).toEqual([])
   })
 })
 

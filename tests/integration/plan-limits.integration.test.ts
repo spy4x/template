@@ -223,8 +223,7 @@ Deno.test("the free plan's note cap on Postgres", async (t) => {
         for (let index = 0; index < FREE_NOTES; index++) {
           others.push((await bus.execute(createNote(groupId, owner, `Live ${index}`))).note)
         }
-        const restore = () =>
-          new NoteRestoreCommand({ actor: actor(owner), groupId, id: first.id })
+        const restore = () => new NoteRestoreCommand({ actor: actor(owner), groupId, id: first.id })
 
         await expect(bus.execute(restore())).rejects.toMatchObject({
           code: "PLAN_LIMIT_REACHED",

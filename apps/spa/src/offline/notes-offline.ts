@@ -39,9 +39,10 @@ export function offlineNotes(
 
   return {
     ...online,
-    async fetchPage(groupId, _cursor): Promise<NotePage> {
+    async fetchPage(groupId, _cursor, deleted): Promise<NotePage> {
       const layer = current()
-      if (!layer) return await online.fetchPage(groupId, _cursor)
+      // The deleted notes are read from the server only: the device keeps no copy of them.
+      if (!layer || deleted) return await online.fetchPage(groupId, _cursor, deleted)
       let base: NoteItem[]
       try {
         base = []
@@ -109,6 +110,13 @@ export function offlineNotes(
       })
       if (outcome.kind === "failed") throw outcome.error
       return undefined
+    },
+    async restore(input) {
+      // Needs the server, like a move: it is never queued, so a person offline is told so.
+      const result = await online.restore(input)
+      const layer = current()
+      if (layer) await layer.store.putNote(result.note)
+      return result
     },
     async move(input) {
       const result = await online.move(input)

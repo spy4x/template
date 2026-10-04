@@ -34,6 +34,11 @@ Deno.test("activity: only an admin or the owner may read the log", () => {
   expect(codeOf(null)).toBe("GROUP_NOT_FOUND")
 })
 
+Deno.test("activity: a restored note reads as a sentence, with the title when there is one", () => {
+  expect(say("note.restored", { details: { title: "Plan" } })).toBe("Ada restored the note “Plan”")
+  expect(say("note.restored")).toBe("Ada restored a note")
+})
+
 Deno.test("activity: a move reads as a sentence with the count and the group", () => {
   expect(say("note.moved_out", { details: { count: 3, groupName: "Family" } })).toBe(
     "Ada moved 3 notes to Family",

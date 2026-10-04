@@ -13,7 +13,9 @@ import { IconEllipsisVertical, IconPlus } from "@spy4x/preact-icons"
 import { timeAgo } from "@spy4x/platform/universal/time"
 import type { PlanRefusal } from "@domain/billing"
 import { canMutateNotes, type GroupRole } from "@domain/groups"
+import { NOTE_RESTORE_DAYS } from "@domain/notes"
 import { PageAction, PageHeader } from "./page-header.tsx"
+import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
 /**
@@ -115,6 +117,20 @@ export interface NotesScreenProps {
   moveError?: string | null
   /** Deletes a note from its row's menu, after the person confirms. Left out, rows offer no delete. */
   onDelete?: (note: { id: string; version: number }) => void
+  /**
+   * The "Show deleted" filter is on: the list shows `deletedNotes`, each with a Restore button for
+   * an editor. Left out, `onShowDeletedChange` hides the filter's menu entry.
+   */
+  showDeleted?: boolean
+  onShowDeletedChange?: (on: boolean) => void
+  deletedNotes?: readonly NoteRow[]
+  deletedLoading?: boolean
+  /** Restores a deleted note from its row. Left out, or for a viewer, rows offer no restore. */
+  onRestore?: (note: { id: string }) => void
+  /** The id of the note being restored: its button is busy and the others wait. */
+  restoring?: string | null
+  /** Why the last restore failed; a plan refusal shows as an upgrade prompt. */
+  restoreError?: NoteFormErrors | null
   navigate?: Navigate
 }
 
@@ -122,12 +138,17 @@ export interface NotesScreenProps {
  * The notes of one group, as a list of rows. Writing happens on the note's own page
  * (`NoteEditorScreen`): "New note" and each note's title open it. Each row has a menu to move the
  * note to another group or delete it, the delete behind a confirmation. "Select notes" in the
- * header's menu ticks several notes at once and moves them together, all or none.
+ * header's menu ticks several notes at once and moves them together, all or none. "Show deleted
+ * notes" in the same menu swaps the list for the deleted notes, which an editor can restore.
  */
 export function NotesScreen(props: NotesScreenProps): JSX.Element {
   const { group, notes, loading, navigate } = props
   const moveTargets = group?.canWrite && props.onMove ? props.moveTargets ?? [] : []
   const onDelete = group?.canWrite ? props.onDelete : undefined
+  const deletedMode = Boolean(props.showDeleted && props.onShowDeletedChange)
+  const deletedNotes = props.deletedNotes ?? []
+  const onRestore = group?.canWrite ? props.onRestore : undefined
+  const rows = deletedMode ? deletedNotes : notes
   const [selecting, setSelecting] = useState(false)
   const [ticked, setTicked] = useState<readonly string[]>([])
   const [deleting, setDeleting] = useState<NoteRow | null>(null)
@@ -150,16 +171,18 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
   useEffect(() => {
     if (!focusAfter) return
     // A refused delete or move keeps the note; a later live change must not pull focus to it.
-    if (props.moveError || props.listError) return setFocusAfter(null)
-    if (focusAfter.id && notes.some((note) => note.id === focusAfter.id)) return
+    if (props.moveError || props.listError || props.restoreError?.form) return setFocusAfter(null)
+    if (focusAfter.id && rows.some((note) => note.id === focusAfter.id)) return
     const root = page.current
-    const menus = root?.querySelectorAll<HTMLElement>("[data-e2e=note-menu]")
+    const menus = root?.querySelectorAll<HTMLElement>(
+      deletedMode ? "[data-e2e=note-restore]" : "[data-e2e=note-menu]",
+    )
     const row = focusAfter.id && menus
       ? menus[focusAfter.index] ?? menus[focusAfter.index - 1]
       : undefined
     ;(row ?? root?.querySelector<HTMLElement>("[data-e2e=notes-menu]"))?.focus()
     setFocusAfter(null)
-  }, [focusAfter, notes, props.moveError, props.listError])
+  }, [focusAfter, rows, props.moveError, props.listError, props.restoreError])
 
   if (!group) {
     return (
@@ -186,7 +209,7 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
     setFocusAfter({ id: null, index: 0 })
   }
   const leaving = (note: NoteRow) =>
-    setFocusAfter({ id: note.id, index: notes.findIndex((row) => row.id === note.id) })
+    setFocusAfter({ id: note.id, index: rows.findIndex((row) => row.id === note.id) })
 
   const list = (
     <ul
@@ -220,6 +243,48 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
     </ul>
   )
 
+  const deletedList = (
+    <ul
+      class="divide-y divide-subtle overflow-hidden rounded-lg border border-subtle bg-surface"
+      data-e2e="deleted-note-list"
+    >
+      {deletedNotes.map((note) => (
+        <li
+          key={note.id}
+          class="flex min-h-16 items-center gap-3 px-4 py-3"
+          data-e2e={`note-${note.id}`}
+        >
+          <div class="min-w-0 flex-1">
+            <h2 class="truncate text-sm font-medium" data-e2e="note-item-title">{note.title}</h2>
+            {note.updatedAt && (
+              <p class="text-xs text-muted">
+                Deleted <time dateTime={note.updatedAt}>{timeAgo(note.updatedAt)}</time>
+              </p>
+            )}
+          </div>
+          {onRestore && (
+            <Button
+              type="button"
+              variant="outline"
+              class="min-h-11 shrink-0"
+              aria-label={`Restore ${note.title}`}
+              busy={props.restoring === note.id}
+              busyLabel="Restoring..."
+              disabled={Boolean(props.restoring)}
+              data-e2e="note-restore"
+              onClick={() => {
+                leaving(note)
+                onRestore({ id: note.id })
+              }}
+            >
+              Restore
+            </Button>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+
   return (
     <ListPage pageRef={page}>
       <PageHeader
@@ -238,7 +303,15 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
         menuDataE2E="notes-menu"
         menu={
           <>
-            {canSelect && !selecting && (
+            {props.onShowDeletedChange && !selecting && (
+              <DropdownItem
+                onClick={() => props.onShowDeletedChange?.(!deletedMode)}
+                dataE2E="notes-show-deleted"
+              >
+                {deletedMode ? "Show notes" : "Show deleted notes"}
+              </DropdownItem>
+            )}
+            {canSelect && !selecting && !deletedMode && (
               <DropdownItem onClick={() => setSelecting(true)} dataE2E="notes-select">
                 Select notes to move
               </DropdownItem>
@@ -255,8 +328,44 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
         </p>
       )}
       <ErrorState message={props.listError} />
-      {!selecting && <ErrorState message={props.moveError ?? null} />}
-      {notes.length === 0
+      {!selecting && !deletedMode && <ErrorState message={props.moveError ?? null} />}
+      {deletedMode && (
+        <div
+          class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-subtle bg-surface p-3"
+          data-e2e="notes-deleted-banner"
+        >
+          <p class="min-w-0 flex-1 text-sm">
+            Deleted notes stay here for {NOTE_RESTORE_DAYS} days, then they are removed for good.
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => props.onShowDeletedChange?.(false)}
+            data-e2e="notes-show-live"
+          >
+            Back to notes
+          </Button>
+        </div>
+      )}
+      {deletedMode && props.restoreError?.plan
+        ? (
+          <PlanRefusalNotice
+            groupId={group.id}
+            refusal={props.restoreError.plan}
+            navigate={navigate}
+          />
+        )
+        : deletedMode && <ErrorState message={props.restoreError?.form ?? null} />}
+      {deletedMode
+        ? deletedNotes.length === 0
+          ? (
+            <EmptyState
+              headingLevel={2}
+              title={props.deletedLoading ? "Loading deleted notes..." : "No deleted notes."}
+            />
+          )
+          : deletedList
+        : notes.length === 0
         ? (
           <EmptyState
             headingLevel={2}

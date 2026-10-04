@@ -14,6 +14,8 @@ import {
   noteListPayloadSchema,
   noteMovePayloadSchema,
   noteMoveRequestSchema,
+  noteRestorePayloadSchema,
+  noteRestoreRequestSchema,
   noteUpdateRequestSchema,
   NoteVersionConflictError,
   parseNoteMoveRequest,
@@ -80,12 +82,24 @@ describe("note requests", () => {
       ["a socket create without a group", noteCreatePayloadSchema, { id, title: "a", body: "" }],
       ["a list above the largest page", noteListPayloadSchema, { groupId, limit: 101 }],
       ["a list with an empty cursor", noteListPayloadSchema, { groupId, cursor: "" }],
+      ["a list of deleted notes with a string flag", noteListPayloadSchema, {
+        groupId,
+        deleted: "true",
+      }],
+      ["a restore with a field of its own", noteRestoreRequestSchema, { version: 2 }],
+      ["a socket restore without a note", noteRestorePayloadSchema, { groupId }],
     ] as const
   ) {
     it(`rejects ${name}`, () => {
       expect(codeOf(() => parseNoteRequest(schema, value))).toBe("INVALID_REQUEST")
     })
   }
+
+  it("accepts an empty restore body, a socket restore and a list of deleted notes", () => {
+    expect(parseNoteRequest(noteRestoreRequestSchema, {})).toEqual({})
+    expect(parseNoteRequest(noteRestorePayloadSchema, { groupId, id })).toEqual({ groupId, id })
+    expect(parseNoteRequest(noteListPayloadSchema, { groupId, deleted: true }).deleted).toBe(true)
+  })
 
   it("counts an emoji as one character of the title", () => {
     const title = "😀".repeat(NOTE_TITLE_MAX_LENGTH)

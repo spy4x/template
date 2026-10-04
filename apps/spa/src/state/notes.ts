@@ -20,6 +20,17 @@ export interface NoteItem {
   updatedAt: string
 }
 
+/** The note a person just deleted and may still take back: the Undo toast is shown for it. */
+export interface UndoOffer {
+  id: string
+  title: string
+  /** When the offer ends, in milliseconds since the epoch. */
+  until: number
+}
+
+/** How long Undo is offered after a delete, in milliseconds. */
+export const UNDO_MS = 10_000
+
 /** One page of a group's notes. */
 export interface NotePage {
   notes: NoteItem[]
@@ -29,7 +40,7 @@ export interface NotePage {
 /** What the notes store needs from the outside. Injected so tests need no network. */
 export interface NotesDependencies {
   /** Reads one page of a group's notes, over REST: the same read at start-up and after a push. */
-  fetchPage(groupId: string, cursor: string | null): Promise<NotePage>
+  fetchPage(groupId: string, cursor: string | null, deleted?: boolean): Promise<NotePage>
   /** Reads one note over the socket. */
   get(groupId: string, id: string): Promise<{ note: NoteItem }>
   /**
@@ -45,6 +56,8 @@ export interface NotesDependencies {
     input: { groupId: string; id: string; title: string; body: string; version: number },
   ): Promise<{ note: NoteItem }>
   delete(input: { groupId: string; id: string; version: number }): Promise<unknown>
+  /** Brings a deleted note back. Needs the server: it is never queued. */
+  restore(input: { groupId: string; id: string }): Promise<{ note: NoteItem }>
   /** Moves the notes to another group, all or none. Needs the server: it is never queued. */
   move(input: { groupId: string; toGroupId: string; noteIds: string[] }): Promise<
     { notes: NoteItem[] }
@@ -93,6 +106,9 @@ export const NOTE_MESSAGES = {
   moveOffline: "Moving notes needs a connection. Try again when you are back online.",
   moveNone: "Tick the notes you want to move.",
   moveUnsaved: "Save or discard your changes before moving the note.",
+  restore: "Could not restore the note",
+  restoreOffline: "Restoring a note needs a connection. Try again when you are back online.",
+  restoreGone: "That note is no longer in the deleted notes.",
   moveGone: "A note you ticked is no longer here, so nothing was moved.",
 } as const
 
@@ -136,6 +152,17 @@ export function createNotesStore(dependencies: NotesDependencies) {
   const saving = signal(false)
   const deleting = signal<string | null>(null)
   const moving = signal(false)
+  /** The "Show deleted" filter is on: the list shows the deleted notes instead. */
+  const showDeleted = signal(false)
+  /** The group's deleted notes, newest first. Read only while `showDeleted` is on. */
+  const deletedNotes = signal<readonly NoteItem[]>([])
+  const deletedLoading = signal(false)
+  /** The note being restored. */
+  const restoring = signal<string | null>(null)
+  /** Why the last restore failed, and the plan's refusal when the notes limit caused it. */
+  const restoreError = signal<FormErrors>(NO_ERRORS)
+  /** The note just deleted: the screen offers Undo for it until dismissed or taken. */
+  const undo = signal<UndoOffer | null>(null)
   /** The refusal of the last move, shown beside the move button. */
   const moveError = signal<string | null>(null)
   /** The open note is not in the open group: it is gone, or it is in another group. */
@@ -155,17 +182,28 @@ export function createNotesStore(dependencies: NotesDependencies) {
   let inFlight: Promise<void> | null = null
   let queued: Promise<void> | null = null
 
-  async function readAll(forGroup: string): Promise<void> {
+  async function readPages(forGroup: string, deleted: boolean): Promise<NoteItem[]> {
     const all: NoteItem[] = []
     let cursor: string | null = null
     for (let page = 0; page < MAX_PAGES; page++) {
-      const result = await dependencies.fetchPage(forGroup, cursor)
+      const result: NotePage = await dependencies.fetchPage(forGroup, cursor, deleted)
       all.push(...result.notes)
       cursor = result.nextCursor
       if (cursor === null) break
     }
+    return all
+  }
+
+  async function readAll(forGroup: string): Promise<void> {
+    const all = await readPages(forGroup, false)
     // The person may have opened another group while this read ran.
     if (groupId.value === forGroup) notes.value = all
+    if (showDeleted.value) await readDeleted(forGroup)
+  }
+
+  async function readDeleted(forGroup: string): Promise<void> {
+    const all = await readPages(forGroup, true)
+    if (groupId.value === forGroup) deletedNotes.value = all
   }
 
   function start(): Promise<void> {
@@ -200,6 +238,27 @@ export function createNotesStore(dependencies: NotesDependencies) {
       await refresh()
     } catch (cause) {
       listError.value = describe(cause, NOTE_MESSAGES.load)
+    }
+  }
+
+  /**
+   * Turns the deleted notes' list on or off. Turning it on reads them from the server; a failure
+   * shows under the list and leaves the filter on, with the list empty.
+   */
+  async function setShowDeleted(on: boolean): Promise<void> {
+    showDeleted.value = on
+    restoreError.value = NO_ERRORS
+    if (!on) return
+    const forGroup = groupId.value
+    if (!forGroup) return
+    deletedLoading.value = true
+    listError.value = null
+    try {
+      await readDeleted(forGroup)
+    } catch (cause) {
+      listError.value = describe(cause, NOTE_MESSAGES.load)
+    } finally {
+      deletedLoading.value = false
     }
   }
 
@@ -362,10 +421,13 @@ export function createNotesStore(dependencies: NotesDependencies) {
     if (!forGroup || deleting.value) return false
     deleting.value = note.id
     listError.value = null
+    const title = (notes.value.find((existing) => existing.id === note.id)?.title ??
+      (editing.value?.id === note.id ? editing.value.base.title : null)) ?? ""
     try {
       await dependencies.delete({ groupId: forGroup, id: note.id, version: note.version })
       notes.value = notes.value.filter((existing) => existing.id !== note.id)
       editing.value = null
+      undo.value = { id: note.id, title, until: Date.now() + UNDO_MS }
       return true
     } catch (cause) {
       const code = noteCode(cause)
@@ -382,6 +444,58 @@ export function createNotesStore(dependencies: NotesDependencies) {
     } finally {
       deleting.value = null
     }
+  }
+
+  /**
+   * Brings a deleted note back. Resolves `true` once restored, `false` when it was refused or
+   * failed (the reason is in `restoreError`). It needs the server and is never queued: a restore
+   * made offline would be a write the person cannot see settle.
+   */
+  async function restore(id: string): Promise<boolean> {
+    const forGroup = groupId.value
+    if (!forGroup || restoring.value) return false
+    restoring.value = id
+    restoreError.value = NO_ERRORS
+    try {
+      const { note } = await dependencies.restore({ groupId: forGroup, id })
+      deletedNotes.value = deletedNotes.value.filter((existing) => existing.id !== id)
+      if (undo.value?.id === id) undo.value = null
+      if (groupId.value === forGroup) {
+        notes.value = [note, ...notes.value.filter((existing) => existing.id !== id)]
+      }
+      return true
+    } catch (cause) {
+      const code = noteCode(cause)
+      restoreError.value = {
+        title: null,
+        form: code === "NOTE_NOT_FOUND"
+          ? NOTE_MESSAGES.restoreGone
+          : cause instanceof RealtimeRequestError
+          ? describe(cause, NOTE_MESSAGES.restore)
+          : NOTE_MESSAGES.restoreOffline,
+        plan: planRefusal(cause),
+      }
+      // The deleted list is stale: another member restored or purged it first.
+      if (code === "NOTE_NOT_FOUND") {
+        if (undo.value?.id === id) undo.value = null
+        if (showDeleted.value) await readDeleted(forGroup).catch(() => {})
+      }
+      return false
+    } finally {
+      restoring.value = null
+    }
+  }
+
+  /** Takes back the delete the Undo toast offers. */
+  async function undoDelete(): Promise<boolean> {
+    const offer = undo.value
+    if (!offer) return false
+    undo.value = null
+    return await restore(offer.id)
+  }
+
+  function dismissUndo(): void {
+    undo.value = null
   }
 
   /**
@@ -438,6 +552,12 @@ export function createNotesStore(dependencies: NotesDependencies) {
     saving.value = false
     deleting.value = null
     moving.value = false
+    showDeleted.value = false
+    deletedNotes.value = []
+    deletedLoading.value = false
+    restoring.value = null
+    restoreError.value = NO_ERRORS
+    undo.value = null
     moveError.value = null
     missing.value = false
     elsewhere.value = null
@@ -461,6 +581,12 @@ export function createNotesStore(dependencies: NotesDependencies) {
     deleting,
     moving,
     moveError,
+    showDeleted,
+    deletedNotes,
+    deletedLoading,
+    restoring,
+    restoreError,
+    undo,
     missing,
     elsewhere,
     unsaved,
@@ -471,6 +597,10 @@ export function createNotesStore(dependencies: NotesDependencies) {
     discardDraft,
     save,
     remove,
+    restore,
+    undoDelete,
+    dismissUndo,
+    setShowDeleted,
     move,
     reset,
   }
@@ -489,9 +619,10 @@ function toEdit(note: NoteItem): Edit {
 
 /** The notes as the server serves them: reads over REST, writes over the socket. */
 const onlineNotes: NotesDependencies = {
-  async fetchPage(groupId, cursor) {
+  async fetchPage(groupId, cursor, deleted = false) {
     const query = new URLSearchParams({ limit: String(PAGE_LIMIT) })
     if (cursor) query.set("cursor", cursor)
+    if (deleted) query.set("deleted", "true")
     const result = await apiFetch<NotePage>(`/api/groups/${groupId}/notes?${query}`)
     if (!result.ok) throw new Error(result.error.message)
     return result.data
@@ -501,6 +632,7 @@ const onlineNotes: NotesDependencies = {
   create: (input) => realtimeCommand("note.create", input),
   update: (input) => realtimeCommand("note.update", input),
   delete: (input) => realtimeCommand("note.delete", input),
+  restore: (input) => realtimeCommand("note.restore", input),
   move: (input) => realtimeCommand("note.move", input),
   newId: () => crypto.randomUUID(),
 }

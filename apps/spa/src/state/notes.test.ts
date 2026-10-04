@@ -1,7 +1,7 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { RealtimeRequestError } from "@spy4x/realtime"
-import { createNotesStore, NOTE_MESSAGES, type NoteItem, type NotePage } from "./notes.ts"
+import { createNotesStore, NOTE_MESSAGES, type NoteItem, type NotePage, UNDO_MS } from "./notes.ts"
 
 const groupId = "g-1"
 
@@ -39,13 +39,21 @@ function harness(overrides: {
   locate?: (id: string) => Promise<{ groupId: string }>
   create?: () => Promise<{ note: NoteItem }>
   move?: () => Promise<{ notes: NoteItem[] }>
+  restore?: () => Promise<{ note: NoteItem }>
+  deletedPages?: NotePage[]
 } = {}) {
   const pages = [...(overrides.pages ?? [])]
+  const deletedPages = [...(overrides.deletedPages ?? [])]
   const reads: { groupId: string; cursor: string | null }[] = []
+  const deletedReads: string[] = []
   const calls: { name: string; input: unknown }[] = []
   let ids = 0
   const store = createNotesStore({
-    fetchPage(forGroup, cursor) {
+    fetchPage(forGroup, cursor, deleted) {
+      if (deleted) {
+        deletedReads.push(forGroup)
+        return Promise.resolve(deletedPages.shift() ?? { notes: [], nextCursor: null })
+      }
       reads.push({ groupId: forGroup, cursor })
       return Promise.resolve(pages.shift() ?? { notes: [], nextCursor: null })
     },
@@ -71,13 +79,17 @@ function harness(overrides: {
       calls.push({ name: "delete", input })
       return overrides.delete?.() ?? Promise.resolve({})
     },
+    restore(input) {
+      calls.push({ name: "restore", input })
+      return overrides.restore?.() ?? Promise.resolve({ note: item(input.id, 3) })
+    },
     move(input) {
       calls.push({ name: "move", input })
       return overrides.move?.() ?? Promise.resolve({ notes: [] })
     },
     newId: () => `new-${++ids}`,
   })
-  return { store, reads, calls }
+  return { store, reads, deletedReads, calls }
 }
 
 describe("notes store", () => {
@@ -89,6 +101,7 @@ describe("notes store", () => {
       create: () => Promise.reject(new Error("unused")),
       update: () => Promise.reject(new Error("unused")),
       delete: () => Promise.reject(new Error("unused")),
+      restore: () => Promise.reject(new Error("unused")),
       move: () => Promise.reject(new Error("unused")),
       newId: () => "id",
       readLocal: () => Promise.resolve([item("cached")]),
@@ -544,6 +557,154 @@ describe("notes store", () => {
       expect(store.moveError.value).toBe(NOTE_MESSAGES.moveGone)
       expect(reads).toHaveLength(2)
       expect(store.notes.value.map((note) => note.id)).toEqual(["c"])
+    })
+  })
+  describe("restoring deleted notes", () => {
+    const planRefused = () =>
+      new RealtimeRequestError("forbidden", "This group's plan holds 10 notes", {
+        code: "PLAN_LIMIT_REACHED",
+        entitlement: "maxNotes",
+        limit: 10,
+        canUpgrade: true,
+      })
+
+    it("offers Undo for ten seconds after a delete, for the note that was deleted", async () => {
+      const { store } = harness({ pages: [{ notes: [item("a", 2, "Plan")], nextCursor: null }] })
+      await store.open(groupId, null)
+      const before = Date.now()
+
+      await store.remove({ id: "a", version: 2 })
+
+      expect(store.undo.value?.id).toBe("a")
+      expect(store.undo.value?.title).toBe("Plan")
+      expect(store.undo.value!.until - before).toBeGreaterThanOrEqual(UNDO_MS)
+      expect(store.undo.value!.until - Date.now()).toBeLessThanOrEqual(UNDO_MS)
+    })
+
+    it("offers no Undo for a delete that was refused", async () => {
+      const { store } = harness({
+        pages: [{ notes: [item("a")], nextCursor: null }],
+        delete: () => Promise.reject(conflict(2)),
+      })
+      await store.open(groupId, null)
+
+      await store.remove({ id: "a", version: 1 })
+
+      expect(store.undo.value).toBe(null)
+    })
+
+    it("undoes a delete: restores the note, puts it back in the list and ends the offer", async () => {
+      const { store, calls } = harness({
+        pages: [{ notes: [item("a", 2, "Plan")], nextCursor: null }],
+      })
+      await store.open(groupId, null)
+      await store.remove({ id: "a", version: 2 })
+      expect(store.notes.value).toEqual([])
+
+      expect(await store.undoDelete()).toBe(true)
+
+      expect(calls.filter((call) => call.name === "restore")).toEqual([
+        { name: "restore", input: { groupId, id: "a" } },
+      ])
+      expect(store.notes.value.map((note) => note.id)).toEqual(["a"])
+      expect(store.undo.value).toBe(null)
+    })
+
+    it("does not read the deleted notes until the filter is turned on, then reads them all", async () => {
+      const { store, deletedReads } = harness({
+        deletedPages: [
+          { notes: [item("x")], nextCursor: "c1" },
+          { notes: [item("y")], nextCursor: null },
+        ],
+      })
+      await store.open(groupId, null)
+      expect(deletedReads).toEqual([])
+
+      await store.setShowDeleted(true)
+
+      expect(store.deletedNotes.value.map((note) => note.id)).toEqual(["x", "y"])
+      await store.setShowDeleted(false)
+      expect(store.showDeleted.value).toBe(false)
+    })
+
+    it("rereads the deleted notes together with the list while the filter is on", async () => {
+      const { store, deletedReads } = harness()
+      await store.open(groupId, null)
+      await store.setShowDeleted(true)
+
+      await store.refresh()
+
+      expect(deletedReads).toEqual([groupId, groupId])
+    })
+
+    it("restores a deleted note from the deleted list into the live list", async () => {
+      const { store } = harness({
+        deletedPages: [{ notes: [item("x", 3, "Old"), item("y")], nextCursor: null }],
+      })
+      await store.open(groupId, null)
+      await store.setShowDeleted(true)
+
+      expect(await store.restore("x")).toBe(true)
+
+      expect(store.deletedNotes.value.map((note) => note.id)).toEqual(["y"])
+      expect(store.notes.value.map((note) => note.id)).toEqual(["x"])
+      expect(store.restoreError.value.form).toBe(null)
+    })
+
+    it("keeps the note deleted and carries the plan's refusal when the group is full", async () => {
+      const { store } = harness({
+        deletedPages: [{ notes: [item("x")], nextCursor: null }],
+        restore: () => Promise.reject(planRefused()),
+      })
+      await store.open(groupId, null)
+      await store.setShowDeleted(true)
+
+      expect(await store.restore("x")).toBe(false)
+
+      expect(store.deletedNotes.value.map((note) => note.id)).toEqual(["x"])
+      expect(store.notes.value).toEqual([])
+      expect(store.restoreError.value.plan?.entitlement).toBe("maxNotes")
+    })
+
+    it("says so when a note is no longer deleted, and rereads the deleted list", async () => {
+      const { store, deletedReads } = harness({
+        deletedPages: [{ notes: [item("x")], nextCursor: null }],
+        restore: () => Promise.reject(notFound()),
+      })
+      await store.open(groupId, null)
+      await store.setShowDeleted(true)
+
+      expect(await store.restore("x")).toBe(false)
+
+      expect(store.restoreError.value.form).toBe(NOTE_MESSAGES.restoreGone)
+      expect(deletedReads).toHaveLength(2)
+    })
+
+    it("tells a person offline that restoring needs a connection", async () => {
+      const { store } = harness({
+        restore: () => Promise.reject(new TypeError("Failed to fetch")),
+      })
+      await store.open(groupId, null)
+
+      expect(await store.restore("x")).toBe(false)
+
+      expect(store.restoreError.value.form).toBe(NOTE_MESSAGES.restoreOffline)
+    })
+
+    it("forgets the filter, the deleted notes and the offer when another group opens", async () => {
+      const { store } = harness({
+        pages: [{ notes: [item("a")], nextCursor: null }],
+        deletedPages: [{ notes: [item("x")], nextCursor: null }],
+      })
+      await store.open(groupId, null)
+      await store.remove({ id: "a", version: 1 })
+      await store.setShowDeleted(true)
+
+      await store.open("g-2", null)
+
+      expect(store.showDeleted.value).toBe(false)
+      expect(store.deletedNotes.value).toEqual([])
+      expect(store.undo.value).toBe(null)
     })
   })
 })
