@@ -4,8 +4,8 @@ import type { notesStore } from "../state/notes.ts"
 
 /**
  * The toast that follows a delete: the note's title and an Undo button, for ten seconds. It is its
- * own `Toastr` because the app's toast list takes text only, and it sits bottom left (above the tab bar on a phone), away from
- * the app's other toasts at the top right. An offer that ended while another page was open is not
+ * own `Toastr` because the app's toast list takes text only, and it sits bottom right (above the tab
+ * bar on a phone), away from the app's other toasts at the top right and clear of the desktop rail. An offer that ended while another page was open is not
  * shown late.
  */
 export function UndoDeleteToast({ store }: { store: typeof notesStore }) {
@@ -14,9 +14,9 @@ export function UndoDeleteToast({ store }: { store: typeof notesStore }) {
   if (!offer || left <= 0) return null
   return (
     <Toastr
-      corner="bottom-left"
+      corner="bottom-right"
       class="max-sm:bottom-24"
-      label="Undo"
+      label="Note deleted, undo available"
       dataE2E="undo-toasts"
       onDismiss={() => store.dismissUndo()}
       toasts={[{

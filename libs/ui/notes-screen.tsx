@@ -340,6 +340,7 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
           <Button
             type="button"
             variant="ghost"
+            class="min-h-11"
             onClick={() => props.onShowDeletedChange?.(false)}
             data-e2e="notes-show-live"
           >
@@ -347,7 +348,7 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
           </Button>
         </div>
       )}
-      {deletedMode && props.restoreError?.plan
+      {props.restoreError?.plan
         ? (
           <PlanRefusalNotice
             groupId={group.id}
@@ -355,7 +356,7 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
             navigate={navigate}
           />
         )
-        : deletedMode && <ErrorState message={props.restoreError?.form ?? null} />}
+        : <ErrorState message={props.restoreError?.form ?? null} />}
       {deletedMode
         ? deletedNotes.length === 0
           ? (

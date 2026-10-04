@@ -113,6 +113,21 @@ test.describe("restoring deleted notes", () => {
       await expect(memberPage.getByText("No deleted notes.")).toBeVisible({ timeout: 5_000 })
       await memberPage.locator("[data-e2e=notes-show-live]").click()
       await expect(memberTitles).toHaveText(["Trip"])
+
+      // Undo needs a connection: offline, the delete is queued and Undo says so.
+      await ownerContext.setOffline(true)
+      await ownerPage.locator(`[data-e2e=note-${noteId}] [data-e2e=note-menu]`).click()
+      await ownerPage.getByRole("menuitem", { name: "Delete" }).click()
+      await ownerPage.locator("[data-e2e=note-delete-dialog]").getByRole("button", {
+        name: "Delete",
+        exact: true,
+      }).click()
+      await expect(ownerTitles).toHaveCount(0)
+      await ownerPage.locator("[data-e2e=note-undo-toast]").getByRole("button", {
+        name: "Undo",
+      }).click()
+      await expect(ownerPage.getByText("Restoring a note needs a connection.")).toBeVisible()
+      await ownerContext.setOffline(false)
     } finally {
       await ownerContext.close()
       await memberContext.close()

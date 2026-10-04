@@ -544,6 +544,29 @@ describe("NotesScreen deleted notes", () => {
     expect(focused()).toBe("plan-refusal")
   })
 
+  it("shows a refused Undo in the live list, where the person is", async () => {
+    await mount(
+      <NotesScreen
+        {...listDefaults}
+        notes={[]}
+        restoreError={{
+          title: null,
+          form: "Restoring a note needs a connection. Try again when you are back online.",
+        }}
+      />,
+    )
+    expect(document.body.textContent).toContain("Restoring a note needs a connection.")
+
+    await rerender(
+      <NotesScreen
+        {...listDefaults}
+        notes={[]}
+        restoreError={{ title: null, form: "Limit", plan: limitReached }}
+      />,
+    )
+    expect(find("[data-e2e=plan-refusal]").getAttribute("data-entitlement")).toBe("maxNotes")
+  })
+
   it("moves focus to the next Restore after a restore, else More actions", async () => {
     const listOf = (notes: NoteRow[]) => <NotesScreen {...deletedDefaults} deletedNotes={notes} />
     await mount(listOf([trip, plan]))

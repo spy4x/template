@@ -668,6 +668,18 @@ describe("notes over both transports", () => {
       expect(notes.writes).toBe(0)
     })
 
+    it("refuses a stranger's list of deleted notes as an unknown group, with no title", async () => {
+      const { notes, buses } = stack()
+      await seedDeleted(notes)
+
+      const response = await rest(buses, STRANGER)("GET", "?deleted=true", undefined)
+      const text = await response.text()
+
+      expect(response.status).toBe(404)
+      expect(JSON.parse(text).error.code).toBe("GROUP_NOT_FOUND")
+      expect(text).not.toContain(noteId)
+    })
+
     it("restores over the socket and lists the note again", async () => {
       const { notes, buses } = stack()
       await seedDeleted(notes)

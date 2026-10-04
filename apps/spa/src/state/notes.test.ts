@@ -610,6 +610,22 @@ describe("notes store", () => {
       expect(store.undo.value).toBe(null)
     })
 
+    it("keeps the reason a failed Undo gave until the next delete, and shows no Undo for it", async () => {
+      const { store } = harness({
+        pages: [{ notes: [item("a", 2, "Plan"), item("b", 2, "Trip")], nextCursor: null }],
+        restore: () => Promise.reject(new TypeError("Failed to fetch")),
+      })
+      await store.open(groupId, null)
+      await store.remove({ id: "a", version: 2 })
+
+      expect(await store.undoDelete()).toBe(false)
+      expect(store.restoreError.value.form).toBe(NOTE_MESSAGES.restoreOffline)
+      expect(store.undo.value).toBe(null)
+
+      await store.remove({ id: "b", version: 2 })
+      expect(store.restoreError.value.form).toBe(null)
+    })
+
     it("does not read the deleted notes until the filter is turned on, then reads them all", async () => {
       const { store, deletedReads } = harness({
         deletedPages: [

@@ -428,6 +428,7 @@ export function createNotesStore(dependencies: NotesDependencies) {
       notes.value = notes.value.filter((existing) => existing.id !== note.id)
       editing.value = null
       undo.value = { id: note.id, title, until: Date.now() + UNDO_MS }
+      restoreError.value = NO_ERRORS
       return true
     } catch (cause) {
       const code = noteCode(cause)
