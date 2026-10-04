@@ -53,6 +53,8 @@ export function NotesView() {
         onRestore={(note) => void store.restore(note.id)}
         restoring={store.restoring.value}
         restoreError={store.restoreError.value}
+        undoOutcome={store.undoOutcome.value}
+        onUndoFocused={() => store.clearUndoOutcome()}
         navigate={navigate}
       />
       <UndoDeleteToast store={store} />

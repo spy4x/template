@@ -1,7 +1,13 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { RealtimeRequestError } from "@spy4x/realtime"
-import { createNotesStore, NOTE_MESSAGES, type NoteItem, type NotePage } from "./notes.ts"
+import {
+  createNotesStore,
+  NOTE_MESSAGES,
+  type NoteItem,
+  type NotePage,
+  restoreOverSocket,
+} from "./notes.ts"
 
 const groupId = "g-1"
 
@@ -610,6 +616,30 @@ describe("notes store", () => {
       expect(store.undo.value).toBe(null)
     })
 
+    it("reports how Undo ended, for focus: the restored note, or a failure", async () => {
+      let fail = false
+      let restoring = "a"
+      const { store } = harness({
+        pages: [{ notes: [item("a", 2, "Plan"), item("b", 2, "Trip")], nextCursor: null }],
+        restore: () =>
+          fail
+            ? Promise.reject(new TypeError("Failed to fetch"))
+            : Promise.resolve({ note: item(restoring) }),
+      })
+      await store.open(groupId, null)
+      await store.remove({ id: "a", version: 2 })
+      await store.undoDelete()
+      expect(store.undoOutcome.value).toEqual({ id: "a", restored: true })
+      store.clearUndoOutcome()
+      expect(store.undoOutcome.value).toBe(null)
+
+      fail = true
+      restoring = "b"
+      await store.remove({ id: "b", version: 2 })
+      await store.undoDelete()
+      expect(store.undoOutcome.value).toEqual({ id: "b", restored: false })
+    })
+
     it("keeps the reason a failed Undo gave until the next delete, and shows no Undo for it", async () => {
       const { store } = harness({
         pages: [{ notes: [item("a", 2, "Plan"), item("b", 2, "Trip")], nextCursor: null }],
@@ -722,5 +752,28 @@ describe("notes store", () => {
       expect(store.deletedNotes.value).toEqual([])
       expect(store.undo.value).toBe(null)
     })
+  })
+})
+
+describe("restoreOverSocket", () => {
+  it("refuses at once, without sending, when the socket is not open", async () => {
+    let sent = 0
+    const send = () => {
+      sent++
+      return Promise.resolve({ note: item("a") })
+    }
+    await expect(restoreOverSocket({ groupId, id: "a" }, () => false, send)).rejects.toThrow(
+      "the socket is not open",
+    )
+    expect(sent).toBe(0)
+  })
+
+  it("sends the restore when the socket is open", async () => {
+    const result = await restoreOverSocket(
+      { groupId, id: "a" },
+      () => true,
+      () => Promise.resolve({ note: item("a") }),
+    )
+    expect(result.note.id).toBe("a")
   })
 })

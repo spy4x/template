@@ -136,10 +136,12 @@ test.describe("restoring deleted notes", () => {
       await ownerPage.locator("[data-e2e=note-undo-toast]").getByRole("button", {
         name: "Undo",
       }).click()
-      // The call tries again for about six seconds before it gives up.
+      // The socket is not open, so Undo refuses at once, not after the call's retries (about six
+      // seconds), and focus goes to "More actions" in place of the page's body.
       await expect(ownerPage.getByText("Restoring a note needs a connection.")).toBeVisible({
-        timeout: 20_000,
+        timeout: 1_000,
       })
+      await expect(ownerPage.locator("[data-e2e=notes-menu]")).toBeFocused()
       await ownerContext.setOffline(false)
     } finally {
       await ownerContext.close()

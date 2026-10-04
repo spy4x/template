@@ -131,6 +131,14 @@ export interface NotesScreenProps {
   restoring?: string | null
   /** Why the last restore failed; a plan refusal shows as an upgrade prompt. */
   restoreError?: NoteFormErrors | null
+  /**
+   * How an Undo of a delete ended. The toast that offers it lives outside the screen and vanishes
+   * at once, so the screen moves focus: to the restored note's row, or, when the restore failed,
+   * to "More actions".
+   */
+  undoOutcome?: { id: string; restored: boolean } | null
+  /** Called once focus has moved after an Undo, so the app forgets the outcome. */
+  onUndoFocused?: () => void
   navigate?: Navigate
 }
 
@@ -183,6 +191,18 @@ export function NotesScreen(props: NotesScreenProps): JSX.Element {
     ;(row ?? root?.querySelector<HTMLElement>("[data-e2e=notes-menu]"))?.focus()
     setFocusAfter(null)
   }, [focusAfter, rows, props.moveError, props.listError, props.restoreError])
+
+  // Undo's toast is gone by now and focus would fall to the page's body.
+  const { undoOutcome, onUndoFocused } = props
+  useEffect(() => {
+    if (!undoOutcome) return
+    const root = page.current
+    const row = undoOutcome.restored
+      ? root?.querySelector<HTMLElement>(`[data-e2e=note-${undoOutcome.id}] a`)
+      : null
+    ;(row ?? root?.querySelector<HTMLElement>("[data-e2e=notes-menu]"))?.focus()
+    onUndoFocused?.()
+  }, [undoOutcome])
 
   if (!group) {
     return (
