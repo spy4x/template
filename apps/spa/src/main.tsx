@@ -8,13 +8,18 @@ import { getEnvVar } from "@client/vite/env.ts"
 import { createThemeStore } from "@spy4x/preact-signals/theme"
 import { ErrorBoundary } from "./error-boundary.tsx"
 import { startErrorReporting } from "./error-reporting.ts"
+import { loadRuntimeConfig } from "./runtime-config.ts"
 
 // Follows the system light/dark setting. `index.html` paints the stored choice before this runs.
 createThemeStore().attach()
 
+// Settings that differ per environment come from `/config.json`, written when the container
+// starts, so one image serves any of them. The service worker keeps a copy for an offline start.
+const config = await loadRuntimeConfig()
+
 // Without a DSN this does nothing and the page makes no request to any tracker.
 startErrorReporting(
-  { ERROR_REPORT_DSN: getEnvVar("ERROR_REPORT_DSN"), ENV: getEnvVar("ENV") },
+  { ERROR_REPORT_DSN: config.errorReportDsn, ENV: config.env },
   globalThis,
   () => location.href,
 )

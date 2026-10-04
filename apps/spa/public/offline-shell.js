@@ -22,6 +22,8 @@ async function precache() {
   const page = await fetch("/", { cache: "reload" })
   if (!page.ok) return
   await cache.put("/", page.clone())
+  // The runtime settings (`/config.json`) are part of the shell: the app reads them before it renders.
+  await cache.add("/config.json").catch(() => {})
   const html = await page.text()
   const urls = [...html.matchAll(/(?:src|href)="(\/[^"#]+)"/g)].map((match) => match[1])
   // One asset that fails to load must not stop the worker from installing.

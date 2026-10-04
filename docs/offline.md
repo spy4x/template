@@ -99,7 +99,9 @@ A write made online that the server refuses is not queued: the notes store shows
   answered from the cache first;
 - every other request, the page itself included, goes to the network first and is answered from
   the cache only when the network fails, so a deploy, and an edit under the dev server, show at
-  once. Every route is the same page, so any page load is stored and served under `/`;
+  once. Every route is the same page, so any page load is stored and served under `/`. That
+  includes `/config.json` (the runtime settings the app reads before it renders, `docs/stack.md`),
+  which is also stored on install, so the app starts offline;
 - `/api` and `/ws` (the route Traefik sends to the API) are never touched; an e2e test checks that
   no cached URL starts with either.
 

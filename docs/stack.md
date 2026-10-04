@@ -77,8 +77,8 @@ format, about 270 lines and no dependency, instead of the 30 KB `@sentry/browser
   `Set-Cookie` line, a relative path's query and a bare JWT are masked too. The SPA also masks `/invite/<token>`.
 - Reporting is capped (20 reports per page load, 100 per hour in the API process) and fails open: a tracker
   that is down never changes what a person sees.
-- **No DSN, no reporting:** with `ERROR_REPORT_DSN` (API) and `SPA_ERROR_REPORT_DSN` (browser
-  bundle, baked in at build time) empty, nothing is sent and no request is made. A browser DSN is
+- **No DSN, no reporting:** with `ERROR_REPORT_DSN` (API) and `SPA_ERROR_REPORT_DSN` (browser,
+  read at container start) empty, nothing is sent and no request is made. A browser DSN is
   public by design; give the SPA its own GlitchTip project so a leaked key can only add noise.
 
 **Where GlitchTip runs.** Both layouts need only the two DSN variables.
@@ -100,6 +100,29 @@ sourcemaps upload` (GlitchTip accepts it) in the deploy step, and delete the `.m
 the image is built, so they are never served. The release name must match the `release` option of
 the reporter, which the SPA does not set yet. This is not wired in: it needs a running GlitchTip to
 verify.
+
+## Runtime configuration
+
+One built SPA image serves every environment. Settings that differ between environments are not
+baked into the build; the container writes them to `/config.json` when it starts.
+
+- **The allow list:** `apps/spa/public-env.allow` names the only container variables that reach the
+  file (`SPA_ENV` as `env`, `SPA_ERROR_REPORT_DSN` as `errorReportDsn`). Anything else in the
+  container's environment is ignored. The file goes to every visitor's browser, so list a public
+  value only; `tests/spa-runtime-config.test.ts` fails if a name looks like a secret.
+- **Start-up:** nginx's entrypoint runs `apps/spa/runtime-config.sh`, which writes `/tmp/config.json`
+  (`/config.json` is a link to it, so the container can run as any user). A variable that is unset
+  or empty is left out.
+- **In the app:** `apps/spa/src/runtime-config.ts` fetches the file before the first render and
+  checks it with an arktype schema. A missing or invalid file gives the defaults (no error tracker)
+  and a console warning, never a blank page.
+- **Offline:** the service worker stores `/config.json` with the app shell and answers from that
+  copy when the network fails (`docs/offline.md`, "The app shell").
+- **Adding a setting:** add a line to the allow list, a key to the schema, and pass the variable to
+  the `spa` service in `infra/compose/compose.shared.yml`. Changing a value needs a container
+  restart, not a rebuild.
+- **Development:** the Vite dev server serves the committed `apps/spa/public/config.json`; edit it
+  locally (do not commit a DSN) to try a setting.
 
 ## Deployment
 

@@ -581,11 +581,13 @@ services:
       dockerfile: apps/spa/dockerfile.prod
       args:
         - DENO_VERSION=${DENO_VERSION}
-        - VITE_ERROR_REPORT_DSN=${SPA_ERROR_REPORT_DSN:-}
     environment:
       - DENO_DIR=/tmp/deno-cache
       - DENO_LOG=${DENO_LOG}
       - VITE_ENV=prod
+      # Read at container start into /config.json (apps/spa/public-env.allow lists them all).
+      - SPA_ENV=${ENV}
+      - SPA_ERROR_REPORT_DSN=${SPA_ERROR_REPORT_DSN:-}
     volumes:
       - ../../apps:/app/apps:z
       - ../../libs:/app/libs:z
