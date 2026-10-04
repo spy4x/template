@@ -131,6 +131,7 @@ export function GroupsScreen(
       {groups.length === 0
         ? (
           <EmptyState
+            headingLevel={2}
             title={loading ? "Loading groups..." : "No groups yet."}
             description={loading
               ? undefined

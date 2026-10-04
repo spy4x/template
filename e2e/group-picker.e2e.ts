@@ -26,6 +26,17 @@ async function signInOnline(page: Page, email: string): Promise<void> {
   await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 }
 
+/**
+ * Waits for the worker's welcome note in the group (#165), so what a spec adds next is ordered
+ * after it. A spec that counts or lists a new account's notes must account for it.
+ */
+async function welcomeNoteIn(page: Page, groupId: string): Promise<void> {
+  await expect.poll(async () => {
+    const listed = await page.request.get(`${apiBase}/api/groups/${groupId}/notes?limit=100`)
+    return (await listed.json()).notes.map((note: { title: string }) => note.title)
+  }, { message: "the worker makes the welcome note", timeout: 15_000 }).toEqual(["Welcome"])
+}
+
 /** One group of the person's, with a note in it. */
 async function noteIn(page: Page, groupId: string, title: string): Promise<void> {
   const note = await page.request.post(`${apiBase}/api/groups/${groupId}/notes`, {
@@ -83,6 +94,7 @@ test.describe("notes at /notes with a group picker", () => {
       const page = await context.newPage()
       await signInOnline(page, user)
       const personal = await personalGroup(page)
+      await welcomeNoteIn(page, personal.id)
       const team = await sharedGroup(page, "Team B")
       await noteIn(page, personal.id, "Only in personal")
       await noteIn(page, team, "Only in team")
@@ -90,7 +102,8 @@ test.describe("notes at /notes with a group picker", () => {
       await open(page, "/notes")
       await expect(heading(page, personal.name)).toBeVisible()
       const titles = page.locator("[data-e2e=note-item-title]")
-      await expect(titles).toHaveText(["Only in personal"])
+      // Newest change first: the person's note, then the welcome note the worker made.
+      await expect(titles).toHaveText(["Only in personal", "Welcome"])
 
       await pickWithKeyboard(page, "Team B")
       await expect(heading(page, "Team B")).toBeVisible()

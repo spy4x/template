@@ -1,6 +1,8 @@
 import type postgres from "postgres"
 import { scheduleOutboxEvent } from "@spy4x/server/outbox"
+import { effectivePlanId, entitlementsOf, PlanError } from "@domain/billing"
 import { NoteError } from "@domain/notes"
+import { PostgresBillingRepository } from "../billing/postgres-billing-repository.ts"
 import { PostgresNoteRepository } from "../notes/postgres-note-repository.ts"
 import { JOB_AGGREGATE, type JobHandler } from "./jobs.ts"
 
@@ -34,14 +36,24 @@ export async function scheduleStarterData(tx: postgres.Sql, userId: number): Pro
   )
 }
 
+/** What the job needs to find a group's note cap; the defaults are a deployment without billing. */
+export interface StarterDataPlan {
+  /** `true` when the deployment takes payments, so the free plan's cap applies. */
+  billingEnabled?: boolean
+  /** The billing setup's grace period, which `effectivePlanId` counts. */
+  graceDays?: number
+}
+
 /**
  * Creates the welcome note in the person's first group, then sets `done_at`. The note's id is the
  * request's id, so a job that runs twice (a forced retry, a crash between the note and the marker)
  * adds one note: the second insert finds the first and does nothing. Once `done_at` is set the job
  * does not look at the notes again, so a note the person deleted stays deleted. A person with no
- * active group left gets nothing, and the request is closed.
+ * active group left, or whose group is at its plan's note cap, gets nothing, and the request is
+ * closed.
  */
-export function starterDataJob(sql: postgres.Sql): JobHandler {
+export function starterDataJob(sql: postgres.Sql, plan: StarterDataPlan = {}): JobHandler {
+  const billing = new PostgresBillingRepository(sql)
   return async (event) => {
     const [request] = await sql<{ userId: number; doneAt: Date | null }[]>`
       SELECT user_id AS "userId", done_at AS "doneAt"
@@ -60,6 +72,13 @@ export function starterDataJob(sql: postgres.Sql): JobHandler {
     `
     if (group) {
       try {
+        // The cap the API's gate would apply: none while billing is off.
+        const allowance = plan.billingEnabled
+          ? entitlementsOf(
+            effectivePlanId(await billing.get(group.id), new Date(), plan.graceDays ?? 0),
+            true,
+          ).limits.maxNotes
+          : null
         await new PostgresNoteRepository(sql).create(
           {
             groupId: group.id,
@@ -68,11 +87,12 @@ export function starterDataJob(sql: postgres.Sql): JobHandler {
             body: WELCOME_NOTE_BODY,
           },
           request.userId,
-          null,
+          allowance,
         )
       } catch (error) {
-        // The group was deleted or the person was removed since the lookup: nothing to seed.
-        if (!(error instanceof NoteError)) throw error
+        // The group was deleted, the person was removed, or the group is at its plan's note cap:
+        // nothing to seed, and a retry would only meet the same answer.
+        if (!(error instanceof NoteError || error instanceof PlanError)) throw error
       }
     }
     await sql`UPDATE starter_data_requests SET done_at = now() WHERE id = ${event.aggregateId}`
