@@ -95,6 +95,12 @@ export function parseDsn(dsn: string | undefined): ParsedDsn | null {
 }
 
 const MASK = "<REDACTED>"
+/** Longest free text masked and sent: the masking patterns slow down sharply on long input. */
+const MAX_TEXT = 4000
+/** Longest function name kept in a stack frame. */
+const MAX_FUNCTION = 200
+/** Most stack frames kept, newest first. */
+const MAX_FRAMES = 50
 const SECRET_NAME = String
   .raw`(?:pass(?:word|wd)?|pwd|token|secret|api[_-]?key|auth(?:orization)?|cookie|session|otp)`
 
@@ -118,12 +124,12 @@ export function scrubUrl(url: string, redactPathAfter: string[] = []): string {
  * value of anything named like a password, token, cookie or key.
  */
 export function scrubText(text: string, redactPathAfter: string[] = []): string {
-  return text
+  return text.slice(0, MAX_TEXT)
     // A header line is secret to its end: `Cookie: a=1; b=2`, `Authorization: Basic …`.
     .replace(/\b(authorization|proxy-authorization|set-cookie|cookie)\s*:[^\n]*/gi, `$1: ${MASK}`)
     .replace(/(?:https?|wss?):\/\/[^\s"'<>)]+/gi, (url) => scrubUrl(url, redactPathAfter))
     // A relative path loses its query and fragment: `GET /reset?code=…`.
-    .replace(/(^|[\s"'(])(\/[^\s"'<>)?#]*)[?#][^\s"'<>)]*/g, "$1$2")
+    .replace(/(^|[\s"'(=:[])(\/[^\s"'<>)?#]*)[?#][^\s"'<>)]*/g, "$1$2")
     .replace(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g, MASK)
     .replace(/\bBearer\s+[\w.~+/=-]+/gi, `Bearer ${MASK}`)
     .replace(
@@ -147,7 +153,7 @@ interface Frame {
 /** Frames of a V8 or Firefox/Safari stack, oldest call first as Sentry wants them. */
 function parseFrames(stack: string, redactPathAfter: string[]): Frame[] {
   const frames: Frame[] = []
-  for (const raw of stack.split("\n")) {
+  for (const raw of stack.split("\n").slice(0, MAX_FRAMES + 1)) {
     const line = raw.trim()
     const v8 = /^at (?:(.*?) \()?(.*?):(\d+):(\d+)\)?$/.exec(line)
     const gecko = /^(.*?)@(.*?):(\d+):(\d+)$/.exec(line)
@@ -156,7 +162,7 @@ function parseFrames(stack: string, redactPathAfter: string[]): Frame[] {
     const [, fn, file, lineno, colno] = match
     frames.push({
       filename: scrubUrl(file.replace(/^async /, ""), redactPathAfter),
-      function: fn ? scrubText(fn, redactPathAfter) : undefined,
+      function: fn ? scrubText(fn.slice(0, MAX_FUNCTION), redactPathAfter) : undefined,
       lineno: Number(lineno),
       colno: Number(colno),
     })

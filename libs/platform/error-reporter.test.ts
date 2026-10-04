@@ -185,6 +185,7 @@ describe("a report's free text", () => {
         "Cookie: a=1; b=COOKIEX",
         "Set-Cookie: sid=SETX; Path=/",
         "GET /reset?code=RELX",
+        "url=/next?code=EQX next:/next?code=COLONX [/next?code=BRACKETX]",
         "request to /api/auth/magic?key=RELKEYX failed",
         "wss://app.example.com/socket?ticket=WSSX",
         "ws://h/s#FRAGX",
@@ -198,13 +199,40 @@ describe("a report's free text", () => {
     const event = eventOf(sent[0])
     const body = String(sent[0].init.body)
     for (
-      const secret of ["BASICX", "COOKIEX", "SETX", "RELX", "RELKEYX", "WSSX", "FRAGX", "SIGX"]
+      const secret of [
+        "BASICX",
+        "COOKIEX",
+        "SETX",
+        "RELX",
+        "EQX",
+        "COLONX",
+        "BRACKETX",
+        "RELKEYX",
+        "WSSX",
+        "FRAGX",
+        "SIGX",
+      ]
     ) {
       expect(body, secret).not.toContain(secret)
     }
     expect(body).not.toContain("FNSECRETX")
     expect(event.exception.values[0].value).toContain("GET /reset")
     expect(event.exception.values[0].value).toContain("wss://app.example.com/socket")
+  })
+
+  it("masks a 100,000-character message in under a second, cut to a fixed length", async () => {
+    const { sent, reporter } = setup()
+    const error = new Error("a-".repeat(50_000))
+    error.stack = `Error: x\n    at ${"b-".repeat(50_000)} (https://app.example.com/a.js:1:1)`
+
+    const started = performance.now()
+    await reporter.report(error)
+    const elapsed = performance.now() - started
+
+    expect(elapsed).toBeLessThan(1000)
+    const value = eventOf(sent[0]).exception.values[0]
+    expect(value.value.length).toBeLessThanOrEqual(4000)
+    expect(value.stacktrace.frames[0].function.length).toBeLessThanOrEqual(200)
   })
 })
 
