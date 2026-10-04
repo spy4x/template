@@ -12,12 +12,13 @@ function serving(body: string, status = 200): { fetcher: typeof fetch; urls: str
   return { fetcher, urls }
 }
 
-/** Keeps the warning a fallback logs out of the test output. */
-async function quietly<T>(run: () => Promise<T>): Promise<T> {
+/** Runs `run` with `console.warn` captured, so a fallback's warning is checked, not printed. */
+async function warned<T>(run: () => Promise<T>): Promise<{ result: T; warnings: unknown[][] }> {
   const original = console.warn
-  console.warn = () => {}
+  const warnings: unknown[][] = []
+  console.warn = (...args: unknown[]) => void warnings.push(args)
   try {
-    return await run()
+    return { result: await run(), warnings }
   } finally {
     console.warn = original
   }
@@ -43,14 +44,18 @@ describe("the SPA's runtime configuration", () => {
 
   it("falls back to the defaults for a file of the wrong shape, a bad status or bad JSON", async () => {
     for (const bad of [serving(`{"env":5}`), serving(`{}`, 404), serving(`<html>`)]) {
-      expect(await quietly(() => loadRuntimeConfig(bad.fetcher))).toEqual({})
+      const { result, warnings } = await warned(() => loadRuntimeConfig(bad.fetcher))
+      expect(result).toEqual({})
+      expect(warnings.length).toBe(1)
     }
   })
 
   it("falls back to the defaults when the network fails", async () => {
     const fetcher = (() => Promise.reject(new TypeError("offline"))) as unknown as typeof fetch
 
-    expect(await quietly(() => loadRuntimeConfig(fetcher))).toEqual({})
+    const { result, warnings } = await warned(() => loadRuntimeConfig(fetcher))
+    expect(result).toEqual({})
+    expect(warnings.length).toBe(1)
   })
 
   it("makes one build report to the tracker its config file names, and to none without one", async () => {
