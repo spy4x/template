@@ -77,8 +77,8 @@ export function GroupMoveAllForm(
       <Stack gap="lg">
         <p class="text-sm text-muted" data-e2e="group-move-all-explanation">
           Every note in "{groupName}" moves to the group you pick, and its members stop seeing them.
-          Members of the other group see them right away. The ids and history stay. Nothing moves if
-          any of it fails.
+          Members of the other group see them right away. Each note keeps its edit history. Nothing
+          moves if any of it fails.
         </p>
         <Field id="group-move-all-to" label="Move everything to">
           <Select
