@@ -11,6 +11,10 @@ Before writing a component, helper or library here, search
 ["Shared libs before local code"][shared-libs] says what belongs in each library; code only this
 repo needs stays here.
 
+Reusable code follows the global rule ["Library first, never move it later"][shared-libs]: the
+library change is reviewed, merged and released before this repo imports it. There is no local
+stand-in.
+
 [shared-libs]: https://github.com/spy4x/dotfiles/blob/main/ai-harnesses/AGENTS.md
 
 ## Three layers of UI
