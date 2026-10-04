@@ -26,7 +26,10 @@ describe("mintApiToken", () => {
 describe("hashApiToken", () => {
   it("needs the server key: another key gives another hash", async () => {
     const { secret, hash } = await mintApiToken(KEY)
-    expect(await hashApiToken(secret, `${KEY}-rotated`)).not.toBe(hash)
+    expect(await hashApiToken(secret, KEY)).toBe(hash)
+    expect(await hashApiToken(secret, `${KEY}-rotated`)).not.toBe(
+      await hashApiToken(secret, KEY),
+    )
   })
 
   it("answers null for anything that is not a token, so it never reaches the database", async () => {
