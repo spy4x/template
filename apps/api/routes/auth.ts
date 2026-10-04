@@ -91,6 +91,21 @@ async function spendChangeMail(
 export const ACCOUNT_DELETE_BLOCKED =
   "You own groups other people still use or pay for. Deal with them first."
 
+/**
+ * The answer for a session that cannot be ended from the devices list: another person's, one that
+ * does not exist or already ended, and a malformed id alike, so the answer tells nothing.
+ */
+export const SESSION_NOT_FOUND = "This session has already ended."
+
+/** The answer when the devices list is asked to end the request's own session. */
+export const SESSION_IS_CURRENT = "This is the device you are using. Sign out instead."
+
+/** A session id as the devices list sends it: a positive integer without leading zeros. */
+const SESSION_ID = /^[1-9][0-9]{0,9}$/
+
+/** The largest id `auth_sessions.id` (a Postgres `integer`) can hold. */
+const MAX_SESSION_ID = 2_147_483_647
+
 /** The answer when the account has two-factor on and the request carries no code. */
 export const ACCOUNT_DELETE_CODE_REQUIRED = "Enter the code from your authenticator app"
 
@@ -153,6 +168,15 @@ export function createAuthRoute(
   }: AuthRouteDependencies,
 ): Hono<APIContext> {
   const { isAuthenticated1FA, isAuthenticated2FA } = signIn.auth
+  /** Announces that sessions of `userId` ended, so the realtime hub closes their sockets. */
+  const emitSignOut = (c: Context<APIContext>, userId: number) =>
+    emit(
+      new UserSignedOutEvent({
+        userId,
+        // trustedProxy: true keeps the old behaviour of trusting X-Forwarded-For / X-Real-IP.
+        request: requestInfoFromContext(c, { trustedProxy: true }),
+      }),
+    )
   return new Hono<APIContext>()
     .post(`/sign-out`, mutationGuards.anonymous, rateLimits.normal, async (c) => {
       const authData = c.get("auth")
@@ -382,11 +406,44 @@ export function createAuthRoute(
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
       }
-      const { password, newPassword } = validationResult.data
-      const isSuccess = await signIn.changePassword(c, c.get("auth")!, password, newPassword)
+      const { password, newPassword, signOutOthers = true } = validationResult.data
+      const authData = c.get("auth")!
+      const isSuccess = await signIn.changePassword(
+        c,
+        authData,
+        password,
+        newPassword,
+        signOutOthers,
+      )
       if (!isSuccess) {
         return c.json({ error: "Invalid password" }, 400)
       }
+      // The other devices' sockets close now rather than at the next periodic check.
+      if (signOutOthers) emitSignOut(c, authData.user.id)
+      return c.json({ success: true })
+    })
+    .get(`/sessions`, rateLimits.normal, async (c) => {
+      return c.json({ sessions: await signIn.listSessions(c.get("auth")!) })
+    })
+    // Before `/sessions/:id`, which would otherwise take "others" as an id.
+    .delete(`/sessions/others`, rateLimits.normal, async (c) => {
+      const authData = c.get("auth")!
+      const ended = await signIn.endOtherSessions(c, authData)
+      if (ended > 0) emitSignOut(c, authData.user.id)
+      return c.json({ success: true, ended })
+    })
+    .delete(`/sessions/:id`, rateLimits.normal, async (c) => {
+      const authData = c.get("auth")!
+      const raw = c.req.param("id")
+      const sessionId = SESSION_ID.test(raw) ? Number(raw) : 0
+      if (sessionId < 1 || sessionId > MAX_SESSION_ID) {
+        return c.json({ error: SESSION_NOT_FOUND }, 404)
+      }
+      if (sessionId === authData.session.id) return c.json({ error: SESSION_IS_CURRENT }, 400)
+      if (!(await signIn.endSession(c, authData, sessionId))) {
+        return c.json({ error: SESSION_NOT_FOUND }, 404)
+      }
+      emitSignOut(c, authData.user.id)
       return c.json({ success: true })
     })
     .get(`/account/deletion`, rateLimits.normal, async (c) => {
