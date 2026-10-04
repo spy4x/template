@@ -3,7 +3,7 @@ import type { AuthSessionRecord, AuthStore } from "@spy4x/server/auth"
 import { createPostgresAuthStore, createPostgresSessionStore } from "@spy4x/server/auth/postgres"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import type { SessionStore } from "@spy4x/server/sign-in"
-import type { AuthAuditBase, User, UserBase } from "@domain/identity"
+import { type AuthAuditBase, type User, type UserBase, UserMFAStatus } from "@domain/identity"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { PostgresGroupActivityRepository } from "@server/groups/postgres-activity-repository.ts"
 import { PostgresGroupDataMover } from "@server/groups/postgres-group-data-mover.ts"
@@ -215,6 +215,16 @@ export class AppDbBase extends DbServiceBase {
        * never let `mfa` or `role` from this row decide anything.
        */
       findOneCached: cached.findOne,
+      /**
+       * Turns two-factor off, on a row waiting to be deleted too: `updateOne` skips a deleted row,
+       * and a password reset during the wait must still reach it, or no sign-in could restore it.
+       * `mfa` from the cache decides nothing (see `findOneCached`), so it is not refreshed here.
+       */
+      clearSecondFactor: async (id: number): Promise<void> => {
+        await this.sql`
+          UPDATE users SET mfa = ${UserMFAStatus.NOT_CONFIGURED}, updated_at = now() WHERE id = ${id}
+        `
+      },
       /** Creates the profile row of a new auth user; `users.id` is the auth user's id. */
       createForAuthUser: (id: number, data: UserBase): Promise<User> =>
         this.createOne<User>(

@@ -673,7 +673,7 @@ export function createSignIn(options: SignInOptions): SignIn {
           // Whoever turned on a second factor never proved they own this address: it goes with
           // their claim, so the owner signs in with the new password alone.
           await tx.userTotp.remove(user.id)
-          await tx.user.updateOne({ id: user.id, data: { mfa: UserMFAStatus.NOT_CONFIGURED } })
+          await tx.user.clearSecondFactor(user.id)
         }
         await tx.authStore.updateKeySecret(key.id, secret)
         // The mailbox owner is back in control: an address change someone else asked for goes.

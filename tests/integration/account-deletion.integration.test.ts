@@ -8,6 +8,7 @@ import type { EmailSender } from "@spy4x/email/sender"
 import type { OutboxEvent } from "@spy4x/server/outbox"
 import { BillingStatus } from "@domain/billing"
 import { AccountDeletionBlockReason, UserMFAStatus } from "@domain/identity"
+import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
@@ -16,6 +17,7 @@ import {
   hardDeleteDueAccounts,
   HardDeleteOutcome,
 } from "../../libs/server/auth/account-deletion.ts"
+import { issuePasswordReset } from "../../libs/server/auth/password-reset.ts"
 import {
   ACCOUNT_DELETION_MAIL_JOB,
   ACCOUNT_HARD_DELETE_JOB,
@@ -109,6 +111,11 @@ function buildApp(sql: postgres.Sql) {
     const { otp } = await c.req.json()
     const ok = await signIn.checkTotp(c, c.get("auth")!, otp)
     return ok ? c.json({ ok }) : c.json({ error: "Invalid token" }, 401)
+  })
+  app.post("/reset", async (c) => {
+    const { email, code, password } = await c.req.json()
+    const ok = await signIn.resetPassword(email, code, password)
+    return ok ? c.json({ ok }) : c.json({ error: "refused" }, 401)
   })
   app.post("/delete", async (c) => {
     const auth = c.get("auth")
@@ -389,6 +396,11 @@ Deno.test("deleting one's own account", async (t) => {
         const cookie = cookieOf(response)
 
         expect(await state()).toEqual([{ ...before, request: id }])
+        const [session] = await sql<{ secondFactor: number }[]>`
+          SELECT second_factor AS "secondFactor" FROM auth_sessions
+          WHERE user_id = ${quinn.id} ORDER BY created_at DESC LIMIT 1
+        `
+        expect(session.secondFactor).toBe(SecondFactorStatus.Pending)
         expect((await app.request("/strong", { body: {}, cookie })).status).toBe(401)
         const wrong = await app.request("/totp/check", {
           body: { otp: totpCode(Date.now() + 10 * 60_000) },
@@ -406,6 +418,31 @@ Deno.test("deleting one's own account", async (t) => {
         expect(await state()).toEqual([{ request: null, deletedAt: null, restores: 1 }])
         expect((await app.request("/strong", { body: {}, cookie })).status).toBe(200)
         expect(await hardDeleteAccount(sql, id)).toBe(HardDeleteOutcome.NothingDue)
+      },
+    )
+
+    await t.step(
+      "a password reset while waiting drops an unproven second factor, so the password restores",
+      async () => {
+        const uma = await signUp(app, "uma")
+        await sql`UPDATE users SET mfa = ${UserMFAStatus.CONFIGURED} WHERE id = ${uma.id}`
+        await sql`
+          INSERT INTO user_totp (user_id, secret, confirmed_at)
+          VALUES (${uma.id}, ${TOTP_SECRET}, now())
+        `
+        await requestDeletion(app, sql, uma)
+        const issued = (await issuePasswordReset(app.db.authStore, "uma@example.com"))!
+
+        const reset = await app.request("/reset", {
+          body: { email: issued.email, code: issued.code, password: PASSWORD },
+        })
+        expect(reset.status).toBe(200)
+        const response = await signIn(app, "uma")
+
+        expect(response.status).toBe(200)
+        const cookie = cookieOf(response)
+        expect((await app.request("/strong", { body: {}, cookie })).status).toBe(200)
+        expect(await sql`SELECT 1 FROM account_deletions WHERE user_id = ${uma.id}`).toEqual([])
       },
     )
 
@@ -447,7 +484,7 @@ Deno.test("deleting one's own account", async (t) => {
       },
     )
 
-    await t.step("a member who is waiting to be deleted does not stop the owner", async () => {
+    await t.step("a member who is waiting to be deleted stops the owner too", async () => {
       const jay = await signUp(app, "jay")
       const kim = await signUp(app, "kim")
       const groupId = crypto.randomUUID()
@@ -458,7 +495,17 @@ Deno.test("deleting one's own account", async (t) => {
       `
       await requestDeletion(app, sql, kim)
 
-      await requestDeletion(app, sql, jay)
+      const response = await app.request("/delete", { body: {}, cookie: jay.cookie })
+
+      // Kim may still sign in and come back, which would leave the group to an owner who is gone.
+      expect(await response.json()).toEqual({
+        blockers: [{
+          groupId,
+          name: "Jay's club",
+          reason: AccountDeletionBlockReason.Members,
+          endsAt: null,
+        }],
+      })
     })
 
     await t.step("refuses while a group of theirs has a subscription not cancelled", async () => {

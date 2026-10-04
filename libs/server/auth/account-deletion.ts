@@ -50,7 +50,8 @@ export enum HardDeleteOutcome {
 
 /**
  * The groups that stop `userId` from deleting their account, by name. A live group they own counts
- * while another active person is a member; any group they own, deleted ones included, counts while
+ * while another person is a member who is active or waiting to be deleted, since a sign-in may
+ * still restore that one; any group they own, deleted ones included, counts while
  * its subscription is not cancelled, since the delete for good would remove that group too, even one
  * cancelled at the end of its period: that one names the day it ends. A group with both reasons is
  * listed once, for its members: handing it over takes its billing along.
@@ -66,7 +67,10 @@ export async function accountDeletionBlockers(
         groups.name,
         groups.deleted_at IS NULL AND EXISTS (
           SELECT 1 FROM group_members
-          INNER JOIN users ON users.id = group_members.user_id AND users.deleted_at IS NULL
+          INNER JOIN users ON users.id = group_members.user_id AND (
+            users.deleted_at IS NULL
+            OR EXISTS (SELECT 1 FROM account_deletions WHERE account_deletions.user_id = users.id)
+          )
           WHERE group_members.group_id = groups.id AND group_members.user_id <> ${userId}
         ) AS shared,
         EXISTS (

@@ -28,8 +28,9 @@ CREATE INDEX idx_account_restorations_user_id ON account_restorations (user_id);
 -- What a deleted person wrote in a shared group stays there, by "Deleted user": the author
 -- columns become nullable and are emptied when the user row goes. They were RESTRICT, which
 -- made deleting a user who ever wrote anything impossible. The constraint names stay the same.
--- The new keys are added NOT VALID and validated afterwards, so adding them does not scan the
--- table while holding the lock that blocks writes.
+-- The migration runs in one transaction, so these tables stay locked against writes until it
+-- commits, validation scans included. They are small; a large table would need its own
+-- migration outside a transaction.
 ALTER TABLE notes
     ALTER COLUMN created_by_user_id DROP NOT NULL,
     ALTER COLUMN updated_by_user_id DROP NOT NULL,
