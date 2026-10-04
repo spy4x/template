@@ -28,6 +28,7 @@ import {
   accountHardDeleteJob,
   accountRestoredMailJob,
 } from "./account-deletion.ts"
+import { STARTER_DATA_JOB, starterDataJob } from "./starter-data.ts"
 import { billingNoticeMailJob } from "./billing-notice-mail.ts"
 import {
   EMAIL_CODE_MAIL_JOB,
@@ -134,6 +135,7 @@ export function createOutboxProcessor(
       [ACCOUNT_DELETION_MAIL_JOB]: accountDeletionMailJob({ sql, ...mail }),
       [ACCOUNT_RESTORED_MAIL_JOB]: accountRestoredMailJob({ sql, ...mail }),
       [ACCOUNT_HARD_DELETE_JOB]: accountHardDeleteJob({ sql, log: mail.log }),
+      [STARTER_DATA_JOB]: starterDataJob(sql),
       ...billingNoticeJobs(sql, mail),
       [SUBSCRIBER_CONFIRM_MAIL_JOB]: subscriberConfirmMailJob({ sql, ...mail, setup: subscribers }),
       [SUBSCRIBER_WELCOME_MAIL_JOB]: subscriberWelcomeMailJob({ sql, ...mail, setup: subscribers }),
