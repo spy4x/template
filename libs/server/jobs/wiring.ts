@@ -16,6 +16,7 @@ import {
 import { GroupChangeNotifier } from "../groups/group-change-notify.ts"
 import { purgeDeadInvitations } from "../groups/purge-dead-invitations.ts"
 import { purgeDeletedGroups } from "../groups/purge-deleted-groups.ts"
+import { purgeReadNotifications } from "../notifications/purge-notifications.ts"
 import { purgeOldAuditEvents } from "../groups/purge-audit-events.ts"
 import { hardDeleteDueAccounts } from "../auth/account-deletion.ts"
 import {
@@ -110,6 +111,8 @@ export function createOutboxProcessor(
         if (invitations > 0) console.log(`Removed ${invitations} dead group invitation(s)`)
         const audit = await purgeOldAuditEvents(sql)
         if (audit > 0) console.log(`Removed ${audit} audit event(s) past their retention`)
+        const inbox = await purgeReadNotifications(sql)
+        if (inbox > 0) console.log(`Removed ${inbox} read notification(s) past their retention`)
         const accounts = await hardDeleteDueAccounts(sql)
         if (accounts.deleted > 0) console.log(`Deleted ${accounts.deleted} account(s) for good`)
         if (accounts.blocked > 0) {

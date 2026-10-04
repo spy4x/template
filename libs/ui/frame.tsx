@@ -1,7 +1,8 @@
 import type { ComponentChildren, JSX } from "preact"
-import { IconDocumentText, IconUser, IconUsers } from "@spy4x/preact-icons"
+import { IconBell, IconDocumentText, IconUser, IconUsers } from "@spy4x/preact-icons"
 import { RailShell, type RailShellItem } from "@spy4x/preact-system/rail-shell"
 import { Avatar } from "@spy4x/preact-ui/avatar"
+import { badgeClasses } from "@spy4x/preact-ui/badge"
 import { Button } from "@spy4x/preact-ui/button"
 import { Dropdown, DropdownItem } from "@spy4x/preact-ui/dropdown"
 import { followLinkClick, Link } from "@spy4x/preact-ui/link"
@@ -83,6 +84,48 @@ function displayName(user: FrameUser): string {
   return `${user.firstName} ${user.lastName}`.trim() || "User"
 }
 
+/** The most the bell's badge writes; more reads "99+" so the badge keeps its size. */
+const BADGE_MAX = 99
+
+/** The bell's accessible name: `Notifications`, or `Notifications, 3 unread`. */
+export function bellLabel(unreadCount: number): string {
+  return unreadCount > 0 ? `Notifications, ${unreadCount} unread` : `Notifications`
+}
+
+/**
+ * The inbox's bell in the header: a link to the notifications page with the unread count in a
+ * badge while there is any. The count is part of the link's name, so a screen reader hears it; the
+ * badge itself is hidden from it. The target is 44 px square on a phone.
+ */
+function NotificationBell(
+  { unreadCount, navigate }: { unreadCount: number; navigate?: Navigate },
+): JSX.Element {
+  return (
+    <Link
+      href={SCREEN_PATHS.notifications}
+      navigate={navigate}
+      aria-label={bellLabel(unreadCount)}
+      class="relative flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted hover:text-foreground sm:min-h-9 sm:min-w-9"
+      data-e2e="shell-bell"
+    >
+      <IconBell class="size-5" aria-hidden="true" />
+      {unreadCount > 0 && (
+        <span
+          class={badgeClasses(
+            "red",
+            "filled",
+            "absolute top-0.5 right-0.5 min-w-4 justify-center px-1 py-0 text-[10px] leading-4",
+          )}
+          aria-hidden="true"
+          data-e2e="shell-bell-count"
+        >
+          {unreadCount > BADGE_MAX ? `${BADGE_MAX}+` : unreadCount}
+        </span>
+      )}
+    </Link>
+  )
+}
+
 /**
  * The connection in the header. Its text is always there for screen readers and the e2e specs;
  * a person sees it only while it is news ({@link connectionIsNews}).
@@ -105,16 +148,26 @@ function ConnectionState({ status }: { status: ConnectionStatus }): JSX.Element 
 /**
  * The signed-in frame, mobile first: a bottom tab bar on a phone and a rail from `md` up
  * (`RailShell`), and a slim header with the brand, the current group, the connection while it is
- * not live, and the user menu holding Sign out. The page sits in a column of at most 64 rem;
- * `banner` shows above every page, such as the request to verify the e-mail address, as wide as
- * the page's own column ({@link ACCOUNT_COLUMN} on the account pages). Signed-out
- * screens use {@link PublicFrame} instead.
+ * not live, the inbox's bell with its unread count, and the user menu holding Sign out. The page
+ * sits in a column of at most 64 rem; `banner` shows above every page, such as the request to
+ * verify the e-mail address, as wide as the page's own column ({@link ACCOUNT_COLUMN} on the
+ * account pages). Signed-out screens use {@link PublicFrame} instead.
  *
  * The navigation entries are real links; with `navigate`, a plain click on one goes through the
  * app's router instead of loading the page, and a Ctrl- or middle-click still opens a new tab.
  */
 export function AppFrame(
-  { user, connection, currentPath, navigate, onSignOut, groupPicker, banner, children }: {
+  {
+    user,
+    connection,
+    currentPath,
+    navigate,
+    onSignOut,
+    groupPicker,
+    banner,
+    unreadCount,
+    children,
+  }: {
     user: FrameUser
     connection?: ConnectionStatus
     currentPath?: string
@@ -122,6 +175,8 @@ export function AppFrame(
     onSignOut: () => void
     groupPicker?: GroupPickerData
     banner?: ComponentChildren
+    /** How many notifications are unread. Left out, the header has no bell. */
+    unreadCount?: number
     children: ComponentChildren
   },
 ): JSX.Element {
@@ -142,6 +197,9 @@ export function AppFrame(
             {groupPicker && <GroupPicker {...groupPicker} />}
             <div class="ml-auto flex shrink-0 items-center gap-2">
               {connection && <ConnectionState status={connection} />}
+              {unreadCount !== undefined && (
+                <NotificationBell unreadCount={unreadCount} navigate={navigate} />
+              )}
               <Dropdown
                 trigger={<Avatar name={displayName(user)} size="sm" />}
                 triggerNamedByContent

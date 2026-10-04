@@ -5,6 +5,7 @@ import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import type { SessionStore } from "@spy4x/server/sign-in"
 import { type AuthAuditBase, type User, type UserBase, UserMFAStatus } from "@domain/identity"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
+import { PostgresNotificationRepository } from "@server/notifications/postgres-notification-repository.ts"
 import { PostgresGroupActivityRepository } from "@server/groups/postgres-activity-repository.ts"
 import { PostgresGroupDataMover } from "@server/groups/postgres-group-data-mover.ts"
 import type { MovableAggregate } from "@server/groups/movable.ts"
@@ -91,6 +92,11 @@ export class AppDbBase extends DbServiceBase {
   /** The read side of a group's activity log. Built per access, like `group`. */
   get groupActivity(): PostgresGroupActivityRepository {
     return new PostgresGroupActivityRepository(this.sql)
+  }
+
+  /** A person's inbox. Built per access, like `group`. */
+  get notification(): PostgresNotificationRepository {
+    return new PostgresNotificationRepository(this.sql)
   }
 
   /** Moves all of a group's data to another group. Built per access, like `group`. */

@@ -18,6 +18,7 @@ import {
 } from "@domain/groups"
 import { recordAccessChange } from "./group-change-log.ts"
 import { type AuditEventInput, writeAuditEvent } from "./audit.ts"
+import { notifyInvitationReceived } from "./group-notifications.ts"
 import { INVITATION_EVENTS } from "./invitation-revocation.ts"
 import { storeSelection } from "./postgres-group-repository.ts"
 
@@ -158,6 +159,9 @@ export class PostgresInvitationRepository {
         entityId: id,
         details: { role: record.role },
       })
+      if (record.email !== null) {
+        await notifyInvitationReceived(tx, record.groupId, record.email, record.role)
+      }
       return { invitation: (await listInvitations(tx, record.groupId, { id }))[0], groupName }
     })
   }

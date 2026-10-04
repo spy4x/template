@@ -247,6 +247,23 @@ event. Follow the details command (`group.updateDetails`, spy4x/template#134) fi
    member's socket, and their pages read the group again. Test it with two pages and a count of
    page loads, as `e2e/groups-details.e2e.ts` does.
 
+## Telling a person in their inbox
+
+A change that a person should hear about, and did not make themselves, writes a notification
+(spy4x/template#147). Follow `libs/server/groups/group-notifications.ts`.
+
+1. **Same transaction.** Call `createNotification(tx, …)` from `@server/notifications` inside the
+   transaction of the change, after the change, so the row exists exactly when the change does.
+   The group writers call a helper from `group-notifications.ts` after their `audit()` line.
+2. **A kind, a payload, a link.** Add the kind to `NotificationKind` and its sentence to
+   `describeNotification` in `libs/domain/notifications`. The payload holds only the facts the
+   sentence needs, never a note body or an address. The link is an in-app path; the database and
+   `createNotification` both refuse anything else.
+3. **Nothing else.** The row announces itself: `createNotification` sends the Postgres
+   notification `user_notification` in the same transaction, the API turns it into a hint on the
+   person's sockets, and the page reads the new count. A test per writer in
+   `tests/integration/notifications.integration.test.ts` shows the row and who got it.
+
 ## What is left to the next aggregate
 
 - The SPA creates a note in the group it shows, over the socket, so a note never lands in a group

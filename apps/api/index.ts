@@ -13,6 +13,8 @@ import { createAuthRoute } from "./routes/auth.ts"
 import { createPushNotificationRoute } from "./routes/pushNotification.ts"
 import { createUsersRoute } from "./routes/users.ts"
 import { wsRoute } from "./routes/ws.ts"
+import { createNotificationsRoute } from "./routes/notifications.ts"
+import { notificationCursor } from "./services/notification-cursor.ts"
 import { createGroupActivityRoute } from "./routes/group-activity.ts"
 import { createGroupsRoute } from "./routes/groups.ts"
 import { createNotesRoute } from "./routes/notes.ts"
@@ -31,6 +33,7 @@ import { createEmailCodeFailures } from "./services/email-code-failures.ts"
 import { createAuthRateLimits } from "./middlewares/auth-rate-limits.ts"
 import { commandBus } from "./services/commandBus.ts"
 import { queryBus } from "./services/queryBus.ts"
+import { listenForInboxNews } from "./services/inbox-news.ts"
 import { listenForGroupNews } from "./services/group-news.ts"
 import { groupListCursor } from "./services/group-list-cursor.ts"
 import { noteListCursor } from "./services/note-list-cursor.ts"
@@ -142,6 +145,17 @@ app.route(
     cursor: activityCursor,
   }),
 )
+app.route(
+  "/notifications",
+  createNotificationsRoute({
+    list: (query) => queryBus.execute(query),
+    unreadCount: (query) => queryBus.execute(query),
+    markRead: (command) => commandBus.execute(command),
+    markAllRead: (command) => commandBus.execute(command),
+    cursor: notificationCursor,
+    expectedOrigin,
+  }),
+)
 const invitationRoutes: InvitationsRouteDependencies = {
   create: (command) => commandBus.execute(command),
   list: (query) => queryBus.execute(query),
@@ -237,6 +251,8 @@ if (config.isDev) {
 
 // Group changes and access losses announced by Postgres become hints on the open sockets.
 await listenForGroupNews(sql, realtime, log)
+// A change to a person's inbox becomes a hint on their sockets; the page reads the count.
+await listenForInboxNews(sql, realtime)
 // Sockets whose session was signed out, expired or lost its second factor while open are closed
 // within this interval; the per-request check already refuses their frames.
 realtime.startRevalidation(REALTIME_REVALIDATE_INTERVAL_MS)

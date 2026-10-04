@@ -1,0 +1,159 @@
+/**
+ * The inbox screen and the header's bell: what they render (server-rendered HTML) and what a click
+ * on a notification does in a browser DOM (happy-dom).
+ */
+import { expect } from "@std/expect"
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd"
+import { Window } from "happy-dom"
+import { render } from "preact"
+import { act } from "preact/test-utils"
+import { renderToString } from "preact-render-to-string"
+import { AppFrame, bellLabel } from "./frame.tsx"
+import { type NotificationRow, NotificationsScreen } from "./notifications-screen.tsx"
+
+const window = new Window({ url: "http://app.localhost/" })
+const own = { document: globalThis.document }
+
+beforeAll(() => {
+  Object.assign(globalThis, { document: window.document })
+})
+
+afterAll(async () => {
+  Object.assign(globalThis, own)
+  await window.happyDOM.close()
+})
+
+function row(id: number, parts: Partial<NotificationRow> = {}): NotificationRow {
+  return {
+    id: String(id),
+    kind: "group.removed",
+    payload: { groupName: "Family" },
+    link: "/groups",
+    readAt: null,
+    createdAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    ...parts,
+  }
+}
+
+const noop = () => {}
+
+function screen(props: Partial<Parameters<typeof NotificationsScreen>[0]> = {}) {
+  return (
+    <NotificationsScreen
+      notifications={[]}
+      unreadCount={0}
+      loading={false}
+      error={null}
+      onRead={noop}
+      onReadAll={noop}
+      {...props}
+    />
+  )
+}
+
+describe("notifications screen", () => {
+  it("writes each notification as a sentence with a link to its subject and when it came", () => {
+    const page = renderToString(screen({
+      notifications: [row(2, { link: "/groups/g-1" }), row(1)],
+      unreadCount: 2,
+    }))
+    expect(page).toContain("You were removed from “Family”.")
+    expect(page).toContain(`href="/groups/g-1"`)
+    expect(page).toContain("3 hours ago")
+  })
+
+  it("marks an unread notification in words, not by weight or colour alone", () => {
+    const page = renderToString(screen({
+      notifications: [row(2), row(1, { readAt: new Date().toISOString() })],
+      unreadCount: 1,
+    }))
+    expect(page.match(/Unread:/g)?.length).toBe(1)
+    // The weight is the second sign, so exactly the unread row carries it.
+    expect(page.match(/min-w-0 flex-1 text-sm font-semibold/g)?.length).toBe(1)
+    expect(page.match(/min-w-0 flex-1 text-sm "/g)?.length).toBe(1)
+    expect(page).toContain(`data-unread="true"`)
+    expect(page).toContain(`data-unread="false"`)
+  })
+
+  it("offers Mark all as read only while something is unread", () => {
+    expect(renderToString(screen({ notifications: [row(1)], unreadCount: 1 })))
+      .toContain(`data-e2e="notifications-read-all"`)
+    expect(renderToString(screen({ notifications: [row(1, { readAt: "2026-10-01T10:00:00Z" })] })))
+      .not.toContain(`data-e2e="notifications-read-all"`)
+  })
+
+  it("says the inbox is empty instead of showing a blank page", () => {
+    expect(renderToString(screen())).toContain("You are all caught up.")
+  })
+
+  it("tells the app a notification was read as its link is followed, and only if it was unread", async () => {
+    const read: string[] = []
+    const root = document.createElement("div")
+    document.body.append(root)
+    await act(() =>
+      render(
+        screen({
+          notifications: [row(2), row(1, { readAt: "2026-10-01T10:00:00Z" })],
+          unreadCount: 1,
+          onRead: (id) => read.push(id),
+          navigate: noop,
+        }),
+        root,
+      )
+    )
+    const links = root.querySelectorAll<HTMLElement>(`[data-e2e="notification-link"]`)
+    await act(() => links[1].click())
+    expect(read).toEqual([])
+    await act(() => links[0].click())
+    expect(read).toEqual(["2"])
+    await act(() => render(null, root))
+    root.remove()
+  })
+
+  it("loads the next page when asked", async () => {
+    let asked = 0
+    const root = document.createElement("div")
+    document.body.append(root)
+    await act(() =>
+      render(screen({ notifications: [row(1)], hasMore: true, onLoadMore: () => asked++ }), root)
+    )
+    await act(() => root.querySelector<HTMLElement>(`[data-e2e="notifications-more"]`)!.click())
+    expect(asked).toBe(1)
+    await act(() => render(null, root))
+    root.remove()
+  })
+})
+
+describe("notification bell", () => {
+  const frame = (unreadCount?: number) =>
+    renderToString(
+      <AppFrame
+        user={{ firstName: "Ada", lastName: "L" }}
+        onSignOut={noop}
+        unreadCount={unreadCount}
+      >
+        <p>page</p>
+      </AppFrame>,
+    )
+
+  it("names the unread count in the link's accessible name and badges it", () => {
+    const page = frame(3)
+    expect(page).toContain(`aria-label="Notifications, 3 unread"`)
+    expect(page).toContain(`href="/notifications"`)
+    expect(page).toContain(`data-e2e="shell-bell-count"`)
+    // 44 px on a phone: the class must sit on the bell's own link, not on a neighbour.
+    const link = page.match(/<a\b[^>]*data-e2e="shell-bell"[^>]*>/)?.[0] ?? ""
+    expect(link).toContain("min-h-11 min-w-11")
+  })
+
+  it("shows no badge when everything is read, and caps a long count at 99+", () => {
+    expect(frame(0)).not.toContain(`data-e2e="shell-bell-count"`)
+    expect(frame(0)).toContain(`aria-label="Notifications"`)
+    expect(frame(250)).toContain("99+")
+    expect(bellLabel(250)).toBe("Notifications, 250 unread")
+  })
+
+  it("has no bell in a frame that was not given a count", () => {
+    expect(frame()).not.toContain(`data-e2e="shell-bell"`)
+  })
+})

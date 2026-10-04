@@ -23,8 +23,10 @@ import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView
 import { GroupsView } from "./views/GroupsView.tsx"
 import { SubscribeView, SubscriptionConfirmView, UnsubscribeView } from "./views/SubscribeViews.tsx"
 import { GroupSettingsView } from "./views/GroupSettingsView.tsx"
+import { NotificationsView } from "./views/NotificationsView.tsx"
 import { GroupActivityView } from "./views/GroupActivityView.tsx"
 import { InvitationView } from "./views/InvitationView.tsx"
+import { notificationsStore } from "./state/notifications.ts"
 import { invitationsStore } from "./state/invitations.ts"
 import { PricingView } from "./views/BillingViews.tsx"
 import { billingStore } from "./state/billing.ts"
@@ -89,6 +91,7 @@ function Routes() {
       <Route path="/invite/:token">
         {(params) => <InvitationView key={params.token} token={params.token} />}
       </Route>
+      <Route path="/notifications" component={NotificationsView} />
       <Route path="/notes" component={NotesView} />
       <Route path="/notes/new">{() => <NoteEditorView key="new" />}</Route>
       <Route path="/notes/:noteId">
@@ -171,6 +174,7 @@ export function App() {
       emailStore.reset()
       billingStore.reset()
       invitationsStore.reset()
+      notificationsStore.reset()
       return
     }
     // The REST read is the pull: it runs at start-up, after every reconnect and for every push
@@ -184,6 +188,7 @@ export function App() {
       groups: groupsStore,
       notes: notesStore,
       members: membersStore,
+      notifications: notificationsStore,
     })
     startOffline(userId)
     selectionStore.start(userId)
