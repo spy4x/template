@@ -120,6 +120,8 @@ export interface GroupSettingsScreenProps {
   moveAllRefusal?: PlanRefusal | null
   /** The finished move, shown in its dialog with the choice to delete the group; or `null`. */
   moveAllResult?: MoveAllResult | null
+  /** The person picked another target in the move dialog: the app forgets the refusal. */
+  onMoveAllTargetChange?: () => void
   /** The move dialog closed: the app forgets the finished move and any error. */
   onMoveAllClose?: () => void
 }
@@ -175,6 +177,7 @@ export function GroupSettingsScreen(
     moveAllResult = null,
     moveAllRefusal = null,
     onMoveAllClose,
+    onMoveAllTargetChange,
   }: GroupSettingsScreenProps,
 ): JSX.Element {
   const [dialog, setDialog] = useState<Dialog | null>(null)
@@ -429,6 +432,7 @@ export function GroupSettingsScreen(
             navigate={navigate}
             result={moveAllResult}
             onMove={onMoveAll}
+            onTargetChange={onMoveAllTargetChange}
             onCancel={close}
             onDelete={canDelete(group.role) && deleteBlocked === null
               ? () => {

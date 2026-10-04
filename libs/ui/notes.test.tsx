@@ -567,6 +567,33 @@ describe("NotesScreen deleted notes", () => {
     expect(find("[data-e2e=plan-refusal]").getAttribute("data-entitlement")).toBe("maxNotes")
   })
 
+  it("after Undo, moves focus to the restored note's row, or to More actions when it failed", async () => {
+    let handled = 0
+    const props = { onUndoFocused: () => handled++ }
+    await mount(<NotesScreen {...listDefaults} notes={[]} />)
+    await rerender(
+      <NotesScreen
+        {...listDefaults}
+        notes={[trip, plan]}
+        undoOutcome={{ id: plan.id, restored: true }}
+        {...props}
+      />,
+    )
+    expect(focusedRow()).toBe(`note-${plan.id}`)
+    expect(handled).toBe(1)
+
+    await rerender(
+      <NotesScreen
+        {...listDefaults}
+        notes={[trip]}
+        undoOutcome={{ id: plan.id, restored: false }}
+        {...props}
+      />,
+    )
+    expect(focused()).toBe("notes-menu")
+    expect(handled).toBe(2)
+  })
+
   it("moves focus to the next Restore after a restore, else More actions", async () => {
     const listOf = (notes: NoteRow[]) => <NotesScreen {...deletedDefaults} deletedNotes={notes} />
     await mount(listOf([trip, plan]))

@@ -6,24 +6,27 @@ import type { FeatureKey, LimitKey, PlanRefusal } from "@domain/billing"
 import { BILLING_PATHS } from "./billing-screen.tsx"
 import type { Navigate } from "./progressive.tsx"
 
-/** What a refusal says, per entitlement: a title, and what the plan allows. */
+/**
+ * What a refusal says, per entitlement: a title, and what the plan allows. `who` is what the title
+ * calls the group: its name, or "This group".
+ */
 const REFUSAL_TEXT: Record<
   FeatureKey | LimitKey,
-  (limit: number | null) => {
+  (limit: number | null, who: string) => {
     title: string
     message: string
   }
 > = {
-  maxNotes: (limit) => ({
-    title: "This group has reached its note limit",
+  maxNotes: (limit, who) => ({
+    title: `${who} has reached its note limit`,
     message: `Its plan holds up to ${limit} notes. Every note it has stays readable and editable.`,
   }),
-  maxMembers: (limit) => ({
-    title: "This group has reached its member limit",
+  maxMembers: (limit, who) => ({
+    title: `${who} has reached its member limit`,
     message: `Its plan allows up to ${limit} members.`,
   }),
-  storageBytes: () => ({
-    title: "This group has used all its storage",
+  storageBytes: (_limit, who) => ({
+    title: `${who} has used all its storage`,
     message: "Its plan has no room for more files.",
   }),
   memberRoles: () => ({
@@ -37,6 +40,8 @@ export interface PlanRefusalNoticeProps {
   groupId: string
   /** The refusal the API sent with its 402, or the socket with its `forbidden`. */
   refusal: PlanRefusal
+  /** The group's name, for the title ("Family has reached its note limit"). Left out: "This group". */
+  groupName?: string
   navigate?: Navigate
 }
 
@@ -46,11 +51,11 @@ export interface PlanRefusalNoticeProps {
  * change the plan. Focus moves to the notice, so a keyboard or screen reader user hears it.
  */
 export function PlanRefusalNotice(
-  { groupId, refusal, navigate }: PlanRefusalNoticeProps,
+  { groupId, refusal, groupName, navigate }: PlanRefusalNoticeProps,
 ): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => box.current?.focus(), [refusal])
-  const text = REFUSAL_TEXT[refusal.entitlement](refusal.limit)
+  const text = REFUSAL_TEXT[refusal.entitlement](refusal.limit, groupName ?? "This group")
   return (
     <div
       ref={box}

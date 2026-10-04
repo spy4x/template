@@ -25,14 +25,16 @@ export interface GroupMoveAllFormProps {
   /** Why the move was refused, or `null`. */
   error?: string | null
   /**
-   * The target's plan refused the move: shown as the plan notice, in place of `error`. The limit is
-   * the picked group's, not this group's.
+   * The target's plan refused the move: shown as the plan notice, naming that group, in place of
+   * `error`. It belongs to the target that was picked then: `onTargetChange` clears it.
    */
   refusal?: PlanRefusal | null
   /** Follows the notice's "See plans" link without a page load. */
   navigate?: Navigate
   /** The finished move, or `null` while there is none. */
   result?: MoveAllResult | null
+  /** The person picked another target: the refusal belonged to the one before. */
+  onTargetChange?: () => void
   /** Moves everything to the chosen group. */
   onMove?: (toGroupId: string) => void
   /** Closes the dialog the form sits in. */
@@ -58,12 +60,16 @@ export function GroupMoveAllForm(
     refusal = null,
     navigate,
     result = null,
+    onTargetChange,
     onMove,
     onCancel,
     onDelete,
   }: GroupMoveAllFormProps,
 ): JSX.Element {
   const [toGroupId, setToGroupId] = useState(targets[0]?.id ?? ``)
+  // The refusal belongs to the group the form last submitted to; it is shown only while that
+  // group is still picked, under that group's name and pricing link.
+  const [submittedTo, setSubmittedTo] = useState<string | null>(null)
   if (result) {
     return <Done groupName={groupName} result={result} onCancel={onCancel} onDelete={onDelete} />
   }
@@ -71,7 +77,9 @@ export function GroupMoveAllForm(
     <ScreenForm
       pending={moving}
       onSubmit={() => {
-        if (toGroupId) onMove?.(toGroupId)
+        if (!toGroupId) return
+        setSubmittedTo(toGroupId)
+        onMove?.(toGroupId)
       }}
     >
       <Stack gap="lg">
@@ -85,18 +93,21 @@ export function GroupMoveAllForm(
             name="toGroupId"
             data-e2e="group-move-all-to"
             value={toGroupId}
-            onChange={(event) => setToGroupId(event.currentTarget.value)}
+            onChange={(event) => {
+              setToGroupId(event.currentTarget.value)
+              onTargetChange?.()
+            }}
             options={targets.map((target) => ({ value: target.id, label: target.name }))}
           />
         </Field>
         {refusal
-          ? (
-            <>
-              <PlanRefusalNotice groupId={toGroupId} refusal={refusal} navigate={navigate} />
-              <p class="text-sm text-muted" data-e2e="group-move-all-limit-owner">
-                The limit is the plan of the group you picked, not this one's.
-              </p>
-            </>
+          ? submittedTo === toGroupId && (
+            <PlanRefusalNotice
+              groupId={toGroupId}
+              groupName={targets.find((target) => target.id === toGroupId)?.name}
+              refusal={refusal}
+              navigate={navigate}
+            />
           )
           : <FocusedError message={error} dataE2E="group-move-all-error" />}
         <Cluster gap="md" class="justify-end">

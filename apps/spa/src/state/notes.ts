@@ -1,8 +1,9 @@
 import { computed, signal } from "@preact/signals"
-import { RealtimeRequestError } from "@spy4x/realtime"
+import { ConnectionLostError, RealtimeRequestError } from "@spy4x/realtime"
 import { type PlanRefusal, readPlanRefusal } from "@domain/billing"
 import { apiFetch } from "./api.ts"
 import { realtimeCommand, realtimeQuery } from "./realtime.ts"
+import { sessionState } from "./session.ts"
 import { currentLayer } from "../offline/index.ts"
 import { offlineNotes } from "../offline/notes-offline.ts"
 
@@ -163,6 +164,13 @@ export function createNotesStore(dependencies: NotesDependencies) {
   const restoreError = signal<FormErrors>(NO_ERRORS)
   /** The note just deleted: the screen offers Undo for it until dismissed or taken. */
   const undo = signal<UndoOffer | null>(null)
+  /** The notes list is on screen: an Undo that ends while it is not moves no focus. */
+  const listShown = signal(false)
+  /**
+   * How the last Undo ended, for the screen to move focus: to the restored note's row, or to the
+   * list's "More actions" when it failed. The screen clears it once focus has moved.
+   */
+  const undoOutcome = signal<{ id: string; restored: boolean } | null>(null)
   /** The refusal of the last move, shown beside the move button. */
   const moveError = signal<string | null>(null)
   /** The open note is not in the open group: it is gone, or it is in another group. */
@@ -492,7 +500,17 @@ export function createNotesStore(dependencies: NotesDependencies) {
     const offer = undo.value
     if (!offer) return false
     undo.value = null
-    return await restore(offer.id)
+    const forGroup = groupId.value
+    const restored = await restore(offer.id)
+    // A person who switched group, or left the list, is somewhere else: focus must not follow.
+    if (listShown.value && groupId.value === forGroup) {
+      undoOutcome.value = { id: offer.id, restored }
+    }
+    return restored
+  }
+
+  function clearUndoOutcome(): void {
+    undoOutcome.value = null
   }
 
   function dismissUndo(): void {
@@ -559,6 +577,7 @@ export function createNotesStore(dependencies: NotesDependencies) {
     restoring.value = null
     restoreError.value = NO_ERRORS
     undo.value = null
+    undoOutcome.value = null
     moveError.value = null
     missing.value = false
     elsewhere.value = null
@@ -588,6 +607,8 @@ export function createNotesStore(dependencies: NotesDependencies) {
     restoring,
     restoreError,
     undo,
+    undoOutcome,
+    listShown,
     missing,
     elsewhere,
     unsaved,
@@ -600,6 +621,7 @@ export function createNotesStore(dependencies: NotesDependencies) {
     remove,
     restore,
     undoDelete,
+    clearUndoOutcome,
     dismissUndo,
     setShowDeleted,
     move,
@@ -618,6 +640,20 @@ function toEdit(note: NoteItem): Edit {
   }
 }
 
+/**
+ * Restores over the socket, or refuses at once when it is not open. A restore is never queued, and
+ * the call's own retries would keep the person waiting about six seconds for the same answer.
+ */
+export function restoreOverSocket(
+  input: { groupId: string; id: string },
+  isOpen: () => boolean = () => sessionState.value.wsStatus === "open",
+  send: (input: { groupId: string; id: string }) => Promise<{ note: NoteItem }> = (value) =>
+    realtimeCommand("note.restore", value),
+): Promise<{ note: NoteItem }> {
+  if (!isOpen()) return Promise.reject(new ConnectionLostError("the socket is not open"))
+  return send(input)
+}
+
 /** The notes as the server serves them: reads over REST, writes over the socket. */
 const onlineNotes: NotesDependencies = {
   async fetchPage(groupId, cursor, deleted = false) {
@@ -633,7 +669,7 @@ const onlineNotes: NotesDependencies = {
   create: (input) => realtimeCommand("note.create", input),
   update: (input) => realtimeCommand("note.update", input),
   delete: (input) => realtimeCommand("note.delete", input),
-  restore: (input) => realtimeCommand("note.restore", input),
+  restore: (input) => restoreOverSocket(input),
   move: (input) => realtimeCommand("note.move", input),
   newId: () => crypto.randomUUID(),
 }

@@ -228,6 +228,7 @@ export function GroupSettingsView({ groupId }: { groupId: string }) {
       moveAllResult={movedAll &&
         { count: movedAll.count, toName: movedTo?.name ?? "the other group" }}
       moveAllRefusal={failure?.action === "moveAll" ? failure.plan ?? null : null}
+      onMoveAllTargetChange={() => store.forgetMoveAll()}
       onMoveAllClose={() => store.forgetMoveAll()}
       billing={group && <GroupBillingCard groupId={groupId} />}
       invite={group
