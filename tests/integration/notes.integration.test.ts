@@ -831,7 +831,7 @@ Deno.test("notes against Postgres", async (t) => {
         }),
       )
 
-      const results = await runBlockedOnLock(sql, [groupId, toGroupId], [
+      const results = await runBlockedOnLock(sql, groupId, [
         () => move(editor, groupId, toGroupId, ids),
         () => move(editor, toGroupId, groupId, [back]),
       ])

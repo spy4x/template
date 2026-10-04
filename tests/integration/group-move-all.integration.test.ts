@@ -224,7 +224,7 @@ Deno.test("moving all of a group's data", async (t) => {
         null,
       )
 
-      const results = await runBlockedOnLock(sql, [from, to], [
+      const results = await runBlockedOnLock(sql, from, [
         () => mover.moveAll({ fromGroupId: from, toGroupId: to }, editor, NO_CAP),
         () => mover.moveAll({ fromGroupId: to, toGroupId: from }, editor, NO_CAP),
       ])
