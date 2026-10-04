@@ -37,6 +37,7 @@ async function openNotes(page: Page, groupName: string): Promise<void> {
 
 test.describe("restoring deleted notes", () => {
   test("a deleted note comes back with Undo or from Show deleted notes, and a viewer's tab follows", async ({ browser, request }) => {
+    test.setTimeout(90_000)
     const owner = "e2e_notes_restore_owner@example.com"
     const member = "e2e_notes_restore_viewer@example.com"
     const baseURL = test.info().project.use.baseURL
@@ -115,7 +116,16 @@ test.describe("restoring deleted notes", () => {
       await expect(memberTitles).toHaveText(["Trip"])
 
       // Undo needs a connection: offline, the delete is queued and Undo says so.
+      // The service worker must hold the app before the page can start without a network.
+      await ownerPage.evaluate(async () => {
+        await navigator.serviceWorker.ready
+      })
+      await ownerPage.reload()
+      await expect(ownerTitles).toHaveText(["Trip"])
       await ownerContext.setOffline(true)
+      await ownerPage.reload()
+      await expect(ownerPage.locator("[data-e2e=shell-ws-status]")).not.toHaveText("Online")
+      await expect(ownerTitles).toHaveText(["Trip"])
       await ownerPage.locator(`[data-e2e=note-${noteId}] [data-e2e=note-menu]`).click()
       await ownerPage.getByRole("menuitem", { name: "Delete" }).click()
       await ownerPage.locator("[data-e2e=note-delete-dialog]").getByRole("button", {
@@ -126,7 +136,10 @@ test.describe("restoring deleted notes", () => {
       await ownerPage.locator("[data-e2e=note-undo-toast]").getByRole("button", {
         name: "Undo",
       }).click()
-      await expect(ownerPage.getByText("Restoring a note needs a connection.")).toBeVisible()
+      // The call tries again for about six seconds before it gives up.
+      await expect(ownerPage.getByText("Restoring a note needs a connection.")).toBeVisible({
+        timeout: 20_000,
+      })
       await ownerContext.setOffline(false)
     } finally {
       await ownerContext.close()
