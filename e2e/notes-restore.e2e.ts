@@ -1,0 +1,122 @@
+import { type APIRequestContext, type Page } from "@playwright/test"
+import { expect, test } from "./fixtures/stack.ts"
+import { signIn } from "./fixtures/app.ts"
+
+const apiBase = "http://app.localhost"
+const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
+const password = "Passw0rd!"
+const VIEWER = 1
+
+async function cleanup(request: APIRequestContext, email: string): Promise<void> {
+  const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
+    data: { login: email },
+  })
+  expect.soft(response.status(), await response.text()).toBe(200)
+}
+
+async function signUp(request: APIRequestContext, email: string): Promise<void> {
+  const response = await request.post(`${apiBase}/api/auth/password/sign-up`, {
+    headers,
+    data: { email, password },
+  })
+  expect(response.ok(), await response.text()).toBe(true)
+}
+
+async function signInOnline(page: Page, email: string): Promise<void> {
+  await signIn(page, email, password)
+  await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+}
+
+async function openNotes(page: Page, groupName: string): Promise<void> {
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", {
+    name: "Groups",
+  }).click()
+  await page.getByRole("button", { name: `Open notes in ${groupName}` }).click()
+  await expect(page.locator("[data-e2e=notes-group]")).toHaveText(groupName)
+}
+
+test.describe("restoring deleted notes", () => {
+  test("a deleted note comes back with Undo or from Show deleted notes, and a viewer's tab follows", async ({ browser, request }) => {
+    const owner = "e2e_notes_restore_owner@example.com"
+    const member = "e2e_notes_restore_viewer@example.com"
+    const baseURL = test.info().project.use.baseURL
+    for (const email of [owner, member]) await cleanup(request, email)
+    const ownerContext = await browser.newContext({ baseURL })
+    const memberContext = await browser.newContext({ baseURL })
+    try {
+      for (const email of [owner, member]) await signUp(request, email)
+      const ownerPage = await ownerContext.newPage()
+      await signInOnline(ownerPage, owner)
+      const groupId = crypto.randomUUID()
+      const created = await ownerPage.request.post(`${apiBase}/api/groups`, {
+        headers,
+        data: { id: groupId, name: "Restore team" },
+      })
+      expect(created.status(), await created.text()).toBe(201)
+      const added = await request.post(`${apiBase}/api/test/add-member`, {
+        data: { login: member, groupId, role: VIEWER },
+      })
+      expect(added.status(), await added.text()).toBe(200)
+      const noteId = crypto.randomUUID()
+      const note = await ownerPage.request.post(`${apiBase}/api/groups/${groupId}/notes`, {
+        headers,
+        data: { id: noteId, title: "Trip", body: "passport" },
+      })
+      expect(note.status(), await note.text()).toBe(201)
+
+      const memberPage = await memberContext.newPage()
+      await signInOnline(memberPage, member)
+      await openNotes(memberPage, "Restore team")
+      await openNotes(ownerPage, "Restore team")
+      const ownerTitles = ownerPage.locator("[data-e2e=note-item-title]")
+      const memberTitles = memberPage.locator("[data-e2e=note-item-title]")
+      await expect(memberTitles).toHaveText(["Trip"])
+
+      const deleteTrip = async () => {
+        await ownerPage.locator(`[data-e2e=note-${noteId}] [data-e2e=note-menu]`).click()
+        await ownerPage.getByRole("menuitem", { name: "Delete" }).click()
+        await ownerPage.locator("[data-e2e=note-delete-dialog]").getByRole("button", {
+          name: "Delete",
+          exact: true,
+        }).click()
+        await expect(ownerTitles).toHaveCount(0)
+        await expect(memberTitles).toHaveCount(0, { timeout: 5_000 })
+      }
+
+      // Delete, then Undo from the toast.
+      await deleteTrip()
+      const toast = ownerPage.locator("[data-e2e=note-undo-toast]")
+      await expect(toast).toContainText(`"Trip" was deleted.`)
+      await toast.getByRole("button", { name: "Undo" }).click()
+      await expect(ownerTitles).toHaveText(["Trip"])
+      await expect(memberTitles).toHaveText(["Trip"], { timeout: 5_000 })
+      await expect(toast).toHaveCount(0)
+
+      // Delete, then Show deleted notes and Restore.
+      await deleteTrip()
+      await ownerPage.locator("[data-e2e=notes-menu]").click()
+      await ownerPage.getByRole("menuitem", { name: "Show deleted notes" }).click()
+      await expect(ownerTitles).toHaveText(["Trip"])
+      await expect(ownerPage.locator("[data-e2e=notes-deleted-banner]")).toContainText("30 days")
+
+      // A viewer may look at the deleted notes but not restore them.
+      await memberPage.locator("[data-e2e=notes-menu]").click()
+      await memberPage.getByRole("menuitem", { name: "Show deleted notes" }).click()
+      await expect(memberTitles).toHaveText(["Trip"])
+      await expect(memberPage.locator("[data-e2e=note-restore]")).toHaveCount(0)
+
+      await ownerPage.getByRole("button", { name: "Restore Trip" }).click()
+      await expect(ownerPage.getByText("No deleted notes.")).toBeVisible()
+      await ownerPage.locator("[data-e2e=notes-show-live]").click()
+      await expect(ownerTitles).toHaveText(["Trip"])
+      // The viewer's deleted list follows: the note left it.
+      await expect(memberPage.getByText("No deleted notes.")).toBeVisible({ timeout: 5_000 })
+      await memberPage.locator("[data-e2e=notes-show-live]").click()
+      await expect(memberTitles).toHaveText(["Trip"])
+    } finally {
+      await ownerContext.close()
+      await memberContext.close()
+      for (const email of [owner, member]) await cleanup(request, email)
+    }
+  })
+})

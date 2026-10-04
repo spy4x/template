@@ -86,7 +86,7 @@ carries an `idempotencyKey` runs once per user and key.
 | File                                    | What it holds                                                                                                                                               |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/api/features/notes/list.ts`       | One page of the list, with its cursor. Both transports call it, so they cannot drift apart.                                                                 |
-| `apps/api/features/notes/socket.ts`     | The socket requests `note.create`, `note.update`, `note.delete`, `note.move` (commands) and `note.list`, `note.get`, `note.locate` (queries): parse the payload, dispatch. `note.locate` finds the group of a note by its id alone, for a link to a note of another of the person's groups: it answers only a member, and `NOTE_NOT_FOUND` otherwise. |
+| `apps/api/features/notes/socket.ts`     | The socket requests `note.create`, `note.update`, `note.delete`, `note.restore`, `note.move` (commands) and `note.list`, `note.get`, `note.locate` (queries): parse the payload, dispatch. `note.locate` finds the group of a note by its id alone, for a link to a note of another of the person's groups: it answers only a member, and `NOTE_NOT_FOUND` otherwise. |
 | `apps/api/features/notes/errors.ts`     | REST error codes and statuses. A version conflict answers 409 with `currentVersion`.                                                                        |
 | `apps/api/routes/notes.ts`              | `GET`, `POST`, `PATCH`, `DELETE` under `/api/groups/:groupId/notes`, with the same-origin guard on writes and an optional `Idempotency-Key` header.         |
 | `apps/api/services/note-list-cursor.ts` | The cursor codec, keyed from the cookie secret.                                                                                                             |
@@ -148,12 +148,42 @@ one extra read instead.
 | `apps/api/features/notes/socket.test.ts`, `routes/notes.test.ts` | Parsing and dispatch of each transport.                                                                                                                   |
 | `tests/integration/notes.integration.test.ts`                    | Postgres: one sequence step and one outbox row per write, conflicts, viewers, paging.                                                                     |
 | `e2e/notes.e2e.ts`                                               | Two members: one creates, edits and deletes on the note pages; the other's open tab follows without a reload; a viewer sees a note without edit controls. |
+| `e2e/notes-restore.e2e.ts`                                       | Delete then Undo, delete then Show deleted notes and Restore, with the other member's open tab following. |
+| `tests/integration/notes-purge.integration.test.ts`              | The worker's purge removes notes deleted over 30 days ago and keeps restored ones, with the clock set by the test. |
 | `e2e/notes-move.e2e.ts`                                          | Moving one note and ticked notes, with members of both groups watching.                                                                                   |
 | `tests/integration/note-move-push.integration.test.ts`           | Members of both groups get a hint for a move; a stranger gets none.                                                                                       |
 
 The product cannot add a member yet, so tests seed one: the integration test inserts the row, and
 the e2e spec calls `POST /api/test/add-member` (`apps/api/routes/dev.ts`, mounted only in
 development). Teach `POST /api/test/cleanup-user` to delete the new table's rows too.
+
+## Delete, restore and purge
+
+A delete keeps the row (`deleted_at`), so it can come back. An aggregate follows the notes files that
+mention `restore`:
+
+1. **Domain.** A request schema (empty: a restore needs no version, because nothing but a restore
+   changes a deleted row), a socket payload with the group and the id, a command, a `<kind>.restored`
+   event, an audit and activity kind, and a `deleted` flag on the list query.
+2. **Repository.** `restore` runs in one transaction: it checks the role on the locked membership
+   row, clears `deleted_at` only where it is set (a live or missing row is `NOT_FOUND`), raises the
+   version, counts the plan's cap including the restored row and refuses with the plan's refusal,
+   writes the audit row and records one change in the group's log. `list` takes `deleted` and pages
+   the deleted rows by the same cursor, served by a partial index.
+3. **Handler and gate.** Edit rights are required, as for a delete. `needsRoom` reserves room for
+   one row, because a restore adds a live row exactly as a create does.
+4. **Transports.** `POST /:id/restore` (empty body), `?deleted=true` on the list, the socket command
+   `<kind>.restore` and the `deleted` flag of `<kind>.list`.
+5. **Purge.** The worker's nightly cleanup (`libs/server/jobs/wiring.ts`) calls a `purgeDeleted<Kind>`
+   that hard-deletes rows deleted more than the restore window ago. It takes `now` as a parameter, so
+   a test sets the clock. Notes use 30 days (`NOTE_RESTORE_DAYS`). Anything that hangs off the row,
+   such as attachments, must be removed with it, or the purge leaves orphans.
+6. **Screens and SPA.** A delete offers Undo for ten seconds (`UndoDeleteToast`), and the list's menu
+   has "Show deleted notes", which lists the deleted rows with a Restore button for editors. The
+   store never queues a restore: it needs the server, like a move.
+7. **Tests.** Both transports (every role, stranger, a live row, the cap), Postgres (version,
+   sequence, audit row, the deleted list's cursor), the purge against a fixed clock and through the
+   nightly job, the store, the screens and an e2e spec.
 
 ## Making an aggregate movable
 
