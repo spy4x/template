@@ -493,6 +493,7 @@ describe("GroupSettingsScreen header", () => {
       )
       await mount(screen({}))
       await click("[data-e2e=group-move-all-open]")
+      await submit("[data-e2e=group-move-all-dialog] form")
       await rerender(screen({
         moveAllError: "Free groups hold 10 notes.",
         moveAllRefusal: {
@@ -512,7 +513,7 @@ describe("GroupSettingsScreen header", () => {
       expect(focused()).toBe("plan-refusal")
     })
 
-    it("tells the app when the target changes, and the notice then names that group", async () => {
+    it("hides a refusal once another target is picked, and tells the app", async () => {
       const changed = spy<[]>()
       const refusal = {
         code: "PLAN_LIMIT_REACHED",
@@ -530,6 +531,7 @@ describe("GroupSettingsScreen header", () => {
       )
       await mount(screen({}))
       await click("[data-e2e=group-move-all-open]")
+      await submit("[data-e2e=group-move-all-dialog] form")
       await rerender(
         screen({ moveAllError: "Free groups hold 10 notes.", moveAllRefusal: refusal }),
       )
@@ -537,9 +539,13 @@ describe("GroupSettingsScreen header", () => {
 
       await choose("[data-e2e=group-move-all-to]", "g3")
       expect(changed.calls).toHaveLength(1)
-      expect(find("[data-e2e=plan-refusal]").textContent).toContain(
-        "Home has reached its note limit",
-      )
+      // The refusal is still passed in, but it was Archive's: no notice names or links Home.
+      expect(has("[data-e2e=plan-refusal]")).toBe(false)
+      expect(find("[data-e2e=group-move-all-dialog]").textContent).not.toContain("Home has reached")
+      await choose("[data-e2e=group-move-all-to]", "g2")
+      expect(find("[data-e2e=plan-refusal]").textContent).toContain("Archive has reached")
+      expect(find("[data-e2e=plan-refusal] a").getAttribute("href")).toContain("g2")
+      await choose("[data-e2e=group-move-all-to]", "g3")
       // The app answers the callback by clearing the refusal.
       await rerender(screen({}))
       expect(has("[data-e2e=plan-refusal]")).toBe(false)

@@ -20,6 +20,14 @@ export function NotesView() {
   useEffect(() => {
     if (groupId) void store.open(groupId, null)
   }, [groupId])
+  // An Undo that ends while the list is not on screen must not move focus when it returns.
+  useEffect(() => {
+    store.listShown.value = true
+    return () => {
+      store.listShown.value = false
+      store.clearUndoOutcome()
+    }
+  }, [])
 
   const membership = groupId
     ? groupsStore.groups.value.find((group) => group.id === groupId)

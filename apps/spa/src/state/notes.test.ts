@@ -626,6 +626,7 @@ describe("notes store", () => {
             ? Promise.reject(new TypeError("Failed to fetch"))
             : Promise.resolve({ note: item(restoring) }),
       })
+      store.listShown.value = true
       await store.open(groupId, null)
       await store.remove({ id: "a", version: 2 })
       await store.undoDelete()
@@ -638,6 +639,34 @@ describe("notes store", () => {
       await store.remove({ id: "b", version: 2 })
       await store.undoDelete()
       expect(store.undoOutcome.value).toEqual({ id: "b", restored: false })
+    })
+
+    it("reports no Undo outcome when the group changed or the list left while it was pending", async () => {
+      let finish = () => {}
+      const { store } = harness({
+        pages: [{ notes: [item("a", 2, "Plan")], nextCursor: null }],
+        restore: () =>
+          new Promise((resolve) => {
+            finish = () => resolve({ note: item("a") })
+          }),
+      })
+      store.listShown.value = true
+      await store.open(groupId, null)
+      await store.remove({ id: "a", version: 2 })
+      const pending = store.undoDelete()
+      await store.open("g-2", null)
+      finish()
+      await pending
+      expect(store.undoOutcome.value).toBe(null)
+
+      store.listShown.value = true
+      await store.open(groupId, null)
+      await store.remove({ id: "a", version: 2 })
+      const again = store.undoDelete()
+      store.listShown.value = false
+      finish()
+      await again
+      expect(store.undoOutcome.value).toBe(null)
     })
 
     it("keeps the reason a failed Undo gave until the next delete, and shows no Undo for it", async () => {

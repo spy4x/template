@@ -164,6 +164,8 @@ export function createNotesStore(dependencies: NotesDependencies) {
   const restoreError = signal<FormErrors>(NO_ERRORS)
   /** The note just deleted: the screen offers Undo for it until dismissed or taken. */
   const undo = signal<UndoOffer | null>(null)
+  /** The notes list is on screen: an Undo that ends while it is not moves no focus. */
+  const listShown = signal(false)
   /**
    * How the last Undo ended, for the screen to move focus: to the restored note's row, or to the
    * list's "More actions" when it failed. The screen clears it once focus has moved.
@@ -498,8 +500,12 @@ export function createNotesStore(dependencies: NotesDependencies) {
     const offer = undo.value
     if (!offer) return false
     undo.value = null
+    const forGroup = groupId.value
     const restored = await restore(offer.id)
-    undoOutcome.value = { id: offer.id, restored }
+    // A person who switched group, or left the list, is somewhere else: focus must not follow.
+    if (listShown.value && groupId.value === forGroup) {
+      undoOutcome.value = { id: offer.id, restored }
+    }
     return restored
   }
 
@@ -602,6 +608,7 @@ export function createNotesStore(dependencies: NotesDependencies) {
     restoreError,
     undo,
     undoOutcome,
+    listShown,
     missing,
     elsewhere,
     unsaved,

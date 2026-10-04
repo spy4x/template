@@ -67,6 +67,9 @@ export function GroupMoveAllForm(
   }: GroupMoveAllFormProps,
 ): JSX.Element {
   const [toGroupId, setToGroupId] = useState(targets[0]?.id ?? ``)
+  // The refusal belongs to the group the form last submitted to; it is shown only while that
+  // group is still picked, under that group's name and pricing link.
+  const [submittedTo, setSubmittedTo] = useState<string | null>(null)
   if (result) {
     return <Done groupName={groupName} result={result} onCancel={onCancel} onDelete={onDelete} />
   }
@@ -74,7 +77,9 @@ export function GroupMoveAllForm(
     <ScreenForm
       pending={moving}
       onSubmit={() => {
-        if (toGroupId) onMove?.(toGroupId)
+        if (!toGroupId) return
+        setSubmittedTo(toGroupId)
+        onMove?.(toGroupId)
       }}
     >
       <Stack gap="lg">
@@ -96,7 +101,7 @@ export function GroupMoveAllForm(
           />
         </Field>
         {refusal
-          ? (
+          ? submittedTo === toGroupId && (
             <PlanRefusalNotice
               groupId={toGroupId}
               groupName={targets.find((target) => target.id === toGroupId)?.name}
