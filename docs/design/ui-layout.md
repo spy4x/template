@@ -16,27 +16,34 @@ screens were redesigned against these rules in October 2026.
    menu, or under a "Danger zone" disclosure at the bottom.
 2. **Forms open when asked.** A "create" or "edit" form is closed until the person presses the
    button for it: a `Modal` for a short form (new group, invite someone, change password), or
-   `InlineEdit` for one value (rename a group, a name). The note editor is the exception: it is a
-   page of its own, and that is fine.
+   `InlineEdit` for one value (rename a group). A name is two fields, so the profile edits it in a
+   `Modal`. The note editor is the exception: it is a page of its own, and that is fine.
 3. **Hide what cannot happen.** Do not render a section that only explains why its action is
-   unavailable ("You own this group, so you cannot leave it", "Nobody else is in this group yet",
-   a disabled "Delete group"). Leave the action out, or keep it in the menu with a short hint. A
-   disabled control is acceptable only when the person would otherwise not know the feature exists
-   and the hint says what unlocks it.
-4. **Confirm destructive actions** with `ConfirmDialog` (delete, leave, remove a member, revoke,
-   transfer). Never put a red button on the page next to everyday actions.
+   unavailable ("You own this group, so you cannot leave it", "Nobody else is in this group yet").
+   Leave the action out. When a person would otherwise not know the action exists, keep it as a
+   disabled item in the overflow menu with a one-line reason beside it, such as "Delete group" with
+   "It is your only group". Never put a disabled button on the page itself.
+4. **Confirm destructive actions** with `ConfirmDialog` (delete, leave, remove a member, revoke). An
+   action that needs the password again (transfer ownership, delete the account) uses a `Modal` with
+   a password form and a danger-styled submit button instead. Never put a red button on the page
+   next to everyday actions.
 5. **Less chrome.** No card inside a card, no card around a single line, no dashed box inside a
-   card. A list on its own is a list; a page heading is not a `CardHeader`. Use `Card` for a
-   genuine group of related content, `Section` for a titled part of a page, `EmptyState` for an
-   empty list (with its one action), `Stack`, `Cluster` and `Grid` for spacing. No ad-hoc margins:
-   the named gaps (`tests/spacing.test.ts` holds the rules).
-6. **A readable width.** Forms and reading content sit in a column of about 40 rem (640 px); lists
-   and tables may use the full content width (about 64 rem). Inputs never stretch 900 px wide.
-7. **A page header pattern, the same everywhere:** the page title (h1) on the left; the primary
-   action and, if needed, one overflow `Dropdown` ("More actions", a three-dots icon button with
-   that accessible name) on the right. On a phone the title stays on one line, truncating if it
-   must, and the actions stay beside it as icon buttons with accessible names — never stacked
-   awkwardly under a two-line title.
+   card. A list on its own is a list; a signed-in page's heading is its `PageHeader`, never a
+   `CardHeader`. Use `Card` for a genuine group of related content, `Section` for a titled part of a
+   page, `EmptyState` for an empty list (with its one action), `Stack`, `Cluster` and `Grid` for
+   spacing. Space siblings with their `gap` rather than margins. Any spacing class must be a step on
+   the theme's scale, which `tests/spacing.test.ts` enforces.
+6. **A readable width.** Forms and reading content sit in a column: `ACCOUNT_COLUMN`
+   (`libs/ui/frame.tsx`, 42 rem) for account pages, 48 rem (`max-w-3xl`) for group settings and
+   billing. Lists and tables may use the full content width (64 rem). Inputs never stretch 900 px
+   wide.
+7. **One page header on every signed-in page** (`PageHeader`, `libs/ui/page-header.tsx`): the page
+   title (h1) on the left; the primary action and, if needed, one overflow `Dropdown` ("More
+   actions", a three-dots icon button with that accessible name) on the right. On a phone the title
+   stays on one line, truncating if it must, and the actions stay beside it as icon buttons with
+   accessible names — never stacked awkwardly under a two-line title. The signed-out screens
+   (sign-in, sign-up, password reset, the newsletter) are a centred card with the `h1` inside its
+   header instead.
 8. **Mobile first.** Design the 375 px layout first; touch targets at least 44 px; nothing scrolls
    sideways. The desktop layout is the same content with more room, not a different screen.
 9. **Status only when it matters.** "Online" in the header and "WS: open" on the profile are debug
