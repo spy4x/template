@@ -115,6 +115,14 @@ describe("SignedInDevices", () => {
     expect(ips).toEqual(["203.0.113.*", "198.51.100.*"])
   })
 
+  it("puts the address on a line of its own, with no separator that could start a line", async () => {
+    await mount(<SignedInDevices {...devicesProps([])} />)
+
+    const details = find("[data-e2e=session-9] [data-e2e=session-details]")
+    expect(details.classList.contains("flex-col")).toBe(true)
+    expect(details.textContent).not.toContain("·")
+  })
+
   it("names the device in the sign-out button for a screen reader", async () => {
     await mount(<SignedInDevices {...devicesProps([])} />)
 

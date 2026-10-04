@@ -121,10 +121,13 @@ export function SignedInDevices(
   )
 }
 
-/** "This device" or when it was last active, then the address with its last part hidden. */
+/**
+ * "This device" or when it was last active, and under it the address with its last part hidden.
+ * One line each, so a narrow screen never strands a separator at the start of a wrapped line.
+ */
 function DeviceDetails({ session }: { session: SignedInDevice }): JSX.Element {
   return (
-    <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
+    <span class="flex flex-col items-start gap-1" data-e2e="session-details">
       {session.current ? <Badge text="This device" color="green" type="outline" /> : (
         <span>
           Last active <time dateTime={session.lastUsedAt}>{timeAgo(session.lastUsedAt)}</time>
@@ -132,8 +135,8 @@ function DeviceDetails({ session }: { session: SignedInDevice }): JSX.Element {
       )}
       {session.ipHint && (
         <span>
-          <span class="sr-only">IP address</span>
-          <span aria-hidden="true">·</span> <span data-e2e="session-ip">{session.ipHint}</span>
+          <span class="sr-only">IP address</span>{" "}
+          <span data-e2e="session-ip">{session.ipHint}</span>
         </span>
       )}
     </span>
