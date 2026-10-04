@@ -43,7 +43,7 @@ const AUDIT_IDENTIFIER_MIGRATION = "2026_10_10_0001_auth_audit_identifier_320.sq
 /** Adds the group's description, colour and emoji, which every group read and write names. */
 const APPEARANCE_MIGRATION = "2026_10_18_0001_group_appearance.sql"
 /** Adds what a session remembers about its device, which every sign-in writes (#151). */
-const SESSION_DEVICES_MIGRATION = "2026_10_23_0001_auth_session_devices.sql"
+const SESSION_DEVICES_MIGRATION = "2026_10_23_0002_auth_session_devices.sql"
 const MASTER_MIGRATIONS = [
   "2026_01_26_0001_init.sql",
   "2026_01_26_0002_auth_profiles_audit.sql",
