@@ -101,6 +101,8 @@ const MAX_TEXT = 4000
 const MAX_FUNCTION = 200
 /** Most stack frames kept, newest first. */
 const MAX_FRAMES = 50
+/** Longest stack line matched against the frame patterns. */
+const MAX_FRAME_LINE = 1000
 const SECRET_NAME = String
   .raw`(?:pass(?:word|wd)?|pwd|token|secret|api[_-]?key|auth(?:orization)?|cookie|session|otp)`
 
@@ -154,7 +156,9 @@ interface Frame {
 function parseFrames(stack: string, redactPathAfter: string[]): Frame[] {
   const frames: Frame[] = []
   for (const raw of stack.split("\n").slice(0, MAX_FRAMES + 1)) {
-    const line = raw.trim()
+    // A real frame line is short; the first line carries the whole message, and the patterns
+    // below slow down sharply on long input.
+    const line = raw.trim().slice(0, MAX_FRAME_LINE)
     const v8 = /^at (?:(.*?) \()?(.*?):(\d+):(\d+)\)?$/.exec(line)
     const gecko = /^(.*?)@(.*?):(\d+):(\d+)$/.exec(line)
     const match = v8 ?? gecko

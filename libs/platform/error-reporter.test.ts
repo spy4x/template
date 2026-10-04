@@ -223,7 +223,7 @@ describe("a report's free text", () => {
   it("masks a 100,000-character message in under a second, cut to a fixed length", async () => {
     const { sent, reporter } = setup()
     const error = new Error("a-".repeat(50_000))
-    error.stack = `Error: x\n    at ${"b-".repeat(50_000)} (https://app.example.com/a.js:1:1)`
+    error.stack = `Error: x\n    at ${"b-".repeat(400)} (https://app.example.com/a.js:1:1)`
 
     const started = performance.now()
     await reporter.report(error)
@@ -233,6 +233,21 @@ describe("a report's free text", () => {
     const value = eventOf(sent[0]).exception.values[0]
     expect(value.value.length).toBeLessThanOrEqual(4000)
     expect(value.stacktrace.frames[0].function.length).toBeLessThanOrEqual(200)
+  })
+
+  it("reads a 400,000-character stack in under a second, keeping at most 50 frames", async () => {
+    const { sent, reporter } = setup()
+    const slow = new Error("x")
+    slow.stack = "@:".repeat(200_000)
+    const deep = new Error("y")
+    deep.stack = `Error: y\n${"    at f (https://app.example.com/a.js:1:1)\n".repeat(80)}`
+
+    const started = performance.now()
+    await reporter.report(slow)
+    expect(performance.now() - started).toBeLessThan(1000)
+    await reporter.report(deep)
+
+    expect(eventOf(sent[1]).exception.values[0].stacktrace.frames.length).toBe(50)
   })
 })
 
