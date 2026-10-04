@@ -69,8 +69,7 @@ const laptop: Device = { userAgent: FIREFOX_LINUX, ip: "203.0.113.42" }
 const phone: Device = { userAgent: SAFARI_IPHONE, ip: "2001:db8:85a3:8d3::7" }
 
 /** A test app over the real sign-in, with the session operations the routes call. */
-function buildApp(sql: postgres.Sql) {
-  const db = new AppDbBase({ sql })
+function buildApp(sql: postgres.Sql, db: AppDbBase = new AppDbBase({ sql })) {
   const signIn: SignIn = createSignIn({
     db,
     pepper: PEPPER,
@@ -356,5 +355,25 @@ Deno.test("a request marks its session as used, at most once every few minutes",
     const stale = await lastUsed()
     await app.request("/sessions", laptop, { cookie: onLaptop.cookie })
     expect(await settled((at) => at > stale + 50 * 60_000)).toBeGreaterThan(stale + 50 * 60_000)
+  })
+})
+
+/** A database whose last-used write always fails, as during a short Postgres outage. */
+class FailingTouchDb extends AppDbBase {
+  override get sessionDevices() {
+    return { ...super.sessionDevices, touch: () => Promise.reject(new Error("database is down")) }
+  }
+}
+
+Deno.test("a failed last-used write is only logged, and the request still succeeds", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, new FailingTouchDb({ sql }))
+    const onLaptop = await signUp(app, "ada@example.com", laptop)
+    await sql`UPDATE auth_sessions SET last_used_at = now() - interval '1 hour'`
+    const response = await app.request("/sessions", laptop, { cookie: onLaptop.cookie })
+    expect(response.status).toBe(200)
+    await response.body?.cancel()
+    // An uncaught rejection would surface here and fail the test, as it would stop the API.
+    await new Promise((resolve) => setTimeout(resolve, 200))
   })
 })
