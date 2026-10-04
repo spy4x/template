@@ -109,7 +109,7 @@ export function ApiTokens(props: ApiTokensProps): JSX.Element {
   return (
     <SettingGroup
       title="API tokens"
-      description="Let a script or another service use one of your groups without your password."
+      description="Let a script or another service use one of your groups without your password. Resetting a forgotten password revokes every token; changing your password keeps them."
       e2e="api-tokens"
     >
       <ErrorState message={errors.list} />

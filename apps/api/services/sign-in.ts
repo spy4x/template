@@ -13,7 +13,7 @@
  *   key's `(method, subject)` constraint, and compared after normalisation.
  * - **Password reset by link.** `resetPassword` spends a code from `password-reset.ts`, proves the
  *   address (whoever holds the mailbox owns the account that signs in with it), sets the new
- *   password and signs out every session of the user. It signs nobody in: the person signs in again
+ *   password, signs out every session of the user and deletes every API token. It signs nobody in: the person signs in again
  *   with the new password, and their second factor if they have one.
  * - **One sign-up transaction.** The auth user and key, the session, the `users` profile row (same
  *   id) and the first group are written in one `db.begin()`: the sign-up provider is built over
@@ -222,9 +222,9 @@ export interface SignIn {
   ): Promise<boolean>
   /**
    * Spends the reset code for `email` and, when it was the live one, proves the address, replaces
-   * the password and signs out every session of the user. `false`, and the password unchanged, when
-   * the code is wrong, expired, already used or replaced, the new password is refused, or no live
-   * account signs in with the address.
+   * the password, signs out every session of the user and deletes every API token, with one audit
+   * row. `false`, and the password unchanged, when the code is wrong, expired, already used or
+   * replaced, the new password is refused, or no live account signs in with the address.
    */
   resetPassword(email: string, code: string, newPassword: string): Promise<boolean>
   /**
@@ -768,6 +768,17 @@ export function createSignIn(options: SignInOptions): SignIn {
         // The mailbox owner is back in control: an address change someone else asked for goes.
         await tx.emailChange.remove(user.id)
         await sessionsOver(tx.sessionStore).signOutUser(user.id)
+        // A reset is account recovery: a token minted with a stolen session goes too (#167). A
+        // voluntary password change keeps them.
+        if (await tx.apiTokens.deleteAllOf(user.id) > 0) {
+          await tx.authAudit.insert({
+            userId: user.id,
+            eventType: AuthAuditEventType.API_TOKEN_REVOKED,
+            identifier: `password-reset`,
+            ip: null,
+            userAgent: null,
+          })
+        }
         return true
       })
     },

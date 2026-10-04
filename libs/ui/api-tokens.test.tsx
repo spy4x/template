@@ -148,6 +148,14 @@ describe("ApiTokens", () => {
     expect(find("[data-e2e=api-tokens]").textContent).not.toContain("tpl_")
   })
 
+  it("says that a password reset revokes every token and a password change keeps them", async () => {
+    await mount(<ApiTokens {...tokensProps([])} />)
+
+    const text = find("[data-e2e=api-tokens]").textContent
+    expect(text).toContain("Resetting a forgotten password revokes every token")
+    expect(text).toContain("changing your password keeps them")
+  })
+
   it("revokes a token only after the person confirms", async () => {
     const calls: unknown[][] = []
     await mount(<ApiTokens {...tokensProps(calls)} />)
