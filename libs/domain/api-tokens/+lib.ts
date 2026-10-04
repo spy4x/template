@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import { isUuidV4 } from "@domain/notes"
 
 /**
  * Personal API tokens (#167): a person lets a script or another service use the API in one of
@@ -71,8 +72,6 @@ export interface ApiTokenCreateResponse {
 /** A UTF-16 surrogate that is not half of a pair: text Postgres cannot store. */
 const LONE_SURROGATE = /\p{Cs}/u
 
-const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-
 /**
  * `POST /api/tokens`: the token's name, its group, what it may do and how many days it lives
  * (`null` for never). The field names are the form's.
@@ -81,7 +80,7 @@ export const apiTokenCreateRequestSchema = type({
   // The length is checked in characters by `parseApiTokenCreateRequest`: arktype counts UTF-16
   // units.
   name: "string",
-  groupId: UUID_V4,
+  groupId: type("string").narrow((value, ctx) => isUuidV4(value) || ctx.mustBe("a UUID")),
   access: type.enumerated(ApiTokenAccess.READ, ApiTokenAccess.WRITE),
   expiresInDays: type.enumerated(...API_TOKEN_EXPIRY_DAYS, null),
   "+": "reject",
