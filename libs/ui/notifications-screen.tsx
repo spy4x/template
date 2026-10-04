@@ -123,7 +123,12 @@ function NotificationItem(
         class={`min-w-0 flex-1 text-sm ${unread ? "font-semibold" : ""}`}
         data-e2e="notification-text"
       >
-        {unread && <span class="sr-only">Unread:</span>}
+        {unread && (
+          <>
+            <span class="sr-only">Unread:</span>
+            {" "}
+          </>
+        )}
         {describeNotification(notification)}{" "}
         <a
           href={notification.link}
