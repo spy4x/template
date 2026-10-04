@@ -14,6 +14,7 @@ import {
   NoteListQuery,
   NoteLocateQuery,
   NoteMoveCommand,
+  NoteRestoreCommand,
   NoteUpdateCommand,
   NoteVersionConflictError,
 } from "@domain/notes"
@@ -31,6 +32,7 @@ import {
   createNoteListHandler,
   createNoteLocateHandler,
   createNoteMoveHandler,
+  createNoteRestoreHandler,
   createNoteUpdateHandler,
   type NoteHandlerDependencies,
 } from "../../apps/api/features/notes/handlers.ts"
@@ -123,6 +125,7 @@ function buses(sql: postgres.Sql) {
   commands.register(NoteUpdateCommand, createNoteUpdateHandler(dependencies))
   commands.register(NoteDeleteCommand, createNoteDeleteHandler(dependencies))
   commands.register(NoteMoveCommand, createNoteMoveHandler(dependencies))
+  commands.register(NoteRestoreCommand, createNoteRestoreHandler(dependencies))
   const queries = new QueryBus()
   queries.use(createSessionGate([]))
   queries.register(NoteListQuery, createNoteListHandler(dependencies))
@@ -837,6 +840,110 @@ Deno.test("notes against Postgres", async (t) => {
       ])
 
       expect(results.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"])
+    })
+
+    await t.step(
+      "a deleted note is restored by an editor, with a new version, sequence and audit row",
+      async () => {
+        const { groupId, owner, editor } = await seedGroup(sql)
+        const id = crypto.randomUUID()
+        await commands.execute(
+          new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Plan", body: "x" }),
+        )
+        await commands.execute(
+          new NoteDeleteCommand({ actor: actor(owner), groupId, id, version: 1 }),
+        )
+        const before = BigInt(await nextSequence(sql, groupId))
+
+        const restored = await commands.execute(
+          new NoteRestoreCommand({ actor: actor(editor), groupId, id }),
+        )
+
+        expect([restored.note.version, restored.note.updatedByUserId]).toEqual([3, editor])
+        expect(restored.note.changeSequence).toBe(String(before))
+        expect(await nextSequence(sql, groupId)).toBe(String(before + 1n))
+        expect((await outbox(sql, groupId)).map((row) => row.eventKind)).toEqual([
+          "note.created",
+          "note.deleted",
+          "note.restored",
+        ])
+        const audit = await sql<{ eventKind: string; actorUserId: number }[]>`
+          SELECT event_kind, actor_user_id FROM audit_events
+          WHERE group_id = ${groupId} AND event_kind = 'note.restored'
+        `
+        expect(audit).toEqual([{ eventKind: "note.restored", actorUserId: editor }])
+        const live = await queries.execute(
+          new NoteListQuery({ actor: actor(owner), groupId, page: { limit: 10 } }),
+        )
+        expect(live.notes.map((note) => note.title)).toEqual(["Plan"])
+      },
+    )
+
+    await t.step("a viewer or a stranger cannot restore a note and nothing changes", async () => {
+      const { groupId, owner, viewer, stranger } = await seedGroup(sql)
+      const id = crypto.randomUUID()
+      await commands.execute(
+        new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Gone", body: "" }),
+      )
+      await commands.execute(
+        new NoteDeleteCommand({ actor: actor(owner), groupId, id, version: 1 }),
+      )
+      const sequence = await nextSequence(sql, groupId)
+
+      const viewerRefusal = await refusal(
+        commands.execute(new NoteRestoreCommand({ actor: actor(viewer), groupId, id })),
+      )
+      const strangerRefusal = await refusal(
+        commands.execute(new NoteRestoreCommand({ actor: actor(stranger), groupId, id })),
+      )
+
+      expect((viewerRefusal as NoteError).code).toBe("ROLE_INSUFFICIENT")
+      expect((strangerRefusal as NoteError).code).toBe("GROUP_NOT_FOUND")
+      expect(await nextSequence(sql, groupId)).toBe(sequence)
+      const deleted = await queries.execute(
+        new NoteListQuery({ actor: actor(owner), groupId, page: { limit: 10 }, deleted: true }),
+      )
+      expect(deleted.notes.map((note) => note.title)).toEqual(["Gone"])
+    })
+
+    await t.step("restoring a note that is not deleted is refused as not found", async () => {
+      const { groupId, owner } = await seedGroup(sql)
+      const id = crypto.randomUUID()
+      await commands.execute(
+        new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Live", body: "" }),
+      )
+
+      const error = await refusal(
+        commands.execute(new NoteRestoreCommand({ actor: actor(owner), groupId, id })),
+      )
+
+      expect((error as NoteError).code).toBe("NOTE_NOT_FOUND")
+    })
+
+    await t.step("the deleted list shows only deleted notes, newest first, by cursor", async () => {
+      const { groupId, owner } = await seedGroup(sql)
+      const notes = new PostgresNoteRepository(sql)
+      const ids: string[] = []
+      for (const title of ["one", "two", "three"]) {
+        const { note } = await notes.create(
+          { groupId, id: crypto.randomUUID(), title, body: "" },
+          owner,
+          null,
+        )
+        ids.push(note.id)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      for (const id of [ids[0], ids[2]]) {
+        await notes.delete({ groupId, id, expectedVersion: 1 }, owner)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+
+      const first = await notes.list(groupId, { limit: 1 }, true)
+      const second = await notes.list(groupId, { limit: 1, after: first.nextPageKey! }, true)
+
+      expect(first.notes.map((note) => note.title)).toEqual(["three"])
+      expect(second.notes.map((note) => note.title)).toEqual(["one"])
+      expect(second.nextPageKey).toBe(null)
     })
   })
 })

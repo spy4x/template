@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "check": "deno check postgres-note-repository.ts note-movable.ts note-list-cursor.ts",
+    "check": "deno check postgres-note-repository.ts note-movable.ts note-list-cursor.ts purge-deleted-notes.ts",
     "test": "deno test note-list-cursor.test.ts"
   }
 }
