@@ -104,7 +104,7 @@ describe("SignedInDevices", () => {
     const row = find("[data-e2e=session-current]")
     expect(row.textContent).toContain("Firefox on Linux")
     expect(row.textContent).toContain("This device")
-    expect(row.querySelector("button")).toBeNull()
+    expect(row.querySelectorAll("button").length).toBe(0)
     expect(find("[data-e2e=session-9]").textContent).not.toContain("This device")
   })
 
@@ -153,7 +153,7 @@ describe("SignedInDevices", () => {
   it("offers no sign-out of other devices when this is the only one", async () => {
     await mount(<SignedInDevices {...devicesProps([], { sessions: [current] })} />)
 
-    expect(document.querySelector("[data-e2e=sessions-end-others]")).toBeNull()
+    expect(document.querySelectorAll("[data-e2e=sessions-end-others]").length).toBe(0)
   })
 
   it("disables every sign-out while one is in flight", async () => {
@@ -219,7 +219,7 @@ describe("ProfileScreen password dialog", () => {
     await mount(<ProfileScreen {...profile} onChangePassword={() => {}} />)
     await click("[data-e2e=password-open]")
 
-    expect(document.querySelector("[data-e2e=password-sign-out-others]")).toBeNull()
+    expect(document.querySelectorAll("[data-e2e=password-sign-out-others]").length).toBe(0)
   })
 
   it("shows the signed-in devices section when the app passes it", async () => {

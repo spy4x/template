@@ -1424,6 +1424,22 @@ describe("signed-in devices", () => {
     expect(calls).toEqual([])
   })
 
+  it("refuses a session that still owes its authenticator code, and lists or ends nothing", async () => {
+    const owing = buildAuthData({
+      user: { mfa: UserMFAStatus.CONFIGURED },
+      session: { secondFactor: SecondFactorStatus.Pending },
+    })
+    const { app, calls } = buildApp(owing)
+    const listed = await app.request(`${API_URL}/auth/sessions`, {
+      headers: { ...sameOriginHeaders },
+    })
+    const ended = await send(app, endRoute("others"), sameOriginHeaders)
+
+    expect(listed.status).toBe(401)
+    expect(ended.status).toBe(401)
+    expect(calls).toEqual([])
+  })
+
   it("ends another device's session and announces the sign-out so its socket closes", async () => {
     let ended: number | null = null
     const { app, emitted } = buildApp(undefined, {
