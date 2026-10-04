@@ -51,8 +51,9 @@ export enum HardDeleteOutcome {
 /**
  * The groups that stop `userId` from deleting their account, by name. A live group they own counts
  * while another active person is a member; any group they own, deleted ones included, counts while
- * its subscription is not cancelled, since the delete for good would remove that group too. A group
- * with both reasons is listed once, for its members: handing it over takes its billing along.
+ * its subscription is not cancelled, since the delete for good would remove that group too, even one
+ * cancelled at the end of its period: that one names the day it ends. A group with both reasons is
+ * listed once, for its members: handing it over takes its billing along.
  */
 export async function accountDeletionBlockers(
   sql: postgres.Sql,
@@ -72,7 +73,19 @@ export async function accountDeletionBlockers(
           SELECT 1 FROM subscriptions
           WHERE subscriptions.group_id = groups.id
             AND subscriptions.status <> ${BillingStatus.Canceled}
-        ) AS paid
+        ) AS paid,
+        EXISTS (
+          SELECT 1 FROM subscriptions
+          WHERE subscriptions.group_id = groups.id
+            AND subscriptions.status <> ${BillingStatus.Canceled}
+            AND NOT (subscriptions.cancel_at_period_end
+              AND subscriptions.current_period_end IS NOT NULL)
+        ) AS renewing,
+        (
+          SELECT max(subscriptions.current_period_end) FROM subscriptions
+          WHERE subscriptions.group_id = groups.id
+            AND subscriptions.status <> ${BillingStatus.Canceled}
+        ) AS ends_at
       FROM groups
       WHERE groups.owner_user_id = ${userId}
     )
@@ -80,7 +93,11 @@ export async function accountDeletionBlockers(
       id AS "groupId",
       name,
       CASE WHEN shared THEN ${AccountDeletionBlockReason.Members}::int
-        ELSE ${AccountDeletionBlockReason.Subscription}::int END AS reason
+        WHEN renewing THEN ${AccountDeletionBlockReason.Subscription}::int
+        ELSE ${AccountDeletionBlockReason.PlanEnding}::int END AS reason,
+      CASE WHEN NOT shared AND NOT renewing
+        THEN to_char(ends_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+      END AS "endsAt"
     FROM owned
     WHERE shared OR paid
     ORDER BY name, id

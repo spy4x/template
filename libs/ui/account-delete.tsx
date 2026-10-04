@@ -30,10 +30,20 @@ export interface AccountDeleteErrors {
   form: string | null
 }
 
-/** What a blocker's reason asks the person to do, shown under the group's name. */
-export const BLOCKER_HINTS: Record<AccountDeletionBlockReason, string> = {
-  [AccountDeletionBlockReason.Members]: "Other people still use it. Hand it over or remove them.",
-  [AccountDeletionBlockReason.Subscription]: "Its plan is still paid. Cancel the plan first.",
+/** What a blocker asks the person to do, shown under the group's name. */
+export function blockerHint(blocker: AccountDeletionBlocker): string {
+  switch (blocker.reason) {
+    case AccountDeletionBlockReason.Members:
+      return "Other people still use it. Hand it over or remove them."
+    case AccountDeletionBlockReason.Subscription:
+      return "Its plan is still paid. Cancel the plan first."
+    case AccountDeletionBlockReason.PlanEnding: {
+      const day = blocker.endsAt
+        ? new Date(blocker.endsAt).toLocaleDateString(undefined, { dateStyle: "long" })
+        : "the end of its period"
+      return `Its plan is cancelled and runs until ${day}. Wait until the plan ends.`
+    }
+  }
 }
 
 export interface AccountDeleteProps {
@@ -138,8 +148,8 @@ export function AccountDelete(
                 <p class="text-sm text-muted">
                   You are signed out on every device at once. Your account and the groups only you
                   use are deleted for good in {ACCOUNT_DELETION_GRACE_DAYS}{" "}
-                  days; sign in before then and everything is back as it was. Notes you wrote in
-                  other people's groups stay there, by "{DELETED_USER_NAME}".
+                  days; sign in before then and your account is restored. Notes you wrote in other
+                  people's groups stay there, by "{DELETED_USER_NAME}".
                 </p>
                 <Field
                   id="account-delete-password"
@@ -217,12 +227,12 @@ function BlockerList(
             <Link
               href={GROUP_PATHS.settings(blocker.groupId)}
               navigate={navigate}
-              class="pc-link font-medium wrap-anywhere"
+              class="pc-link inline-flex min-h-11 items-center self-start font-medium wrap-anywhere sm:min-h-9"
               data-e2e={`account-delete-blocker-${blocker.groupId}`}
             >
               {blocker.name}
             </Link>
-            <span class="text-sm text-muted">{BLOCKER_HINTS[blocker.reason]}</span>
+            <span class="text-sm text-muted">{blockerHint(blocker)}</span>
           </li>
         ))}
       </ul>

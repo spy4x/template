@@ -17,7 +17,7 @@ import {
   type UserPushTokenPublic,
 } from "@domain/identity"
 import { GroupRole } from "@domain/groups"
-import { type AccountDeleteProps, BLOCKER_HINTS } from "./account-delete.tsx"
+import type { AccountDeleteProps } from "./account-delete.tsx"
 import { AuthScreen } from "./auth-screen.tsx"
 import {
   EMAIL_FAILURES,
@@ -579,8 +579,19 @@ describe("deleting the account from the profile", () => {
   it("lists each blocking group as a link to its settings with what it needs, and asks for no password", async () => {
     const navigate = spy<[string]>()
     const blockers = [
-      { groupId: "g-1", name: "Family", reason: AccountDeletionBlockReason.Members },
-      { groupId: "g-2", name: "Shop", reason: AccountDeletionBlockReason.Subscription },
+      { groupId: "g-1", name: "Family", reason: AccountDeletionBlockReason.Members, endsAt: null },
+      {
+        groupId: "g-2",
+        name: "Shop",
+        reason: AccountDeletionBlockReason.Subscription,
+        endsAt: null,
+      },
+      {
+        groupId: "g-3",
+        name: "Club",
+        reason: AccountDeletionBlockReason.PlanEnding,
+        endsAt: "2026-11-20T12:00:00.000Z",
+      },
     ]
     await mount(withDeletion({ blockers }, { navigate: navigate.fn }))
     await openDeletion()
@@ -589,11 +600,18 @@ describe("deleting the account from the profile", () => {
     expect(items.map((item) => item.querySelector("a")?.getAttribute("href"))).toEqual([
       GROUP_PATHS.settings("g-1"),
       GROUP_PATHS.settings("g-2"),
+      GROUP_PATHS.settings("g-3"),
     ])
     expect(items.map((item) => item.textContent)).toEqual([
-      `Family${BLOCKER_HINTS[AccountDeletionBlockReason.Members]}`,
-      `Shop${BLOCKER_HINTS[AccountDeletionBlockReason.Subscription]}`,
+      "FamilyOther people still use it. Hand it over or remove them.",
+      "ShopIts plan is still paid. Cancel the plan first.",
+      `ClubIts plan is cancelled and runs until ${
+        new Date("2026-11-20T12:00:00.000Z").toLocaleDateString(undefined, { dateStyle: "long" })
+      }. Wait until the plan ends.`,
     ])
+    // A tap target of 44 px on a phone.
+    expect(items.map((item) => item.querySelector("a")!.classList.contains("min-h-11")))
+      .toEqual([true, true, true])
     expect(document.querySelector("[data-e2e=account-delete-password]")).toBeNull()
     expect(document.querySelector("[data-e2e=account-delete-submit]")).toBeNull()
 

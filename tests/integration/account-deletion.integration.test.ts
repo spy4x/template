@@ -435,7 +435,12 @@ Deno.test("deleting one's own account", async (t) => {
         const response = await app.request("/delete", { body: {}, cookie: hal.cookie })
 
         expect(await response.json()).toEqual({
-          blockers: [{ groupId, name: "Hal's club", reason: AccountDeletionBlockReason.Members }],
+          blockers: [{
+            groupId,
+            name: "Hal's club",
+            reason: AccountDeletionBlockReason.Members,
+            endsAt: null,
+          }],
         })
         expect((await app.request("/me", { cookie: hal.cookie })).status).toBe(200)
         expect(await sql`SELECT 1 FROM account_deletions WHERE user_id = ${hal.id}`).toEqual([])
@@ -474,6 +479,31 @@ Deno.test("deleting one's own account", async (t) => {
           groupId: personal.id,
           name: personal.name,
           reason: AccountDeletionBlockReason.Subscription,
+          endsAt: null,
+        }],
+      })
+    })
+
+    await t.step("names the day a plan cancelled at the end of its period ends", async () => {
+      const liz = await signUp(app, "liz")
+      const [personal] = await sql<{ id: string; name: string }[]>`
+        SELECT id, name FROM groups WHERE owner_user_id = ${liz.id}
+      `
+      await sql`
+        INSERT INTO subscriptions (group_id, provider_subscription_id, plan_id, status,
+          provider_event_at, provider_event_rank, current_period_end, cancel_at_period_end)
+        VALUES (${personal.id}, 'sub_liz', 'pro', ${BillingStatus.Active}, now(), 1,
+          '2030-05-17T09:30:00Z', true)
+      `
+
+      const response = await app.request("/delete", { body: {}, cookie: liz.cookie })
+
+      expect(await response.json()).toEqual({
+        blockers: [{
+          groupId: personal.id,
+          name: personal.name,
+          reason: AccountDeletionBlockReason.PlanEnding,
+          endsAt: "2030-05-17T09:30:00.000Z",
         }],
       })
     })

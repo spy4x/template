@@ -155,6 +155,8 @@ export enum AccountDeletionBlockReason {
   Members = 1,
   /** Its subscription is not cancelled: cancel it first, or the provider keeps charging. */
   Subscription = 2,
+  /** Its subscription is cancelled but runs until the end of the paid period: wait for that. */
+  PlanEnding = 3,
 }
 
 /** A group the person owns that must be dealt with before their account can be deleted. */
@@ -162,6 +164,8 @@ export interface AccountDeletionBlocker {
   groupId: string
   name: string
   reason: AccountDeletionBlockReason
+  /** When its plan ends, as an ISO timestamp, for {@link AccountDeletionBlockReason.PlanEnding}. */
+  endsAt: string | null
 }
 
 /** `GET /api/auth/account/deletion`: what stops the account from being deleted now. */

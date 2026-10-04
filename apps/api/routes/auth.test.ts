@@ -1218,6 +1218,7 @@ describe("deleting one's own account", () => {
     groupId: "8c3f1d9e-6b2a-4c5d-9e8f-0a1b2c3d4e5f",
     name: "Family",
     reason: AccountDeletionBlockReason.Members,
+    endsAt: null,
   }
   /** A session of a user with two-factor on, who gave the code at sign-in. */
   const twoFactorAuth = () =>
