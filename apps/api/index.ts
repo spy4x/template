@@ -58,6 +58,7 @@ import {
   subscribersOffWarning,
 } from "@server/subscribers/subscribers.ts"
 import { createPostgresSubscriberStore } from "@spy4x/server/subscribers/postgres"
+import { createErrorReporter } from "@platform/error-reporter.ts"
 import "./cqrs/+init.ts"
 
 const REALTIME_REVALIDATE_INTERVAL_MS = 15_000
@@ -67,7 +68,19 @@ const mailWarning = mailOffWarning(readMailSetup(Deno.env))
 if (mailWarning) log(mailWarning)
 
 const app = new Hono<APIContext>().basePath("/api")
-applyBaseMiddleware(app, { write: log, parseAuth })
+// Without ERROR_REPORT_DSN the reporter is off and sends nothing.
+const errorReporter = createErrorReporter({
+  dsn: config.errorReportDsn,
+  environment: config.env,
+  // 100 an hour, not 100 for the life of the process, so a flood is capped and a later error still shows.
+  maxPerSession: 100,
+  windowMs: 60 * 60 * 1000,
+})
+applyBaseMiddleware(app, {
+  write: log,
+  parseAuth,
+  reportError: (error, context) => void errorReporter.report(error, context),
+})
 
 app.route(
   "/health",

@@ -55,6 +55,52 @@ Defined in `infra/compose/`:
   build in use); change a pin on purpose, not by a moving `latest`.
 - Traefik router, service and middleware names all end in `-${PROJECT}`.
 
+## Error tracking
+
+Unhandled errors in the browser and in the API reach an error tracker that groups them, shows the
+stack trace and alerts. The tracker is [GlitchTip](https://glitchtip.com) (MIT licence, speaks
+Sentry's protocol, runs on Postgres and Valkey). Any Sentry-compatible tracker works, because the
+app only needs a DSN.
+
+**In the app.** `libs/platform/error-reporter.ts` is a small reporter that posts Sentry's envelope
+format, about 270 lines and no dependency, instead of the 30 KB `@sentry/browser`.
+
+- The SPA reports `error` and `unhandledrejection` events and the errors its `ErrorBoundary`
+  catches (`apps/spa/src/error-reporting.ts`). The MPA has no client script, so it reports nothing.
+- The API's base middleware (`apps/api/base-middleware.ts`) logs and reports every error answered
+  with status 500 or more, with the request id, the method and the path. That includes an error a
+  route's own `onError` answered; the answer is unchanged. It never sends a query string, a header
+  or a body. An `HTTPException` below 500 is an answer, not a failure, and is not reported.
+- A report never carries cookies, headers, form values, query strings or fragments. Free text (the
+  message, the stack) has URLs cut to their path and values named like `password`, `token`,
+  `cookie`, `api_key` or `Bearer …` masked; the rest of an `Authorization`, `Cookie` or
+  `Set-Cookie` line, a relative path's query and a bare JWT are masked too. The SPA also masks `/invite/<token>`.
+- Reporting is capped (20 reports per page load, 100 per hour in the API process) and fails open: a tracker
+  that is down never changes what a person sees.
+- **No DSN, no reporting:** with `ERROR_REPORT_DSN` (API) and `SPA_ERROR_REPORT_DSN` (browser
+  bundle, baked in at build time) empty, nothing is sent and no request is made. A browser DSN is
+  public by design; give the SPA its own GlitchTip project so a leaked key can only add noise.
+
+**Where GlitchTip runs.** Both layouts need only the two DSN variables.
+
+| Layout | Use when | Cost |
+| ------ | -------- | ---- |
+| External, one instance shared by several projects | You run more than one project on a host. The default. | One more thing to keep up, shared by all |
+| Bundled, an optional Compose profile of this project | One project runs alone on its host | Its own web and worker containers, and a database and cache of its own |
+
+The bundled profile is not in `infra/compose` yet: this template does not deploy GlitchTip. To
+bring one up, use GlitchTip's own Compose file, point its database at this project's Postgres (a
+separate database and user) and its cache at Valkey, and put it behind Traefik with the same router
+pattern as Grafana. Create two projects (API, SPA) and put their DSNs in the env file.
+
+**Source maps.** The SPA build does not produce source maps, so a browser stack trace shows the
+minified bundle. To get readable traces: set `build.sourcemap: "hidden"` in
+`apps/spa/vite.config.ts`, upload `apps/spa/dist/**/*.map` for the release with `sentry-cli
+sourcemaps upload` (GlitchTip accepts it) in the deploy step, and delete the `.map` files before
+the image is built, so they are never served. The release name must match the `release` option of
+the reporter, which the SPA does not set yet. This is not wired in: it needs a running GlitchTip to
+verify.
+
 ## Deployment
 
 Docker Compose for both local development and single-node production. Scaling is

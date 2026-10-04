@@ -33,6 +33,7 @@ services:
     user: "0:0"  # Run as root in dev mode for Podman compatibility
     environment:
       - VITE_ENV=dev
+      - VITE_ERROR_REPORT_DSN=${SPA_ERROR_REPORT_DSN:-}
     build:
       dockerfile: apps/spa/dockerfile.dev
       args:

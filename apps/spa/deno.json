@@ -5,6 +5,8 @@
     "dev": "deno run -A --node-modules-dir=auto npm:vite@7.3.6 ."
   },
   "imports": {
+    // A browser DOM for the error boundary's test: the version libs/ui already uses.
+    "happy-dom": "npm:happy-dom@20.14.5",
     "@deno/vite-plugin": "npm:@deno/vite-plugin@1.0.6",
     "@preact/preset-vite": "npm:@preact/preset-vite@2.10.2",
     // Server-renders a view in its test: the version libs/ui already uses.

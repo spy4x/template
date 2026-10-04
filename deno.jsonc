@@ -4,6 +4,7 @@
     "./apps/spa",
     "./apps/mpa",
     "./apps/worker",
+    "./libs/platform",
     "./libs/domain/billing",
     "./libs/domain/groups",
     "./libs/domain/identity",
@@ -130,6 +131,7 @@
     "@server/notifications/": "./libs/server/notifications/",
     "@server/subscribers/": "./libs/server/subscribers/",
     "@client/vite/": "./libs/client/vite/",
+    "@platform/": "./libs/platform/",
     // #endregion Aliases
 
     // #region Dependencies
