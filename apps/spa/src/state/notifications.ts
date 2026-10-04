@@ -104,8 +104,19 @@ export function createNotificationsStore(dependencies: NotificationDependencies)
     }
   }
 
+  /**
+   * Drops every read still on its way: its answer was asked for before this write and could undo
+   * what the write shows. The spinners go with it, as a dropped read never clears them itself.
+   */
+  function supersedeReads(): void {
+    reads++
+    loading.value = false
+    loadingMore.value = false
+  }
+
   /** Marks one read: it shows as read at once, and the server's count replaces the bell's. */
   async function markRead(id: string): Promise<void> {
+    supersedeReads()
     const readAt = new Date().toISOString()
     const before = notifications.value
     notifications.value = before.map((n) => n.id === id && n.readAt === null ? { ...n, readAt } : n)
@@ -119,6 +130,7 @@ export function createNotificationsStore(dependencies: NotificationDependencies)
 
   /** Marks every notification read. */
   async function markAllRead(): Promise<void> {
+    supersedeReads()
     const readAt = new Date().toISOString()
     const before = notifications.value
     notifications.value = before.map((n) => n.readAt === null ? { ...n, readAt } : n)

@@ -103,6 +103,28 @@ describe("notifications store", () => {
     expect(store.unreadCount.value).toBe(1)
   })
 
+  it("keeps a notification shown as read when a page asked for earlier answers after it", async () => {
+    const stale = deferred<NotificationPageResult>()
+    let reads = 0
+    const store = createNotificationsStore(dependencies({
+      list: () =>
+        ++reads === 1
+          ? Promise.resolve({ notifications: [row(2), row(1)], nextCursor: null, unreadCount: 2 })
+          : stale.promise,
+      markRead: () => Promise.resolve(1),
+    }))
+    await store.open()
+
+    const refreshing = store.refresh()
+    await store.markRead("2")
+    stale.resolve({ notifications: [row(2), row(1)], nextCursor: null, unreadCount: 2 })
+    await refreshing
+
+    expect(store.notifications.value.find((n) => n.id === "2")?.readAt).not.toBeNull()
+    expect(store.unreadCount.value).toBe(1)
+    expect(store.loading.value).toBe(false)
+  })
+
   it("puts a notification back to unread and says why when the server refuses to mark it", async () => {
     const store = createNotificationsStore(dependencies({
       list: () => Promise.resolve({ notifications: [row(1)], nextCursor: null, unreadCount: 1 }),
