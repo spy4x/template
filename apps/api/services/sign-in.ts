@@ -31,6 +31,12 @@
  *   `auth_audits` row inside the transaction that changes the session, so a failed row undoes the
  *   action. Sign-in checks the password with the package's `checkCredentials` first and creates
  *   the session itself, so the transaction holds no connection while a hash is verified.
+ * - **Signed-in devices (#151).** Every new session records a device name parsed once from the user
+ *   agent and the address with its last part hidden, in the transaction that creates it when there
+ *   is one; requests and live sockets record when it was last used, at most every few minutes. A
+ *   person lists their live sessions and ends any other one, or all others, which deletes their
+ *   rows: every statement names the user, so another person's session is out of reach and looks
+ *   missing. A password change ends every other session unless the person asks to keep them.
  * - **Deleting the account (#144).** `deleteAccount` soft-deletes the profile, writes the waiting
  *   request with its two jobs and signs out every session, in one transaction, after checking
  *   again under row locks that no group stops it (`@server/auth/account-deletion.ts`). A correct
@@ -70,12 +76,14 @@ import {
 import { EmailCodeError } from "@spy4x/server/auth/email-code"
 import {
   createPasswordSignIn,
+  DEFAULT_MIN_PASSWORD_LENGTH,
   PASSWORD_METHOD,
   type PasswordSignIn,
   PasswordSignInError,
   type PasswordSignInOptions,
 } from "@spy4x/server/auth/password"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
+import type { MiddlewareHandler } from "hono"
 import { GroupError } from "@domain/groups"
 import {
   type AccountDeletionBlocker,
@@ -83,6 +91,7 @@ import {
   AuthAuditEventType,
   type EmailStatus,
   emailToVerify,
+  type SignedInDevice,
   type User,
   UserMFAStatus,
   UserRole,
@@ -90,6 +99,8 @@ import {
 import type { AppDbBase } from "./db-base.ts"
 import { consumePasswordReset } from "@server/auth/password-reset.ts"
 import { passwordKeyOf, proveEmailCode, readEmailStatus } from "@server/auth/email-verification.ts"
+import { deviceName, ipHint } from "@server/auth/session-device.ts"
+import type { SessionDevice } from "@server/auth/sessions.ts"
 
 /** Longest username, in characters (code points), after normalisation. */
 export const USERNAME_MAX_LENGTH = 50
@@ -198,14 +209,16 @@ export interface SignIn {
    */
   disconnectTotp(state: AppAuthState): Promise<boolean>
   /**
-   * Replaces the password, signs out every other session and sets the new session's cookie.
-   * `false` when the current password is wrong.
+   * Replaces the password. With `signOutOthers` (the default) it also signs out every other session
+   * and gives this one a new session and cookie; without it every session stays as it is. `false`
+   * when the current password is wrong or the new one is refused.
    */
   changePassword(
     c: Context,
     state: AppAuthState,
     password: string,
     newPassword: string,
+    signOutOthers?: boolean,
   ): Promise<boolean>
   /**
    * Spends the reset code for `email` and, when it was the live one, proves the address, replaces
@@ -256,6 +269,16 @@ export interface SignIn {
   verifyEmail(c: Context, state: AppAuthState, code: string): Promise<EmailVerifyOutcome>
   /** Marks every active session that has run out as expired. */
   expireSessions(): Promise<void>
+  /** The user's live sessions, this one first, then the rest by when they were last used. */
+  listSessions(state: AppAuthState): Promise<SignedInDevice[]>
+  /**
+   * Ends session `sessionId` of the user by deleting it, with an audit row, in one transaction.
+   * `false` when the user has no such session, the answer for another person's session too, and
+   * for the request's own session, which signs out instead.
+   */
+  endSession(c: Context, state: AppAuthState, sessionId: number): Promise<boolean>
+  /** Ends every session of the user but this one, with an audit row. Returns how many ended. */
+  endOtherSessions(c: Context, state: AppAuthState): Promise<number>
   /**
    * The session and its user as they are now, or `null` when the session may no longer act: it was
    * signed out or expired, its user is gone, or it still owes a second factor. The rules are the
@@ -299,6 +322,14 @@ function auditRow(
   }
 }
 
+/** The device a request comes from, as a new session records it. */
+function deviceOf(c: Context): SessionDevice {
+  // Only `X-Real-IP`: Traefik rewrites it, but passes a client's `CF-Connecting-IP` through, so
+  // trusting every header would let a client choose the address shown for its session.
+  const request = requestInfoFromContext(c, { trustedProxy: "x-real-ip" })
+  return { deviceName: deviceName(request.userAgent), ipHint: ipHint(request.ip) }
+}
+
 /** Builds the app's sign-in over the package building blocks. */
 export function createSignIn(options: SignInOptions): SignIn {
   const { db } = options
@@ -328,12 +359,35 @@ export function createSignIn(options: SignInOptions): SignIn {
   }
   const hasSecondFactor = (user: User) => user.mfa === UserMFAStatus.CONFIGURED
 
-  const auth = createAuth<AuthSessionRecord, User>({
+  const packageAuth = createAuth<AuthSessionRecord, User>({
     sessions,
     cookie,
     loadUser,
     hasSecondFactor,
   })
+
+  /**
+   * Records that a session was used, for the devices list, without making the caller wait. A
+   * failed write is logged and the request goes on: the time it shows is a convenience, never a
+   * reason to refuse or slow anyone.
+   */
+  function touchSession(sessionId: number): void {
+    db.sessionDevices.touch(sessionId).catch((error) => {
+      console.error("error: cannot record when a session was last used", error)
+    })
+  }
+
+  // The package's middleware, then the time of use of a valid session.
+  const parseAuth: MiddlewareHandler<{ Variables: { auth: AppAuthState | null } }> = async (
+    c,
+    next,
+  ) =>
+    await packageAuth.parseAuth(c, async () => {
+      const state = c.get("auth")
+      if (state) touchSession(state.session.id)
+      await next()
+    })
+  const auth: Auth<AuthSessionRecord, User> = { ...packageAuth, parseAuth }
 
   /** What `secondFactorFor` answers for the auth user's `users` row, or `null` without one. */
   const secondFactorFrom =
@@ -414,6 +468,32 @@ export function createSignIn(options: SignInOptions): SignIn {
     ),
   })
 
+  /**
+   * Replaces the password of `userId` and leaves every session as it is: a password change where
+   * the person chose to stay signed in elsewhere. Checks the current password as `checkPassword`
+   * does, refuses a new one shorter than the package's minimum as its own change does, and hashes
+   * the new one before writing, so a refused password changes nothing.
+   */
+  async function replacePasswordOnly(
+    userId: number,
+    password: string,
+    newPassword: string,
+  ): Promise<boolean> {
+    // Code points, as the package counts them: the route schema counts UTF-16 units, so four
+    // emoji pass it.
+    if ([...newPassword].length < DEFAULT_MIN_PASSWORD_LENGTH) return false
+    const key = await passwordKeyOf(db.authStore, userId)
+    if (!key?.secret || !(await hasher.verify(password, key.secret)).valid) return false
+    let secret: string
+    try {
+      secret = await hasher.hash(newPassword)
+    } catch (error) {
+      if (error instanceof RangeError || error instanceof TypeError) return false
+      throw error
+    }
+    return await db.authStore.updateKeySecret(key.id, secret)
+  }
+
   return {
     auth,
 
@@ -458,6 +538,7 @@ export function createSignIn(options: SignInOptions): SignIn {
             lastLoginAt: new Date(),
           })
           await tx.group.createFirst({ id: firstGroupId, name: "Personal" }, user.id)
+          await tx.sessionDevices.record(signedUp.session.session.id, deviceOf(c))
           await tx.authAudit.insert(
             auditRow(c, user.id, AuthAuditEventType.SIGNED_UP, normalizeEmail(rawEmail)),
           )
@@ -500,6 +581,7 @@ export function createSignIn(options: SignInOptions): SignIn {
           keyId: checked.key.id,
           secondFactor,
         })
+        await tx.sessionDevices.record(started.session.id, deviceOf(c))
         // A deleted row takes no update; the code that restores it comes later.
         const user = waiting ?? await tx.user.updateOne({
           id: checked.user.id,
@@ -624,7 +706,8 @@ export function createSignIn(options: SignInOptions): SignIn {
       }
     },
 
-    async changePassword(c, { user }, password, newPassword) {
+    async changePassword(c, { user }, password, newPassword, signOutOthers = true) {
+      if (!signOutOthers) return await replacePasswordOnly(user.id, password, newPassword)
       let result
       try {
         result = await changePasswords.changePassword({
@@ -636,6 +719,8 @@ export function createSignIn(options: SignInOptions): SignIn {
         if (error instanceof PasswordSignInError) return false
         throw error
       }
+      // The package created this device's new session outside any transaction of ours.
+      await db.sessionDevices.record(result.session.session.id, deviceOf(c))
       await cookie.set(c, result.session.session, result.session.cookieValue)
       return true
     },
@@ -788,6 +873,7 @@ export function createSignIn(options: SignInOptions): SignIn {
             ? SecondFactorStatus.Completed
             : SecondFactorStatus.NotRequired,
         })
+        await tx.sessionDevices.record(created.session.id, deviceOf(c))
         await tx.authStore.deleteKey(user.id, key.id)
         await tx.emailChange.remove(user.id)
         return { outcome: EmailVerifyOutcome.Verified, created }
@@ -806,9 +892,47 @@ export function createSignIn(options: SignInOptions): SignIn {
       if (session.expiresAt.getTime() <= Date.now()) return null
       const user = await loadUser(session.userId)
       if (!user) return null
-      return secondFactorSatisfied(session.secondFactor, hasSecondFactor(user))
-        ? { session, user }
-        : null
+      if (!secondFactorSatisfied(session.secondFactor, hasSecondFactor(user))) return null
+      // A live socket counts as use, so a tab that only talks over it is not shown as idle.
+      touchSession(session.id)
+      return { session, user }
+    },
+
+    async listSessions({ session }) {
+      const rows = await db.sessionDevices.listLive(session.userId)
+      const devices = rows.map((row): SignedInDevice => ({
+        id: row.id,
+        deviceName: row.deviceName,
+        ipHint: row.ipHint,
+        createdAt: row.createdAt.toISOString(),
+        lastUsedAt: row.lastUsedAt.toISOString(),
+        current: row.id === session.id,
+      }))
+      // `sort` is stable: the rest keep the database's order, last used first.
+      return devices.sort((a, b) => Number(b.current) - Number(a.current))
+    },
+
+    async endSession(c, { session, user }, sessionId) {
+      if (sessionId === session.id) return false
+      return await db.begin(async (tx) => {
+        if (!(await tx.sessionDevices.deleteOwn(user.id, sessionId))) return false
+        await tx.authAudit.insert(
+          auditRow(c, user.id, AuthAuditEventType.SESSIONS_ENDED, String(sessionId)),
+        )
+        return true
+      })
+    },
+
+    async endOtherSessions(c, { session, user }) {
+      return await db.begin(async (tx) => {
+        const ended = await tx.sessionDevices.deleteOthers(user.id, session.id)
+        if (ended > 0) {
+          await tx.authAudit.insert(
+            auditRow(c, user.id, AuthAuditEventType.SESSIONS_ENDED, "all other sessions"),
+          )
+        }
+        return ended
+      })
     },
   }
 }

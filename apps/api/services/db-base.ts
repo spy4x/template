@@ -25,6 +25,14 @@ import {
   scheduleAccountRestoredMail,
 } from "@server/jobs/account-deletion.ts"
 import type { AccountDeletionBlocker } from "@domain/identity"
+import {
+  deleteOtherSessions,
+  deleteOwnSession,
+  listLiveSessions,
+  recordSessionDevice,
+  type SessionDevice,
+  touchSession,
+} from "@server/auth/sessions.ts"
 
 /** A user's authenticator-app enrolment, one row of `user_totp`. */
 export interface UserTotp {
@@ -126,6 +134,27 @@ export class AppDbBase extends DbServiceBase {
   /** The `@spy4x/server` session store over `auth_sessions`. Built per access, like `group`. */
   get sessionStore(): SessionStore<AuthSessionRecord> {
     return createPostgresSessionStore(this.sql)
+  }
+
+  /**
+   * What the devices list shows about the sessions, and ending them (`@server/auth/sessions.ts`).
+   * Built per access, like `group`, so inside `begin()` it writes through the transaction.
+   */
+  get sessionDevices() {
+    const sql = this.sql
+    return {
+      /** Records the device on a session just created. */
+      record: (sessionId: number, device: SessionDevice) =>
+        recordSessionDevice(sql, sessionId, device),
+      /** Records that the session was used now, at most every few minutes. */
+      touch: (sessionId: number) => touchSession(sql, sessionId),
+      /** The user's sessions that can still act, last used first. */
+      listLive: (userId: number) => listLiveSessions(sql, userId),
+      /** Deletes the user's own session; `false` when the user has no such session. */
+      deleteOwn: (userId: number, sessionId: number) => deleteOwnSession(sql, userId, sessionId),
+      /** Deletes every session of the user but `keepId`; returns how many. */
+      deleteOthers: (userId: number, keepId: number) => deleteOtherSessions(sql, userId, keepId),
+    }
   }
 
   /**

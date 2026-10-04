@@ -131,6 +131,8 @@ export function emailToVerify(status: EmailStatus): string | null {
 
 export const authPasswordChangeSchema = authPasswordSchema.and({
   newPassword: "8 <= string <= 50",
+  /** Ends every other session of the person once the password changed. Left out means `true`. */
+  "signOutOthers?": "boolean",
 })
 export type AuthPasswordChange = typeof authPasswordChangeSchema.infer
 
@@ -202,6 +204,8 @@ export enum AuthAuditEventType {
   ACCOUNT_DELETION_REQUESTED = 5,
   /** The person signed in while their account waited for deletion, which restored it. */
   ACCOUNT_RESTORED = 6,
+  /** The person ended one of their other sessions, or all of them, from the devices list. */
+  SESSIONS_ENDED = 7,
 }
 
 export const authAuditBaseSchema = type({
@@ -213,6 +217,7 @@ export const authAuditBaseSchema = type({
     AuthAuditEventType.PROFILE_UPDATED,
     AuthAuditEventType.ACCOUNT_DELETION_REQUESTED,
     AuthAuditEventType.ACCOUNT_RESTORED,
+    AuthAuditEventType.SESSIONS_ENDED,
   ),
   identifier: "string <= 320 | null = null",
   ip: "string <= 45 | null = null",
@@ -246,6 +251,26 @@ export type PushSubscribeResponse = {
 export type TotpConnectStartResponse = {
   qrcode: string
   secret: string
+}
+
+/** One device the person is signed in on, as `GET /api/auth/sessions` lists it (#151). */
+export interface SignedInDevice {
+  id: number
+  /** "Firefox on Linux", worked out once at sign-in; "Unknown device" when nothing was recognised. */
+  deviceName: string
+  /** The sign-in address with its last part hidden (`203.0.113.*`), or `null` when unknown. */
+  ipHint: string | null
+  /** ISO 8601. When the device signed in. */
+  createdAt: string
+  /** ISO 8601. The last time the device used the session, to within a few minutes. */
+  lastUsedAt: string
+  /** The session of the request that asked: this device. */
+  current: boolean
+}
+
+/** The answer of `GET /api/auth/sessions`: this device first, then the rest, last used first. */
+export interface SignedInDevicesResponse {
+  sessions: SignedInDevice[]
 }
 
 // The four response shapes below have no @spy4x/platform/api counterpart: they name this app's

@@ -67,6 +67,12 @@ CREATE TABLE auth_sessions (
   second_factor smallint NOT NULL,
   expires_at timestamptz NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
+  -- #151: "Firefox on Linux", the address with its last part hidden, the last time it was used.
+  device_name text NOT NULL DEFAULT '',
+  ip_hint text,
+  last_used_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT auth_sessions_device_name_check CHECK (length(device_name) <= 100),
+  CONSTRAINT auth_sessions_ip_hint_check CHECK (length(ip_hint) <= 45),
   CONSTRAINT auth_sessions_key_fkey FOREIGN KEY (key_id, user_id)
     REFERENCES auth_keys (id, user_id) ON DELETE CASCADE,
   CONSTRAINT auth_sessions_status_check CHECK (status IN (1, 2, 3)),

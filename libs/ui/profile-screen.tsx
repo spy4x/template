@@ -4,6 +4,7 @@ import { encodeBase64 } from "@std/encoding"
 import { IconBell, IconLockClosed } from "@spy4x/preact-icons"
 import { Badge } from "@spy4x/preact-ui/badge"
 import { Button } from "@spy4x/preact-ui/button"
+import { Checkbox } from "@spy4x/preact-ui/checkbox"
 import { ConfirmDialog } from "@spy4x/preact-ui/confirm-dialog"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
@@ -17,6 +18,7 @@ import { ACCOUNT_COLUMN } from "./frame.tsx"
 import { PageHeader, TOUCH_TARGET } from "./page-header.tsx"
 import { type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
+import { SignedInDevices, type SignedInDevicesProps } from "./signed-in-devices.tsx"
 import { useSucceeded } from "./use-succeeded.ts"
 import { TwoFactorStep, twoFactorStep } from "./two-factor.ts"
 
@@ -100,6 +102,15 @@ export interface ProfileScreenProps {
   onChangePassword?: () => void
   /** Drops what was typed in the password dialog and its errors, when the person closes it. */
   onCancelPassword?: () => void
+  /** Whether the password change also signs out every other device. */
+  signOutOthers?: boolean
+  /**
+   * Called when the person ticks or clears "Sign out of all other devices" in the password dialog.
+   * Without it the dialog has no such box.
+   */
+  onSignOutOthersChange?: (signOutOthers: boolean) => void
+  /** The "Signed-in devices" section, after Security. Without it the page has none. */
+  devices?: SignedInDevicesProps
   onStartTotp?: () => void
   onFinishTotp?: () => void
   /** Drops an enrolment under way, when the person closes the set-up dialog. */
@@ -121,7 +132,7 @@ export interface ProfileScreenProps {
 
 /**
  * The profile page as a list of settings: name and e-mail address, then password and two-factor
- * sign-in, then push devices. Each row shows its value and one action; a form opens in a dialog
+ * sign-in, then the signed-in devices, then push devices. Each row shows its value and one action; a form opens in a dialog
  * only when asked, and closes once its change went through. Turning two-factor off asks first.
  * Deleting the account sits last, in a closed "Danger zone".
  */
@@ -140,6 +151,9 @@ export function ProfileScreen(
     onCancelProfile,
     onChangePassword,
     onCancelPassword,
+    signOutOthers = true,
+    onSignOutOthersChange,
+    devices,
     onStartTotp,
     onFinishTotp,
     onCancelTotp,
@@ -350,6 +364,8 @@ export function ProfileScreen(
         {step !== TwoFactorStep.Confirm && <ErrorState message={errors.totp} />}
       </SettingGroup>
 
+      {devices && <SignedInDevices {...devices} />}
+
       <SettingGroup
         title="Push devices"
         description="Devices that get a notification when something changes."
@@ -520,6 +536,20 @@ export function ProfileScreen(
                 required
               />
             </Field>
+            {onSignOutOthersChange && (
+              // The row is the 44 px target: the whole label ticks the box.
+              <div class="flex min-h-11 items-center">
+                <Checkbox
+                  name="signOutOthers"
+                  value="true"
+                  data-e2e="password-sign-out-others"
+                  checked={signOutOthers}
+                  onChange={(e) => onSignOutOthersChange(e.currentTarget.checked)}
+                >
+                  Sign out of all other devices
+                </Checkbox>
+              </div>
+            )}
             <ErrorState message={errors.password} />
             <DialogButtons
               onCancel={cancelPassword}
