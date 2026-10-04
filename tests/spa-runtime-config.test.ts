@@ -25,21 +25,44 @@ function listed(text: string): { name: string; key: string }[] {
   })
 }
 
-/** Runs the script with exactly these variables and returns the parsed file it wrote. */
-async function runScript(env: Record<string, string>): Promise<Record<string, unknown>> {
-  const dir = await Deno.makeTempDir()
+/**
+ * A scratch folder under `tests/`, which the task grants: the OS temp folder moves with `TMPDIR`,
+ * which a permission flag cannot follow.
+ */
+function tempDir(): Promise<string> {
+  return Deno.makeTempDir({ dir: fromFileUrl(new URL(".", import.meta.url)), prefix: ".scratch-" })
+}
+
+interface Run {
+  code: number
+  stderr: string
+  /** The parsed file, or undefined when the script wrote none. */
+  config?: Record<string, unknown>
+}
+
+/** Runs the script with exactly these variables, on this allow list. */
+async function run(env: Record<string, string>, allow = ALLOW): Promise<Run> {
+  const dir = await tempDir()
   try {
     const out = `${dir}/config.json`
     const result = await new Deno.Command("sh", {
       args: [SCRIPT],
       clearEnv: true,
-      env: { PATH: "/usr/bin:/bin", ALLOW_FILE: ALLOW, OUT_FILE: out, ...env },
+      env: { PATH: "/usr/bin:/bin", ALLOW_FILE: allow, OUT_FILE: out, ...env },
     }).output()
-    expect(result.code).toBe(0)
-    return JSON.parse(await Deno.readTextFile(out))
+    const stderr = new TextDecoder().decode(result.stderr)
+    if (result.code !== 0) return { code: result.code, stderr }
+    return { code: 0, stderr, config: JSON.parse(await Deno.readTextFile(out)) }
   } finally {
     await Deno.remove(dir, { recursive: true })
   }
+}
+
+/** Runs the script, expects success and returns the parsed file it wrote. */
+async function runScript(env: Record<string, string>): Promise<Record<string, unknown>> {
+  const result = await run(env)
+  expect(result.code).toBe(0)
+  return result.config!
 }
 
 Deno.test("the allow list names no variable that looks like a secret", async () => {
@@ -81,4 +104,37 @@ Deno.test("a value with quotes and backslashes still gives valid JSON", async ()
 
 Deno.test("no variables give an empty object", async () => {
   expect(await runScript({})).toEqual({})
+})
+
+for (
+  const [label, value] of [
+    ["a tab", "a\tb"],
+    ["a trailing carriage return", "https://k@a.example/1\r"],
+    ["a newline", `line1\n","errorReportDsn":"https://evil@x.example/1`],
+    ["a bell character", "a\x07b"],
+  ]
+) {
+  Deno.test(`a value with ${label} stops the script and names the variable, not the value`, async () => {
+    const result = await run({ SPA_ERROR_REPORT_DSN: value, SPA_ENV: "prod" })
+
+    expect(result.code).not.toBe(0)
+    expect(result.config).toBeUndefined()
+    expect(result.stderr).toContain("SPA_ERROR_REPORT_DSN")
+    expect(result.stderr).not.toContain("evil")
+    expect(result.stderr).not.toContain("a.example")
+  })
+}
+
+Deno.test("the last allow list line counts without a trailing newline", async () => {
+  const dir = await tempDir()
+  try {
+    const allow = `${dir}/allow`
+    await Deno.writeTextFile(allow, "SPA_ENV env\nSPA_ERROR_REPORT_DSN errorReportDsn")
+
+    const result = await run({ SPA_ENV: "p", SPA_ERROR_REPORT_DSN: "d" }, allow)
+
+    expect(result.config).toEqual({ env: "p", errorReportDsn: "d" })
+  } finally {
+    await Deno.remove(dir, { recursive: true })
+  }
 })

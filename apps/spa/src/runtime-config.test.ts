@@ -3,13 +3,18 @@ import { describe, it } from "@std/testing/bdd"
 import { loadRuntimeConfig } from "./runtime-config.ts"
 import { startErrorReporting } from "./error-reporting.ts"
 
-function serving(body: string, status = 200): { fetcher: typeof fetch; urls: string[] } {
+function serving(
+  body: string,
+  status = 200,
+): { fetcher: typeof fetch; urls: string[]; inits: (RequestInit | undefined)[] } {
   const urls: string[] = []
-  const fetcher = ((url: string) => {
+  const inits: (RequestInit | undefined)[] = []
+  const fetcher = ((url: string, init?: RequestInit) => {
     urls.push(url)
+    inits.push(init)
     return Promise.resolve(new Response(body, { status }))
   }) as unknown as typeof fetch
-  return { fetcher, urls }
+  return { fetcher, urls, inits }
 }
 
 /** Runs `run` with `console.warn` captured, so a fallback's warning is checked, not printed. */
@@ -34,6 +39,14 @@ describe("the SPA's runtime configuration", () => {
 
     expect(config).toEqual({ env: "stag", errorReportDsn: "https://k@tracker.example/1" })
     expect(urls).toEqual(["/config.json"])
+  })
+
+  it("asks the network, not the browser's HTTP cache", async () => {
+    const { fetcher, inits } = serving(`{}`)
+
+    await loadRuntimeConfig(fetcher)
+
+    expect(inits[0]?.cache).toBe("no-store")
   })
 
   it("drops keys the schema does not name", async () => {
