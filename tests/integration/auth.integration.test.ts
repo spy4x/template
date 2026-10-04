@@ -42,6 +42,8 @@ const EMAIL_MIGRATION = "2026_10_08_0002_email_verification.sql"
 const AUDIT_IDENTIFIER_MIGRATION = "2026_10_10_0001_auth_audit_identifier_320.sql"
 /** Adds the group's description, colour and emoji, which every group read and write names. */
 const APPEARANCE_MIGRATION = "2026_10_18_0001_group_appearance.sql"
+/** Adds what a session remembers about its device, which every sign-in writes (#151). */
+const SESSION_DEVICES_MIGRATION = "2026_10_23_0002_auth_session_devices.sql"
 const MASTER_MIGRATIONS = [
   "2026_01_26_0001_init.sql",
   "2026_01_26_0002_auth_profiles_audit.sql",
@@ -78,6 +80,9 @@ async function withSchema(
     await applyMigration(sql, APPEARANCE_MIGRATION)
     await applyMigration(sql, "2026_10_19_0001_audit_activity.sql")
     await applyMigration(sql, "2026_10_22_0001_notifications.sql")
+    // The device columns need the package's session table; a test that starts before it applies
+    // this migration itself, right after the auth migration.
+    if (migrations.includes(AUTH_MIGRATION)) await applyMigration(sql, SESSION_DEVICES_MIGRATION)
     await body(sql)
   } finally {
     await sql.end({ timeout: 5 })
@@ -725,6 +730,7 @@ Deno.test("the auth migration applies on top of the previous schema", async () =
     await applyMigration(sql, AUTH_MIGRATION)
     // Every later migration runs before the next sign-up, as a deploy applies them in order.
     await applyMigration(sql, KIND_MIGRATION)
+    await applyMigration(sql, SESSION_DEVICES_MIGRATION)
 
     const [authUser] = await sql<{ id: number; createdAt: Date }[]>`
       SELECT id, created_at FROM auth_users

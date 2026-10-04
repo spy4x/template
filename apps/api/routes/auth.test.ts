@@ -7,7 +7,12 @@ import {
   type SignedIn,
   type SignIn,
 } from "../services/sign-in.ts"
-import { AccountDeletionBlockReason, type EmailStatus, UserMFAStatus } from "@domain/identity"
+import {
+  AccountDeletionBlockReason,
+  type EmailStatus,
+  type SignedInDevice,
+  UserMFAStatus,
+} from "@domain/identity"
 import type { UserSignedOutEvent } from "../cqrs/events.ts"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { buildAuthData } from "../_testing/fake-auth.ts"
@@ -42,10 +47,28 @@ import {
   EMAIL_TAKEN,
   PASSWORD_RESET_REFUSED,
   PASSWORD_RESET_REQUESTED,
+  SESSION_IS_CURRENT,
+  SESSION_NOT_FOUND,
 } from "./auth.ts"
 
 /** When the fake sign-in says a deleted account goes for good. */
 const DELETE_AFTER = new Date("2026-10-11T08:00:00.000Z")
+
+/** The device of the fake session (id 1), and another device of the same person. */
+const CURRENT_DEVICE: SignedInDevice = {
+  id: 1,
+  deviceName: "Firefox on Linux",
+  ipHint: "203.0.113.*",
+  createdAt: "2026-10-01T08:00:00.000Z",
+  lastUsedAt: "2026-10-04T08:00:00.000Z",
+  current: true,
+}
+const OTHER_DEVICE: SignedInDevice = {
+  ...CURRENT_DEVICE,
+  id: 2,
+  deviceName: "Safari on iPhone",
+  current: false,
+}
 
 /** An address the user still has to prove, and one already proven. */
 const UNPROVEN: EmailStatus = { email: "alice@example.com", proven: false, pending: null }
@@ -110,6 +133,11 @@ function fakeSignIn(
       calls.push("verifyEmail"),
         Promise.resolve(succeed ? EmailVerifyOutcome.Verified : EmailVerifyOutcome.WrongCode)
     ),
+    listSessions:
+      () => (calls.push("listSessions"), Promise.resolve([CURRENT_DEVICE, OTHER_DEVICE])),
+    // Without success the session is another user's or already gone.
+    endSession: () => (calls.push("endSession"), Promise.resolve(succeed)),
+    endOtherSessions: () => (calls.push("endOtherSessions"), Promise.resolve(1)),
     expireSessions: () => Promise.resolve(),
     entitledSession: () => Promise.resolve(null),
   }
@@ -308,6 +336,13 @@ const sessionRoutes: SessionRoute[] = [
       succeeded: ["accountDeletionBlockers", "checkPassword", "deleteAccount"],
       failed: ["accountDeletionBlockers", "checkPassword"],
     },
+  },
+  { method: "DELETE", path: "/auth/sessions/2", body: undefined, operation: "endSession" },
+  {
+    method: "DELETE",
+    path: "/auth/sessions/others",
+    body: undefined,
+    operation: "endOtherSessions",
   },
 ]
 
@@ -1353,5 +1388,148 @@ describe("deleting one's own account", () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ blockers: [blocker] })
+  })
+})
+
+describe("signed-in devices", () => {
+  const endRoute = (id: string) => ({
+    method: "DELETE",
+    path: `/auth/sessions/${id}`,
+    body: undefined,
+  })
+  const passwordRoute = (body: Record<string, unknown>) => ({
+    method: "POST",
+    path: "/auth/password/change",
+    body: { password: "correct-horse", newPassword: "battery-staple", ...body },
+  })
+
+  it("lists the person's devices on GET /auth/sessions", async () => {
+    const { app, calls } = buildApp()
+    const response = await app.request(`${API_URL}/auth/sessions`, {
+      headers: { ...sameOriginHeaders },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ sessions: [CURRENT_DEVICE, OTHER_DEVICE] })
+    expect(calls).toEqual(["listSessions"])
+  })
+
+  it("answers GET /auth/sessions without a session with 401 and reads nothing", async () => {
+    const { app, calls } = buildApp(null)
+    const response = await app.request(`${API_URL}/auth/sessions`, {
+      headers: { ...sameOriginWithoutCookieHeaders },
+    })
+
+    expect(response.status).toBe(401)
+    expect(calls).toEqual([])
+  })
+
+  it("refuses a session that still owes its authenticator code, and lists or ends nothing", async () => {
+    const owing = buildAuthData({
+      user: { mfa: UserMFAStatus.CONFIGURED },
+      session: { secondFactor: SecondFactorStatus.Pending },
+    })
+    const { app, calls } = buildApp(owing)
+    const listed = await app.request(`${API_URL}/auth/sessions`, {
+      headers: { ...sameOriginHeaders },
+    })
+    const ended = await send(app, endRoute("others"), sameOriginHeaders)
+
+    expect(listed.status).toBe(401)
+    expect(ended.status).toBe(401)
+    expect(calls).toEqual([])
+  })
+
+  it("ends another device's session and announces the sign-out so its socket closes", async () => {
+    let ended: number | null = null
+    const { app, emitted } = buildApp(undefined, {
+      signIn: { endSession: (_c, _state, id) => (ended = id, Promise.resolve(true)) },
+    })
+    const response = await send(app, endRoute("2"), sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(ended).toBe(2)
+    expect(emitted.map((event) => event.data.userId)).toEqual([1])
+  })
+
+  it("answers a session of someone else exactly like a missing one, and announces nothing", async () => {
+    const { app, emitted } = buildApp(undefined, { succeed: false })
+    const foreign = await send(app, endRoute("2"), sameOriginHeaders)
+    const missing = await send(app, endRoute("999999"), sameOriginHeaders)
+
+    expect(foreign.status).toBe(404)
+    expect(missing.status).toBe(404)
+    expect(await foreign.json()).toEqual({ error: SESSION_NOT_FOUND })
+    expect(await missing.json()).toEqual({ error: SESSION_NOT_FOUND })
+    expect(emitted).toEqual([])
+  })
+
+  it("refuses to end this device's own session, which signing out does", async () => {
+    const { app, calls, emitted } = buildApp()
+    const response = await send(app, endRoute("1"), sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: SESSION_IS_CURRENT })
+    expect(calls).toEqual([])
+    expect(emitted).toEqual([])
+  })
+
+  for (const id of ["0", "abc", "1.5", "-2", "01", "2147483648", "99999999999"]) {
+    it(`answers the id "${id}" with 404 without asking the database`, async () => {
+      const { app, calls } = buildApp()
+      const response = await send(app, endRoute(id), sameOriginHeaders)
+
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({ error: SESSION_NOT_FOUND })
+      expect(calls).toEqual([])
+    })
+  }
+
+  it("signs out every other device and announces it", async () => {
+    const { app, calls, emitted } = buildApp()
+    const response = await send(app, endRoute("others"), sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ success: true, ended: 1 })
+    expect(calls).toEqual(["endOtherSessions"])
+    expect(emitted.map((event) => event.data.userId)).toEqual([1])
+  })
+
+  it("announces nothing when there was no other device to sign out", async () => {
+    const { app, emitted } = buildApp(undefined, {
+      signIn: { endOtherSessions: () => Promise.resolve(0) },
+    })
+    const response = await send(app, endRoute("others"), sameOriginHeaders)
+
+    expect(await response.json()).toEqual({ success: true, ended: 0 })
+    expect(emitted).toEqual([])
+  })
+
+  it("signs the other devices out on a password change unless asked not to", async () => {
+    const asked: (boolean | undefined)[] = []
+    const { app, emitted } = buildApp(undefined, {
+      signIn: {
+        changePassword: (_c, _state, _old, _new, signOutOthers) => (
+          asked.push(signOutOthers), Promise.resolve(true)
+        ),
+      },
+    })
+    await send(app, passwordRoute({}), sameOriginHeaders)
+    expect(emitted).toHaveLength(1)
+    await send(app, passwordRoute({ signOutOthers: true }), sameOriginHeaders)
+    expect(emitted).toHaveLength(2)
+    const kept = await send(app, passwordRoute({ signOutOthers: false }), sameOriginHeaders)
+
+    expect(kept.status).toBe(200)
+    expect(asked).toEqual([true, true, false])
+    expect(emitted).toHaveLength(2)
+  })
+
+  it("refuses a sign-out choice that is not true or false", async () => {
+    const { app, calls } = buildApp()
+    const response = await send(app, passwordRoute({ signOutOthers: "yes" }), sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(calls).toEqual([])
   })
 })

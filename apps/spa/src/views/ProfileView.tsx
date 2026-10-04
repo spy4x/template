@@ -13,6 +13,9 @@ import { SCREEN_PATHS } from "@ui/progressive.tsx"
 import {
   changePassword,
   deleteAccount,
+  endOtherSessions,
+  endSession,
+  listSessions,
   readAccountDeletionBlockers,
   totpConnectFinish,
   totpConnectStart,
@@ -33,7 +36,8 @@ import {
   UserMFAStatus,
   userProfileBaseSchema,
 } from "@domain/identity"
-import type { PushPublicKeyResponse } from "@domain/identity"
+import type { PushPublicKeyResponse, SignedInDevice } from "@domain/identity"
+import { SESSIONS_FAILURE } from "@ui/signed-in-devices.tsx"
 
 const NO_DELETE_VALUES: AccountDeleteValues = { password: "", otp: "" }
 const NO_DELETE_ERRORS: AccountDeleteErrors = { form: null }
@@ -68,6 +72,19 @@ export function ProfileView() {
   const [deleteErrors, setDeleteErrors] = useState(NO_DELETE_ERRORS)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [blockers, setBlockers] = useState<AccountDeletionBlocker[] | null>(null)
+  const [signOutOthers, setSignOutOthers] = useState(true)
+  const [devices, setDevices] = useState<SignedInDevice[] | null>(null)
+  const [devicesError, setDevicesError] = useState<string | null>(null)
+  const [devicesBusy, setDevicesBusy] = useState(false)
+
+  /** Reads the signed-in devices again; a failure shows above the list and keeps the old one. */
+  const loadDevices = async () => {
+    const result = await listSessions()
+    if (result.ok) {
+      setDevices(result.sessions)
+      setDevicesError(null)
+    } else setDevicesError(result.error || SESSIONS_FAILURE)
+  }
 
   const setValue = (field: keyof ProfileValues, value: string) =>
     setValues((current) => ({ ...current, [field]: value }))
@@ -87,7 +104,25 @@ export function ProfileView() {
     apiFetch<PushPublicKeyResponse>("/api/push/public-key").then((res) => {
       if (res.ok) setPushPublicKey(res.data.publicKey)
     })
+    void loadDevices()
   }, [session.user?.id, session.isMfaRequired])
+
+  /** Runs one sign-out of other devices, then reads the list again. */
+  const endDevices = async (
+    end: () => Promise<{ ok: boolean; error?: string }>,
+    body: string,
+  ) => {
+    setDevicesError(null)
+    setDevicesBusy(true)
+    const result = await end()
+    setDevicesBusy(false)
+    await loadDevices()
+    if (!result.ok) {
+      setDevicesError(result.error || SESSIONS_FAILURE)
+      return
+    }
+    toasts.success({ title: "Signed out", body, dataE2E: "sessions-ended" })
+  }
 
   /**
    * Checks the values with the schema the API checks them with. Each refused field gets its message
@@ -122,16 +157,21 @@ export function ProfileView() {
     const { password: currentPassword, ...rest } = problems ?? {}
     if (!fieldsPass(problems && { currentPassword, ...rest })) return
     setBusyPassword(true)
-    const result = await changePassword(values.currentPassword, values.newPassword)
+    const result = await changePassword(values.currentPassword, values.newPassword, signOutOthers)
     setBusyPassword(false)
     if (!result.ok) {
       setPasswordError(result.error || PROFILE_FAILURES.password)
       return
     }
     setValues((current) => ({ ...current, currentPassword: "", newPassword: "" }))
+    setSignOutOthers(true)
+    // The change ends this device's session too and opens a new one: the list changes either way.
+    void loadDevices()
     toasts.success({
       title: "Password changed",
-      body: "Use the new password next time you sign in.",
+      body: signOutOthers
+        ? "Every other device was signed out. Use the new password next time you sign in."
+        : "Use the new password next time you sign in.",
       dataE2E: "password-saved",
     })
   }
@@ -277,6 +317,16 @@ export function ProfileView() {
         setPasswordError(null)
         setFieldErrors(({ currentPassword: _current, newPassword: _new, ...rest }) => rest)
         setValues((current) => ({ ...current, currentPassword: "", newPassword: "" }))
+        setSignOutOthers(true)
+      }}
+      signOutOthers={signOutOthers}
+      onSignOutOthersChange={setSignOutOthers}
+      devices={{
+        sessions: devices,
+        pending: devicesBusy,
+        error: devicesError,
+        onEnd: (id) => void endDevices(() => endSession(id), "That device was signed out."),
+        onEndOthers: () => void endDevices(endOtherSessions, "Every other device was signed out."),
       }}
       onStartTotp={startTotp}
       onFinishTotp={finishTotp}
