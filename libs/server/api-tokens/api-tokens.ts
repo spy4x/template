@@ -101,6 +101,8 @@ export interface ApiTokenRows {
    * exists, which is also the answer for another user's token.
    */
   deleteOwn(userId: number, tokenId: string): Promise<boolean>
+  /** Deletes every token of `userId`, as a password reset does, and answers how many it deleted. */
+  deleteAllOf(userId: number): Promise<number>
   /**
    * The token whose hash is `hash`, when it may act now: not expired, and its owner's account is
    * live. `null` otherwise. Membership of the group is not checked here: the handlers check the
@@ -125,9 +127,13 @@ export function apiTokenRows(sql: postgres.Sql): ApiTokenRows {
         WHERE group_members.group_id = ${input.groupId} AND group_members.user_id = ${input.userId}
       `
       if (!member) return { refused: "GROUP_NOT_FOUND" }
+      // The same set `listLive` shows: a token of a deleted group is neither listed nor counted.
+      // Restoring the group brings its tokens back, listed, counted and working.
       const [{ count }] = await sql<{ count: number }[]>`
         SELECT count(*)::int AS count FROM api_tokens
-        WHERE user_id = ${input.userId} AND (expires_at IS NULL OR expires_at > now())
+        INNER JOIN groups ON groups.id = api_tokens.group_id AND groups.deleted_at IS NULL
+        WHERE api_tokens.user_id = ${input.userId}
+          AND (api_tokens.expires_at IS NULL OR api_tokens.expires_at > now())
       `
       if (count >= API_TOKENS_MAX) return { refused: "TOO_MANY_TOKENS" }
       const [row] = await sql<ApiTokenRow[]>`
@@ -162,6 +168,11 @@ export function apiTokenRows(sql: postgres.Sql): ApiTokenRows {
         DELETE FROM api_tokens WHERE id = ${tokenId} AND user_id = ${userId} RETURNING id
       `
       return rows.length > 0
+    },
+
+    async deleteAllOf(userId) {
+      const rows = await sql`DELETE FROM api_tokens WHERE user_id = ${userId} RETURNING id`
+      return rows.length
     },
 
     async findLive(hash) {
