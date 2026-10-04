@@ -748,6 +748,17 @@ describe("GroupMembersSection", () => {
     expect(has("[data-e2e=group-member-remove-error]")).toBe(false)
   })
 
+  it("shows when a member was last seen, and nothing for a row without the field", async () => {
+    const seen: GroupMemberRow = {
+      ...editor,
+      lastSeenAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    }
+    await mount(<GroupMembersSection {...props} members={[owner, seen]} />)
+    expect(find('[data-user-id="2"] [data-e2e=group-member-last-seen]').textContent)
+      .toBe("Last seen 3 hours ago")
+    expect(has('[data-user-id="1"] [data-e2e=group-member-last-seen]')).toBe(false)
+  })
+
   it("moves focus to the next row's menu once a member is removed, else to the section's button", async () => {
     const kim: GroupMemberRow = { ...viewer, userId: 4, email: "kim@example.com" }
     const invite = <button type="button" data-e2e="invite-open">Invite people</button>

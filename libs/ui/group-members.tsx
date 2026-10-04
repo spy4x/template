@@ -1,5 +1,6 @@
 import type { ComponentChildren, JSX } from "preact"
 import { useRef, useState } from "preact/hooks"
+import { timeAgo } from "@spy4x/platform/universal/time"
 import { Avatar } from "@spy4x/preact-ui/avatar"
 import { Card } from "@spy4x/preact-ui/card"
 import { ConfirmDialog } from "@spy4x/preact-ui/confirm-dialog"
@@ -29,6 +30,11 @@ export interface GroupMemberRow {
    */
   email?: string | null
   role: GroupRole
+  /**
+   * When they were last active, as an ISO string, or `null` if not recorded. Like `email`, the API
+   * sends it only to the owner and admins, so for anyone else the row shows nothing.
+   */
+  lastSeenAt?: string | null
   /** When they joined, as an ISO string. */
   joinedAt: string
   /** Whether this member is the person looking at the page. */
@@ -196,6 +202,11 @@ function MemberItem(
           </span>
           {member.name.trim() && member.email && (
             <span class="truncate text-xs text-muted" title={member.email}>{member.email}</span>
+          )}
+          {member.lastSeenAt && (
+            <span class="text-xs text-muted" data-e2e="group-member-last-seen">
+              Last seen <time dateTime={member.lastSeenAt}>{timeAgo(member.lastSeenAt)}</time>
+            </span>
           )}
         </div>
         <span class="shrink-0 text-sm text-muted" data-e2e="group-member-role">

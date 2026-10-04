@@ -143,6 +143,32 @@ for (const [reader, sees] of Object.entries(SEES_ADDRESSES)) {
   )
 }
 
+for (const [reader, sees] of Object.entries(SEES_ADDRESSES)) {
+  Deno.test(
+    `members: ${
+      sees
+        ? `the ${reader} gets when every member was last seen`
+        : `the ${reader} gets no last-seen field`
+    }`,
+    async () => {
+      await withSchema(async (sql) => {
+        const people = await team(sql)
+        const { repository, groupId, editor } = people
+        await sql`UPDATE users SET last_seen_at = '2026-10-04T08:00:00Z' WHERE id = ${editor}`
+
+        const { members } =
+          (await repository.listMembers(groupId, people[reader as keyof typeof SEES_ADDRESSES]))!
+        const seen = members.map((member) =>
+          "lastSeenAt" in member ? member.lastSeenAt?.toISOString() ?? null : "absent"
+        )
+        expect(seen).toEqual(
+          sees ? [null, null, "2026-10-04T08:00:00.000Z", null, null] : Array(5).fill("absent"),
+        )
+      })
+    },
+  )
+}
+
 Deno.test("members: the group list carries a count and the first five names", async () => {
   await withSchema(async (sql) => {
     const { repository, groupId, owner, viewer } = await team(sql)
