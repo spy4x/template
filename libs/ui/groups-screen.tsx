@@ -132,7 +132,14 @@ export function GroupsScreen(
         ? (
           <EmptyState
             title={loading ? "Loading groups..." : "No groups yet."}
-            description={loading ? undefined : error ?? undefined}
+            description={loading
+              ? undefined
+              : error ?? `A group holds the notes you share with the people you invite.`}
+            action={!loading && (
+              <Button onClick={() => setCreatingOpen(true)} data-e2e="group-new-empty">
+                New group
+              </Button>
+            )}
           />
         )
         : (
