@@ -19,6 +19,7 @@ import { PageHeader, TOUCH_TARGET } from "./page-header.tsx"
 import { type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
 import { SignedInDevices, type SignedInDevicesProps } from "./signed-in-devices.tsx"
+import { ApiTokens, type ApiTokensProps } from "./api-tokens.tsx"
 import { useSucceeded } from "./use-succeeded.ts"
 import { TwoFactorStep, twoFactorStep } from "./two-factor.ts"
 
@@ -111,6 +112,8 @@ export interface ProfileScreenProps {
   onSignOutOthersChange?: (signOutOthers: boolean) => void
   /** The "Signed-in devices" section, after Security. Without it the page has none. */
   devices?: SignedInDevicesProps
+  /** The "API tokens" section, after the signed-in devices. Without it the page has none. */
+  apiTokens?: ApiTokensProps
   onStartTotp?: () => void
   onFinishTotp?: () => void
   /** Drops an enrolment under way, when the person closes the set-up dialog. */
@@ -132,8 +135,9 @@ export interface ProfileScreenProps {
 
 /**
  * The profile page as a list of settings: name and e-mail address, then password and two-factor
- * sign-in, then the signed-in devices, then push devices. Each row shows its value and one action; a form opens in a dialog
- * only when asked, and closes once its change went through. Turning two-factor off asks first.
+ * sign-in, then the signed-in devices, the API tokens and push devices. Each row shows its value
+ * and one action; a form opens in a dialog only when asked, and closes once its change went
+ * through. Turning two-factor off asks first.
  * Deleting the account sits last, in a closed "Danger zone".
  */
 export function ProfileScreen(
@@ -154,6 +158,7 @@ export function ProfileScreen(
     signOutOthers = true,
     onSignOutOthersChange,
     devices,
+    apiTokens,
     onStartTotp,
     onFinishTotp,
     onCancelTotp,
@@ -365,6 +370,8 @@ export function ProfileScreen(
       </SettingGroup>
 
       {devices && <SignedInDevices {...devices} />}
+
+      {apiTokens && <ApiTokens {...apiTokens} />}
 
       <SettingGroup
         title="Push devices"
