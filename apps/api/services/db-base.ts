@@ -32,6 +32,7 @@ import {
   recordSessionDevice,
   type SessionDevice,
   touchSession,
+  touchUserSeen,
 } from "@server/auth/sessions.ts"
 
 /** A user's authenticator-app enrolment, one row of `user_totp`. */
@@ -148,6 +149,8 @@ export class AppDbBase extends DbServiceBase {
         recordSessionDevice(sql, sessionId, device),
       /** Records that the session was used now, at most every few minutes. */
       touch: (sessionId: number) => touchSession(sql, sessionId),
+      /** Records that the user was active at `now`, at most every five minutes. */
+      touchUser: (userId: number, now?: Date) => touchUserSeen(sql, userId, now),
       /** The user's sessions that can still act, last used first. */
       listLive: (userId: number) => listLiveSessions(sql, userId),
       /** Deletes the user's own session; `false` when the user has no such session. */

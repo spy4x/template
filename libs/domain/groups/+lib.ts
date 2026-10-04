@@ -145,6 +145,11 @@ export interface GroupMemberSummary {
   role: GroupRole
   /** When they became a member. */
   joinedAt: Date
+  /**
+   * When they were last active, or `null` if not since this was recorded. Present only for a
+   * reader who may see it ({@link canSeeMemberLastSeen}): an admin or the owner.
+   */
+  lastSeenAt?: Date | null
   /** This member is the person who asked. */
   isYou: boolean
 }
@@ -840,6 +845,11 @@ export function canRename(role: GroupRole): boolean {
  * who manage the members. Viewers and editors see names only.
  */
 export function canSeeMemberEmails(role: GroupRole): boolean {
+  return isGroupRole(role) && role >= GroupRole.ADMIN
+}
+
+/** Whether `role` may read when members were last active: an admin or the owner. */
+export function canSeeMemberLastSeen(role: GroupRole): boolean {
   return isGroupRole(role) && role >= GroupRole.ADMIN
 }
 

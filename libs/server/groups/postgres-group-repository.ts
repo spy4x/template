@@ -6,6 +6,7 @@ import {
   assertCanTransfer,
   canRename,
   canSeeMemberEmails,
+  canSeeMemberLastSeen,
   CreatedGroup,
   CreateGroupInput,
   DeletedGroupSummary,
@@ -90,6 +91,7 @@ interface MemberSummaryRow extends postgres.Row {
   userId: number
   name: string
   email?: string | null
+  lastSeenAt?: Date | null
   role: GroupRole
   joinedAt: Date
   isYou: boolean
@@ -736,7 +738,10 @@ export class PostgresGroupRepository implements GroupRepository {
     const actor = await this.getSummaryForMember(groupId, actorId)
     if (!actor) return null
     const [members, [count]] = await Promise.all([
-      this.readMembers(groupId, actorId, { emails: canSeeMemberEmails(actor.role) }),
+      this.readMembers(groupId, actorId, {
+        emails: canSeeMemberEmails(actor.role),
+        lastSeen: canSeeMemberLastSeen(actor.role),
+      }),
       this.sql<{ memberCount: number }[]>`
         SELECT count(*)::int AS member_count
         FROM group_members
@@ -750,12 +755,13 @@ export class PostgresGroupRepository implements GroupRepository {
   /**
    * The members of a group as `actorId` sees them, oldest first; with `only`, just that member.
    * With `emails`, each carries the address on their sign-in key, `null` for an account with none;
-   * without it, no member carries an `email` field at all.
+   * without it, no member carries an `email` field at all. `lastSeen` does the same for
+   * `lastSeenAt`.
    */
   private async readMembers(
     groupId: string,
     actorId: number,
-    { emails, only }: { emails: boolean; only?: number },
+    { emails, lastSeen, only }: { emails: boolean; lastSeen: boolean; only?: number },
   ): Promise<GroupMemberSummary[]> {
     return await this.sql<MemberSummaryRow[]>`
       SELECT
@@ -772,6 +778,7 @@ export class PostgresGroupRepository implements GroupRepository {
         ) AS email,`
         : this.sql``
     }
+        ${lastSeen ? this.sql`users.last_seen_at,` : this.sql``}
         group_members.role,
         group_members.created_at AS joined_at,
         group_members.user_id = ${actorId} AS is_you
@@ -819,7 +826,11 @@ export class PostgresGroupRepository implements GroupRepository {
         await recordAccessChange(transaction, groupId, actorId, MEMBER_ROLE_CHANGED_EVENT, [])
       }
       // Only the owner and an admin get this far, and both may see addresses.
-      return (await repository.readMembers(groupId, actorId, { emails: true, only: userId }))[0]
+      return (await repository.readMembers(groupId, actorId, {
+        emails: true,
+        lastSeen: true,
+        only: userId,
+      }))[0]
     })
   }
 

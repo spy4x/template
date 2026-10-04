@@ -371,9 +371,13 @@ export function createSignIn(options: SignInOptions): SignIn {
    * failed write is logged and the request goes on: the time it shows is a convenience, never a
    * reason to refuse or slow anyone.
    */
-  function touchSession(sessionId: number): void {
+  function touchSession(sessionId: number, userId: number): void {
     db.sessionDevices.touch(sessionId).catch((error) => {
       console.error("error: cannot record when a session was last used", error)
+    })
+    // The person's own "last seen" (#152): the same activity, throttled per person in the query.
+    db.sessionDevices.touchUser(userId).catch((error) => {
+      console.error("error: cannot record when a user was last seen", error)
     })
   }
 
@@ -384,7 +388,7 @@ export function createSignIn(options: SignInOptions): SignIn {
   ) =>
     await packageAuth.parseAuth(c, async () => {
       const state = c.get("auth")
-      if (state) touchSession(state.session.id)
+      if (state) touchSession(state.session.id, state.session.userId)
       await next()
     })
   const auth: Auth<AuthSessionRecord, User> = { ...packageAuth, parseAuth }
@@ -894,7 +898,7 @@ export function createSignIn(options: SignInOptions): SignIn {
       if (!user) return null
       if (!secondFactorSatisfied(session.secondFactor, hasSecondFactor(user))) return null
       // A live socket counts as use, so a tab that only talks over it is not shown as idle.
-      touchSession(session.id)
+      touchSession(session.id, session.userId)
       return { session, user }
     },
 

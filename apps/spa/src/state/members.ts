@@ -17,6 +17,8 @@ export interface MemberItem {
   name: string
   /** Sent only to the owner and admins. */
   email?: string | null
+  /** Sent only to the owner and admins. */
+  lastSeenAt?: string | null
   role: GroupRole
   joinedAt: string
   isYou: boolean
