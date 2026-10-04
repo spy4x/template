@@ -542,6 +542,8 @@ export function createSignIn(options: SignInOptions): SignIn {
             lastLoginAt: new Date(),
           })
           await tx.group.createFirst({ id: firstGroupId, name: "Personal" }, user.id)
+          // The worker makes the welcome note, so a slow job never holds up the sign-up.
+          await tx.starterData.queue(user.id)
           await tx.sessionDevices.record(signedUp.session.session.id, deviceOf(c))
           await tx.authAudit.insert(
             auditRow(c, user.id, AuthAuditEventType.SIGNED_UP, normalizeEmail(rawEmail)),

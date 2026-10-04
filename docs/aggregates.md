@@ -294,6 +294,29 @@ A change that a person should hear about, and did not make themselves, writes a 
    person's sockets, and the page reads the new count. A test per writer in
    `tests/integration/notifications.integration.test.ts` shows the row and who got it.
 
+## Giving a new account starter data
+
+A new account should not open onto an empty app. Sign-up queues one worker job per account
+(`libs/server/jobs/starter-data.ts`), and the job creates the template's starter data: one welcome
+note in the person's first group. The sign-up never waits for it and never fails because of it.
+
+- **The request row is the marker.** Sign-up writes one `starter_data_requests` row and the outbox
+  job in its own transaction, through `db.starterData.queue(userId)`. The job's id is the row's id.
+  The worker sets `done_at` when it has finished, so a job that runs again does nothing.
+- **Make the write repeatable.** The welcome note's id is the request's id, so a retry that lands
+  between the note and the marker finds the note and adds none. Do the same for your data: derive
+  each row's id from the request id (or use `ON CONFLICT DO NOTHING`), never "insert and hope".
+- **Add yours inside `starterDataJob`**, after the welcome note, using your repository's own create
+  (the one the handlers use), with the person as the actor. Skip quietly when the group is gone:
+  `NoteError` there means "nothing to seed", not a failure to retry. Financy's default categories
+  would be one more call here.
+- **Test it with a forced retry** (`tests/integration/starter-data.integration.test.ts`): run the
+  job twice, and once more with the outbox row put back as unprocessed, and count the rows.
+
+Every list also needs a first-run empty state: `EmptyState` with one action when there is
+something to do (`New note`, `New group`), and none when there is not (the inbox, the activity
+log). See `docs/design/ui-layout.md`.
+
 ## What is left to the next aggregate
 
 - The SPA creates a note in the group it shows, over the socket, so a note never lands in a group

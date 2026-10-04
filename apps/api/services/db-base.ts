@@ -24,6 +24,7 @@ import {
   scheduleAccountDeletionJobs,
   scheduleAccountRestoredMail,
 } from "@server/jobs/account-deletion.ts"
+import { scheduleStarterData } from "@server/jobs/starter-data.ts"
 import type { AccountDeletionBlocker } from "@domain/identity"
 import {
   deleteOtherSessions,
@@ -209,6 +210,18 @@ export class AppDbBase extends DbServiceBase {
           VALUES (${row.userId}, ${row.eventType}, ${row.identifier}, ${ip}, ${userAgent})
         `
       },
+    }
+  }
+
+  /**
+   * Queues the starter data a new account is owed (`@server/jobs/starter-data.ts`). Built per
+   * access, like `group`: `queue` belongs inside the sign-up's `begin()`.
+   */
+  get starterData() {
+    const sql = this.sql
+    return {
+      /** Writes the marker row and queues the worker job that creates the welcome note. */
+      queue: (userId: number): Promise<void> => scheduleStarterData(sql, userId),
     }
   }
 

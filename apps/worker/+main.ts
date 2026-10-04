@@ -68,6 +68,7 @@ const processor = createOutboxProcessor(
   },
   billingSetup.provider,
   subscribersSetup,
+  billingSetup.graceDays,
 )
 
 // Starts the nightly chain the first time; a restart finds the row and adds nothing.

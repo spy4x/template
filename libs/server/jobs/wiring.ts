@@ -28,6 +28,7 @@ import {
   accountHardDeleteJob,
   accountRestoredMailJob,
 } from "./account-deletion.ts"
+import { STARTER_DATA_JOB, starterDataJob } from "./starter-data.ts"
 import { billingNoticeMailJob } from "./billing-notice-mail.ts"
 import {
   EMAIL_CODE_MAIL_JOB,
@@ -79,6 +80,9 @@ const NIGHTLY_HOUR_UTC = 3
  * every group whose stored quantity has drifted. Without one, a seat sync left in the table does
  * nothing.
  *
+ * With a `provider`, the welcome note of a new account respects the group's plan cap, counting the
+ * plan with `graceDays`; without one, nothing caps it.
+ *
  * With `subscribers`, the subscriber jobs sign and mail confirm links, welcomes and issues. Without
  * it, they drop what they find.
  */
@@ -87,6 +91,7 @@ export function createOutboxProcessor(
   mail: Omit<PasswordResetMailDeps, "sql">,
   provider: BillingProvider | null = null,
   subscribers: SubscribersSetup | null = null,
+  graceDays = 0,
 ): OutboxProcessor {
   const notifier = new GroupChangeNotifier(sql)
   return new OutboxProcessor(
@@ -134,6 +139,7 @@ export function createOutboxProcessor(
       [ACCOUNT_DELETION_MAIL_JOB]: accountDeletionMailJob({ sql, ...mail }),
       [ACCOUNT_RESTORED_MAIL_JOB]: accountRestoredMailJob({ sql, ...mail }),
       [ACCOUNT_HARD_DELETE_JOB]: accountHardDeleteJob({ sql, log: mail.log }),
+      [STARTER_DATA_JOB]: starterDataJob(sql, { billingEnabled: provider !== null, graceDays }),
       ...billingNoticeJobs(sql, mail),
       [SUBSCRIBER_CONFIRM_MAIL_JOB]: subscriberConfirmMailJob({ sql, ...mail, setup: subscribers }),
       [SUBSCRIBER_WELCOME_MAIL_JOB]: subscriberWelcomeMailJob({ sql, ...mail, setup: subscribers }),

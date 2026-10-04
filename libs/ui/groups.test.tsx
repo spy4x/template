@@ -204,6 +204,17 @@ describe("GroupsScreen", () => {
       .toBe("Settings of Family")
   })
 
+  it("shows an empty list as an empty state whose one action opens the new group dialog", async () => {
+    await mount(<GroupsScreen {...defaults} groups={[]} />)
+    expect(find("[data-e2e=group-new-empty]").textContent).toContain("New group")
+    expect(has("[data-e2e=group-new-dialog]")).toBe(false)
+    await click("[data-e2e=group-new-empty]")
+    expect(has("[data-e2e=group-new-dialog] [data-e2e=group-name]")).toBe(true)
+
+    await rerender(<GroupsScreen {...defaults} groups={[]} loading />)
+    expect(has("[data-e2e=group-new-empty]")).toBe(false)
+  })
+
   it("marks only the current group, with a check and in the row's name", async () => {
     await mount(<GroupsScreen {...defaults} />)
     expect(root!.querySelectorAll("[data-e2e=group-current]")).toHaveLength(1)
