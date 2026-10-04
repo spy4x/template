@@ -6,7 +6,12 @@ import { BillingEventType, type SubscriptionEvent, SubscriptionStatus } from "@s
 import { DEFAULT_GRACE_DAYS, effectivePlanId, PlanError, PRO_PLAN_ID } from "@domain/billing"
 import { UserMFAStatus } from "@domain/identity"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
-import { NoteCreateCommand, NoteDeleteCommand, NoteUpdateCommand } from "@domain/notes"
+import {
+  NoteCreateCommand,
+  NoteDeleteCommand,
+  NoteRestoreCommand,
+  NoteUpdateCommand,
+} from "@domain/notes"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import {
@@ -17,6 +22,7 @@ import { ENTITLEMENT_NEEDS } from "../../apps/api/cqrs/entitlement-needs.ts"
 import {
   createNoteCreateHandler,
   createNoteDeleteHandler,
+  createNoteRestoreHandler,
   createNoteUpdateHandler,
 } from "../../apps/api/features/notes/handlers.ts"
 import { team, withSchema } from "./group-team.ts"
@@ -53,6 +59,7 @@ function noteBus(sql: postgres.Sql, usage?: EntitlementGateDependencies["usage"]
   bus.register(NoteCreateCommand, createNoteCreateHandler({ notes, groups }))
   bus.register(NoteUpdateCommand, createNoteUpdateHandler({ notes, groups }))
   bus.register(NoteDeleteCommand, createNoteDeleteHandler({ notes, groups }))
+  bus.register(NoteRestoreCommand, createNoteRestoreHandler({ notes, groups }))
   return { bus, notes, billing }
 }
 
@@ -195,6 +202,80 @@ Deno.test("the free plan's note cap on Postgres", async (t) => {
         await expect(bus.execute(createNote(groupId, owner, "Still over"))).rejects.toThrow(
           PlanError,
         )
+      },
+    )
+
+    await t.step(
+      "restoring a deleted note into a full free group is refused, and works once there is room",
+      async () => {
+        const { groupId, owner } = await team(sql)
+        const { bus, notes } = noteBus(sql)
+        const first = (await bus.execute(createNote(groupId, owner, "Deleted"))).note
+        await bus.execute(
+          new NoteDeleteCommand({
+            actor: actor(owner),
+            groupId,
+            id: first.id,
+            version: first.version,
+          }),
+        )
+        const others = []
+        for (let index = 0; index < FREE_NOTES; index++) {
+          others.push((await bus.execute(createNote(groupId, owner, `Live ${index}`))).note)
+        }
+        const restore = () => new NoteRestoreCommand({ actor: actor(owner), groupId, id: first.id })
+
+        await expect(bus.execute(restore())).rejects.toMatchObject({
+          code: "PLAN_LIMIT_REACHED",
+          entitlement: "maxNotes",
+          limit: FREE_NOTES,
+        })
+        expect(await notes.count(groupId)).toBe(FREE_NOTES)
+
+        await bus.execute(
+          new NoteDeleteCommand({
+            actor: actor(owner),
+            groupId,
+            id: others[0].id,
+            version: others[0].version,
+          }),
+        )
+        const restored = await bus.execute(restore())
+
+        expect(restored.note.id).toBe(first.id)
+        expect(await notes.count(groupId)).toBe(FREE_NOTES)
+      },
+    )
+
+    await t.step(
+      "a restore that passed the gate on a stale count is refused by the write's own count",
+      async () => {
+        const { groupId, owner } = await team(sql)
+        const { bus, notes } = noteBus(sql)
+        const gone = (await bus.execute(createNote(groupId, owner, "Gone"))).note
+        await bus.execute(
+          new NoteDeleteCommand({
+            actor: actor(owner),
+            groupId,
+            id: gone.id,
+            version: gone.version,
+          }),
+        )
+        for (let index = 0; index < FREE_NOTES; index++) {
+          await bus.execute(createNote(groupId, owner, `Live ${index}`))
+        }
+
+        // The gate counted 9 before another member's create took the last slot; the repository
+        // is handed the cap the gate let the restore through with, and counts for itself.
+        await expect(notes.restore({ groupId, id: gone.id }, owner, FREE_NOTES)).rejects
+          .toMatchObject({
+            code: "PLAN_LIMIT_REACHED",
+            entitlement: "maxNotes",
+          })
+
+        expect(await notes.count(groupId)).toBe(FREE_NOTES)
+        const deleted = await notes.list(groupId, { limit: 10 }, true)
+        expect(deleted.notes.map((note) => note.id)).toEqual([gone.id])
       },
     )
   })

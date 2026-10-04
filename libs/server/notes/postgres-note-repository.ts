@@ -13,6 +13,7 @@ import {
   type NoteListResult,
   type NoteMoveInput,
   type NoteRepository,
+  type NoteRestoreInput,
   type NoteUpdateInput,
   NoteVersionConflictError,
   type NoteWriteResult,
@@ -142,13 +143,13 @@ export async function moveNoteRows(
 export class PostgresNoteRepository implements NoteRepository {
   constructor(private readonly sql: postgres.Sql) {}
 
-  async list(groupId: string, page: NoteListPage): Promise<NoteListResult> {
+  async list(groupId: string, page: NoteListPage, deleted = false): Promise<NoteListResult> {
     const limit = Math.max(1, Math.min(100, page.limit))
     const rows = await this.sql<NoteRow[]>`
       SELECT ${this.columns()}
       FROM notes
       WHERE group_id = ${groupId}
-        AND deleted_at IS NULL
+        AND ${deleted ? this.sql`deleted_at IS NOT NULL` : this.sql`deleted_at IS NULL`}
         ${
       page.after
         ? this.sql`
@@ -337,6 +338,56 @@ export class PostgresNoteRepository implements NoteRepository {
         version: deleted.version,
         changeSequence: sequence,
       }
+    })
+  }
+
+  /**
+   * The cap is counted after the update, in the same transaction, like a create's: the group row
+   * that `assertWriterNow` locks makes a create or a second restore wait for this one to commit.
+   * A note that is not deleted matches nothing and is answered as not found.
+   */
+  async restore(
+    input: NoteRestoreInput,
+    actorId: number,
+    allowance: number | null,
+  ): Promise<Note> {
+    return await this.sql.begin(async (transaction: postgres.TransactionSql) => {
+      const repository = new PostgresNoteRepository(transaction)
+      const role = await assertWriterNow(transaction, input.groupId, actorId)
+      const restored = (
+        await transaction<{ id: string; title: string }[]>`
+          UPDATE notes
+          SET deleted_at = NULL,
+              version = version + 1,
+              updated_by_user_id = ${actorId},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ${input.id}
+            AND group_id = ${input.groupId}
+            AND deleted_at IS NOT NULL
+          RETURNING id, title
+        `
+      )[0]
+      if (!restored) throw new NoteError("NOTE_NOT_FOUND", "Note not found")
+      if (allowance !== null) {
+        const used = await repository.count(input.groupId) - 1
+        assertRoomFor("maxNotes", allowance, used, role)
+      }
+      await writeAuditEvent(transaction, {
+        eventKind: NOTE_EVENTS.restored,
+        actorId,
+        groupId: input.groupId,
+        requestId: input.requestId,
+        entityType: "note",
+        entityId: input.id,
+        details: { title: restored.title.slice(0, AUDIT_TITLE_MAX) },
+      })
+      return await repository.stamp(
+        transaction,
+        input.groupId,
+        input.id,
+        actorId,
+        NOTE_EVENTS.restored,
+      )
     })
   }
 

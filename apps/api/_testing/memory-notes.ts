@@ -11,6 +11,7 @@ import {
   type NoteListResult,
   type NoteMoveInput,
   type NoteRepository,
+  type NoteRestoreInput,
   type NoteUpdateInput,
   NoteVersionConflictError,
   type NoteWriteResult,
@@ -22,14 +23,18 @@ import {
  */
 export class MemoryNoteRepository implements NoteRepository {
   readonly notes = new Map<string, Note>()
+  /** Deleted notes, kept as the database keeps them until a restore or the purge. */
+  readonly deleted = new Map<string, Note>()
   writes = 0
   #sequence = 1
 
   /** Who is in which group, for `groupIdOfForMember`; without it no one is a member. */
   constructor(private readonly groups?: GroupRoleLookup) {}
 
-  list(groupId: string, page: NoteListPage): Promise<NoteListResult> {
-    const notes = [...this.notes.values()].filter((note) => note.groupId === groupId)
+  list(groupId: string, page: NoteListPage, deleted = false): Promise<NoteListResult> {
+    const notes = [...(deleted ? this.deleted : this.notes).values()].filter((note) =>
+      note.groupId === groupId
+    )
       .slice(0, page.limit)
     return Promise.resolve({ notes, nextPageKey: null })
   }
@@ -85,14 +90,33 @@ export class MemoryNoteRepository implements NoteRepository {
 
   delete(input: NoteDeleteInput, _actorId: number): Promise<DeletedNote> {
     const note = this.#current(input.groupId, input.id, input.expectedVersion)
+    const changeSequence = String(this.#sequence++)
     this.notes.delete(note.id)
+    this.deleted.set(note.id, { ...note, version: note.version + 1, changeSequence })
     this.writes++
     return Promise.resolve({
       id: note.id,
       groupId: note.groupId,
       version: note.version + 1,
-      changeSequence: String(this.#sequence++),
+      changeSequence,
     })
+  }
+
+  restore(input: NoteRestoreInput, actorId: number, allowance: number | null): Promise<Note> {
+    const note = this.deleted.get(input.id)
+    if (!note || note.groupId !== input.groupId) throw new NoteError("NOTE_NOT_FOUND", "gone")
+    const used = [...this.notes.values()].filter((live) => live.groupId === input.groupId).length
+    assertRoomFor("maxNotes", allowance, used, GroupRole.EDITOR)
+    const restored: Note = {
+      ...note,
+      version: note.version + 1,
+      changeSequence: String(this.#sequence++),
+      updatedByUserId: actorId,
+    }
+    this.deleted.delete(note.id)
+    this.notes.set(restored.id, restored)
+    this.writes++
+    return Promise.resolve(restored)
   }
 
   move(input: NoteMoveInput, actorId: number, allowance: number | null): Promise<Note[]> {

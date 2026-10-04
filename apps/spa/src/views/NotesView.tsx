@@ -5,6 +5,7 @@ import { moveTargetsOf, NotesScreen } from "@ui/notes-screen.tsx"
 import { groupsStore } from "../state/groups.ts"
 import { notesStore } from "../state/notes.ts"
 import { selectionStore } from "../state/selection.ts"
+import { UndoDeleteToast } from "./UndoDeleteToast.tsx"
 import { OfflineStatus } from "../offline/OfflineStatus.tsx"
 
 /**
@@ -45,8 +46,16 @@ export function NotesView() {
         moving={store.moving.value}
         moveError={store.moveError.value}
         onDelete={(note) => void store.remove(note)}
+        showDeleted={store.showDeleted.value}
+        onShowDeletedChange={(on) => void store.setShowDeleted(on)}
+        deletedNotes={store.deletedNotes.value}
+        deletedLoading={store.deletedLoading.value}
+        onRestore={(note) => void store.restore(note.id)}
+        restoring={store.restoring.value}
+        restoreError={store.restoreError.value}
         navigate={navigate}
       />
+      <UndoDeleteToast store={store} />
     </>
   )
 }

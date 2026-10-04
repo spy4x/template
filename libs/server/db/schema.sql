@@ -300,6 +300,12 @@ CREATE TABLE notes (
 CREATE INDEX idx_notes_group_updated_id_active
     ON notes (group_id, updated_at DESC, id)
     WHERE deleted_at IS NULL;
+-- The "Show deleted" list and the nightly purge. See migration 2026_10_23_0001.
+CREATE INDEX idx_notes_group_updated_id_deleted
+    ON notes (group_id, updated_at DESC, id)
+    WHERE deleted_at IS NOT NULL;
+CREATE INDEX idx_notes_deleted_at ON notes (deleted_at) WHERE deleted_at IS NOT NULL;
+
 -- A future pull by cursor: a group's notes changed after a sequence, deleted ones included.
 CREATE INDEX idx_notes_group_change_sequence ON notes (group_id, change_sequence);
 CREATE INDEX idx_notes_created_by ON notes (created_by_user_id);

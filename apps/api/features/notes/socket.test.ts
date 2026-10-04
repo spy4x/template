@@ -8,6 +8,7 @@ import {
   type NoteListQuery,
   type NoteLocateQuery,
   type NoteMoveCommand,
+  type NoteRestoreCommand,
 } from "@domain/notes"
 import { createNoteSocketRequests } from "./socket.ts"
 import { DEFAULT_NOTE_LIST_LIMIT } from "./list.ts"
@@ -27,7 +28,8 @@ function harness() {
     list: NoteListQuery | null
     locate: NoteLocateQuery | null
     move: NoteMoveCommand | null
-  } = { create: null, list: null, locate: null, move: null }
+    restore: NoteRestoreCommand | null
+  } = { create: null, list: null, locate: null, move: null, restore: null }
   const unused = () => Promise.reject(new Error("not used"))
   const requests = createNoteSocketRequests({
     create(command) {
@@ -36,6 +38,10 @@ function harness() {
     },
     update: unused,
     delete: unused,
+    restore(command) {
+      seen.restore = command
+      return unused()
+    },
     move(command) {
       seen.move = command
       return unused()
@@ -63,6 +69,7 @@ describe("note socket requests", () => {
         "note.create": "command",
         "note.update": "command",
         "note.delete": "command",
+        "note.restore": "command",
         "note.move": "command",
         "note.list": "query",
         "note.get": "query",
@@ -89,6 +96,26 @@ describe("note socket requests", () => {
       body: "b",
       requestId: "req-1",
       idempotencyKey: "key-1",
+    })
+  })
+
+  it("dispatches a restore with the socket's actor, the note, the request id and the key", async () => {
+    const { requests, seen } = harness()
+
+    await requests["note.restore"].handle({
+      actor,
+      requestId: "req-8",
+      signal,
+      idempotencyKey: "key-8",
+      payload: { groupId, id },
+    }).catch(() => {})
+
+    expect(seen.restore?.data).toEqual({
+      actor,
+      groupId,
+      id,
+      requestId: "req-8",
+      idempotencyKey: "key-8",
     })
   })
 

@@ -433,6 +433,154 @@ describe("NotesScreen in the browser", () => {
   })
 })
 
+describe("NotesScreen deleted notes", () => {
+  const row = (note: { id: string }) => `[data-e2e=note-${note.id}]`
+  const deletedDefaults: NotesScreenProps = {
+    ...listDefaults,
+    showDeleted: true,
+    onShowDeletedChange: () => {},
+    deletedNotes: [trip, plan],
+    onRestore: () => {},
+  }
+  const limitReached: PlanRefusal = {
+    code: "PLAN_LIMIT_REACHED",
+    entitlement: "maxNotes",
+    limit: 10,
+    canUpgrade: true,
+  }
+
+  it("offers Show deleted notes in the header's menu, and only when the app can show them", async () => {
+    await mount(<NotesScreen {...listDefaults} onShowDeletedChange={() => {}} />)
+    await click("[data-e2e=notes-menu]")
+    expect(find("[data-e2e=notes-show-deleted]").textContent?.trim()).toBe("Show deleted notes")
+    await rerender(<NotesScreen {...listDefaults} />)
+    expect(count("[data-e2e=notes-show-deleted]")).toBe(0)
+  })
+
+  it("turns the filter on from the menu and back off from the menu or the banner", async () => {
+    const change = spy<[boolean]>()
+    await mount(<NotesScreen {...listDefaults} onShowDeletedChange={change.fn} />)
+    await click("[data-e2e=notes-menu]")
+    await click("[data-e2e=notes-show-deleted]")
+    await rerender(<NotesScreen {...deletedDefaults} onShowDeletedChange={change.fn} />)
+
+    await click("[data-e2e=notes-show-live]")
+    await click("[data-e2e=notes-menu]")
+    expect(find("[data-e2e=notes-show-deleted]").textContent?.trim()).toBe("Show notes")
+    await click("[data-e2e=notes-show-deleted]")
+
+    expect(change.calls).toEqual([[true], [false], [false]])
+  })
+
+  it("lists the deleted notes in place of the live ones, with the 30 day notice", () => {
+    const html = renderToString(<NotesScreen {...deletedDefaults} />)
+
+    expect(html).toContain(`data-e2e="deleted-note-list"`)
+    expect(html).not.toContain(`data-e2e="note-list"`)
+    expect(html).toContain("Trip")
+    expect(html).not.toContain("Groceries")
+    expect(html).toContain("stay here for 30 days")
+    expect(html).not.toContain(`data-e2e="note-menu"`)
+  })
+
+  it("restores a note from its row", async () => {
+    const restore = spy<[{ id: string }]>()
+    await mount(<NotesScreen {...deletedDefaults} onRestore={restore.fn} />)
+
+    await click(`${row(plan)} [data-e2e=note-restore]`)
+
+    expect(restore.calls).toEqual([[{ id: plan.id }]])
+  })
+
+  it("names each Restore button after its note, so a screen reader can tell them apart", () => {
+    const html = renderToString(<NotesScreen {...deletedDefaults} />)
+
+    expect(html).toContain(`aria-label="Restore Trip"`)
+    expect(html).toContain(`aria-label="Restore Plan"`)
+  })
+
+  it("shows a viewer the deleted notes with no Restore", () => {
+    const html = renderToString(<NotesScreen {...deletedDefaults} group={viewerOfTeam} />)
+
+    expect(html).toContain("Trip")
+    expect(html).not.toContain(`data-e2e="note-restore"`)
+  })
+
+  it("disables every Restore while one note is being restored", async () => {
+    await mount(<NotesScreen {...deletedDefaults} restoring={trip.id} />)
+
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>("[data-e2e=note-restore]")]
+
+    expect(buttons.map((button) => button.disabled)).toEqual([true, true])
+  })
+
+  it("says there are no deleted notes, and that they are loading", () => {
+    expect(renderToString(<NotesScreen {...deletedDefaults} deletedNotes={[]} />)).toContain(
+      "No deleted notes.",
+    )
+    expect(
+      renderToString(<NotesScreen {...deletedDefaults} deletedNotes={[]} deletedLoading />),
+    ).toContain("Loading deleted notes...")
+  })
+
+  it("shows a refused restore under the banner, and the plan's limit as an upgrade prompt", async () => {
+    await mount(
+      <NotesScreen
+        {...deletedDefaults}
+        restoreError={{ title: null, form: "Could not restore the note" }}
+      />,
+    )
+    expect(find("[data-e2e=notes-deleted-banner]").parentElement!.textContent).toContain(
+      "Could not restore the note",
+    )
+
+    await rerender(
+      <NotesScreen
+        {...deletedDefaults}
+        restoreError={{ title: null, form: "Limit", plan: limitReached }}
+      />,
+    )
+    expect(find("[data-e2e=plan-refusal]").getAttribute("data-entitlement")).toBe("maxNotes")
+    expect(focused()).toBe("plan-refusal")
+  })
+
+  it("shows a refused Undo in the live list, where the person is", async () => {
+    await mount(
+      <NotesScreen
+        {...listDefaults}
+        notes={[]}
+        restoreError={{
+          title: null,
+          form: "Restoring a note needs a connection. Try again when you are back online.",
+        }}
+      />,
+    )
+    expect(document.body.textContent).toContain("Restoring a note needs a connection.")
+
+    await rerender(
+      <NotesScreen
+        {...listDefaults}
+        notes={[]}
+        restoreError={{ title: null, form: "Limit", plan: limitReached }}
+      />,
+    )
+    expect(find("[data-e2e=plan-refusal]").getAttribute("data-entitlement")).toBe("maxNotes")
+  })
+
+  it("moves focus to the next Restore after a restore, else More actions", async () => {
+    const listOf = (notes: NoteRow[]) => <NotesScreen {...deletedDefaults} deletedNotes={notes} />
+    await mount(listOf([trip, plan]))
+
+    await click(`${row(trip)} [data-e2e=note-restore]`)
+    await rerender(listOf([plan]))
+    expect(focusedRow()).toBe(`note-${plan.id}`)
+
+    await click(`${row(plan)} [data-e2e=note-restore]`)
+    await rerender(listOf([]))
+    expect(focused()).toBe("notes-menu")
+  })
+})
+
 const editorDefaults: NoteEditorScreenProps = {
   group: team,
   loading: false,

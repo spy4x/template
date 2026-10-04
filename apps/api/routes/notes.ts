@@ -11,6 +11,8 @@ import {
   NoteGetQuery,
   NoteMoveCommand,
   noteMoveRequestSchema,
+  NoteRestoreCommand,
+  noteRestoreRequestSchema,
   NoteUpdateCommand,
   noteUpdateRequestSchema,
   type NoteWriteResult,
@@ -32,6 +34,7 @@ export interface NotesRouteDependencies extends NoteListDependencies {
   create(command: NoteCreateCommand): Promise<NoteWriteResult>
   update(command: NoteUpdateCommand): Promise<{ note: Note }>
   delete(command: NoteDeleteCommand): Promise<{ note: DeletedNote }>
+  restore(command: NoteRestoreCommand): Promise<{ note: Note }>
   get(query: NoteGetQuery): Promise<{ note: Note }>
   move(command: NoteMoveCommand): Promise<{ notes: Note[] }>
   /** The origin the browser sends; see `GroupsRouteDependencies.expectedOrigin`. */
@@ -43,11 +46,13 @@ export interface NotesRouteDependencies extends NoteListDependencies {
  * MPA uses. Like the socket, it parses, names the actor from the session and dispatches on the
  * buses; who may read or write is decided by the handlers, never here.
  *
- * - `GET /` lists the notes, newest first: `?limit=1..100&cursor=…`.
+ * - `GET /` lists the notes, newest first: `?limit=1..100&cursor=…`; `deleted=true` lists the
+ *   deleted ones instead.
  * - `GET /:noteId` reads one note.
  * - `POST /` creates `{ id, title, body }`: 201, or 200 for a retry of the same create.
  * - `PATCH /:noteId` updates `{ title, body, version }`.
  * - `DELETE /:noteId` deletes `{ version }`.
+ * - `POST /:noteId/restore` restores a deleted note: `{ note }`, or 402 when the plan's cap is full.
  * - `POST /move` moves `{ toGroupId, noteIds }` to another group, all or none: `{ notes }`.
  *
  * An update or delete that names a stale version answers 409 `VERSION_CONFLICT` with
@@ -69,6 +74,7 @@ export function createNotesRoute(dependencies: NotesRouteDependencies): Hono<API
       const page = await listNotesPage(dependencies, actorOf(c), groupIdOf(c), {
         limit: parseLimit(c.req.query("limit")),
         cursor: c.req.query("cursor"),
+        deleted: parseDeleted(c.req.query("deleted")),
       })
       return c.json(page)
     })
@@ -86,6 +92,19 @@ export function createNotesRoute(dependencies: NotesRouteDependencies): Hono<API
           actor: actorOf(c),
           groupId,
           ...input,
+          requestId: c.get("requestId"),
+          idempotencyKey: c.req.header("idempotency-key"),
+        }),
+      )
+      return c.json(result)
+    })
+    .post("/:noteId/restore", requireSameOrigin, async (c) => {
+      parseNoteRequest(noteRestoreRequestSchema, await readJson(c))
+      const result = await dependencies.restore(
+        new NoteRestoreCommand({
+          actor: actorOf(c),
+          groupId: groupIdOf(c),
+          id: noteIdOf(c),
           requestId: c.get("requestId"),
           idempotencyKey: c.req.header("idempotency-key"),
         }),
@@ -176,6 +195,12 @@ async function readJson(c: Context<APIContext>): Promise<unknown> {
   } catch {
     throw new NoteFeatureError("INVALID_REQUEST", "Request body must be JSON")
   }
+}
+
+function parseDeleted(value: string | undefined): boolean {
+  if (value === undefined || value === "false") return false
+  if (value === "true") return true
+  throw new NoteFeatureError("INVALID_REQUEST", "Note list filter is invalid")
 }
 
 function parseLimit(value: string | undefined): number {

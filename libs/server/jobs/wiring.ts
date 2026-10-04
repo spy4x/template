@@ -15,6 +15,7 @@ import {
 } from "../billing/seat-sync.ts"
 import { GroupChangeNotifier } from "../groups/group-change-notify.ts"
 import { purgeDeadInvitations } from "../groups/purge-dead-invitations.ts"
+import { purgeDeletedNotes } from "../notes/purge-deleted-notes.ts"
 import { purgeDeletedGroups } from "../groups/purge-deleted-groups.ts"
 import { purgeReadNotifications } from "../notifications/purge-notifications.ts"
 import { purgeOldAuditEvents } from "../groups/purge-audit-events.ts"
@@ -107,6 +108,8 @@ export function createOutboxProcessor(
             `Kept ${groups.kept} deleted group(s) with a live subscription; cancel it in Stripe`,
           )
         }
+        const notes = await purgeDeletedNotes(sql)
+        if (notes.removed > 0) console.log(`Removed ${notes.removed} deleted note(s) for good`)
         const invitations = await purgeDeadInvitations(sql)
         if (invitations > 0) console.log(`Removed ${invitations} dead group invitation(s)`)
         const audit = await purgeOldAuditEvents(sql)

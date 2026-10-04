@@ -5,6 +5,7 @@ import type {
   NoteCreateCommand,
   NoteListQuery,
   NoteMoveCommand,
+  NoteRestoreCommand,
   NoteUpdateCommand,
 } from "@domain/notes"
 import type { APIContext } from "../_types.ts"
@@ -36,7 +37,8 @@ function harness(
     update: NoteUpdateCommand | null
     list: NoteListQuery | null
     move: NoteMoveCommand | null
-  } = { create: null, update: null, list: null, move: null }
+    restore: NoteRestoreCommand | null
+  } = { create: null, update: null, list: null, move: null, restore: null }
   const dependencies: NotesRouteDependencies = {
     create(command) {
       seen.create = command
@@ -48,6 +50,10 @@ function harness(
     },
     delete: () =>
       Promise.resolve({ note: { id: noteId, groupId, version: 2, changeSequence: "3" } }),
+    restore(command) {
+      seen.restore = command
+      return Promise.resolve({ note })
+    },
     move(command) {
       seen.move = command
       return Promise.resolve({ notes: [note] })
@@ -128,6 +134,38 @@ describe("notes route", () => {
     expect(seen.create).toBe(null)
   })
 
+  it("restores the note of the path in the group of the path, with the request id and key", async () => {
+    const { request, seen } = harness()
+
+    const response = await request(
+      "POST",
+      `${groupId}/notes/${noteId}/restore`,
+      {},
+      { "idempotency-key": "key-3" },
+    )
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).note.id).toBe(noteId)
+    expect(seen.restore?.data).toMatchObject({
+      groupId,
+      id: noteId,
+      requestId: "req-notes",
+      idempotencyKey: "key-3",
+      actor: { userId: 7 },
+    })
+  })
+
+  it("lists the deleted notes only for `deleted=true`", async () => {
+    const { request, seen } = harness()
+
+    await request("GET", `${groupId}/notes?deleted=true`)
+    const deleted = seen.list?.data.deleted
+    await request("GET", `${groupId}/notes`)
+    const live = seen.list?.data.deleted
+
+    expect([deleted, live]).toEqual([true, false])
+  })
+
   it("answers 200 to a create that found the same note already there", async () => {
     const { request } = harness(false)
 
@@ -171,10 +209,21 @@ describe("notes route", () => {
       await request("PATCH", `${groupId}/notes/not-a-uuid`, { title: "a", body: "", version: 1 }),
       await request("POST", `${groupId}/notes`, { id: noteId, title: "a", body: "", userId: 9 }),
       await request("GET", `${groupId}/notes?limit=101`),
+      await request("POST", `${groupId}/notes/not-a-uuid/restore`, {}),
+      await request("POST", `${groupId}/notes/${noteId}/restore`, { version: 1 }),
+      await request("GET", `${groupId}/notes?deleted=yes`),
     ]
 
-    expect(responses.map((response) => response.status)).toEqual([400, 400, 400, 400])
-    expect([seen.create, seen.update, seen.list]).toEqual([null, null, null])
+    expect(responses.map((response) => response.status)).toEqual([
+      400,
+      400,
+      400,
+      400,
+      400,
+      400,
+      400,
+    ])
+    expect([seen.create, seen.update, seen.list, seen.restore]).toEqual([null, null, null, null])
   })
 
   it("refuses a write from another origin", async () => {
