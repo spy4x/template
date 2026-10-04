@@ -166,7 +166,7 @@ Deno.test("each device is listed by name and masked address, this one marked", a
     expect(listed.map((row: Record<string, unknown>) => [row.id, row.deviceName, row.ipHint]))
       .toEqual([
         [onLaptop.id, "Firefox on Linux", "203.0.113.*"],
-        [onPhone.id, "Safari on iPhone", "2001:db8:85a3:*"],
+        [onPhone.id, "Safari on iPhone", "2001:db8:*"],
       ])
     expect(listed.map((row: { current: boolean }) => row.current)).toEqual([true, false])
     // Neither the full address nor the user agent is kept with the session.

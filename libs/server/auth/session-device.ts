@@ -52,8 +52,9 @@ export function deviceName(userAgent: string | null | undefined): string {
 
 /**
  * The address with only its network part shown: the first three parts of an IPv4 address
- * (`203.0.113.*`) or the first three groups of an IPv6 one (`2001:db8:85a3:*`). Enough to tell a
- * home from an office, too little to point at one machine. `null` when `ip` is not an address.
+ * (`203.0.113.*`) or the first two groups of an IPv6 one (`2001:db8:*`). Not three IPv6 groups: a
+ * provider often gives one household a whole /48. Enough to tell a home network from a phone
+ * network, too little to point at one machine. `null` when `ip` is not an address.
  */
 export function ipHint(ip: string | null | undefined): string | null {
   const parsed = ip ? parseIp(ip) : null
@@ -64,6 +65,6 @@ export function ipHint(ip: string | null | undefined): string | null {
     const [a, b, c] = bytes
     return `${a}.${b}.${c}.*`
   }
-  const groups = [0, 2, 4].map((at) => ((bytes[at] << 8) | bytes[at + 1]).toString(16))
+  const groups = [0, 2].map((at) => ((bytes[at] << 8) | bytes[at + 1]).toString(16))
   return `${groups.join(":")}:*`
 }

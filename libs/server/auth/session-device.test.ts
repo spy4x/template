@@ -86,9 +86,10 @@ describe("ipHint", () => {
     expect(ipHint("::ffff:198.51.100.7")).toBe("198.51.100.*")
   })
 
-  it("keeps only the first three groups of an IPv6 address", () => {
-    expect(ipHint("2001:db8:85a3:8d3:1319:8a2e:370:7348")).toBe("2001:db8:85a3:*")
-    expect(ipHint("2001:db8::1")).toBe("2001:db8:0:*")
+  it("keeps only the first two groups of an IPv6 address, less than one household's /48", () => {
+    expect(ipHint("2001:db8:85a3:8d3:1319:8a2e:370:7348")).toBe("2001:db8:*")
+    expect(ipHint("2001:db8::1")).toBe("2001:db8:*")
+    expect(ipHint("2001::1")).toBe("2001:0:*")
   })
 
   it("gives nothing for a missing or malformed address", () => {
