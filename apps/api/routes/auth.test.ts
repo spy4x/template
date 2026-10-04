@@ -7,7 +7,8 @@ import {
   type SignedIn,
   type SignIn,
 } from "../services/sign-in.ts"
-import type { EmailStatus } from "@domain/identity"
+import { AccountDeletionBlockReason, type EmailStatus, UserMFAStatus } from "@domain/identity"
+import type { UserSignedOutEvent } from "../cqrs/events.ts"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { buildAuthData } from "../_testing/fake-auth.ts"
 import {
@@ -32,6 +33,8 @@ import {
 import type { Lockout } from "@spy4x/server/lockout"
 import { createKvStore, type RateLimitStore } from "@spy4x/platform/rate-limit"
 import {
+  ACCOUNT_DELETE_BLOCKED,
+  ACCOUNT_DELETE_CODE_REQUIRED,
   createAuthRoute,
   EMAIL_CHANGE_TOO_MANY,
   EMAIL_CODE_REFUSED,
@@ -40,6 +43,9 @@ import {
   PASSWORD_RESET_REFUSED,
   PASSWORD_RESET_REQUESTED,
 } from "./auth.ts"
+
+/** When the fake sign-in says a deleted account goes for good. */
+const DELETE_AFTER = new Date("2026-10-11T08:00:00.000Z")
 
 /** An address the user still has to prove, and one already proven. */
 const UNPROVEN: EmailStatus = { email: "alice@example.com", proven: false, pending: null }
@@ -89,6 +95,11 @@ function fakeSignIn(
     changePassword: () => (calls.push("changePassword"), Promise.resolve(succeed)),
     resetPassword: () => (calls.push("resetPassword"), Promise.resolve(succeed)),
     checkPassword: () => (calls.push("checkPassword"), Promise.resolve(succeed)),
+    verifyTotpCode: () => (calls.push("verifyTotpCode"), Promise.resolve(succeed)),
+    accountDeletionBlockers: () => (calls.push("accountDeletionBlockers"), Promise.resolve([])),
+    deleteAccount: () => (
+      calls.push("deleteAccount"), Promise.resolve({ deleteAfter: DELETE_AFTER })
+    ),
     // Without success there is nothing to prove, the code is wrong and the password too.
     emailStatus: () => (calls.push("emailStatus"), Promise.resolve(succeed ? UNPROVEN : PROVEN)),
     requestEmailChange: () => (
@@ -168,9 +179,11 @@ function buildApp(
   const queued: string[] = []
   /** What the route handed `signUp` and `signIn` as the address or login. */
   const logins: string[] = []
+  /** Every sign-out the route announced. */
+  const emitted: UserSignedOutEvent[] = []
   const route = createAuthRoute({
     signIn: { ...fakeSignIn(calls, succeed, secondFactor, logins), ...overrides },
-    emit: () => {},
+    emit: (event) => void emitted.push(event),
     mutationGuards: testMutationGuards,
     rateLimits,
     totpFailures: fakeTotpFailures(failureCalls, lockedForMs),
@@ -193,6 +206,7 @@ function buildApp(
     logins,
     mailed,
     logged,
+    emitted,
   }
 }
 
@@ -235,8 +249,22 @@ const anonymousRoutes: (MutationCase & { operation: string })[] = [
   { method: "POST", path: "/auth/password/reset", body: resetBody, operation: "resetPassword" },
 ]
 
+/**
+ * A route behind a session. `calls` lists what a route that runs more than its `operation` calls,
+ * when its checks pass and when they fail.
+ */
+interface SessionRoute extends MutationCase {
+  operation: string
+  calls?: { succeeded: string[]; failed: string[] }
+}
+
+/** What `route` calls once, when its checks pass (`succeeded`) or fail. */
+function callsOf(route: SessionRoute, succeeded: boolean): string[] {
+  return route.calls?.[succeeded ? "succeeded" : "failed"] ?? [route.operation]
+}
+
 /** Routes behind `isAuthenticated1FA` or `isAuthenticated2FA`. */
-const sessionRoutes: (MutationCase & { operation: string })[] = [
+const sessionRoutes: SessionRoute[] = [
   { method: "POST", path: "/auth/totp/check", body: { otp: "123456" }, operation: "checkTotp" },
   {
     method: "POST",
@@ -271,6 +299,16 @@ const sessionRoutes: (MutationCase & { operation: string })[] = [
     body: { email: "new@example.com", password: "correct-horse" },
     operation: "requestEmailChange",
   },
+  {
+    method: "POST",
+    path: "/auth/account/delete",
+    body: { password: "correct-horse" },
+    operation: "deleteAccount",
+    calls: {
+      succeeded: ["accountDeletionBlockers", "checkPassword", "deleteAccount"],
+      failed: ["accountDeletionBlockers", "checkPassword"],
+    },
+  },
 ]
 
 describe("auth routes refuse cross-site requests", () => {
@@ -304,7 +342,7 @@ describe("auth routes behind a session", () => {
       const response = await send(app, route, sameOriginHeaders)
 
       expect(response.ok).toBe(true)
-      expect(calls).toEqual([route.operation])
+      expect(calls).toEqual(callsOf(route, true))
     })
 
     it(`answers ${route.method} ${route.path} without a session with 401, not 403`, async () => {
@@ -448,7 +486,7 @@ describe("auth routes rate-limit", () => {
 
       expect(statuses.slice(3)).toEqual([429])
       expect(statuses.slice(0, 3)).not.toContain(429)
-      expect(calls).toEqual([route.operation, route.operation, route.operation])
+      expect(calls).toEqual([1, 2, 3].flatMap(() => callsOf(route, false)))
     })
   }
 
@@ -589,7 +627,7 @@ describe("auth routes rate-limit", () => {
       const sameOrigin = await send(app, route, headers)
 
       expect(sameOrigin.status).not.toBe(429)
-      expect(calls).toEqual([route.operation])
+      expect(calls).toEqual(callsOf(route, false))
     })
   }
 
@@ -1169,5 +1207,151 @@ describe("auth routes prove an e-mail address with a code", () => {
 
     expect(response.status).toBe(200)
     expect(logged).toEqual(["error: the code mail after a sign-up was not queued"])
+  })
+})
+
+describe("deleting one's own account", () => {
+  const deletePath = "/auth/account/delete"
+  const deleteRoute = { method: "POST", path: deletePath, body: { password: "correct-horse" } }
+  const withCode = { ...deleteRoute, body: { password: "correct-horse", otp: "123456" } }
+  const blocker = {
+    groupId: "8c3f1d9e-6b2a-4c5d-9e8f-0a1b2c3d4e5f",
+    name: "Family",
+    reason: AccountDeletionBlockReason.Members,
+    endsAt: null,
+  }
+  /** A session of a user with two-factor on, who gave the code at sign-in. */
+  const twoFactorAuth = () =>
+    buildAuthData({
+      user: { mfa: UserMFAStatus.CONFIGURED },
+      session: { secondFactor: SecondFactorStatus.Completed },
+    })
+
+  it("refuses a cross-site request with 403 and deletes nothing", async () => {
+    const { app, calls } = buildApp()
+    const response = await send(app, deleteRoute, crossSiteHeaders)
+
+    expect(response.status).toBe(403)
+    expect(calls).toEqual([])
+  })
+
+  it("answers 401 without a session and deletes nothing", async () => {
+    const { app, calls } = buildApp(null)
+    const response = await send(app, deleteRoute, sameOriginWithoutCookieHeaders)
+
+    expect(response.status).toBe(401)
+    expect(calls).toEqual([])
+  })
+
+  it("refuses a session that still owes its authenticator code and deletes nothing", async () => {
+    const owing = buildAuthData({
+      user: { mfa: UserMFAStatus.CONFIGURED },
+      session: { secondFactor: SecondFactorStatus.Pending },
+    })
+    const { app, calls } = buildApp(owing)
+    const response = await send(app, withCode, sameOriginHeaders)
+
+    expect(response.status).toBe(401)
+    expect(calls).toEqual([])
+  })
+
+  it("names the groups that stop it with 409, before the password is checked", async () => {
+    const { app, calls } = buildApp(undefined, {
+      signIn: { accountDeletionBlockers: () => Promise.resolve([blocker]) },
+    })
+    const response = await send(app, deleteRoute, sameOriginHeaders)
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: ACCOUNT_DELETE_BLOCKED, blockers: [blocker] })
+    expect(calls).toEqual([])
+  })
+
+  it("refuses a wrong password with 400 and deletes nothing", async () => {
+    const { app, calls, emitted } = buildApp(undefined, { succeed: false })
+    const response = await send(app, deleteRoute, sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Invalid password" })
+    expect(calls).toEqual(["accountDeletionBlockers", "checkPassword"])
+    expect(emitted).toEqual([])
+  })
+
+  it("asks for the authenticator code when two-factor is on, and deletes nothing", async () => {
+    const { app, calls } = buildApp(twoFactorAuth())
+    const response = await send(app, deleteRoute, sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: ACCOUNT_DELETE_CODE_REQUIRED })
+    expect(calls).toEqual(["accountDeletionBlockers", "checkPassword"])
+  })
+
+  it("counts a wrong authenticator code and deletes nothing", async () => {
+    const { app, calls, failureCalls } = buildApp(twoFactorAuth(), {
+      signIn: { verifyTotpCode: () => Promise.resolve(false) },
+    })
+    const response = await send(app, withCode, sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(failureCalls).toEqual(["begin", "fail"])
+    expect(calls).not.toContain("deleteAccount")
+  })
+
+  it("refuses with 429 while wrong codes lock the user, without checking the code", async () => {
+    const { app, calls } = buildApp(twoFactorAuth(), { lockedForMs: 60_000 })
+    const response = await send(app, withCode, sameOriginHeaders)
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get("Retry-After")).toBe("60")
+    expect(calls).toEqual(["accountDeletionBlockers", "checkPassword"])
+  })
+
+  it("deletes with the password and the code, announces the sign-out and answers the day it goes", async () => {
+    const { app, calls, emitted, failureCalls } = buildApp(twoFactorAuth())
+    const response = await send(app, withCode, sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      success: true,
+      deleteAfter: DELETE_AFTER.toISOString(),
+    })
+    expect(calls).toEqual([
+      "accountDeletionBlockers",
+      "checkPassword",
+      "verifyTotpCode",
+      "deleteAccount",
+    ])
+    expect(failureCalls).toEqual(["begin", "refund"])
+    expect(emitted.map((event) => event.data.userId)).toEqual([1])
+  })
+
+  it("deletes with the password alone when two-factor is off", async () => {
+    const { app, calls } = buildApp()
+    const response = await send(app, deleteRoute, sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(calls).toEqual(["accountDeletionBlockers", "checkPassword", "deleteAccount"])
+  })
+
+  it("answers 409 when a group started to stop it while the password was checked", async () => {
+    const { app, emitted } = buildApp(undefined, {
+      signIn: { deleteAccount: () => Promise.resolve({ blockers: [blocker] }) },
+    })
+    const response = await send(app, deleteRoute, sameOriginHeaders)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).blockers).toEqual([blocker])
+    expect(emitted).toEqual([])
+  })
+
+  it("lists the groups that stop it on GET /auth/account/deletion", async () => {
+    const { app } = buildApp(undefined, {
+      signIn: { accountDeletionBlockers: () => Promise.resolve([blocker]) },
+    })
+    const response = await app.request(`${API_URL}/auth/account/deletion`, {
+      headers: { ...sameOriginHeaders },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ blockers: [blocker] })
   })
 })

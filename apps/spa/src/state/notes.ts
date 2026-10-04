@@ -14,8 +14,8 @@ export interface NoteItem {
   body: string
   version: number
   changeSequence: string
-  createdByUserId: number
-  updatedByUserId: number
+  createdByUserId: number | null
+  updatedByUserId: number | null
   createdAt: string
   updatedAt: string
 }

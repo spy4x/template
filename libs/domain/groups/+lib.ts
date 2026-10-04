@@ -78,7 +78,8 @@ export interface Group {
   /** One emoji, or `null` when the group has none. */
   emoji: string | null
   ownerUserId: number
-  createdByUserId: number
+  /** `null` once the creator deleted their account. */
+  createdByUserId: number | null
   authorizationRevision: string
   nextChangeSequence: string
   createdAt: Date
@@ -90,7 +91,8 @@ export interface GroupMembership {
   groupId: string
   userId: number
   role: GroupRole
-  addedByUserId: number
+  /** `null` once whoever added them deleted their account. */
+  addedByUserId: number | null
   createdAt: Date
   updatedAt: Date
 }

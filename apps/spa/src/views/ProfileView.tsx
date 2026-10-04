@@ -8,8 +8,12 @@ import {
   type ProfileValues,
   type TotpEnrolment,
 } from "@ui/profile-screen.tsx"
+import type { AccountDeleteErrors, AccountDeleteValues } from "@ui/account-delete.tsx"
+import { SCREEN_PATHS } from "@ui/progressive.tsx"
 import {
   changePassword,
+  deleteAccount,
+  readAccountDeletionBlockers,
   totpConnectFinish,
   totpConnectStart,
   totpDisconnect,
@@ -21,8 +25,19 @@ import { profileStore } from "../state/profile.ts"
 import { toasts } from "../state/toasts.ts"
 import type { PushSubscribeRequest } from "@spy4x/platform/model"
 import { validate } from "@spy4x/validation"
-import { authOTPSchema, authPasswordChangeSchema, userProfileBaseSchema } from "@domain/identity"
+import {
+  accountDeleteSchema,
+  type AccountDeletionBlocker,
+  authOTPSchema,
+  authPasswordChangeSchema,
+  UserMFAStatus,
+  userProfileBaseSchema,
+} from "@domain/identity"
 import type { PushPublicKeyResponse } from "@domain/identity"
+
+const NO_DELETE_VALUES: AccountDeleteValues = { password: "", otp: "" }
+const NO_DELETE_ERRORS: AccountDeleteErrors = { form: null }
+const CODE_MISSING = "Enter the code from your authenticator app"
 
 /**
  * Wires `ProfileScreen` to this app's session store, the auth calls and the push endpoints. Holds
@@ -49,6 +64,10 @@ export function ProfileView() {
   const [pushPublicKey, setPushPublicKey] = useState<string | null>(null)
   const [pushError, setPushError] = useState<string | null>(null)
   const [pushBusy, setPushBusy] = useState(false)
+  const [deleteValues, setDeleteValues] = useState(NO_DELETE_VALUES)
+  const [deleteErrors, setDeleteErrors] = useState(NO_DELETE_ERRORS)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [blockers, setBlockers] = useState<AccountDeletionBlocker[] | null>(null)
 
   const setValue = (field: keyof ProfileValues, value: string) =>
     setValues((current) => ({ ...current, [field]: value }))
@@ -183,6 +202,49 @@ export function ProfileView() {
     if (!result.ok) setPushError(result.error || PROFILE_FAILURES.push)
   }
 
+  /** Reads the groups that stop the deletion; a failed read shows the form, which checks again. */
+  const loadBlockers = async () => {
+    setBlockers(null)
+    const result = await readAccountDeletionBlockers()
+    setBlockers(result.ok ? result.blockers : [])
+    if (!result.ok) setDeleteErrors({ form: result.error })
+  }
+
+  const submitDelete = async () => {
+    const twoFactor = session.user?.mfa === UserMFAStatus.CONFIGURED
+    const { password, otp } = deleteValues
+    const problems = refusedFields(
+      accountDeleteSchema,
+      twoFactor && otp !== "" ? { password, otp } : { password },
+    )
+    const otpMissing = twoFactor && otp === ""
+    if (problems || otpMissing) {
+      setDeleteErrors({
+        form: null,
+        password: problems?.password,
+        otp: otpMissing ? CODE_MISSING : problems?.otp,
+      })
+      return
+    }
+    setDeleteErrors(NO_DELETE_ERRORS)
+    setDeleteBusy(true)
+    const result = await deleteAccount(password, twoFactor ? otp : undefined)
+    setDeleteBusy(false)
+    if (!result.ok) {
+      if (result.blocked) await loadBlockers()
+      else setDeleteErrors({ form: result.error })
+      return
+    }
+    navigate(SCREEN_PATHS.signIn, { replace: true })
+    toasts.success({
+      title: "Account deleted",
+      body: `It goes for good on ${
+        result.deleteAfter.toLocaleDateString(undefined, { dateStyle: "long" })
+      }. Sign in before then to keep it.`,
+      dataE2E: "account-deleted",
+    })
+  }
+
   return (
     <ProfileScreen
       user={session.user}
@@ -226,6 +288,20 @@ export function ProfileView() {
       onDisableTotp={disableTotp}
       onRegisterPush={registerPush}
       onRemovePush={removePush}
+      accountDeletion={{
+        blockers,
+        values: deleteValues,
+        onValueChange: (field, value) =>
+          setDeleteValues((current) => ({ ...current, [field]: value })),
+        errors: deleteErrors,
+        pending: deleteBusy,
+        onOpen: () => void loadBlockers(),
+        onCancel: () => {
+          setDeleteValues(NO_DELETE_VALUES)
+          setDeleteErrors(NO_DELETE_ERRORS)
+        },
+        onDelete: () => void submitDelete(),
+      }}
       navigate={navigate}
     />
   )

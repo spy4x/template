@@ -44,7 +44,7 @@ interface GroupRow extends postgres.Row {
   color: GroupColor | null
   emoji: string | null
   ownerUserId: number
-  createdByUserId: number
+  createdByUserId: number | null
   authorizationRevision: string
   nextChangeSequence: string
   createdAt: Date

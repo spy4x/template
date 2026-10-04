@@ -1,4 +1,6 @@
 import {
+  type AccountDeletionBlocker,
+  type AccountDeletionStatus,
   type ApiSuccessResponse,
   type TotpConnectStartResponse,
   type User,
@@ -272,6 +274,37 @@ export async function totpDisconnect(): Promise<{ ok: boolean; error?: string }>
   }
   setUserMfa(UserMFAStatus.NOT_CONFIGURED)
   return { ok: true }
+}
+
+/** The groups that stop the signed-in person from deleting their account. */
+export async function readAccountDeletionBlockers(): Promise<
+  | { ok: true; blockers: AccountDeletionBlocker[] }
+  | { ok: false; error: string }
+> {
+  const result = await apiFetch<AccountDeletionStatus>("/api/auth/account/deletion")
+  if (!result.ok) return { ok: false, error: result.error.message }
+  return { ok: true, blockers: result.data.blockers }
+}
+
+/**
+ * Asks the server to delete the account, with the password and, when two-factor is on, a code.
+ * On success the server has ended every session of this person, so the page is signed out too.
+ * `blocked` means groups stop it: {@link readAccountDeletionBlockers} names them.
+ */
+export async function deleteAccount(password: string, otp?: string): Promise<
+  | { ok: true; deleteAfter: Date }
+  | { ok: false; blocked: boolean; error: string }
+> {
+  const result = await apiFetch<{ deleteAfter: string }>("/api/auth/account/delete", {
+    method: "POST",
+    // `JSON.stringify` leaves out an undefined code.
+    body: JSON.stringify({ password, otp }),
+  })
+  if (!result.ok) {
+    return { ok: false, blocked: result.status === 409, error: result.error.message }
+  }
+  sessionState.value = { ...sessionState.value, user: null, isMfaRequired: false }
+  return { ok: true, deleteAfter: new Date(result.data.deleteAfter) }
 }
 
 /** Records the signed-in user's new MFA status, so the profile page shows the right control. */

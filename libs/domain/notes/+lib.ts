@@ -72,8 +72,10 @@ export interface Note {
   version: number
   /** The group's change sequence this note was last written at, as a decimal string (BIGINT). */
   changeSequence: string
-  createdByUserId: number
-  updatedByUserId: number
+  /** `null` once the author deleted their account; shown as `DELETED_USER_NAME`. */
+  createdByUserId: number | null
+  /** `null` once the last editor deleted their account; shown as `DELETED_USER_NAME`. */
+  updatedByUserId: number | null
   createdAt: Date
   updatedAt: Date
 }

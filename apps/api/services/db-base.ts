@@ -3,7 +3,7 @@ import type { AuthSessionRecord, AuthStore } from "@spy4x/server/auth"
 import { createPostgresAuthStore, createPostgresSessionStore } from "@spy4x/server/auth/postgres"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import type { SessionStore } from "@spy4x/server/sign-in"
-import type { AuthAuditBase, User, UserBase } from "@domain/identity"
+import { type AuthAuditBase, type User, type UserBase, UserMFAStatus } from "@domain/identity"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { PostgresGroupActivityRepository } from "@server/groups/postgres-activity-repository.ts"
 import { PostgresGroupDataMover } from "@server/groups/postgres-group-data-mover.ts"
@@ -12,6 +12,18 @@ import { noteMovable } from "@server/notes/note-movable.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
 import { emailChanges } from "@server/auth/email-verification.ts"
+import {
+  accountDeletionBlockers,
+  cancelAccountDeletion,
+  isAccountDeletionWaiting,
+  lockAccountForDeletion,
+  recordAccountDeletion,
+} from "@server/auth/account-deletion.ts"
+import {
+  scheduleAccountDeletionJobs,
+  scheduleAccountRestoredMail,
+} from "@server/jobs/account-deletion.ts"
+import type { AccountDeletionBlocker } from "@domain/identity"
 
 /** A user's authenticator-app enrolment, one row of `user_totp`. */
 export interface UserTotp {
@@ -153,6 +165,33 @@ export class AppDbBase extends DbServiceBase {
     }
   }
 
+  /**
+   * Deleting one's own account (`@server/auth/account-deletion.ts`). Built per access, like
+   * `group`: `lock`, `request` and `cancel` belong inside `begin()`.
+   */
+  get accountDeletion() {
+    const sql = this.sql
+    return {
+      /** The groups that stop the user from deleting their account. */
+      blockers: (userId: number): Promise<AccountDeletionBlocker[]> =>
+        accountDeletionBlockers(sql, userId),
+      /** Locks the live user row and their groups; `false` when the user is not live. */
+      lock: (userId: number): Promise<boolean> => lockAccountForDeletion(sql, userId),
+      /** Writes the waiting request and queues its mail and its delete for good. */
+      request: async (userId: number) => {
+        const request = await recordAccountDeletion(sql, userId)
+        await scheduleAccountDeletionJobs(sql, request)
+        return request
+      },
+      /** Removes the waiting request; `true` when there was one. */
+      cancel: (userId: number): Promise<boolean> => cancelAccountDeletion(sql, userId),
+      /** `true` while the user has a request waiting. */
+      waiting: (userId: number): Promise<boolean> => isAccountDeletionWaiting(sql, userId),
+      /** Records that a sign-in restored the account and queues the mail that says so. */
+      restored: (userId: number): Promise<void> => scheduleAccountRestoredMail(sql, userId),
+    }
+  }
+
   /** The address change waiting for its code. Built per access, like `group`. */
   get emailChange(): ReturnType<typeof emailChanges> {
     return emailChanges(this.sql)
@@ -176,6 +215,16 @@ export class AppDbBase extends DbServiceBase {
        * never let `mfa` or `role` from this row decide anything.
        */
       findOneCached: cached.findOne,
+      /**
+       * Turns two-factor off, on a row waiting to be deleted too: `updateOne` skips a deleted row,
+       * and a password reset during the wait must still reach it, or no sign-in could restore it.
+       * `mfa` from the cache decides nothing (see `findOneCached`), so it is not refreshed here.
+       */
+      clearSecondFactor: async (id: number): Promise<void> => {
+        await this.sql`
+          UPDATE users SET mfa = ${UserMFAStatus.NOT_CONFIGURED}, updated_at = now() WHERE id = ${id}
+        `
+      },
       /** Creates the profile row of a new auth user; `users.id` is the auth user's id. */
       createForAuthUser: (id: number, data: UserBase): Promise<User> =>
         this.createOne<User>(

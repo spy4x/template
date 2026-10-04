@@ -134,6 +134,45 @@ export const authPasswordChangeSchema = authPasswordSchema.and({
 })
 export type AuthPasswordChange = typeof authPasswordChangeSchema.infer
 
+/** Days a deleted account waits before it is removed for good. Signing in before then restores it. */
+export const ACCOUNT_DELETION_GRACE_DAYS = 7
+
+/**
+ * The author shown for what a deleted account left in a shared group. Its rows keep the content and
+ * hold `null` where the author's id was.
+ */
+export const DELETED_USER_NAME = "Deleted user"
+
+/** The body of "delete my account": the password, and an authenticator code when two-factor is on. */
+export const accountDeleteSchema = authPasswordSchema.and({
+  "otp?": "/^[0-9]{6}$/",
+})
+export type AccountDelete = typeof accountDeleteSchema.infer
+
+/** Why a group stops its owner from deleting their account. */
+export enum AccountDeletionBlockReason {
+  /** Other people are still members: hand the group over or remove them first. */
+  Members = 1,
+  /** Its subscription is not cancelled: cancel it first, or the provider keeps charging. */
+  Subscription = 2,
+  /** Its subscription is cancelled but runs until the end of the paid period: wait for that. */
+  PlanEnding = 3,
+}
+
+/** A group the person owns that must be dealt with before their account can be deleted. */
+export interface AccountDeletionBlocker {
+  groupId: string
+  name: string
+  reason: AccountDeletionBlockReason
+  /** When its plan ends, as an ISO timestamp, for {@link AccountDeletionBlockReason.PlanEnding}. */
+  endsAt: string | null
+}
+
+/** `GET /api/auth/account/deletion`: what stops the account from being deleted now. */
+export interface AccountDeletionStatus {
+  blockers: AccountDeletionBlocker[]
+}
+
 export const userPushTokenSchemaBase = type({
   userId: "number = 0",
   deviceId: "string <= 256 = ''",
@@ -159,6 +198,10 @@ export enum AuthAuditEventType {
   SIGNED_IN = 2,
   SIGNED_OUT = 3,
   PROFILE_UPDATED = 4,
+  /** The person asked to delete their account; it waits {@link ACCOUNT_DELETION_GRACE_DAYS} days. */
+  ACCOUNT_DELETION_REQUESTED = 5,
+  /** The person signed in while their account waited for deletion, which restored it. */
+  ACCOUNT_RESTORED = 6,
 }
 
 export const authAuditBaseSchema = type({
@@ -168,6 +211,8 @@ export const authAuditBaseSchema = type({
     AuthAuditEventType.SIGNED_IN,
     AuthAuditEventType.SIGNED_OUT,
     AuthAuditEventType.PROFILE_UPDATED,
+    AuthAuditEventType.ACCOUNT_DELETION_REQUESTED,
+    AuthAuditEventType.ACCOUNT_RESTORED,
   ),
   identifier: "string <= 320 | null = null",
   ip: "string <= 45 | null = null",

@@ -5,6 +5,7 @@ import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
 import { normalizeEmail } from "@spy4x/server/auth"
 import {
+  accountDeleteSchema,
   authEmailChangeSchema,
   authEmailCodeSchema,
   authOTPSchema,
@@ -15,6 +16,7 @@ import {
   authSignUpSchema,
   emailToVerify,
   type User,
+  UserMFAStatus,
 } from "@domain/identity"
 import { EmailChangeOutcome, EmailVerifyOutcome, type SignIn } from "@api/services/sign-in.ts"
 import { UserSignedOutEvent } from "@api/cqrs/events.ts"
@@ -84,6 +86,13 @@ async function spendChangeMail(
   const byUser = await rateLimits.emailChangeByUser(userId)
   return byUser.allowed ? await rateLimits.emailChangeByAddress(email) : byUser
 }
+
+/** The answer when groups stop the account from being deleted. */
+export const ACCOUNT_DELETE_BLOCKED =
+  "You own groups other people still use or pay for. Deal with them first."
+
+/** The answer when the account has two-factor on and the request carries no code. */
+export const ACCOUNT_DELETE_CODE_REQUIRED = "Enter the code from your authenticator app"
 
 /** Sets `Retry-After` and answers 429 with `error`. */
 function tooMany(c: Context<APIContext>, retryAfterMs: number, error: string): Response {
@@ -252,7 +261,7 @@ export function createAuthRoute(
           c,
           totpFailures,
           authData.user.id,
-          () => signIn.checkTotp(authData, validationResult.data.otp),
+          () => signIn.checkTotp(c, authData, validationResult.data.otp),
           () => c.json({ error: "Invalid token" }, 401),
         )
         return outcome === true ? c.json(authData.user) : outcome
@@ -379,5 +388,48 @@ export function createAuthRoute(
         return c.json({ error: "Invalid password" }, 400)
       }
       return c.json({ success: true })
+    })
+    .get(`/account/deletion`, rateLimits.normal, async (c) => {
+      return c.json({ blockers: await signIn.accountDeletionBlockers(c.get("auth")!) })
+    })
+    // Asks again for what a stolen session lacks: the password, and the authenticator code when
+    // two-factor is on, as the sign-in does. Groups that stop it are named before anything is
+    // checked, so the person learns what to do first without typing the password in vain.
+    .post(`/account/delete`, rateLimits.strictByUser, async (c) => {
+      const body = await readApiJson(c)
+      const validationResult = validate(accountDeleteSchema, body)
+      if (validationResult.error) {
+        return c.json({ error: validationResult.error.description }, 400)
+      }
+      const authData = c.get("auth")!
+      const { password, otp } = validationResult.data
+      const blockers = await signIn.accountDeletionBlockers(authData)
+      if (blockers.length > 0) return c.json({ error: ACCOUNT_DELETE_BLOCKED, blockers }, 409)
+      if (!(await signIn.checkPassword(authData.user.id, password))) {
+        return c.json({ error: "Invalid password" }, 400)
+      }
+      if (authData.user.mfa === UserMFAStatus.CONFIGURED) {
+        if (otp === undefined) return c.json({ error: ACCOUNT_DELETE_CODE_REQUIRED }, 400)
+        const outcome = await checkUnderFailureCount(
+          c,
+          totpFailures,
+          authData.user.id,
+          () => signIn.verifyTotpCode(authData, otp),
+          () => c.json({ error: "Code is incorrect" }, 400),
+        )
+        if (outcome !== true) return outcome
+      }
+      const result = await signIn.deleteAccount(c, authData)
+      if (result.blockers) {
+        if (result.blockers.length === 0) return c.json({ error: "User not signed in" }, 401)
+        return c.json({ error: ACCOUNT_DELETE_BLOCKED, blockers: result.blockers }, 409)
+      }
+      emit(
+        new UserSignedOutEvent({
+          userId: authData.user.id,
+          request: requestInfoFromContext(c, { trustedProxy: true }),
+        }),
+      )
+      return c.json({ success: true, deleteAfter: result.deleteAfter.toISOString() })
     })
 }

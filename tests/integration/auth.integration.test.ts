@@ -122,7 +122,7 @@ function buildApp(signIn: SignIn) {
   })
   app.post("/totp/check", signIn.auth.isAuthenticated1FA, async (c) => {
     const { otp } = await c.req.json()
-    const ok = await signIn.checkTotp(c.get("auth")!, otp)
+    const ok = await signIn.checkTotp(c, c.get("auth")!, otp)
     return ok ? c.json(c.get("auth")!.user) : c.json({ error: "Invalid token" }, 401)
   })
   app.post("/totp/disconnect", signIn.auth.isAuthenticated2FA, async (c) => {

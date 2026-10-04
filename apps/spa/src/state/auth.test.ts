@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd"
 import { type User, UserMFAStatus } from "@domain/identity"
 import {
   bootstrapSession,
+  deleteAccount,
   signIn,
   signOut,
   totpConnectFinish,
@@ -248,5 +249,64 @@ describe("two-factor enrolment", () => {
     expect(await totpDisconnect()).toEqual({ ok: true })
 
     expect(sessionState.value.user?.mfa).toBe(UserMFAStatus.NOT_CONFIGURED)
+  })
+})
+
+describe("deleteAccount", () => {
+  const sent: { url: string; body: unknown }[] = []
+
+  /** Makes every request answer `status` with `body`, and records what was sent. */
+  function apiAnswers(status: number, body: unknown) {
+    globalThis.fetch = (input, init) => {
+      sent.push({ url: String(input), body: JSON.parse(String(init?.body)) })
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    }
+  }
+
+  beforeEach(() => {
+    sent.length = 0
+    sessionState.value = { ...sessionState.value, user: user as unknown as User }
+  })
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    sessionState.value = { ...sessionState.value, user: null }
+  })
+
+  it("signs the page out and returns the day the account goes once the server accepts", async () => {
+    apiAnswers(200, { success: true, deleteAfter: "2026-10-11T08:00:00.000Z" })
+
+    const result = await deleteAccount("secret-pass", "123456")
+
+    expect(result).toEqual({ ok: true, deleteAfter: new Date("2026-10-11T08:00:00.000Z") })
+    expect(sent).toEqual([
+      { url: "/api/auth/account/delete", body: { password: "secret-pass", otp: "123456" } },
+    ])
+    expect(sessionState.value.user).toBeNull()
+  })
+
+  it("sends no code without two-factor, and keeps the session when groups block it", async () => {
+    apiAnswers(409, { error: "You own groups", blockers: [] })
+
+    const result = await deleteAccount("secret-pass")
+
+    expect(result).toEqual({ ok: false, blocked: true, error: "You own groups" })
+    expect(sent[0].body).toEqual({ password: "secret-pass" })
+    expect(sessionState.value.user?.id).toBe(1)
+  })
+
+  it("keeps the session and reports the server's message when the password is refused", async () => {
+    apiAnswers(400, { error: "Invalid password" })
+
+    expect(await deleteAccount("wrong")).toEqual({
+      ok: false,
+      blocked: false,
+      error: "Invalid password",
+    })
+    expect(sessionState.value.user?.id).toBe(1)
   })
 })

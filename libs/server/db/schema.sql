@@ -117,7 +117,7 @@ CREATE TABLE groups (
     id UUID PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     owner_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    created_by_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_by_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
     authorization_revision BIGINT DEFAULT 1 NOT NULL,
     next_change_sequence BIGINT DEFAULT 1 NOT NULL,
     created_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -136,12 +136,13 @@ CREATE INDEX idx_groups_updated_id_active
     ON groups (updated_at DESC, id)
     WHERE deleted_at IS NULL;
 CREATE INDEX idx_groups_deleted_at ON groups (deleted_at) WHERE deleted_at IS NOT NULL;
+CREATE INDEX idx_groups_created_by ON groups (created_by_user_id);
 
 CREATE TABLE group_members (
     group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     user_id INT4 NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     role INT2 NOT NULL,
-    added_by_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    added_by_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (group_id, user_id),
@@ -153,6 +154,7 @@ COMMENT ON COLUMN group_members.role IS '1=viewer, 2=editor, 3=admin, 4=owner';
 CREATE INDEX idx_group_members_user_group_role
     ON group_members (user_id, group_id) INCLUDE (role);
 CREATE INDEX idx_group_members_group_role ON group_members (group_id, role);
+CREATE INDEX idx_group_members_added_by ON group_members (added_by_user_id);
 CREATE UNIQUE INDEX group_members_one_owner_key ON group_members (group_id) WHERE role = 4;
 
 CREATE TABLE user_totp (
@@ -240,6 +242,7 @@ CREATE UNIQUE INDEX idx_outbox_events_aggregate_version_kind
 CREATE INDEX idx_outbox_events_available
     ON outbox_events (available_at, created_at)
     WHERE processed_at IS NULL;
+CREATE INDEX idx_outbox_events_actor_user_id ON outbox_events (actor_user_id);
 
 -- One row per command a client sent with an idempotency key (ADR 002, "Idempotency"). A retry
 -- with the same key returns `result` instead of running the command again.
@@ -282,8 +285,8 @@ CREATE TABLE notes (
     body TEXT DEFAULT '' NOT NULL,
     version INT4 DEFAULT 1 NOT NULL,
     change_sequence BIGINT NOT NULL,
-    created_by_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    updated_by_user_id INT4 NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_by_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
+    updated_by_user_id INT4 REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMPTZ(3),
@@ -533,3 +536,22 @@ CREATE TABLE subscriber_issue_content (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
   CONSTRAINT subscriber_issue_content_list_issue_unique UNIQUE (list_id, issue_id)
 );
+
+-- A person's request to delete their account (#144). See migration 2026_10_20_0001.
+CREATE TABLE account_deletions (
+    id UUID PRIMARY KEY,
+    user_id INT4 NOT NULL UNIQUE REFERENCES auth_users(id) ON DELETE CASCADE,
+    requested_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    delete_after TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_account_deletions_delete_after ON account_deletions (delete_after);
+
+-- A restore whose mail is not sent yet (#144). See migration 2026_10_20_0001.
+CREATE TABLE account_restorations (
+    id UUID PRIMARY KEY,
+    user_id INT4 NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+    restored_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE INDEX idx_account_restorations_user_id ON account_restorations (user_id);

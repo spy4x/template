@@ -31,6 +31,12 @@
  *   `auth_audits` row inside the transaction that changes the session, so a failed row undoes the
  *   action. Sign-in checks the password with the package's `checkCredentials` first and creates
  *   the session itself, so the transaction holds no connection while a hash is verified.
+ * - **Deleting the account (#144).** `deleteAccount` soft-deletes the profile, writes the waiting
+ *   request with its two jobs and signs out every session, in one transaction, after checking
+ *   again under row locks that no group stops it (`@server/auth/account-deletion.ts`). A correct
+ *   password during the wait restores the account before the sign-in goes on as usual, second
+ *   factor included: the password alone cancels the deletion but still lets nobody in who lacks
+ *   the second factor.
  *
  * Reads no environment and imports no singleton, so the integration tests construct it against
  * their own schema.
@@ -72,6 +78,7 @@ import {
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
 import { GroupError } from "@domain/groups"
 import {
+  type AccountDeletionBlocker,
   type AuthAuditBase,
   AuthAuditEventType,
   type EmailStatus,
@@ -144,6 +151,13 @@ export interface SignInOptions {
   hasher?: PasswordHasher
 }
 
+/** What {@link SignIn.deleteAccount} did. */
+export type AccountDeleteResult =
+  /** The account waits to be deleted until `deleteAfter`; every session is signed out. */
+  | { deleteAfter: Date; blockers?: undefined }
+  /** These groups stop it; nothing changed. */
+  | { deleteAfter?: undefined; blockers: AccountDeletionBlocker[] }
+
 /** The sign-in operations the routes call. */
 export interface SignIn {
   /** Middleware and guards from `createAuth`. */
@@ -177,7 +191,7 @@ export interface SignIn {
   /** Finishes enrolment with a code; signs out every other session of the user. */
   connectTotpFinish(state: AppAuthState, code: string): Promise<boolean>
   /** Gives the second factor for this session. A code is never accepted twice. */
-  checkTotp(state: AppAuthState, code: string): Promise<boolean>
+  checkTotp(c: Context, state: AppAuthState, code: string): Promise<boolean>
   /**
    * Removes a finished enrolment, and lets the user's other sessions that still owed the second
    * factor through without it.
@@ -206,6 +220,21 @@ export interface SignIn {
    * someone else, asks for it. `false` for an account with no password.
    */
   checkPassword(userId: number, password: string): Promise<boolean>
+  /**
+   * Whether `code` is the user's current authenticator code, spending it so it never works twice.
+   * Leaves the session as it is: for a step that asks for the code again, such as deleting the
+   * account. `false` without a confirmed enrolment.
+   */
+  verifyTotpCode(state: AppAuthState, code: string): Promise<boolean>
+  /** The groups that stop the user from deleting their account now. */
+  accountDeletionBlockers(state: AppAuthState): Promise<AccountDeletionBlocker[]>
+  /**
+   * Starts the deletion of the user's account, in one transaction under row locks: checks the
+   * blockers again, soft-deletes the profile, writes the request and its jobs, signs out every
+   * session and writes the audit row. Then clears the cookie. The caller checks the password and
+   * the second factor first, and announces the sign-out.
+   */
+  deleteAccount(c: Context, state: AppAuthState): Promise<AccountDeleteResult>
   /** Where the user's address stands. */
   emailStatus(state: AppAuthState): Promise<EmailStatus>
   /**
@@ -286,7 +315,9 @@ export function createSignIn(options: SignInOptions): SignIn {
   /** The user a session belongs to, or `null` when the user is gone or may not sign in. */
   async function loadUser(userId: number): Promise<User | null> {
     const user = await db.user.findOne({ id: userId })
-    if (!user) return null
+    // An account waiting to be deleted with two-factor on is restored only by its code, so its
+    // session owes that code and reaches nothing else (`hasSecondFactor` is true for it).
+    if (!user) return await waitingForCode(userId)
     try {
       await db.group.ensureFirst({ id: crypto.randomUUID(), name: "Personal" }, user.id)
     } catch (error) {
@@ -326,6 +357,44 @@ export function createSignIn(options: SignInOptions): SignIn {
       ? SecondFactorStatus.Pending
       : SecondFactorStatus.NotRequired
   })
+  /**
+   * The profile of `userId` while it waits to be deleted with two-factor on, else `null`. A sign-in
+   * to it gets a session that owes the code, and only the code restores the account: the password
+   * alone must not undo a deletion the person asked for.
+   */
+  async function waitingForCode(userId: number): Promise<User | null> {
+    const profile = await db.user.findOne({ id: userId, includeDeleted: true })
+    if (!profile || profile.deletedAt === null) return null
+    if (profile.mfa !== UserMFAStatus.CONFIGURED) return null
+    return (await db.accountDeletion.waiting(userId)) ? profile : null
+  }
+
+  /**
+   * Restores the account of `userId` inside `tx`: the request goes, the profile comes back, the
+   * audit row is written and the mail that says so is queued. `true` when the account is live
+   * afterwards: just restored, or restored by a sign-in running alongside. `false` for a profile
+   * deleted with no request waiting: one disabled some other way, or deleted for good meanwhile.
+   */
+  async function restoreInTx(tx: AppDbBase, c: Context, userId: number): Promise<boolean> {
+    if (!(await tx.accountDeletion.cancel(userId))) {
+      return (await tx.user.findOne({ id: userId })) !== null
+    }
+    await tx.user.undeleteOne({ id: userId })
+    await tx.authAudit.insert(auditRow(c, userId, AuthAuditEventType.ACCOUNT_RESTORED))
+    await tx.accountDeletion.restored(userId)
+    return true
+  }
+
+  /**
+   * Restores the account of `userId` when it waits to be deleted, before a password sign-in goes
+   * on. `true` when the sign-in may go on (see {@link restoreInTx}); a live profile needs nothing.
+   */
+  async function restoreIfWaiting(c: Context, userId: number): Promise<boolean> {
+    const profile = await db.user.findOne({ id: userId, includeDeleted: true })
+    if (!profile || profile.deletedAt === null) return true
+    return await db.begin((tx) => restoreInTx(tx, c, userId))
+  }
+
   // Sign-in only checks the password through these; it creates the session itself (`signIn`).
   const signInOptions = { store: db.authStore, sessions }
   const signInByAddress = passwordsOver(signInOptions)
@@ -407,10 +476,17 @@ export function createSignIn(options: SignInOptions): SignIn {
       const provider = normalizeEmail(login) === null ? signInByUsername : signInByAddress
       let checked
       let secondFactor
+      let waiting: User | null
       try {
         // The hash is verified before `db.begin()`, so no pool connection waits on it.
         checked = await provider.checkCredentials({ email: login, password })
-        secondFactor = await signInSecondFactor(checked.user)
+        waiting = await waitingForCode(checked.user.id)
+        if (waiting) {
+          secondFactor = SecondFactorStatus.Pending
+        } else {
+          if (!(await restoreIfWaiting(c, checked.user.id))) return null
+          secondFactor = await signInSecondFactor(checked.user)
+        }
       } catch (error) {
         if (error instanceof PasswordSignInError || error instanceof MissingProfileError) {
           return null
@@ -424,7 +500,8 @@ export function createSignIn(options: SignInOptions): SignIn {
           keyId: checked.key.id,
           secondFactor,
         })
-        const user = await tx.user.updateOne({
+        // A deleted row takes no update; the code that restores it comes later.
+        const user = waiting ?? await tx.user.updateOne({
           id: checked.user.id,
           data: { lastLoginAt: new Date() },
         })
@@ -515,7 +592,7 @@ export function createSignIn(options: SignInOptions): SignIn {
       }
     },
 
-    async checkTotp({ user, session }, code) {
+    async checkTotp(c, { user, session }, code) {
       const enrolment = await db.userTotp.find(user.id)
       if (!enrolment || enrolment.confirmedAt === null) return false
       const step = verifyTotp(enrolment.secret, code, {
@@ -523,7 +600,12 @@ export function createSignIn(options: SignInOptions): SignIn {
       })
       if (step === null) return false
       if (!(await db.userTotp.acceptStep(user.id, step))) return false
-      return await sessions.completeSecondFactor(session.id)
+      if (user.deletedAt === null) return await sessions.completeSecondFactor(session.id)
+      // The code of an account waiting to be deleted restores it, with the session it completes.
+      return await db.begin(async (tx) => {
+        if (!(await restoreInTx(tx, c, user.id))) return false
+        return await sessionsOver(tx.sessionStore).completeSecondFactor(session.id)
+      })
     },
 
     async disconnectTotp({ user }) {
@@ -591,7 +673,7 @@ export function createSignIn(options: SignInOptions): SignIn {
           // Whoever turned on a second factor never proved they own this address: it goes with
           // their claim, so the owner signs in with the new password alone.
           await tx.userTotp.remove(user.id)
-          await tx.user.updateOne({ id: user.id, data: { mfa: UserMFAStatus.NOT_CONFIGURED } })
+          await tx.user.clearSecondFactor(user.id)
         }
         await tx.authStore.updateKeySecret(key.id, secret)
         // The mailbox owner is back in control: an address change someone else asked for goes.
@@ -604,6 +686,40 @@ export function createSignIn(options: SignInOptions): SignIn {
     async checkPassword(userId, password) {
       const key = await passwordKeyOf(db.authStore, userId)
       return !!key?.secret && (await hasher.verify(password, key.secret)).valid
+    },
+
+    async verifyTotpCode({ user }, code) {
+      const enrolment = await db.userTotp.find(user.id)
+      if (!enrolment || enrolment.confirmedAt === null) return false
+      const step = verifyTotp(enrolment.secret, code, {
+        lastAcceptedStep: enrolment.lastAcceptedStep,
+      })
+      return step !== null && await db.userTotp.acceptStep(user.id, step)
+    },
+
+    async accountDeletionBlockers({ user }) {
+      return await db.accountDeletion.blockers(user.id)
+    },
+
+    async deleteAccount(c, { user }) {
+      const result = await db.begin(async (tx): Promise<AccountDeleteResult> => {
+        // Gone or already deleted by a request running alongside: that one signed this out too.
+        if (!(await tx.accountDeletion.lock(user.id))) return { blockers: [] }
+        const blockers = await tx.accountDeletion.blockers(user.id)
+        if (blockers.length > 0) return { blockers }
+        await tx.user.deleteOne({ id: user.id })
+        const request = await tx.accountDeletion.request(user.id)
+        await sessionsOver(tx.sessionStore).signOutUser(user.id)
+        await tx.authAudit.insert(
+          auditRow(c, user.id, AuthAuditEventType.ACCOUNT_DELETION_REQUESTED),
+        )
+        return { deleteAfter: request.deleteAfter }
+      })
+      if (result.deleteAfter) {
+        cookie.clear(c)
+        c.set("auth", null)
+      }
+      return result
     },
 
     async emailStatus({ user }) {
