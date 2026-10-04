@@ -287,6 +287,36 @@ Deno.test("a password change signs the other devices out unless asked to keep th
   })
 })
 
+for (
+  const [name, password, newPassword] of [
+    ["still needs the current password", "Wrong-passw0rd!", NEW_PASSWORD],
+    // Eight UTF-16 units, which the route schema accepts, but four code points.
+    ["still refuses a new password shorter than eight characters", PASSWORD, "😀😀😀😀"],
+  ]
+) {
+  Deno.test(`a password change that keeps the other devices ${name}`, async () => {
+    await withSchema(async (sql) => {
+      const app = buildApp(sql)
+      const onLaptop = await signUp(app, "ada@example.com", laptop)
+
+      const refused = await app.request("/password", laptop, {
+        cookie: onLaptop.cookie,
+        body: { password, newPassword, signOutOthers: false },
+      })
+
+      expect(await refused.json()).toEqual({ ok: false })
+      const withOld = await app.request("/sign-in", phone, {
+        body: { login: "ada@example.com", password: PASSWORD },
+      })
+      expect(withOld.status).toBe(200)
+      const withNew = await app.request("/sign-in", phone, {
+        body: { login: "ada@example.com", password: newPassword },
+      })
+      expect(withNew.status).toBe(401)
+    })
+  })
+}
+
 Deno.test("a request marks its session as used, at most once every few minutes", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql)

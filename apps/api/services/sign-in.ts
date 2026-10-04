@@ -76,6 +76,7 @@ import {
 import { EmailCodeError } from "@spy4x/server/auth/email-code"
 import {
   createPasswordSignIn,
+  DEFAULT_MIN_PASSWORD_LENGTH,
   PASSWORD_METHOD,
   type PasswordSignIn,
   PasswordSignInError,
@@ -471,13 +472,17 @@ export function createSignIn(options: SignInOptions): SignIn {
   /**
    * Replaces the password of `userId` and leaves every session as it is: a password change where
    * the person chose to stay signed in elsewhere. Checks the current password as `checkPassword`
-   * does, and hashes the new one before writing, so a refused password changes nothing.
+   * does, refuses a new one shorter than the package's minimum as its own change does, and hashes
+   * the new one before writing, so a refused password changes nothing.
    */
   async function replacePasswordOnly(
     userId: number,
     password: string,
     newPassword: string,
   ): Promise<boolean> {
+    // Code points, as the package counts them: the route schema counts UTF-16 units, so four
+    // emoji pass it.
+    if ([...newPassword].length < DEFAULT_MIN_PASSWORD_LENGTH) return false
     const key = await passwordKeyOf(db.authStore, userId)
     if (!key?.secret || !(await hasher.verify(password, key.secret)).valid) return false
     let secret: string
