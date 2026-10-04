@@ -527,6 +527,7 @@ const SNAPSHOT_TABLES = [
   "subscription_requests",
   "subscriber_issue_content",
   "account_deletions",
+  "account_restorations",
 ]
 
 /**
