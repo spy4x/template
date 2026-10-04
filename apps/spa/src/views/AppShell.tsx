@@ -6,6 +6,7 @@ import { EmailBanner } from "@ui/email-screen.tsx"
 import { emailStore } from "../state/email.ts"
 import { signOut } from "../state/auth.ts"
 import { groupsStore } from "../state/groups.ts"
+import { notificationsStore } from "../state/notifications.ts"
 import { selectionStore } from "../state/selection.ts"
 import type { SessionUser } from "../state/session.ts"
 import { signOutRedirect } from "./sign-in-gate.ts"
@@ -52,6 +53,7 @@ export function AppShell(
         ? undefined
         : <EmailBanner status={emailStore.status.value} navigate={navigate} />}
       connection={wsStatus}
+      unreadCount={notificationsStore.unreadCount.value}
       currentPath={location}
       navigate={navigate}
       onSignOut={onSignOut}

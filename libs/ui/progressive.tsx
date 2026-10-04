@@ -40,6 +40,8 @@ export const SCREEN_PATHS = {
   forgotPassword: "/forgot-password",
   profile: "/",
   groups: "/groups",
+  /** The in-app inbox. */
+  notifications: "/notifications",
   /** The e-mail address: its code, a new code, a change. */
   email: "/email",
   /** Asks for the address to send news to. */

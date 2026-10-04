@@ -1,0 +1,194 @@
+import { signal } from "@preact/signals"
+import type { NotificationRow } from "@ui/notifications-screen.tsx"
+import { apiFetch } from "./api.ts"
+
+/** One page of the inbox as the API answers: `nextCursor` is `null` on the last page. */
+export interface NotificationPageResult {
+  notifications: NotificationRow[]
+  nextCursor: string | null
+  unreadCount: number
+}
+
+/** What the notifications store needs from the outside. Injected so tests need no network. */
+export interface NotificationDependencies {
+  /** Reads a page; throws an `Error` with the API's message when refused. */
+  list(input: { cursor: string | null }): Promise<NotificationPageResult>
+  /** Reads only the unread count, the bell's number. */
+  unreadCount(): Promise<number>
+  /** Marks one read and answers the new unread count. */
+  markRead(id: string): Promise<number>
+  /** Marks all read and answers the new unread count. */
+  markAllRead(): Promise<number>
+}
+
+/**
+ * The person's inbox, and the number on the bell. The count is always kept: a push hint (and the
+ * start-up and every reconnect) calls {@link refresh}, which reads the count. While the page is
+ * open ({@link open}), it reads the first page instead, whose answer carries the count too, so the
+ * list and the badge never disagree. A read answered after a newer one began is dropped.
+ */
+export function createNotificationsStore(dependencies: NotificationDependencies) {
+  const notifications = signal<readonly NotificationRow[]>([])
+  const nextCursor = signal<string | null>(null)
+  const unreadCount = signal(0)
+  const loading = signal(false)
+  const loadingMore = signal(false)
+  const error = signal<string | null>(null)
+  let watching = false
+  let reads = 0
+
+  async function readFirstPage(): Promise<void> {
+    const read = ++reads
+    loading.value = true
+    loadingMore.value = false
+    try {
+      const page = await dependencies.list({ cursor: null })
+      if (read !== reads) return
+      notifications.value = page.notifications
+      nextCursor.value = page.nextCursor
+      unreadCount.value = page.unreadCount
+      error.value = null
+    } catch (cause) {
+      if (read !== reads) return
+      error.value = cause instanceof Error ? cause.message : "Could not load the notifications"
+    } finally {
+      if (read === reads) loading.value = false
+    }
+  }
+
+  /** The inbox page opened: reads the first page, and keeps it fresh until {@link close}. */
+  async function open(): Promise<void> {
+    watching = true
+    await readFirstPage()
+  }
+
+  /** The inbox page closed: later hints read only the count. */
+  function close(): void {
+    watching = false
+  }
+
+  /** Brings what is shown up to date: the first page while the page is open, else the count. */
+  async function refresh(): Promise<void> {
+    if (watching) return await readFirstPage()
+    const read = ++reads
+    try {
+      const count = await dependencies.unreadCount()
+      if (read === reads) unreadCount.value = count
+    } catch (_offline) {
+      // The bell keeps its last number; the next hint or reconnect reads it again.
+    }
+  }
+
+  /** Reads the page after the last one shown and adds it at the end. */
+  async function loadMore(): Promise<void> {
+    const cursor = nextCursor.value
+    if (cursor === null || loading.value || loadingMore.value) return
+    const read = ++reads
+    loadingMore.value = true
+    error.value = null
+    try {
+      const page = await dependencies.list({ cursor })
+      if (read !== reads) return
+      const known = new Set(notifications.value.map((n) => n.id))
+      notifications.value = [
+        ...notifications.value,
+        ...page.notifications.filter((n) => !known.has(n.id)),
+      ]
+      nextCursor.value = page.nextCursor
+      unreadCount.value = page.unreadCount
+    } catch (cause) {
+      if (read !== reads) return
+      error.value = cause instanceof Error ? cause.message : "Could not load more notifications"
+    } finally {
+      if (read === reads) loadingMore.value = false
+    }
+  }
+
+  /** Marks one read: it shows as read at once, and the server's count replaces the bell's. */
+  async function markRead(id: string): Promise<void> {
+    const readAt = new Date().toISOString()
+    const before = notifications.value
+    notifications.value = before.map((n) => n.id === id && n.readAt === null ? { ...n, readAt } : n)
+    try {
+      unreadCount.value = await dependencies.markRead(id)
+    } catch (cause) {
+      notifications.value = before
+      error.value = cause instanceof Error ? cause.message : "Could not mark it as read"
+    }
+  }
+
+  /** Marks every notification read. */
+  async function markAllRead(): Promise<void> {
+    const readAt = new Date().toISOString()
+    const before = notifications.value
+    notifications.value = before.map((n) => n.readAt === null ? { ...n, readAt } : n)
+    try {
+      unreadCount.value = await dependencies.markAllRead()
+    } catch (cause) {
+      notifications.value = before
+      error.value = cause instanceof Error ? cause.message : "Could not mark them as read"
+    }
+  }
+
+  /** Signed out: drops everything. */
+  function reset(): void {
+    reads++
+    watching = false
+    notifications.value = []
+    nextCursor.value = null
+    unreadCount.value = 0
+    loading.value = false
+    loadingMore.value = false
+    error.value = null
+  }
+
+  return {
+    notifications,
+    nextCursor,
+    unreadCount,
+    loading,
+    loadingMore,
+    error,
+    open,
+    close,
+    refresh,
+    loadMore,
+    markRead,
+    markAllRead,
+    reset,
+  }
+}
+
+async function unwrap<T>(result: Awaited<ReturnType<typeof apiFetch<T>>>): Promise<T> {
+  if (!result.ok) throw new Error(result.error.message)
+  return result.data
+}
+
+/** The inbox, read and written over REST: `/api/notifications`. */
+export const notificationsStore = createNotificationsStore({
+  async list({ cursor }) {
+    const query = cursor ? `?${new URLSearchParams({ cursor })}` : ""
+    return await unwrap(await apiFetch<NotificationPageResult>(`/api/notifications${query}`))
+  },
+  async unreadCount() {
+    const data = await unwrap(
+      await apiFetch<{ unreadCount: number }>(`/api/notifications/unread-count`),
+    )
+    return data.unreadCount
+  },
+  async markRead(id) {
+    const data = await unwrap(
+      await apiFetch<{ unreadCount: number }>(
+        `/api/notifications/${encodeURIComponent(id)}/read`,
+        { method: "POST" },
+      ),
+    )
+    return data.unreadCount
+  },
+  async markAllRead() {
+    const data = await unwrap(
+      await apiFetch<{ unreadCount: number }>(`/api/notifications/read-all`, { method: "POST" }),
+    )
+    return data.unreadCount
+  },
+})

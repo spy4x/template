@@ -14,6 +14,7 @@ function harness(
   options: { open: string | null; groupsAfterRead: string[]; settings?: string | null },
 ) {
   const calls: string[] = []
+  const inbox: string[] = []
   const groups = signal<readonly { id: string }[]>([{ id: "home" }, { id: "team" }])
   const pull = createPull({
     userId: USER,
@@ -36,8 +37,9 @@ function harness(
       groupId: signal(options.settings ?? null),
       refresh: () => Promise.resolve(void calls.push("members")),
     },
+    notifications: { refresh: () => Promise.resolve(void inbox.push("notifications")) },
   })
-  return { pull, calls }
+  return { pull, calls, inbox }
 }
 
 describe("the pull after a hint", () => {
@@ -96,5 +98,22 @@ describe("the pull after a hint", () => {
     const removed = harness({ open: null, settings: "team", groupsAfterRead: ["home"] })
     await removed.pull({ groupId: "team" })
     expect(removed.calls).not.toContain("members")
+  })
+  it("reads the unread count again for this person's own hint, for a start-up and a reconnect", async () => {
+    const own = harness({ open: null, groupsAfterRead: ["home"] })
+    await own.pull({ groupId: userChangeGroupId(USER) })
+    expect(own.inbox).toEqual(["notifications"])
+
+    const start = harness({ open: null, groupsAfterRead: ["home"] })
+    await start.pull()
+    expect(start.inbox).toEqual(["notifications"])
+  })
+
+  it("leaves the inbox alone for a group's hint", async () => {
+    const { pull, inbox } = harness({ open: null, groupsAfterRead: ["home", "team"] })
+
+    await pull({ groupId: "team" })
+
+    expect(inbox).toEqual([])
   })
 })

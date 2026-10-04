@@ -11,6 +11,8 @@ export interface PullDependencies {
   notes: { refresh(): Promise<void>; groupId: ReadonlySignal<string | null> }
   /** The members of the group whose settings are open. */
   members: { refresh(): Promise<void>; groupId: ReadonlySignal<string | null> }
+  /** The inbox: its unread count, and its list while the page is open. */
+  notifications: { refresh(): Promise<void> }
 }
 
 /**
@@ -30,18 +32,20 @@ export interface PullDependencies {
  * removed never asks for the members of a group they left.
  */
 export function createPull(dependencies: PullDependencies) {
-  const { userId, profile, selection, groups, notes, members } = dependencies
+  const { userId, profile, selection, groups, notes, members, notifications } = dependencies
   return async (gap?: { groupId: string }): Promise<void> => {
-    // The hint for this person's own changes (profile, push devices, selected group), sent after
-    // a change in another tab.
+    // The hint for this person's own changes (profile, push devices, selected group, inbox), sent
+    // after a change in another tab or a new notification.
     if (gap?.groupId === userChangeGroupId(userId)) {
-      await Promise.all([profile.refresh(), selection.refresh()])
+      await Promise.all([profile.refresh(), selection.refresh(), notifications.refresh()])
       return
     }
     // Writes made offline go out before anything is read, so the read shows their result.
     await dependencies.flushOutbox()
     const openGroup = notes.groupId.value
     const membersGroup = members.groupId.value
+    // A group hint is not about the inbox; a start-up or a reconnect may have missed one.
+    if (!gap) void notifications.refresh()
     await Promise.all([selection.refresh(), groups.refresh()])
     const due = (id: string | null) =>
       id !== null && groups.groups.value.some((g) => g.id === id) && (!gap || gap.groupId === id)
