@@ -1,6 +1,7 @@
 import type { CqrsMiddleware } from "@spy4x/platform/cqrs"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { AccessError, type Actor, UserMFAStatus } from "@domain/identity"
+import { assertTokenMayDispatch, TOKEN_MESSAGES, type TokenNeed } from "./token-scope.ts"
 
 // deno-lint-ignore no-explicit-any
 type MessageConstructor = new (...args: any[]) => { data: unknown }
@@ -42,9 +43,14 @@ function actorOf(data: unknown): Actor | null {
  * Exempted messages are anonymous by construction: sign-in before a session exists, or a worker
  * draining the outbox. A guarded message that arrives without an actor is a wiring bug, not an
  * anonymous request, so it is rejected rather than waved through.
+ *
+ * An actor built from a personal API token (`actor.token`) passes only for the messages in
+ * `tokenMessages`, in the token's group, and only for reads when the token is read-only
+ * (`./token-scope.ts`).
  */
 export function createSessionGate(
   anonymous: Iterable<MessageConstructor> = [],
+  tokenMessages: ReadonlyMap<MessageConstructor, TokenNeed> = TOKEN_MESSAGES,
 ): CqrsMiddleware {
   const exempt = new Set<unknown>(anonymous)
   return (message, next) => {
@@ -59,6 +65,7 @@ export function createSessionGate(
       )
     }
     assertSecondFactorSatisfied(actor)
+    if (actor.token) assertTokenMayDispatch(message, actor.token, tokenMessages)
     return next()
   }
 }

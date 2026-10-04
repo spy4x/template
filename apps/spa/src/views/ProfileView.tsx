@@ -38,6 +38,8 @@ import {
 } from "@domain/identity"
 import type { PushPublicKeyResponse, SignedInDevice } from "@domain/identity"
 import { SESSIONS_FAILURE } from "@ui/signed-in-devices.tsx"
+import { apiTokensHttp, createApiTokensStore } from "../state/api-tokens.ts"
+import { groupsStore } from "../state/groups.ts"
 
 const NO_DELETE_VALUES: AccountDeleteValues = { password: "", otp: "" }
 const NO_DELETE_ERRORS: AccountDeleteErrors = { form: null }
@@ -76,6 +78,8 @@ export function ProfileView() {
   const [devices, setDevices] = useState<SignedInDevice[] | null>(null)
   const [devicesError, setDevicesError] = useState<string | null>(null)
   const [devicesBusy, setDevicesBusy] = useState(false)
+  const [tokens] = useState(() => createApiTokensStore(apiTokensHttp))
+  const groups = groupsStore.groups.value
 
   /** Reads the signed-in devices again; a failure shows above the list and keeps the old one. */
   const loadDevices = async () => {
@@ -105,6 +109,7 @@ export function ProfileView() {
       if (res.ok) setPushPublicKey(res.data.publicKey)
     })
     void loadDevices()
+    void tokens.load()
   }, [session.user?.id, session.isMfaRequired])
 
   /** Runs one sign-out of other devices, then reads the list again. */
@@ -327,6 +332,28 @@ export function ProfileView() {
         error: devicesError,
         onEnd: (id) => void endDevices(() => endSession(id), "That device was signed out."),
         onEndOthers: () => void endDevices(endOtherSessions, "Every other device was signed out."),
+      }}
+      apiTokens={{
+        tokens: tokens.tokens.value,
+        groups,
+        values: tokens.values.value,
+        onValueChange: tokens.setValue,
+        errors: tokens.errors.value,
+        pending: tokens.pending.value,
+        created: tokens.created.value,
+        onStartCreate: () => tokens.startCreate(groups[0]?.id ?? ""),
+        onCreate: () => void tokens.create(),
+        onDismissSecret: tokens.dismissSecret,
+        onRevoke: (id) =>
+          void tokens.revoke(id).then((revoked) => {
+            if (revoked) {
+              toasts.success({
+                title: "Revoked",
+                body: "That token no longer works.",
+                dataE2E: "api-token-revoked",
+              })
+            }
+          }),
       }}
       onStartTotp={startTotp}
       onFinishTotp={finishTotp}

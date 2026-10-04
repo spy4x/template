@@ -34,6 +34,7 @@ import {
   touchSession,
   touchUserSeen,
 } from "@server/auth/sessions.ts"
+import { type ApiTokenRows, apiTokenRows } from "@server/api-tokens/api-tokens.ts"
 
 /** A user's authenticator-app enrolment, one row of `user_totp`. */
 export interface UserTotp {
@@ -158,6 +159,14 @@ export class AppDbBase extends DbServiceBase {
       /** Deletes every session of the user but `keepId`; returns how many. */
       deleteOthers: (userId: number, keepId: number) => deleteOtherSessions(sql, userId, keepId),
     }
+  }
+
+  /**
+   * Personal API tokens (`@server/api-tokens/api-tokens.ts`). Built per access, like `group`, so
+   * inside `begin()` a create, a revoke and their audit rows share the transaction.
+   */
+  get apiTokens(): ApiTokenRows {
+    return apiTokenRows(this.sql)
   }
 
   /**

@@ -206,6 +206,12 @@ export enum AuthAuditEventType {
   ACCOUNT_RESTORED = 6,
   /** The person ended one of their other sessions, or all of them, from the devices list. */
   SESSIONS_ENDED = 7,
+  /** The person created a personal API token; `identifier` is its id. */
+  API_TOKEN_CREATED = 8,
+  /** A personal API token was used; written at most once every few minutes per token. */
+  API_TOKEN_USED = 9,
+  /** The person revoked a personal API token; `identifier` is its id. */
+  API_TOKEN_REVOKED = 10,
 }
 
 export const authAuditBaseSchema = type({
@@ -218,6 +224,9 @@ export const authAuditBaseSchema = type({
     AuthAuditEventType.ACCOUNT_DELETION_REQUESTED,
     AuthAuditEventType.ACCOUNT_RESTORED,
     AuthAuditEventType.SESSIONS_ENDED,
+    AuthAuditEventType.API_TOKEN_CREATED,
+    AuthAuditEventType.API_TOKEN_USED,
+    AuthAuditEventType.API_TOKEN_REVOKED,
   ),
   identifier: "string <= 320 | null = null",
   ip: "string <= 45 | null = null",
@@ -306,6 +315,21 @@ export interface Actor {
   userId: number
   userMfa: UserMFAStatus
   sessionSecondFactor: SecondFactorStatus
+  /**
+   * Set when a personal API token acts instead of a session (#167). The session gate then lets
+   * through only the messages a token may send, in the token's group, and only reads when the
+   * token cannot write.
+   */
+  token?: ActorToken
+}
+
+/** What an API token may do, carried on the {@link Actor} it builds. */
+export interface ActorToken {
+  tokenId: string
+  /** The one group the token acts in. */
+  groupId: string
+  /** `false` for a read-only token: every command is refused. */
+  canWrite: boolean
 }
 
 export type AccessErrorCode = "AUTH_REQUIRED" | "MFA_REQUIRED"
