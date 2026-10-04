@@ -64,6 +64,20 @@ import { groupRestoreHandler } from "@api/cqrs/command-handlers/group-restore.ts
 import { groupDeletedListHandler } from "@api/cqrs/query-handlers/group-deleted-list.ts"
 import { groupSelectedHandler } from "@api/cqrs/query-handlers/group-selected.ts"
 import { groupMembersHandler } from "@api/cqrs/query-handlers/group-members.ts"
+import {
+  NotificationListQuery,
+  NotificationMarkAllReadCommand,
+  NotificationMarkReadCommand,
+  NotificationUnreadCountQuery,
+} from "@domain/notifications"
+import {
+  notificationListHandler,
+  notificationUnreadCountHandler,
+} from "@api/cqrs/query-handlers/notifications.ts"
+import {
+  notificationMarkAllReadHandler,
+  notificationMarkReadHandler,
+} from "@api/cqrs/command-handlers/notifications.ts"
 import { groupActivityHandler } from "@api/cqrs/query-handlers/group-activity.ts"
 import { groupMemberRoleHandler } from "@api/cqrs/command-handlers/group-member-role.ts"
 import { groupMemberRemoveHandler } from "@api/cqrs/command-handlers/group-member-remove.ts"
@@ -185,5 +199,9 @@ queryBus.register(NoteListQuery, noteListHandler)
 queryBus.register(NoteGetQuery, noteGetHandler)
 queryBus.register(NoteLocateQuery, noteLocateHandler)
 queryBus.register(BillingGetQuery, billingGetHandler)
+queryBus.register(NotificationListQuery, notificationListHandler)
+queryBus.register(NotificationUnreadCountQuery, notificationUnreadCountHandler)
+commandBus.register(NotificationMarkReadCommand, notificationMarkReadHandler)
+commandBus.register(NotificationMarkAllReadCommand, notificationMarkAllReadHandler)
 
 console.log("✅ CQRS handlers initialized")

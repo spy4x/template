@@ -77,6 +77,7 @@ async function withSchema(
     for (const migration of migrations) await applyMigration(sql, migration)
     await applyMigration(sql, APPEARANCE_MIGRATION)
     await applyMigration(sql, "2026_10_19_0001_audit_activity.sql")
+    await applyMigration(sql, "2026_10_22_0001_notifications.sql")
     await body(sql)
   } finally {
     await sql.end({ timeout: 5 })
