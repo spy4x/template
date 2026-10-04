@@ -246,5 +246,37 @@ Deno.test("the free plan's note cap on Postgres", async (t) => {
         expect(await notes.count(groupId)).toBe(FREE_NOTES)
       },
     )
+
+    await t.step(
+      "a restore that passed the gate on a stale count is refused by the write's own count",
+      async () => {
+        const { groupId, owner } = await team(sql)
+        const { bus, notes } = noteBus(sql)
+        const gone = (await bus.execute(createNote(groupId, owner, "Gone"))).note
+        await bus.execute(
+          new NoteDeleteCommand({
+            actor: actor(owner),
+            groupId,
+            id: gone.id,
+            version: gone.version,
+          }),
+        )
+        for (let index = 0; index < FREE_NOTES; index++) {
+          await bus.execute(createNote(groupId, owner, `Live ${index}`))
+        }
+
+        // The gate counted 9 before another member's create took the last slot; the repository
+        // is handed the cap the gate let the restore through with, and counts for itself.
+        await expect(notes.restore({ groupId, id: gone.id }, owner, FREE_NOTES)).rejects
+          .toMatchObject({
+            code: "PLAN_LIMIT_REACHED",
+            entitlement: "maxNotes",
+          })
+
+        expect(await notes.count(groupId)).toBe(FREE_NOTES)
+        const deleted = await notes.list(groupId, { limit: 10 }, true)
+        expect(deleted.notes.map((note) => note.id)).toEqual([gone.id])
+      },
+    )
   })
 })
