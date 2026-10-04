@@ -358,6 +358,47 @@ Deno.test("a request marks its session as used, at most once every few minutes",
   })
 })
 
+Deno.test("a user's last-seen time moves at most once every five minutes, whatever the session", async () => {
+  await withSchema(async (sql) => {
+    const db = new AppDbBase({ sql })
+    const app = buildApp(sql, db)
+    const onLaptop = await signUp(app, "ada@example.com", laptop)
+    const onPhone = await signIn(app, "ada@example.com", phone)
+    const [{ userId }] = await sql<{ userId: number }[]>`
+      SELECT user_id FROM auth_sessions WHERE id = ${onLaptop.id}
+    `
+    const seen = async () =>
+      (await sql<{ lastSeenAt: Date | null }[]>`
+        SELECT last_seen_at FROM users WHERE id = ${userId}
+      `)[0].lastSeenAt?.getTime() ?? null
+
+    // The fake clock: each call says what time it is.
+    const start = new Date("2026-10-04T08:00:00.000Z")
+    const at = (minutes: number) => new Date(start.getTime() + minutes * 60_000)
+    expect(await seen()).toBeNull()
+
+    await db.sessionDevices.touchUser(userId, start)
+    expect(await seen()).toBe(start.getTime())
+    // Activity on any session, one minute and then just under five minutes later, writes nothing.
+    await db.sessionDevices.touchUser(userId, at(1))
+    await db.sessionDevices.touchUser(userId, new Date(at(5).getTime() - 1))
+    expect(await seen()).toBe(start.getTime())
+    // At five minutes it writes, and the window starts again from that write.
+    await db.sessionDevices.touchUser(userId, at(5))
+    expect(await seen()).toBe(at(5).getTime())
+    await db.sessionDevices.touchUser(userId, at(9))
+    expect(await seen()).toBe(at(5).getTime())
+
+    // A real request on either session records the first sighting through the middleware.
+    await sql`UPDATE users SET last_seen_at = NULL`
+    await app.request("/sessions", phone, { cookie: onPhone.cookie })
+    for (let attempt = 0; attempt < 20 && (await seen()) === null; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    expect(await seen()).not.toBeNull()
+  })
+})
+
 /** A database whose last-used write always fails, as during a short Postgres outage. */
 class FailingTouchDb extends AppDbBase {
   override get sessionDevices() {

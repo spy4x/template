@@ -110,6 +110,8 @@ CREATE TABLE users (
     last_login_at TIMESTAMPTZ,
     deleted_at TIMESTAMPTZ,
     mfa INT2 DEFAULT 1 NOT NULL,
+    -- #152: last signed-in activity, written at most every five minutes.
+    last_seen_at TIMESTAMPTZ,
     CONSTRAINT users_role_check CHECK (role >= 1 AND role <= 4),
     CONSTRAINT users_mfa_check CHECK (mfa = ANY (ARRAY[1, 2, 3])),
     CONSTRAINT users_id_auth_users_fkey FOREIGN KEY (id) REFERENCES auth_users (id)

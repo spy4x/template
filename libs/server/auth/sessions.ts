@@ -64,6 +64,28 @@ export async function touchSession(sql: postgres.Sql, sessionId: number): Promis
   `
 }
 
+/** How stale `users.last_seen_at` may get before activity writes it again: five minutes. */
+export const LAST_SEEN_RESOLUTION_MS = 5 * 60_000
+
+/**
+ * Records that the user was active at `now`, unless it was already recorded within
+ * {@link LAST_SEEN_RESOLUTION_MS}. The check is in the `UPDATE`'s own condition, so it holds per
+ * person across every session, socket and API instance, and most calls match no row and write
+ * nothing. `now` is a parameter so a test can move the clock.
+ */
+export async function touchUserSeen(
+  sql: postgres.Sql,
+  userId: number,
+  now: Date = new Date(),
+): Promise<void> {
+  await sql`
+    UPDATE users SET last_seen_at = ${now}
+    WHERE id = ${userId}
+      AND (last_seen_at IS NULL
+        OR last_seen_at <= ${new Date(now.getTime() - LAST_SEEN_RESOLUTION_MS)})
+  `
+}
+
 /** The user's sessions that can still act: active and not expired, last used first. */
 export async function listLiveSessions(
   sql: postgres.Sql,
