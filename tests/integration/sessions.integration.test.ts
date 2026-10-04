@@ -326,14 +326,23 @@ Deno.test("a request marks its session as used, at most once every few minutes",
         SELECT last_used_at FROM auth_sessions WHERE id = ${onLaptop.id}
       `)[0].lastUsedAt.getTime()
 
+    // The request does not wait for the write, so the test waits for it, up to two seconds.
+    const settled = async (done: (at: number) => boolean) => {
+      for (let attempt = 0; attempt < 20 && !done(await lastUsed()); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      return await lastUsed()
+    }
+
     await sql`UPDATE auth_sessions SET last_used_at = now() - interval '1 minute'`
     const recent = await lastUsed()
     await app.request("/sessions", laptop, { cookie: onLaptop.cookie })
-    expect(await lastUsed()).toBe(recent)
+    // Nothing should change, so this waits the full two seconds for a write that would.
+    expect(await settled((at) => at !== recent)).toBe(recent)
 
     await sql`UPDATE auth_sessions SET last_used_at = now() - interval '1 hour'`
     const stale = await lastUsed()
     await app.request("/sessions", laptop, { cookie: onLaptop.cookie })
-    expect(await lastUsed()).toBeGreaterThan(stale + 50 * 60_000)
+    expect(await settled((at) => at > stale + 50 * 60_000)).toBeGreaterThan(stale + 50 * 60_000)
   })
 })

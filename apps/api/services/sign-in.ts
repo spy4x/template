@@ -367,15 +367,14 @@ export function createSignIn(options: SignInOptions): SignIn {
   })
 
   /**
-   * Records that a session was used, for the devices list. A failed write is logged and the
-   * request goes on: the time it shows is a convenience, never a reason to refuse anyone.
+   * Records that a session was used, for the devices list, without making the caller wait. A
+   * failed write is logged and the request goes on: the time it shows is a convenience, never a
+   * reason to refuse or slow anyone.
    */
-  async function touchSession(sessionId: number): Promise<void> {
-    try {
-      await db.sessionDevices.touch(sessionId)
-    } catch (error) {
+  function touchSession(sessionId: number): void {
+    db.sessionDevices.touch(sessionId).catch((error) => {
       console.error("error: cannot record when a session was last used", error)
-    }
+    })
   }
 
   // The package's middleware, then the time of use of a valid session.
@@ -385,7 +384,7 @@ export function createSignIn(options: SignInOptions): SignIn {
   ) =>
     await packageAuth.parseAuth(c, async () => {
       const state = c.get("auth")
-      if (state) await touchSession(state.session.id)
+      if (state) touchSession(state.session.id)
       await next()
     })
   const auth: Auth<AuthSessionRecord, User> = { ...packageAuth, parseAuth }
@@ -895,7 +894,7 @@ export function createSignIn(options: SignInOptions): SignIn {
       if (!user) return null
       if (!secondFactorSatisfied(session.secondFactor, hasSecondFactor(user))) return null
       // A live socket counts as use, so a tab that only talks over it is not shown as idle.
-      await touchSession(session.id)
+      touchSession(session.id)
       return { session, user }
     },
 
