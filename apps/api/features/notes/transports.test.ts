@@ -12,6 +12,7 @@ import {
   NoteListQuery,
   NoteLocateQuery,
   NoteMoveCommand,
+  NoteRestoreCommand,
   NoteUpdateCommand,
 } from "@domain/notes"
 import { createSessionGate } from "../../cqrs/session-gate.ts"
@@ -29,6 +30,7 @@ import {
   createNoteListHandler,
   createNoteLocateHandler,
   createNoteMoveHandler,
+  createNoteRestoreHandler,
   createNoteUpdateHandler,
 } from "./handlers.ts"
 import { createNoteSocketRequests } from "./socket.ts"
@@ -48,11 +50,16 @@ const readOnlyGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111004"
 const strangerGroupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111005"
 const OWNER = 1
 const VIEWER = 2
+const EDITOR = 3
+const ADMIN = 4
+const STRANGER = 9
 
 function stack(plan = FREE_PLAN_ID, plans: Record<string, string> = {}) {
   const groups = roles({
     [`${groupId}:${OWNER}`]: GroupRole.OWNER,
     [`${groupId}:${VIEWER}`]: GroupRole.VIEWER,
+    [`${groupId}:${EDITOR}`]: GroupRole.EDITOR,
+    [`${groupId}:${ADMIN}`]: GroupRole.ADMIN,
     [`${editableGroupId}:${OWNER}`]: GroupRole.EDITOR,
     [`${editableGroupId}:${VIEWER}`]: GroupRole.EDITOR,
     [`${readOnlyGroupId}:${OWNER}`]: GroupRole.VIEWER,
@@ -75,6 +82,7 @@ function stack(plan = FREE_PLAN_ID, plans: Record<string, string> = {}) {
   commands.register(NoteUpdateCommand, createNoteUpdateHandler(dependencies))
   commands.register(NoteDeleteCommand, createNoteDeleteHandler(dependencies))
   commands.register(NoteMoveCommand, createNoteMoveHandler(dependencies))
+  commands.register(NoteRestoreCommand, createNoteRestoreHandler(dependencies))
   const queries = new QueryBus()
   queries.use(createSessionGate([]))
   queries.register(NoteListQuery, createNoteListHandler(dependencies))
@@ -85,6 +93,7 @@ function stack(plan = FREE_PLAN_ID, plans: Record<string, string> = {}) {
     update: (command: NoteUpdateCommand) => commands.execute(command),
     delete: (command: NoteDeleteCommand) => commands.execute(command),
     move: (command: NoteMoveCommand) => commands.execute(command),
+    restore: (command: NoteRestoreCommand) => commands.execute(command),
     list: (query: NoteListQuery) => queries.execute(query),
     get: (query: NoteGetQuery) => queries.execute(query),
     locate: (query: NoteLocateQuery) => queries.execute(query),
@@ -599,6 +608,155 @@ describe("notes over both transports", () => {
 
       expect(frame).toMatchObject({ kind: "server.error", details: { code: "NOTE_NOT_FOUND" } })
       ws.shutdown()
+    })
+  })
+  describe("deleting and restoring a note", () => {
+    /** The owner deletes the seeded note (version 2), leaving it at version 3, deleted. */
+    async function seedDeleted(notes: MemoryNoteRepository) {
+      await seedNote(notes)
+      await notes.delete({ groupId, id: noteId, expectedVersion: 2 }, OWNER)
+      notes.writes = 0
+    }
+
+    for (
+      const [name, userId] of [["an owner", OWNER], ["an admin", ADMIN], [
+        "an editor",
+        EDITOR,
+      ]] as const
+    ) {
+      it(`lets ${name} restore a deleted note over REST, at the next version`, async () => {
+        const { notes, buses } = stack()
+        await seedDeleted(notes)
+
+        const response = await rest(buses, userId)("POST", `/${noteId}/restore`, {})
+
+        expect(response.status).toBe(200)
+        expect((await response.json()).note).toMatchObject({ id: noteId, version: 4 })
+        expect(notes.notes.get(noteId)?.version).toBe(4)
+        expect(notes.deleted.size).toBe(0)
+      })
+    }
+
+    it("refuses a viewer's restore over REST and the socket, and the note stays deleted", async () => {
+      const { notes, buses } = stack()
+      await seedDeleted(notes)
+
+      const response = await rest(buses, VIEWER)("POST", `/${noteId}/restore`, {})
+      const ws = socket(buses, VIEWER)
+      const frame = await ws.command("note.restore", { groupId, id: noteId })
+
+      expect(response.status).toBe(403)
+      expect((await response.json()).error.code).toBe("ROLE_INSUFFICIENT")
+      expect(frame).toMatchObject({
+        kind: "server.error",
+        code: "forbidden",
+        details: { code: "ROLE_INSUFFICIENT" },
+      })
+      expect(notes.writes).toBe(0)
+      expect(notes.deleted.has(noteId)).toBe(true)
+      ws.shutdown()
+    })
+
+    it("answers a stranger's restore as an unknown group, never as a missing note", async () => {
+      const { notes, buses } = stack()
+      await seedDeleted(notes)
+
+      const response = await rest(buses, STRANGER)("POST", `/${noteId}/restore`, {})
+
+      expect(response.status).toBe(404)
+      expect((await response.json()).error.code).toBe("GROUP_NOT_FOUND")
+      expect(notes.writes).toBe(0)
+    })
+
+    it("restores over the socket and lists the note again", async () => {
+      const { notes, buses } = stack()
+      await seedDeleted(notes)
+      const ws = socket(buses, EDITOR)
+
+      const restored = await ws.command("note.restore", { groupId, id: noteId })
+      const listed = await ws.query("note.list", { groupId })
+
+      expect(restored).toMatchObject({
+        kind: "server.result",
+        payload: { note: { id: noteId, version: 4 } },
+      })
+      expect(listed).toMatchObject({
+        kind: "server.result",
+        payload: { notes: [{ id: noteId }] },
+      })
+      ws.shutdown()
+    })
+
+    it("lists deleted notes only when asked, over REST and the socket", async () => {
+      const { notes, buses } = stack()
+      await seedDeleted(notes)
+      const ws = socket(buses, VIEWER)
+
+      const live = await (await rest(buses, VIEWER)("GET", "", undefined)).json()
+      const gone = await (await rest(buses, VIEWER)("GET", "?deleted=true", undefined)).json()
+      const goneOverSocket = await ws.query("note.list", { groupId, deleted: true })
+      const invalid = await rest(buses, VIEWER)("GET", "?deleted=maybe", undefined)
+
+      expect(live.notes).toEqual([])
+      expect(gone.notes.map((note: { id: string }) => note.id)).toEqual([noteId])
+      expect(goneOverSocket).toMatchObject({
+        kind: "server.result",
+        payload: { notes: [{ id: noteId }] },
+      })
+      expect(invalid.status).toBe(400)
+      ws.shutdown()
+    })
+
+    it("answers a restore of a note that is not deleted as not found", async () => {
+      const { notes, buses } = stack()
+      await seedNote(notes)
+
+      const response = await rest(buses, OWNER)("POST", `/${noteId}/restore`, {})
+
+      expect(response.status).toBe(404)
+      expect((await response.json()).error.code).toBe("NOTE_NOT_FOUND")
+    })
+
+    it("refuses a restore into a group at the free plan's cap with 402, and keeps the note deleted", async () => {
+      const { notes, buses } = stack()
+      await seedDeleted(notes)
+      await fillFreePlan(notes)
+
+      const response = await rest(buses, OWNER)("POST", `/${noteId}/restore`, {})
+      const ws = socket(buses, OWNER)
+      const frame = await ws.command("note.restore", { groupId, id: noteId })
+
+      expect(response.status).toBe(402)
+      expect((await response.json()).error).toMatchObject({
+        code: "PLAN_LIMIT_REACHED",
+        entitlement: "maxNotes",
+        limit: 10,
+        canUpgrade: true,
+      })
+      expect(frame).toMatchObject({
+        kind: "server.error",
+        code: "forbidden",
+        details: { code: "PLAN_LIMIT_REACHED", entitlement: "maxNotes", limit: 10 },
+      })
+      expect(notes.writes).toBe(0)
+      expect(notes.deleted.has(noteId)).toBe(true)
+      ws.shutdown()
+    })
+
+    it("restores into a full group once a live note makes room, and on Pro past the cap", async () => {
+      const full = stack()
+      await seedDeleted(full.notes)
+      await fillFreePlan(full.notes)
+      const [live] = [...full.notes.notes.keys()]
+      await full.notes.delete({ groupId, id: live, expectedVersion: 1 }, OWNER)
+      const pro = stack(PRO_PLAN_ID)
+      await seedDeleted(pro.notes)
+      await fillFreePlan(pro.notes)
+
+      const withRoom = await rest(full.buses, OWNER)("POST", `/${noteId}/restore`, {})
+      const onPro = await rest(pro.buses, OWNER)("POST", `/${noteId}/restore`, {})
+
+      expect([withRoom.status, onPro.status]).toEqual([200, 200])
     })
   })
 })

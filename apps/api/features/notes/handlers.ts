@@ -11,6 +11,7 @@ import {
   NoteLocateQuery,
   NoteMoveCommand,
   type NoteRepository,
+  NoteRestoreCommand,
   NoteUpdateCommand,
 } from "@domain/notes"
 
@@ -88,6 +89,29 @@ export function createNoteDeleteHandler(
 }
 
 /**
+ * Restoring needs an editor's rights, as a delete does, and the plan's cap on notes: the note is
+ * live again, so it counts.
+ */
+export function createNoteRestoreHandler(
+  { notes, groups }: NoteHandlerDependencies,
+): CommandHandler<NoteRestoreCommand> {
+  return async (command) => {
+    const { data, allowance } = command
+    // The gate sets it on every restore it lets through; without it the cap would go unchecked.
+    if (allowance === undefined) {
+      throw new Error("NoteRestoreCommand reached its handler without the entitlement gate")
+    }
+    assertCanWriteNotes(await groups.roleOf(data.groupId, data.actor.userId))
+    const note = await notes.restore(
+      { groupId: data.groupId, id: data.id, requestId: data.requestId },
+      data.actor.userId,
+      allowance,
+    )
+    return { note }
+  }
+}
+
+/**
  * Moving needs an editor's rights in both groups. The source is checked first, so a person who
  * cannot write there is told so before anything about the target; a target the person does not
  * belong to is "group not found".
@@ -122,7 +146,7 @@ export function createNoteListHandler(
 ): QueryHandler<NoteListQuery> {
   return async ({ data }) => {
     assertCanReadNotes(await groups.roleOf(data.groupId, data.actor.userId))
-    return await notes.list(data.groupId, data.page)
+    return await notes.list(data.groupId, data.page, data.deleted)
   }
 }
 

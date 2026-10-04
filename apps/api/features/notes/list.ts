@@ -21,13 +21,18 @@ export async function listNotesPage(
   dependencies: NoteListDependencies,
   actor: Actor,
   groupId: string,
-  page: { limit: number; cursor?: string },
+  page: { limit: number; cursor?: string; deleted?: boolean },
 ) {
   const after = page.cursor
     ? await dependencies.cursor.decode(page.cursor, actor.userId, groupId)
     : undefined
   const result = await dependencies.list(
-    new NoteListQuery({ actor, groupId, page: { limit: page.limit, after } }),
+    new NoteListQuery({
+      actor,
+      groupId,
+      page: { limit: page.limit, after },
+      deleted: page.deleted,
+    }),
   )
   const nextCursor = result.nextPageKey
     ? await dependencies.cursor.encode(actor.userId, groupId, result.nextPageKey)

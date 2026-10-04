@@ -40,6 +40,7 @@ export const ACTIVITY_KINDS = [
   "group.data_moved_in",
   "note.created",
   "note.deleted",
+  "note.restored",
   "note.moved_out",
   "note.moved_in",
 ] as const
@@ -229,6 +230,10 @@ export function describeActivity(
     case "note.deleted": {
       const title = quoted(details.title)
       return title ? `${who} deleted the note ${title}` : `${who} deleted a note`
+    }
+    case "note.restored": {
+      const title = quoted(details.title)
+      return title ? `${who} restored the note ${title}` : `${who} restored a note`
     }
     case "note.moved_out": {
       const to = typeof details.groupName === "string" && details.groupName !== ""

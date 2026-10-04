@@ -6,7 +6,7 @@ import {
   GroupMoveAllCommand,
   invitableRoles,
 } from "@domain/groups"
-import { NoteCreateCommand, NoteMoveCommand } from "@domain/notes"
+import { NoteCreateCommand, NoteMoveCommand, NoteRestoreCommand } from "@domain/notes"
 import { type EntitlementNeeds, needsFeature, needsRoom } from "./entitlement-gate.ts"
 
 /**
@@ -16,6 +16,14 @@ import { type EntitlementNeeds, needsFeature, needsRoom } from "./entitlement-ga
 export const ENTITLEMENT_NEEDS: EntitlementNeeds = new Map([
   needsRoom(
     NoteCreateCommand,
+    "maxNotes",
+    (command) => command.data.groupId,
+    (actor) => canMutateNotes(actor),
+  ),
+  // A restored note is live again and counts, so a full group cannot restore one. A viewer is not
+  // judged, so the handler answers "not an editor" (403) before the plan answers 402.
+  needsRoom(
+    NoteRestoreCommand,
     "maxNotes",
     (command) => command.data.groupId,
     (actor) => canMutateNotes(actor),

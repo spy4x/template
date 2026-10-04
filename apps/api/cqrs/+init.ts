@@ -91,11 +91,13 @@ import {
   NoteListQuery,
   NoteLocateQuery,
   NoteMoveCommand,
+  NoteRestoreCommand,
   NoteUpdateCommand,
 } from "@domain/notes"
 import { noteCreateHandler } from "@api/cqrs/command-handlers/note-create.ts"
 import { noteUpdateHandler } from "@api/cqrs/command-handlers/note-update.ts"
 import { noteDeleteHandler } from "@api/cqrs/command-handlers/note-delete.ts"
+import { noteRestoreHandler } from "@api/cqrs/command-handlers/note-restore.ts"
 import { noteMoveHandler } from "@api/cqrs/command-handlers/note-move.ts"
 import { noteListHandler } from "@api/cqrs/query-handlers/note-list.ts"
 import { noteGetHandler } from "@api/cqrs/query-handlers/note-get.ts"
@@ -181,6 +183,7 @@ commandBus.register(
 commandBus.register(NoteCreateCommand, noteCreateHandler)
 commandBus.register(NoteUpdateCommand, noteUpdateHandler)
 commandBus.register(NoteDeleteCommand, noteDeleteHandler)
+commandBus.register(NoteRestoreCommand, noteRestoreHandler)
 commandBus.register(NoteMoveCommand, noteMoveHandler)
 commandBus.register(BillingCheckoutCommand, billingCheckoutHandler)
 commandBus.register(BillingPortalCommand, billingPortalHandler)

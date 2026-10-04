@@ -12,6 +12,8 @@ import {
   NoteLocateQuery,
   NoteMoveCommand,
   noteMovePayloadSchema,
+  NoteRestoreCommand,
+  noteRestorePayloadSchema,
   NoteUpdateCommand,
   noteUpdatePayloadSchema,
   type NoteWriteResult,
@@ -26,6 +28,7 @@ export interface NoteSocketDependencies extends NoteListDependencies {
   create(command: NoteCreateCommand): Promise<NoteWriteResult>
   update(command: NoteUpdateCommand): Promise<{ note: Note }>
   delete(command: NoteDeleteCommand): Promise<{ note: DeletedNote }>
+  restore(command: NoteRestoreCommand): Promise<{ note: Note }>
   get(query: NoteGetQuery): Promise<{ note: Note }>
   locate(query: NoteLocateQuery): Promise<{ groupId: string }>
   move(command: NoteMoveCommand): Promise<{ notes: Note[] }>
@@ -68,6 +71,15 @@ export function createNoteSocketRequests(dependencies: NoteSocketDependencies): 
         )
       },
     },
+    "note.restore": {
+      kind: "command",
+      handle: async ({ actor, requestId, payload, idempotencyKey }) => {
+        const input = parseNoteRequest(noteRestorePayloadSchema, payload)
+        return await dependencies.restore(
+          new NoteRestoreCommand({ actor, ...input, requestId, idempotencyKey }),
+        )
+      },
+    },
     "note.move": {
       kind: "command",
       handle: async ({ actor, requestId, payload, idempotencyKey }) => {
@@ -89,6 +101,7 @@ export function createNoteSocketRequests(dependencies: NoteSocketDependencies): 
         return await listNotesPage(dependencies, actor, input.groupId, {
           limit: input.limit ?? DEFAULT_NOTE_LIST_LIMIT,
           cursor: input.cursor,
+          deleted: input.deleted,
         })
       },
     },

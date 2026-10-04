@@ -22,11 +22,18 @@ export const NOTE_EVENTS = {
   created: "note.created",
   updated: "note.updated",
   deleted: "note.deleted",
+  restored: "note.restored",
   /** Written on the group a move takes notes out of. */
   movedOut: "note.moved_out",
   /** Written on the group a move puts notes into. */
   movedIn: "note.moved_in",
 } as const
+
+/**
+ * How long a deleted note waits to be restored: the worker removes it for good once it has been
+ * deleted for more days than this.
+ */
+export const NOTE_RESTORE_DAYS = 30
 
 /** The most notes one move takes: a request for more is refused, not cut short. */
 export const NOTE_MOVE_MAX = 100
@@ -112,6 +119,13 @@ export const noteDeleteRequestSchema = type({ ...versionField, "+": "reject" })
 export type NoteDeleteRequest = typeof noteDeleteRequestSchema.infer
 
 /**
+ * `POST /api/groups/:groupId/notes/:noteId/restore`: takes no fields. The version of a deleted note
+ * is not needed: nothing but a restore changes it, and a second restore finds no deleted note.
+ */
+export const noteRestoreRequestSchema = type({ "+": "reject" })
+export type NoteRestoreRequest = typeof noteRestoreRequestSchema.infer
+
+/**
  * `POST /api/groups/:groupId/notes/move`: the group to move to and the notes to move, all or none.
  * The form fields are the same: `toGroupId`, and one `noteIds` per ticked note.
  */
@@ -147,6 +161,8 @@ export const noteDeletePayloadSchema = type({
   ...versionField,
   "+": "reject",
 })
+/** The `note.restore` socket payload. */
+export const noteRestorePayloadSchema = type({ ...groupIdField, ...noteIdField, "+": "reject" })
 /** The `note.move` socket payload. */
 export const noteMovePayloadSchema = type({
   ...groupIdField,
@@ -163,6 +179,8 @@ export const noteListPayloadSchema = type({
   ...groupIdField,
   "limit?": "1 <= number.integer <= 100",
   "cursor?": "string > 0",
+  /** `true` lists the group's deleted notes instead of its live ones. */
+  "deleted?": "boolean",
   "+": "reject",
 })
 
@@ -306,6 +324,27 @@ export class NoteDeleteCommand implements Command<NoteDeletePayload, { note: Del
   constructor(public data: NoteDeletePayload) {}
 }
 
+export interface NoteRestorePayload {
+  actor: Actor
+  groupId: string
+  id: string
+  requestId?: string
+  idempotencyKey?: string
+}
+
+/**
+ * Brings a deleted note back, as a change on the group like any other write: its `deleted_at` is
+ * cleared and its version grows by one, so an edit queued on the version it had when it was deleted
+ * conflicts instead of landing. Counts against the plan's `maxNotes` like a create does, as the
+ * note is live again. Needs an editor's rights, the same as a delete.
+ */
+export class NoteRestoreCommand implements Command<NoteRestorePayload, { note: Note }> {
+  __resultType?: { note: Note }
+  /** The group's cap on notes, set by the entitlement gate; see {@link NoteCreateCommand}. */
+  allowance?: number | null
+  constructor(public data: NoteRestorePayload) {}
+}
+
 export interface NoteMovePayload {
   actor: Actor
   /** The group the notes are in now. */
@@ -349,6 +388,8 @@ export interface NoteListPayload {
   actor: Actor
   groupId: string
   page: NoteListPage
+  /** List the group's deleted notes (newest deletion first) instead of its live ones. */
+  deleted?: boolean
 }
 
 export class NoteListQuery implements Query<NoteListPayload, NoteListResult> {
@@ -407,6 +448,12 @@ export interface NoteDeleteInput {
   requestId?: string
 }
 
+export interface NoteRestoreInput {
+  groupId: string
+  id: string
+  requestId?: string
+}
+
 export interface NoteMoveInput {
   fromGroupId: string
   toGroupId: string
@@ -420,7 +467,8 @@ export interface NoteMoveInput {
  * write checks again inside its transaction, as a role can change in between.
  */
 export interface NoteRepository {
-  list(groupId: string, page: NoteListPage): Promise<NoteListResult>
+  /** The group's live notes, or with `deleted` its deleted ones, each newest change first. */
+  list(groupId: string, page: NoteListPage, deleted?: boolean): Promise<NoteListResult>
   get(groupId: string, id: string): Promise<Note | null>
   /**
    * The group a live note is in, when the user is an active member of that group. `null` for a
@@ -441,6 +489,12 @@ export interface NoteRepository {
   update(input: NoteUpdateInput, actorId: number): Promise<Note>
   /** Throws `NOTE_NOT_FOUND`, or {@link NoteVersionConflictError} for a stale version. */
   delete(input: NoteDeleteInput, actorId: number): Promise<DeletedNote>
+  /**
+   * Clears `deleted_at`. Throws `NOTE_NOT_FOUND` for a note that is not deleted (never there, live
+   * already, or removed for good), and a `PlanError` when the group would pass `allowance` notes
+   * (`null` for no cap), counted in the write's own transaction.
+   */
+  restore(input: NoteRestoreInput, actorId: number, allowance: number | null): Promise<Note>
   /**
    * Throws `GROUP_NOT_FOUND` or `ROLE_INSUFFICIENT` unless the actor is an editor or above in both
    * groups (checked on the locked membership rows), `NOTE_NOT_FOUND` when any note is not live in
