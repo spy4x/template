@@ -23,6 +23,9 @@ import {
   createNoteListHandler,
 } from "../../apps/api/features/notes/handlers.ts"
 import { createApiTokensRoute } from "../../apps/api/routes/api-tokens.ts"
+import { createAuthRoute } from "../../apps/api/routes/auth.ts"
+import type { AuthRateLimits } from "../../apps/api/middlewares/auth-rate-limits.ts"
+import { issuePasswordReset } from "../../libs/server/auth/password-reset.ts"
 import { createTokenApiRoute } from "../../apps/api/routes/token-api.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
 import { requireDbConnection } from "./db-connection.ts"
@@ -70,6 +73,24 @@ async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<v
 }
 
 const passThrough: MiddlewareHandler = async (_c, next) => await next()
+const notCalled = () => Promise.reject(new Error("not part of this test"))
+
+/** The auth routes' limits, all open: limits are not what these tests are about. */
+const openAuthLimits: AuthRateLimits = {
+  strictByIp: passThrough,
+  strictByUser: passThrough,
+  otpByUser: passThrough,
+  normal: passThrough,
+  resetByAddress: notCalled,
+  emailCodeByAddress: notCalled,
+  emailChangeByUser: notCalled,
+  emailChangeByAddress: notCalled,
+}
+const openLockout = {
+  begin: () => Promise.resolve(0),
+  refund: () => Promise.resolve(),
+  fail: () => Promise.resolve(),
+}
 
 /** The API as `index.ts` mounts the parts this feature touches, with a clock the test moves. */
 async function buildApp(sql: postgres.Sql) {
@@ -123,6 +144,23 @@ async function buildApp(sql: postgres.Sql) {
     const result = await signIn.signUp(c, email, PASSWORD, groupId)
     return result ? c.json({ ok: true }) : c.json({ error: "refused" }, 401)
   })
+  // The real account routes, where the password, sessions and second factor live.
+  app.route(
+    "/auth",
+    createAuthRoute({
+      signIn,
+      emit: () => {},
+      mutationGuards: createMutationGuards(WEB_APP_URL),
+      rateLimits: openAuthLimits,
+      totpFailures: openLockout,
+      requestPasswordReset: () => Promise.resolve(),
+      emailCodeFailures: openLockout,
+      requestEmailCode: () => Promise.resolve(),
+      logError: (message, error) => {
+        throw new Error(`${message}: ${error}`)
+      },
+    }),
+  )
   app.route(
     "/tokens",
     createApiTokensRoute({
@@ -144,7 +182,7 @@ async function buildApp(sql: postgres.Sql) {
       limitByToken: passThrough,
     }),
   )
-  return { app, clock, groups, sql }
+  return { app, clock, groups, sql, db, signIn }
 }
 
 type App = Awaited<ReturnType<typeof buildApp>>
@@ -305,7 +343,7 @@ Deno.test("a token stops working when its owner's account is deleted", async () 
   })
 })
 
-Deno.test("a token cannot reach account actions: those routes read only the session cookie", async () => {
+Deno.test("a token cannot reach account actions: token management, password, sessions", async () => {
   await withSchema(async (sql) => {
     const app = await buildApp(sql)
     const ada = await signUp(app, "ada@example.com")
@@ -329,6 +367,22 @@ Deno.test("a token cannot reach account actions: those routes read only the sess
       headers: { ...bearer(secret), origin: WEB_APP_URL, "sec-fetch-site": "same-origin" },
     })
     expect(revoke.status).toBe(401)
+    // The real account routes: `parseAuth` reads only the session cookie, so a bearer token is no
+    // one there.
+    const sameSite = { ...bearer(secret), origin: WEB_APP_URL, "sec-fetch-site": "same-origin" }
+    const password = await app.app.request(`${API}/auth/password/change`, {
+      method: "POST",
+      headers: sameSite,
+      body: JSON.stringify({ password: PASSWORD, newPassword: "Hijacked-Passw0rd" }),
+    })
+    expect(password.status).toBe(401)
+    const sessions = await app.app.request(`${API}/auth/sessions`, { headers: sameSite })
+    expect(sessions.status).toBe(401)
+    const endOthers = await app.app.request(`${API}/auth/sessions/others`, {
+      method: "DELETE",
+      headers: sameSite,
+    })
+    expect(endOthers.status).toBe(401)
     const [{ count }] = await sql<
       { count: number }[]
     >`SELECT count(*)::int AS count FROM api_tokens`
@@ -393,28 +447,97 @@ Deno.test("create and revoke are audited, and use at most once per few minutes",
   })
 })
 
-Deno.test("a person holds at most the cap of live tokens", async () => {
+/** Sends a create for `groupId` and answers its status, whatever it is. */
+async function createStatus(app: App, person: Person, groupId: string): Promise<number> {
+  const response = await app.app.request(`${API}/tokens`, {
+    method: "POST",
+    headers: browser(person.cookie),
+    body: JSON.stringify({
+      name: "Script",
+      groupId,
+      access: ApiTokenAccess.READ,
+      expiresInDays: 30,
+    }),
+  })
+  await response.body?.cancel()
+  return response.status
+}
+
+Deno.test("a person holds at most the cap of live tokens, even when creates race", async () => {
   await withSchema(async (sql) => {
     const app = await buildApp(sql)
     const ada = await signUp(app, "ada@example.com")
-    await Promise.all(
-      Array.from({ length: API_TOKENS_MAX }, () => createToken(app, ada, { access: 1 })),
+    const statuses = await Promise.all(
+      Array.from({ length: API_TOKENS_MAX + 5 }, () => createStatus(app, ada, ada.groupId)),
     )
 
-    const response = await app.app.request(`${API}/tokens`, {
-      method: "POST",
-      headers: browser(ada.cookie),
-      body: JSON.stringify({
-        name: "One too many",
-        groupId: ada.groupId,
-        access: ApiTokenAccess.READ,
-        expiresInDays: 30,
-      }),
-    })
-    expect(response.status).toBe(409)
+    expect(statuses.filter((status) => status === 201).length).toBe(API_TOKENS_MAX)
+    expect(statuses.filter((status) => status === 409).length).toBe(5)
     const [{ count }] = await sql<
       { count: number }[]
     >`SELECT count(*)::int AS count FROM api_tokens`
     expect(count).toBe(API_TOKENS_MAX)
+  })
+})
+
+Deno.test("tokens of a deleted group are neither listed nor counted, and come back with it", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const side = crypto.randomUUID()
+    await app.groups.create({ id: side, name: "Side project" }, ada.userId)
+    for (let i = 0; i < API_TOKENS_MAX; i++) await createToken(app, ada, { groupId: side })
+    expect(await createStatus(app, ada, ada.groupId)).toBe(409)
+
+    await sql`UPDATE groups SET deleted_at = now() WHERE id = ${side}`
+    const listed = async () => {
+      const response = await app.app.request(`${API}/tokens`, { headers: browser(ada.cookie) })
+      return ((await response.json()) as { tokens: unknown[] }).tokens.length
+    }
+    expect(await listed()).toBe(0)
+    expect(await createStatus(app, ada, ada.groupId)).toBe(201)
+
+    // Restoring the group brings its tokens back, so the list and the cap still agree.
+    await sql`UPDATE groups SET deleted_at = NULL WHERE id = ${side}`
+    expect(await listed()).toBe(API_TOKENS_MAX + 1)
+    expect(await createStatus(app, ada, ada.groupId)).toBe(409)
+  })
+})
+
+Deno.test("a password reset revokes every token, and a password change keeps them", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const kept = await createToken(app, ada)
+
+    const change = await app.app.request(`${API}/auth/password/change`, {
+      method: "POST",
+      headers: browser(ada.cookie),
+      body: JSON.stringify({ password: PASSWORD, newPassword: "Changed-Passw0rd" }),
+    })
+    expect(change.status).toBe(200)
+    expect((await listNotes(app, ada.groupId, kept.secret)).status).toBe(200)
+
+    // The change gives this session a new cookie.
+    const renewed = change.headers.get("set-cookie")?.split(";")[0] ?? ada.cookie
+    const second = await createToken(app, { ...ada, cookie: renewed }, {
+      access: ApiTokenAccess.READ,
+    })
+    const issued = (await issuePasswordReset(app.db.authStore, "ada@example.com", new Date()))!
+    expect(await app.signIn.resetPassword("ada@example.com", issued.code, "Reset-Passw0rd")).toBe(
+      true,
+    )
+
+    expect((await listNotes(app, ada.groupId, kept.secret)).status).toBe(401)
+    expect((await listNotes(app, ada.groupId, second.secret)).status).toBe(401)
+    const [{ count }] = await sql<
+      { count: number }[]
+    >`SELECT count(*)::int AS count FROM api_tokens`
+    expect(count).toBe(0)
+    const rows = await sql<{ identifier: string }[]>`
+      SELECT identifier FROM auth_audits
+      WHERE user_id = ${ada.userId} AND event_type = ${AuthAuditEventType.API_TOKEN_REVOKED}
+    `
+    expect(rows).toEqual([{ identifier: "password-reset" }])
   })
 })
