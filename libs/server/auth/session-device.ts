@@ -60,8 +60,8 @@ export function ipHint(ip: string | null | undefined): string | null {
   if (!parsed) return null
   const bytes = parsed.bytes
   if (parsed.version === 4) {
-    // An IPv4-mapped IPv6 address keeps its IPv4 part in the last four bytes.
-    const [a, b, c] = bytes.subarray(bytes.length - 4)
+    // `parseIp` already reads an IPv4-mapped IPv6 address (`::ffff:198.51.100.7`) as IPv4.
+    const [a, b, c] = bytes
     return `${a}.${b}.${c}.*`
   }
   const groups = [0, 2, 4].map((at) => ((bytes[at] << 8) | bytes[at + 1]).toString(16))

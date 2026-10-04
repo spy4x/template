@@ -59,6 +59,12 @@ describe("deviceName", () => {
     expect(deviceName("SomeBot/1.0 (Windows NT 10.0)")).toBe("Windows")
   })
 
+  it("does not call a WebKit browser it does not know Safari", () => {
+    const agent =
+      "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) SomeBrowser/1.0 Safari/537.36"
+    expect(deviceName(agent)).toBe("Android")
+  })
+
   it("names only the browser when the system is unknown", () => {
     expect(deviceName("Firefox/131.0")).toBe("Firefox")
   })
