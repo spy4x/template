@@ -52,6 +52,8 @@ says what is missing. Do not copy the gap into a new screen.
   with `onSubmit`; only the newsletter's pass `action` too.
 - **One page header.** Every signed-in page starts with `PageHeader` (`libs/ui/page-header.tsx`):
   the title, the primary action and one "More actions" menu. Do not draw a second one.
+- **Laid out by the rules in [docs/design/ui-layout.md](docs/design/ui-layout.md):** one primary
+  action per screen, rare actions in a menu or dialog, destructive ones confirmed, mobile first.
 - **State comes in as props:** `value`, `errors`, `pending`, `items`, `cursor`. Error and pending
   display is part of the component, so every screen shows the same messages.
 - **Accessible by construction.** Every control has a label. Error text is tied to its field with
