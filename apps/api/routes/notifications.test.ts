@@ -194,14 +194,16 @@ describe("POST /notifications/:id/read", () => {
     }
   })
 
-  it("refuses a request from another origin", async () => {
-    const response = await post(buildApp(), "/1/read", {
-      origin: "http://evil.example",
-      "sec-fetch-site": "cross-site",
-    })
+  it("refuses a request from another origin, here and on read-all", async () => {
+    for (const path of ["/1/read", "/read-all"]) {
+      const response = await post(buildApp(), path, {
+        origin: "http://evil.example",
+        "sec-fetch-site": "cross-site",
+      })
 
-    expect(response.status).toBe(403)
-    expect((await response.json()).error.code).toBe("REQUEST_ORIGIN_INVALID")
+      expect(response.status).toBe(403)
+      expect((await response.json()).error.code).toBe("REQUEST_ORIGIN_INVALID")
+    }
   })
 })
 
