@@ -1,4 +1,6 @@
 import { Component, type ComponentChildren } from "preact"
+import { Button } from "@spy4x/preact-ui/button"
+import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { reportCaughtError } from "./error-reporting.ts"
 
 /**
@@ -8,19 +10,27 @@ import { reportCaughtError } from "./error-reporting.ts"
 export class ErrorBoundary extends Component<{ children: ComponentChildren }, { failed: boolean }> {
   override state = { failed: false }
 
+  static override getDerivedStateFromError() {
+    return { failed: true }
+  }
+
   override componentDidCatch(error: unknown) {
     reportCaughtError(error)
-    this.setState({ failed: true })
   }
 
   override render() {
     if (!this.state.failed) return this.props.children
     return (
-      <div role="alert" class="mx-auto max-w-md p-6 text-center">
-        <p class="mb-4">Something went wrong. Reloading the page usually fixes it.</p>
-        <button type="button" class="underline" onClick={() => location.reload()}>
-          Reload the page
-        </button>
+      <div role="alert" data-e2e="render-error">
+        <EmptyState
+          title="Something went wrong."
+          description="Reloading the page usually fixes it."
+          action={
+            <Button data-e2e="render-error-reload" onClick={() => location.reload()}>
+              Reload the page
+            </Button>
+          }
+        />
       </div>
     )
   }

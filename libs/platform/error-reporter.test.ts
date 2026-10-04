@@ -176,6 +176,38 @@ describe("an error report", () => {
   })
 })
 
+describe("a report's free text", () => {
+  it("masks what a header line, a relative path, a websocket URL or a bare token carries", async () => {
+    const { sent, reporter } = setup()
+    const error = new Error(
+      [
+        "Authorization: Basic BASICX",
+        "Cookie: a=1; b=COOKIEX",
+        "Set-Cookie: sid=SETX; Path=/",
+        "GET /reset?code=RELX",
+        "request to /api/auth/magic?key=RELKEYX failed",
+        "wss://app.example.com/socket?ticket=WSSX",
+        "ws://h/s#FRAGX",
+        "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJKV1RYIn0.SIGX",
+      ].join("\n"),
+    )
+    error.stack = "Error: x\n    at handle token=FNSECRETX (https://app.example.com/a.js:1:1)"
+
+    await reporter.report(error)
+
+    const event = eventOf(sent[0])
+    const body = String(sent[0].init.body)
+    for (
+      const secret of ["BASICX", "COOKIEX", "SETX", "RELX", "RELKEYX", "WSSX", "FRAGX", "SIGX"]
+    ) {
+      expect(body, secret).not.toContain(secret)
+    }
+    expect(body).not.toContain("FNSECRETX")
+    expect(event.exception.values[0].value).toContain("GET /reset")
+    expect(event.exception.values[0].value).toContain("wss://app.example.com/socket")
+  })
+})
+
 describe("sampling and the session cap", () => {
   it("sends nothing at sample rate 0 and everything at 1", async () => {
     const off = setup({ sampleRate: 0, random: () => 0 })
@@ -208,6 +240,30 @@ describe("sampling and the session cap", () => {
 
     expect(results).toEqual([true, true, false])
     expect(sent).toHaveLength(2)
+  })
+})
+
+describe("a cap with a window", () => {
+  it("counts again when the window has passed, so a long-running process keeps reporting", async () => {
+    let clock = 0
+    const { sent, reporter } = setup({ maxPerSession: 2, windowMs: 1000, now: () => clock })
+
+    const first = [
+      await reporter.report(new Error("1")),
+      await reporter.report(new Error("2")),
+      await reporter.report(new Error("3")),
+    ]
+    clock = 999
+    const stillCapped = await reporter.report(new Error("4"))
+    clock = 1000
+    const later = [await reporter.report(new Error("5")), await reporter.report(new Error("6"))]
+    const cappedAgain = await reporter.report(new Error("7"))
+
+    expect(first).toEqual([true, true, false])
+    expect(stillCapped).toBe(false)
+    expect(later).toEqual([true, true])
+    expect(cappedAgain).toBe(false)
+    expect(sent).toHaveLength(4)
   })
 })
 

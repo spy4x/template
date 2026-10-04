@@ -17,10 +17,10 @@ export const REQUEST_ID_MAX_LENGTH = 128
 /**
  * The middleware every API request passes first; `index.ts` and its test both call this.
  *
- * It also answers an unhandled exception with a plain 500 and hands it to `reportError` with the
- * request id, the method and the path: never the query, a header or a body. A route that has its
- * own `onError` keeps it. An `HTTPException` below 500 is an answer, not a failure, and is not
- * reported.
+ * It also answers an unhandled exception with a plain 500, and logs and hands every error answered
+ * with 500 or more to `reportError` with the request id, the method and the path: never the query,
+ * a header or a body. That includes an error a route's own `onError` answered, whose answer stays
+ * as it is. An `HTTPException` below 500 is an answer, not a failure, and is not reported.
  */
 export function applyBaseMiddleware(
   app: Hono<APIContext>,
@@ -30,8 +30,12 @@ export function applyBaseMiddleware(
     reportError?: (error: unknown, context: ReportContext) => void
   },
 ): void {
-  app.onError((error, c) => {
-    if (error instanceof HTTPException && error.status < 500) return error.getResponse()
+  // A route may answer an error in its own `onError`, so the failure is read after the answer:
+  // `c.error` is set whichever handler answered, and a 5xx status means it was not the caller's.
+  const reportFailures: MiddlewareHandler = async (c, next) => {
+    await next()
+    const error = c.error
+    if (!error || c.res.status < 500) return
     write(`error: unhandled exception on ${c.req.method} ${c.req.path}`, error)
     try {
       reportError?.(error, {
@@ -41,13 +45,14 @@ export function applyBaseMiddleware(
     } catch {
       // Reporting never changes the answer.
     }
-    return error instanceof HTTPException
-      ? error.getResponse()
-      : c.text("Internal Server Error", 500)
-  })
+  }
+  app.onError((error, c) =>
+    error instanceof HTTPException ? error.getResponse() : c.text("Internal Server Error", 500)
+  )
   app.use(
     contextStorage(),
     requestId({ generator: () => randomBase64Url(6), limitLength: REQUEST_ID_MAX_LENGTH }),
+    reportFailures,
     requestLog({ write, skipPaths: ["/api/health"] }),
     parseAuth,
   )

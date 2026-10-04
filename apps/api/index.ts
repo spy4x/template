@@ -72,7 +72,9 @@ const app = new Hono<APIContext>().basePath("/api")
 const errorReporter = createErrorReporter({
   dsn: config.errorReportDsn,
   environment: config.env,
+  // 100 an hour, not 100 for the life of the process, so a flood is capped and a later error still shows.
   maxPerSession: 100,
+  windowMs: 60 * 60 * 1000,
 })
 applyBaseMiddleware(app, {
   write: log,

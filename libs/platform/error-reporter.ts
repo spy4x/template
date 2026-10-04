@@ -29,8 +29,16 @@ export interface ErrorReporterOptions {
   release?: string
   /** Share of errors sent, from 0 to 1. Defaults to 1. */
   sampleRate?: number
-  /** Most reports one session (one page load, or one process) sends. Defaults to 20. */
+  /**
+   * Most reports sent in one session (one page load, or one process), or in one `windowMs` when
+   * that is set. Defaults to 20.
+   */
   maxPerSession?: number
+  /**
+   * Makes the cap a rate: the count starts again every `windowMs` milliseconds, so a process that
+   * runs for weeks keeps reporting. Unset, the cap lasts the whole session.
+   */
+  windowMs?: number
   /** The page's address, read when a report is made. Its query and fragment are dropped. */
   pageUrl?: () => string | undefined
   /** Path segments that follow one of these names are secrets (`invite` masks `/invite/<token>`). */
@@ -111,7 +119,12 @@ export function scrubUrl(url: string, redactPathAfter: string[] = []): string {
  */
 export function scrubText(text: string, redactPathAfter: string[] = []): string {
   return text
-    .replace(/https?:\/\/[^\s"'<>)]+/gi, (url) => scrubUrl(url, redactPathAfter))
+    // A header line is secret to its end: `Cookie: a=1; b=2`, `Authorization: Basic …`.
+    .replace(/\b(authorization|proxy-authorization|set-cookie|cookie)\s*:[^\n]*/gi, `$1: ${MASK}`)
+    .replace(/(?:https?|wss?):\/\/[^\s"'<>)]+/gi, (url) => scrubUrl(url, redactPathAfter))
+    // A relative path loses its query and fragment: `GET /reset?code=…`.
+    .replace(/(^|[\s"'(])(\/[^\s"'<>)?#]*)[?#][^\s"'<>)]*/g, "$1$2")
+    .replace(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g, MASK)
     .replace(/\bBearer\s+[\w.~+/=-]+/gi, `Bearer ${MASK}`)
     .replace(
       new RegExp(
@@ -176,10 +189,15 @@ export function createErrorReporter(options: ErrorReporterOptions): ErrorReporte
   const random = options.random ?? Math.random
   const now = options.now ?? Date.now
   let sent = 0
+  let windowStart = now()
 
   async function report(error: unknown, context: ReportContext = {}): Promise<boolean> {
     try {
       if (!dsn) return false
+      if (options.windowMs !== undefined && now() - windowStart >= options.windowMs) {
+        windowStart = now()
+        sent = 0
+      }
       if (sent >= maxPerSession) return false
       if (random() >= sampleRate) return false
       sent++
@@ -227,6 +245,8 @@ export function createErrorReporter(options: ErrorReporterOptions): ErrorReporte
         keepalive: true,
         credentials: "omit",
       })
+      // The body is never read; letting go of it frees the connection on a long-running server.
+      await response.body?.cancel()
       return response.ok
     } catch {
       return false

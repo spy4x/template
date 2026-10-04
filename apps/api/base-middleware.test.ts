@@ -54,14 +54,19 @@ describe("an unhandled exception in an API route", () => {
 
   it("answers 500 and reports it with the request id, method and path only", async () => {
     const reported: { error: unknown; context: unknown }[] = []
+    const logged: unknown[][] = []
 
-    const response = await failing(reported).request("/api/boom?token=SECRET", {
+    const response = await failing(reported, logged).request("/api/boom?token=SECRET", {
       method: "POST",
       headers: { "X-Request-Id": "req-1", Cookie: "sid=COOKIE", Authorization: "Bearer BEARER" },
       body: JSON.stringify({ password: "BODYSECRET" }),
     })
 
     expect(response.status).toBe(500)
+    const failures = logged.filter((l) => String(l[0]).startsWith("error: unhandled"))
+    expect(failures).toHaveLength(1)
+    expect(failures[0][0]).toBe("error: unhandled exception on POST /api/boom")
+    expect((failures[0][1] as Error).message).toBe("db exploded")
     expect(reported).toHaveLength(1)
     expect((reported[0].error as Error).message).toBe("db exploded")
     expect(reported[0].context).toEqual({
@@ -106,5 +111,34 @@ describe("an unhandled exception in an API route", () => {
     })
 
     expect((await app.request("/api/boom")).status).toBe(500)
+  })
+
+  it("reports and logs once an error a route's own onError answered, and keeps that answer", async () => {
+    const reported: { error: unknown; context: unknown }[] = []
+    const logged: unknown[][] = []
+    const app = new Hono<APIContext>().basePath("/api")
+    applyBaseMiddleware(app, {
+      write: (...data) => logged.push(data),
+      parseAuth: async (_c, next) => await next(),
+      reportError: (error, context) => reported.push({ error, context }),
+    })
+    const notes = new Hono<APIContext>()
+      .get("/", () => {
+        throw new Error("db down")
+      })
+      .onError((_error, c) => c.json({ error: { code: "INTERNAL_ERROR" } }, 500))
+    app.route("/notes", notes)
+
+    const response = await app.request("/api/notes", { headers: { "X-Request-Id": "req-7" } })
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: { code: "INTERNAL_ERROR" } })
+    expect(reported).toHaveLength(1)
+    expect((reported[0].error as Error).message).toBe("db down")
+    expect(reported[0].context).toEqual({
+      tags: { request_id: "req-7" },
+      request: { method: "GET", path: "/api/notes" },
+    })
+    expect(logged.filter((l) => String(l[0]).startsWith("error: unhandled"))).toHaveLength(1)
   })
 })
