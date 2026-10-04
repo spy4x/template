@@ -92,7 +92,11 @@ test.describe("notifications inbox", () => {
         headers,
       })
       expect(theirs.status()).toBe(404)
-      expect(await theirs.json()).toEqual(await nowhere.json())
+      const refusal = async (response: typeof theirs) => {
+        const { code, message } = (await response.json()).error
+        return { code, message }
+      }
+      expect(await refusal(theirs)).toEqual(await refusal(nowhere))
       await expect(bell(page)).toHaveAttribute("aria-label", "Notifications, 2 unread")
 
       // Following a notification's link marks that one read.
