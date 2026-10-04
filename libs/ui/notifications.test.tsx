@@ -138,7 +138,9 @@ describe("notification bell", () => {
     expect(page).toContain(`aria-label="Notifications, 3 unread"`)
     expect(page).toContain(`href="/notifications"`)
     expect(page).toContain(`data-e2e="shell-bell-count"`)
-    expect(page).toContain("min-h-11 min-w-11")
+    // 44 px on a phone: the class must sit on the bell's own link, not on a neighbour.
+    const link = page.match(/<a\b[^>]*data-e2e="shell-bell"[^>]*>/)?.[0] ?? ""
+    expect(link).toContain("min-h-11 min-w-11")
   })
 
   it("shows no badge when everything is read, and caps a long count at 99+", () => {
