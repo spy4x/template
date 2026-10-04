@@ -148,8 +148,8 @@ function ConnectionState({ status }: { status: ConnectionStatus }): JSX.Element 
 /**
  * The signed-in frame, mobile first: a bottom tab bar on a phone and a rail from `md` up
  * (`RailShell`), and a slim header with the brand, the current group, the connection while it is
- * not live, the inbox's bell with its unread count, and the user menu holding Sign out. The page sits in a column of at most 64 rem;
- * `banner` shows above every page, such as the request to verify the e-mail address, as wide as
+ * not live, the inbox's bell with its unread count, and the user menu holding Sign out. The page
+ * sits in a column of at most 64 rem; `banner` shows above every page, such as the request to verify the e-mail address, as wide as
  * the page's own column ({@link ACCOUNT_COLUMN} on the account pages). Signed-out
  * screens use {@link PublicFrame} instead.
  *

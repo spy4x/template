@@ -36,8 +36,9 @@ export interface NotificationsScreenProps {
 
 /**
  * The person's inbox: one sentence per notification, when it came, and a link to what it is about.
- * Unread ones are marked in text and in weight, never by colour alone. "Mark all as read" sits
- * behind the page's one menu; following a link marks that notification read.
+ * Unread ones are marked in text and in weight, never by colour alone. "Mark all as read" is a
+ * button in the page header, shown only while something is unread; following a link marks that
+ * notification read.
  */
 export function NotificationsScreen(props: NotificationsScreenProps): JSX.Element {
   const { notifications, navigate } = props

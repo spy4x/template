@@ -68,6 +68,9 @@ describe("notifications screen", () => {
       unreadCount: 1,
     }))
     expect(page.match(/Unread:/g)?.length).toBe(1)
+    // The weight is the second sign, so exactly the unread row carries it.
+    expect(page.match(/min-w-0 flex-1 text-sm font-semibold/g)?.length).toBe(1)
+    expect(page.match(/min-w-0 flex-1 text-sm "/g)?.length).toBe(1)
     expect(page).toContain(`data-unread="true"`)
     expect(page).toContain(`data-unread="false"`)
   })
