@@ -17,7 +17,7 @@ the SPA works without them ([how to remove the layer](#removing-the-layer)).
 | `offline/OfflineStatus.tsx`                 | Shows "N changes are waiting to sync" and each conflict, with "Keep mine" and "Use the server's".                         |
 | `offline/session-cache.ts`                  | Remembers who was signed in, so an offline start does not show the sign-in page.                                          |
 | `offline/index.ts`                          | Starts and stops the layer for a user; the one place that touches the socket.                                             |
-| `public/offline-shell.js`                   | The service worker code that caches the app's page, scripts and styles.                                                   |
+| `sw.ts`, `sw-options.ts`                    | The service worker: the app's page, scripts and styles cached by `installOfflineShell`, and the push handlers.            |
 
 ### Reads: the device first
 
@@ -92,8 +92,9 @@ A write made online that the server refuses is not queued: the notes store shows
 
 ### The app shell
 
-`public/offline-shell.js` is loaded by `public/sw.js` with `importScripts`. On install it stores
-`/` and every script, style and image the page names. After that:
+`src/sw.ts` calls `installOfflineShell` from `@spy4x/platform/browser/offline-shell`, with the
+options in `src/sw-options.ts`. On install it stores `/`, `/config.json` and every script, style and
+image the page names. After that:
 
 - files under `/assets/` (a build names them by content hash, so a copy is never stale) are
   answered from the cache first;
@@ -105,10 +106,19 @@ A write made online that the server refuses is not queued: the notes store shows
 - `/api` and `/ws` (the route Traefik sends to the API) are never touched; an e2e test checks that
   no cached URL starts with either.
 
-Files of old builds stay in the cache until the cache name in the file changes.
+The cache is named `shell-<build id>`. The build id is a hash of every built file, so a deploy gives
+the worker a new name and new bytes, and the old cache is deleted when the new worker activates.
+
+A browser cannot load a worker that imports a `jsr:` specifier, so `serviceWorker()` from
+`@spy4x/preact-theme/vite` (in `vite.config.ts`) bundles `src/sw.ts` into one classic `dist/sw.js`
+after the app build and defines `__BUILD_ID__`. The dev server has no `dist`, so a small plugin in
+`vite.config.ts` serves the same bundle from memory at `/sw.js`, with the build id `dev`. The
+worker's file must stay uncached by nginx (`apps/spa/nginx.conf`), or browsers would not see an
+update.
 
 `SWUpdater` from `@spy4x/preact-system` already registered `/sw.js` for push notifications, so no
-registration was added. A person's first visit is online by definition; the app can go offline
+registration was added. The same worker answers its `skipWaiting` message when a visitor accepts
+the "New version available" prompt. A person's first visit is online by definition; the app can go offline
 after the worker installed, which is after that first load.
 
 ### Signing out
@@ -141,8 +151,12 @@ updates. Do these steps. The guard test `tests/offline-removal.test.ts` fails wh
 layer is missing from this list. Following them on this repository ends with `deno task check` and
 `deno task spa:build` passing.
 
-1. Delete the folder `apps/spa/src/offline/` and the file `apps/spa/public/offline-shell.js`.
-2. In `apps/spa/public/sw.js`, delete the `importScripts("/offline-shell.js")` line.
+1. Delete the folder `apps/spa/src/offline/`, and the files `apps/spa/src/sw-options.ts` and
+   `apps/spa/src/sw-options.test.ts`.
+2. In `apps/spa/src/sw.ts`, delete the `@spy4x/platform/browser/offline-shell` and `./sw-options.ts`
+   imports and the `installOfflineShell(...)` call, and add back the one listener `SWUpdater` needs:
+   `scope.addEventListener("message", (event) => { if (event.data?.action === "skipWaiting") scope.skipWaiting() })`.
+   The push handlers stay.
 3. In `apps/spa/src/app.tsx`, delete the two `./offline/` imports and their uses:
    `bootstrapSession(recallUser)` becomes `bootstrapSession()`; drop the effect that remembers the
    user, the `stopOffline` line, the `flushOutbox()` line in `pull` and the `startOffline(userId)`
