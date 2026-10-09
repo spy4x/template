@@ -2,6 +2,8 @@ import { type APIRequestContext, type Page } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
 import { signIn } from "./fixtures/app.ts"
 
+/** The sync line while changes wait or the device is offline; absent once everything is sent. */
+const WAITING = "[data-e2e=offline-status] [data-sync-state]:not([data-sync-state=synced])"
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 const password = "Passw0rd!"
@@ -137,7 +139,7 @@ test.describe("restoring deleted notes", () => {
         name: "Undo",
       }).click()
       await expect(ownerTitles).toHaveText(["Trip"])
-      await expect(ownerPage.locator("[data-e2e=offline-pending]")).toHaveCount(0)
+      await expect(ownerPage.locator(WAITING)).toHaveCount(0)
       await ownerContext.setOffline(false)
       // The taken-back delete never reached the server.
       const server = await ownerPage.request.get(`${apiBase}/api/groups/${groupId}/notes`)
