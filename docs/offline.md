@@ -14,7 +14,8 @@ the SPA works without them ([how to remove the layer](#removing-the-layer)).
 | `offline/local-store.ts`                    | Opens, for one signed-in user, the data cache (`createDataCache`) holding the last notes and groups the server sent, and the IndexedDB outbox store (`createIndexedDbOutboxStore`). |
 | `offline/notes-outbox.ts`                   | Puts the notes (commands, error codes, wording, local store) behind the outbox of `@spy4x/realtime/outbox`, and applies queued writes to a list. |
 | `offline/notes-offline.ts`, `groups-offline.ts` | Wrap the notes and groups stores' dependencies: reads keep and serve the local copy, note writes go through the outbox. |
-| `offline/OfflineStatus.tsx`                 | Shows "N changes are waiting to sync" and each conflict, with "Keep mine" and "Use the server's".                         |
+| `offline/OfflineStatus.tsx`                 | Binds the queue to `SyncStatus` (offline, waiting, syncing, failed with Retry) and `ConflictChooser` (each conflict, with "Keep mine" and "Use the server's"), both from `@spy4x/preact-system`. |
+| `install.ts`                                | `createInstallPrompt` from `@spy4x/preact-signals`; `app.tsx` renders `InstallPrompt` from `@spy4x/preact-system` for it.     |
 | `offline/session-cache.ts`                  | Remembers who was signed in, so an offline start does not show the sign-in page.                                          |
 | `offline/index.ts`                          | Starts and stops the layer for a user; the one place that touches the socket.                                             |
 | `sw.ts`, `sw-options.ts`                    | The service worker: the app's page, scripts and styles cached by `installOfflineShell`, and the push handlers.            |
@@ -123,8 +124,10 @@ the worker a new name and new bytes, and the old cache is deleted when the new w
 
 A browser cannot load a worker that imports a `jsr:` specifier, so `serviceWorker()` from
 `@spy4x/preact-theme/vite` (in `vite.config.ts`) bundles `src/sw.ts` into one classic `dist/sw.js`
-after the app build and defines `__BUILD_ID__`. The dev server has no `dist`, so a small plugin in
-`vite.config.ts` serves the same bundle from memory at `/sw.js`, with the build id `dev`. The
+after the app build and defines `__BUILD_ID__`. On the dev server the same plugin serves the bundle
+from memory at `/sw.js`, with the build id `dev` (since preact-theme 3.8.0), which the e2e specs
+need. The web manifest comes from `webManifest()` in the same file, written as
+`manifest.webmanifest` and served by the dev server; `index.html` links it. The
 worker's file must stay uncached by nginx (`apps/spa/nginx.conf`), or browsers would not see an
 update.
 
