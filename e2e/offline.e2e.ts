@@ -135,6 +135,69 @@ test.describe("offline notes", () => {
     }
   })
 
+  test("notes edited and deleted with no network are sent when the network is back, and an Undo before that takes the delete back", async ({ browser, request }) => {
+    const user = "e2e_offline_edit_delete@example.com"
+    await cleanup(request, user)
+    const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    try {
+      await signUp(request, user)
+      const page = await context.newPage()
+      await signInOnline(page, user)
+      const { groupId } = await groupWithNote(page, "Edit team", "Keep as it is")
+      for (const title of ["Edit me", "Delete me", "Undo me"]) {
+        const created = await page.request.post(`${apiBase}/api/groups/${groupId}/notes`, {
+          headers,
+          data: { id: crypto.randomUUID(), title, body: "" },
+        })
+        expect(created.status(), await created.text()).toBe(201)
+      }
+      await openNotesAndCacheShell(page, groupId)
+      await reloadOffline(context, page)
+      const titles = page.locator("[data-e2e=note-item-title]")
+      await expect(titles).toHaveCount(4)
+
+      const deleteOpenNote = async () => {
+        await page.locator("[data-e2e=note-menu]").click()
+        await page.getByRole("menuitem", { name: "Delete" }).click()
+        await page.locator("[data-e2e=note-delete-dialog]").getByRole("button", {
+          name: "Delete",
+          exact: true,
+        }).click()
+        await expect(page).toHaveURL("/notes")
+      }
+
+      await page.getByRole("link", { name: "Edit me" }).click()
+      await page.locator("[data-e2e=note-title]").fill("Edited offline")
+      await page.locator("[data-e2e=note-save]").click()
+      await expect(page).toHaveURL("/notes")
+
+      await page.getByRole("link", { name: "Delete me" }).click()
+      await deleteOpenNote()
+
+      await page.getByRole("link", { name: "Undo me" }).click()
+      await deleteOpenNote()
+      await expect(titles).toHaveCount(2)
+      await page.locator("[data-e2e=note-undo]").click()
+      await expect(titles).toHaveCount(3)
+
+      // The edit and the delete wait; the undone delete is not among them.
+      await expect(page.locator("[data-e2e=offline-pending]")).toHaveText(
+        "2 changes are waiting to sync.",
+      )
+
+      await context.setOffline(false)
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online", {
+        timeout: 20_000,
+      })
+      await expect(page.locator("[data-e2e=offline-pending]")).toHaveCount(0)
+      await expect.poll(async () => (await serverNotes(page, groupId)).map((n) => n.title).sort())
+        .toEqual(["Edited offline", "Keep as it is", "Undo me"])
+    } finally {
+      await context.close()
+      await cleanup(request, user)
+    }
+  })
+
   test("a person with no network switches between groups already on the device, and the server learns the choice when the network is back", async ({ browser, request }) => {
     const user = "e2e_offline_picker@example.com"
     await cleanup(request, user)
