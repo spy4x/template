@@ -26,6 +26,10 @@ async function linkedManifest(page: Page) {
   }
 }
 
+// The install check needs the full Chromium: the headless shell Playwright runs by default
+// does not compute installability, and answers "no errors" for any manifest.
+test.use({ channel: "chromium" })
+
 test.describe("installable app", () => {
   test("the manifest names the app and carries a 192, a 512 and a maskable icon that load", async ({ page }) => {
     await gotoApp(page, "/sign-in", page.locator("[data-e2e=auth-form-login]"))
@@ -76,9 +80,17 @@ test.describe("installable app", () => {
     const session = await page.context().newCDPSession(page)
     try {
       await session.send("Page.enable")
+      // An empty answer before the browser has read the manifest would pass for the wrong reason,
+      // so the manifest must have been parsed, without errors, before the errors are read.
+      const parsed = await session.send("Page.getAppManifest")
+      expect(parsed.errors.map((error) => error.message)).toEqual([])
+      expect(JSON.parse(parsed.data || "{}").display).toBe("standalone")
       await expect.poll(async () => {
         const { installabilityErrors } = await session.send("Page.getInstallabilityErrors")
-        return installabilityErrors.map((error) => error.errorId)
+        // Playwright's contexts are private windows, which can never be installed from.
+        return installabilityErrors.map((error) => error.errorId).filter((id) =>
+          id !== "in-incognito"
+        )
       }, { timeout: 15_000 }).toEqual([])
     } finally {
       await session.detach()
