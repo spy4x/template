@@ -18,7 +18,7 @@ across real projects, a CLI last.
 ## Ground rules
 
 - **Deno only.** No `node`, `npm`, `pnpm`, `yarn` or `bun` commands. Selected
-  `npm:` specifiers are fine where Vite, Preact or Dexie need them - they still
+  `npm:` specifiers are fine where Vite or Preact need them - they still
   run through Deno.
 - Enums start at 1, never 0.
 - Money is integers.

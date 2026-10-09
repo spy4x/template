@@ -141,7 +141,9 @@ offline after the worker installed, which is after that first load.
 Signing out drops the cached notes and groups and the remembered user. The outbox stays: a write
 that never reached the server is the person's work, and goes out the next time the same user signs
 in on this browser. Those unsent note texts stay in IndexedDB on a shared device until that user
-signs in again, so on a shared browser use the browser's own "clear site data". Signing out with no
+signs in again, so on a shared browser use the browser's own "clear site data". A device that ran
+the earlier Dexie version also keeps its old `offline:user:<id>` database: signing out does not
+clear it, so its cached notes stay on that device until the browser's "clear site data". Signing out with no
 network, or while the server answers with an error, signs the page out at once and records that a
 sign-out is owed to the server (`localStorage`, `auth:sign-out-owed`). The app sends it first thing
 at the next start, before asking who is signed in, and again when the browser comes back online. The

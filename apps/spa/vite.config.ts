@@ -24,7 +24,8 @@ export default defineConfig({
     preactThemeCss(),
     tailwindcss(),
     requireComponentCss(),
-    // A build writes `dist/sw.js`, named after a hash of the built files.
+    // A build writes `dist/sw.js`, named after a hash of the built files. The dev server serves the
+    // same worker from memory at `/sw.js`, so the offline e2e specs, which run against it, have one.
     serviceWorker({
       entry: SW_ENTRY,
       build,
@@ -32,8 +33,6 @@ export default defineConfig({
       readDir: Deno.readDir,
       readFile: Deno.readFile,
     }),
-    // The dev server serves the same worker from memory at `/sw.js`, so the offline e2e specs,
-    // which run against it, have a worker too.
     webManifest({
       writeTextFile: Deno.writeTextFile,
       manifest: {
