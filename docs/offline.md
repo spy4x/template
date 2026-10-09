@@ -118,8 +118,8 @@ update.
 
 `SWUpdater` from `@spy4x/preact-system` already registered `/sw.js` for push notifications, so no
 registration was added. The same worker answers its `skipWaiting` message when a visitor accepts
-the "New version available" prompt. A person's first visit is online by definition; the app can go offline
-after the worker installed, which is after that first load.
+the "New version available" prompt. A person's first visit is online by definition; the app can go
+offline after the worker installed, which is after that first load.
 
 ### Signing out
 
