@@ -90,11 +90,11 @@ export default defineConfig({
   },
   optimizeDeps: {
     // These come in through the Deno plugin's resolver, which the dev server's dependency scan
-    // does not follow: dexie, tailwind-merge (through the JSR package @spy4x/preact-cn) and
+    // does not follow: tailwind-merge (through the JSR package @spy4x/preact-cn) and
     // arktype (through @spy4x/validation and its siblings). Found late, each triggers a re-bundle
     // that leaves a page that loaded meanwhile blank ("Outdated Optimize Dep"), so they are named
     // up front.
-    include: ["dexie", "tailwind-merge", "arktype"],
+    include: ["tailwind-merge", "arktype"],
   },
   server: {
     host: "0.0.0.0",

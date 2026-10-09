@@ -112,9 +112,16 @@ export function offlineNotes(
       return undefined
     },
     async restore(input) {
-      // Needs the server, like a move: it is never queued, so a person offline is told so.
-      const result = await online.restore(input)
       const layer = current()
+      // An Undo of a delete that has not left the device takes the queued delete back: no
+      // network is needed, and nothing reaches the server.
+      if (layer && await layer.outbox.withdraw(input.id)) {
+        const note = await visible(layer, input.groupId, input.id)
+        if (note) return { note }
+      }
+      // Otherwise it needs the server, like a move: it is never queued, so a person offline is
+      // told so.
+      const result = await online.restore(input)
       if (layer) await layer.store.putNote(result.note)
       return result
     },

@@ -6,6 +6,7 @@ import { GroupRole } from "@domain/groups"
 import type { OfflineLayer } from "./index.ts"
 import { createMemoryStore } from "./memory-store.ts"
 import { createPromiseLock } from "@spy4x/realtime/outbox"
+import { createSyncRunner } from "@spy4x/realtime/sync-runner"
 import { createNotesOutbox } from "./notes-outbox.ts"
 import { signal } from "@preact/signals"
 import { offlineNotes } from "./notes-offline.ts"
@@ -41,7 +42,8 @@ function layerWith(online: { socket: boolean }): OfflineLayer {
   })
   const entries = signal<OfflineLayer["entries"]["value"]>([])
   outbox.subscribe((all) => entries.value = all)
-  return { userId: 1, store, outbox, entries }
+  const runner = createSyncRunner({ flush: () => Promise.resolve() })
+  return { userId: 1, store, outbox, entries, runner }
 }
 
 /** Server-side dependencies whose network the test switches off and on. */
@@ -190,6 +192,22 @@ describe("offline notes moves", () => {
 
     expect(restored.version).toBe(3)
     expect((await layer.store.readNotes(groupId)).map((n) => n.id)).toEqual(["a"])
+    expect(await layer.store.readOutbox()).toEqual([])
+  })
+
+  it("undoes a delete that is still waiting on the device without asking the server", async () => {
+    const layer = layerWith({ socket: false })
+    const { online } = network([[note("a")]])
+    online.restore = () => Promise.reject(new Error("the server must not be asked"))
+    const deps = offlineNotes(online, () => layer)
+    await deps.fetchPage(groupId, null)
+    await deps.delete({ groupId, id: "a", version: 1 })
+    expect((await deps.fetchPage(groupId, null)).notes).toEqual([])
+
+    const { note: restored } = await deps.restore({ groupId, id: "a" })
+
+    expect(restored.id).toBe("a")
+    expect((await deps.fetchPage(groupId, null)).notes.map((n) => n.id)).toEqual(["a"])
     expect(await layer.store.readOutbox()).toEqual([])
   })
 

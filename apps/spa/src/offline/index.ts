@@ -1,9 +1,15 @@
 import { type Signal, signal } from "@preact/signals"
 import { RealtimeRequestError } from "@spy4x/realtime"
+import { requestPersistentStorage } from "@spy4x/platform/browser/persistent-storage"
+import {
+  createSyncRunner,
+  flushOutbox as outboxFlush,
+  type SyncRunner,
+} from "@spy4x/realtime/sync-runner"
 import { createPromiseLock, createWebLock, type OutboxLock } from "@spy4x/realtime/outbox"
 import { isRealtimeOpen, realtimeCommand, realtimeQuery } from "../state/realtime.ts"
 import type { NoteItem } from "../state/notes.ts"
-import { type LocalStore, type NoteEntry, openDexieStore } from "./local-store.ts"
+import { type LocalStore, type NoteEntry, openLocalStore } from "./local-store.ts"
 import { createNotesOutbox, type NotesOutbox } from "./notes-outbox.ts"
 
 /**
@@ -18,6 +24,8 @@ export interface OfflineLayer {
   outbox: NotesOutbox
   /** The queued writes, for the screen: refreshed after every change to the queue. */
   entries: Signal<readonly NoteEntry[]>
+  /** Sends the queue on start, reconnect, visibility and focus, retrying with backoff. */
+  runner: SyncRunner
 }
 
 let layer: OfflineLayer | null = null
@@ -41,7 +49,7 @@ export function currentLayer(): OfflineLayer | null {
 export function startOffline(userId: number): OfflineLayer {
   if (layer?.userId === userId) return layer
   stopOffline()
-  const store = openDexieStore(userId)
+  const store = openLocalStore(userId)
   const outbox = createNotesOutbox({
     store,
     lock: withBrowserLock(userId),
@@ -65,9 +73,12 @@ export function startOffline(userId: number): OfflineLayer {
   })
   const entries = signal<readonly NoteEntry[]>([])
   outbox.subscribe((all) => entries.value = all)
-  layer = { userId, store, outbox, entries }
+  const runner = createSyncRunner({ flush: outboxFlush(outbox) })
+  layer = { userId, store, outbox, entries, runner }
   activeLayer.value = layer
-  void outbox.reload()
+  void outbox.reload().then(() => runner.start())
+  // Ask the browser not to evict the device copy and the queue; Safari clears idle sites.
+  void requestPersistentStorage().catch(() => {})
   return layer
 }
 
@@ -82,8 +93,8 @@ export async function stopOffline({ forget = false } = {}): Promise<void> {
   activeLayer.value = null
   if (!closing) return
   if (forget) await closing.store.clearCache().catch(() => {})
+  closing.runner.stop()
   closing.entries.value = []
-  closing.store.close()
 }
 
 /** Sends the queued writes. Never rejects: what could not be sent stays queued. */

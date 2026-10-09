@@ -1,4 +1,5 @@
-import { Dexie, type EntityTable } from "dexie"
+import { createDataCache } from "@spy4x/platform/browser/data-cache"
+import { createIndexedDbOutboxStore } from "@spy4x/realtime/outbox-indexeddb"
 import type { OutboxEntry, OutboxStore } from "@spy4x/realtime/outbox"
 import type { NoteItem } from "../state/notes.ts"
 import type { GroupItem } from "../state/groups.ts"
@@ -25,89 +26,49 @@ export interface LocalStore extends OutboxStore<NotePayload, NoteItem> {
   replaceGroups(groups: readonly GroupItem[]): Promise<void>
   /** Drops the cached notes and groups, keeping the outbox: unsent writes are the person's work. */
   clearCache(): Promise<void>
-  close(): void
 }
 
-type NoteRow = NoteItem & { order: number }
+/** The one scope the groups list lives in. Notes use their group's id as the scope. */
+const GROUPS_SCOPE = "groups"
 
 /**
- * Turns a queue row of the first database version (the note's id and text beside the entry) into
- * the outbox's shape (`entityId` and a `payload`), so a write still waiting on a device that had
- * the old version is sent after the upgrade. A row already in the new shape is returned as it is.
+ * The IndexedDB databases of one user on this browser: the notes and groups the server last sent
+ * (`createDataCache`) and the queue of writes (`createIndexedDbOutboxStore`), each its own database
+ * named for the user, never shared between users.
+ *
+ * A device that ran the earlier Dexie version keeps its old `offline:user:<id>` database untouched
+ * and unread: this template ships no migration, so a write still queued there is not sent.
  */
-export function entryFromV1(row: Record<string, unknown>): Record<string, unknown> {
-  if (!("noteId" in row)) return row
-  const { noteId, groupId, title, body, ...rest } = row
-  return { ...rest, entityId: noteId, payload: { groupId, title, body } }
-}
-
-class OfflineDatabase extends Dexie {
-  notes!: EntityTable<NoteRow, "id">
-  groups!: EntityTable<GroupItem & { order: number }, "id">
-  outbox!: EntityTable<NoteEntry, "seq">
-
-  constructor(name: string) {
-    super(name)
-    this.version(1).stores({
-      notes: "id, groupId",
-      groups: "id",
-      outbox: "++seq, noteId, groupId",
-    })
-    this.version(2).stores({ outbox: "++seq, entityId" }).upgrade((tx) =>
-      tx.table("outbox").toCollection().modify((row) => {
-        const next = entryFromV1(row)
-        for (const key of Object.keys(row)) delete row[key]
-        Object.assign(row, next)
-      })
-    )
-  }
-}
-
-function inOrder<T extends { order: number }>(rows: T[]): Omit<T, "order">[] {
-  return rows.sort((a, b) => a.order - b.order).map(({ order: _order, ...rest }) => rest)
-}
-
-/** The IndexedDB database of one user on this browser. One database per user, never shared. */
-export function openDexieStore(userId: number): LocalStore {
-  const db = new OfflineDatabase(`offline:user:${userId}`)
+export function openLocalStore(userId: number): LocalStore {
+  const prefix = `offline:user:${userId}`
+  const notes = createDataCache<NoteItem>({ name: `${prefix}:notes`, getId: (note) => note.id })
+  const groups = createDataCache<GroupItem>({
+    name: `${prefix}:groups`,
+    getId: (group) => group.id,
+  })
+  const outbox = createIndexedDbOutboxStore<NotePayload, NoteItem>({ name: `${prefix}:outbox` })
   return {
-    async readNotes(groupId) {
-      return inOrder(await db.notes.where("groupId").equals(groupId).toArray())
-    },
-    async replaceNotes(groupId, notes) {
-      await db.transaction("rw", db.notes, async () => {
-        await db.notes.where("groupId").equals(groupId).delete()
-        await db.notes.bulkPut(notes.map((note, order) => ({ ...note, order })))
-      })
-    },
+    ...outbox,
+    readNotes: (groupId) => notes.read(groupId),
+    replaceNotes: (groupId, next) => notes.replace(groupId, next),
     async putNote(note) {
-      const existing = await db.notes.get(note.id)
-      await db.notes.put({ ...note, order: existing?.order ?? -Date.now() })
+      // A moved note changes scope: drop it from every other group's copy in the same step.
+      const others = (await notes.scopes()).filter((scope) => scope !== note.groupId)
+      await notes.batch([
+        ...others.map((scope) => ({ op: "delete" as const, scope, id: note.id })),
+        { op: "put", scope: note.groupId, item: note },
+      ])
     },
     async removeNote(noteId) {
-      await db.notes.delete(noteId)
+      // A note's group is not known here, so remove it from every scope that holds notes.
+      const scopes = await notes.scopes()
+      await notes.batch(scopes.map((scope) => ({ op: "delete" as const, scope, id: noteId })))
     },
-    async readGroups() {
-      return inOrder(await db.groups.toArray())
+    readGroups: () => groups.read(GROUPS_SCOPE),
+    replaceGroups: (next) => groups.replace(GROUPS_SCOPE, next),
+    clearCache: async () => {
+      await notes.clearAll()
+      await groups.clearAll()
     },
-    async replaceGroups(groups) {
-      await db.transaction("rw", db.groups, async () => {
-        await db.groups.clear()
-        await db.groups.bulkPut(groups.map((group, order) => ({ ...group, order })))
-      })
-    },
-    readOutbox: () => db.outbox.orderBy("seq").toArray(),
-    async putEntry(entry) {
-      const seq = await db.outbox.put(entry)
-      return { ...entry, seq }
-    },
-    removeEntry: (seq) => db.outbox.delete(seq),
-    async clearCache() {
-      await db.transaction("rw", db.notes, db.groups, async () => {
-        await db.notes.clear()
-        await db.groups.clear()
-      })
-    },
-    close: () => db.close(),
   }
 }
