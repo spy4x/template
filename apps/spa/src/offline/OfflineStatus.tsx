@@ -73,6 +73,7 @@ export function OfflineStatus(
   const layer = activeLayer.value
   const [runner, setRunner] = useState(() => layer?.runner.getState())
   useEffect(() => {
+    setRunner(layer?.runner.getState())
     const stop = network.watch()
     const unsubscribe = layer?.runner.subscribe(setRunner)
     return () => {

@@ -10,6 +10,7 @@ import { createPromiseLock, createWebLock, type OutboxLock } from "@spy4x/realti
 import { isRealtimeOpen, realtimeCommand, realtimeQuery } from "../state/realtime.ts"
 import type { NoteItem } from "../state/notes.ts"
 import { type LocalStore, type NoteEntry, openLocalStore } from "./local-store.ts"
+import { startRunnerWhileCurrent } from "./start-runner.ts"
 import { createNotesOutbox, type NotesOutbox } from "./notes-outbox.ts"
 
 /**
@@ -76,7 +77,7 @@ export function startOffline(userId: number): OfflineLayer {
   const runner = createSyncRunner({ flush: outboxFlush(outbox) })
   layer = { userId, store, outbox, entries, runner }
   activeLayer.value = layer
-  void outbox.reload().then(() => runner.start())
+  void startRunnerWhileCurrent(runner, outbox.reload(), () => layer?.runner === runner)
   // Ask the browser not to evict the device copy and the queue; Safari clears idle sites.
   void requestPersistentStorage().catch(() => {})
   return layer
@@ -92,8 +93,8 @@ export async function stopOffline({ forget = false } = {}): Promise<void> {
   layer = null
   activeLayer.value = null
   if (!closing) return
-  if (forget) await closing.store.clearCache().catch(() => {})
   closing.runner.stop()
+  if (forget) await closing.store.clearCache().catch(() => {})
   closing.entries.value = []
 }
 
