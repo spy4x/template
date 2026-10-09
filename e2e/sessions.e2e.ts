@@ -39,8 +39,9 @@ function address(name: string): string {
 }
 
 /**
- * A second device: its own browser context, with its own cookie jar and user agent. Its address
- * header stands for the one the proxy in front of the API sets in production.
+ * A second device: its own browser context, with its own cookie jar and user agent. It also sends a
+ * forged `X-Real-IP`: the proxy must replace it with the address it sees, so a client cannot
+ * choose the address shown for its session.
  */
 function device(browser: Browser, userAgent: string): Promise<BrowserContext> {
   return browser.newContext({
@@ -88,7 +89,12 @@ test.describe("signed-in devices", () => {
       await expect(sessions.locator("[data-e2e=session-current]")).toContainText("This device")
       const phoneRow = sessions.locator("dl > div", { hasText: "Safari on iPhone" })
       await expect(phoneRow).toHaveCount(1)
-      await expect(phoneRow.locator("[data-e2e=session-ip]")).toHaveText("203.0.113.*")
+      // Traefik sees the browser at the Docker network's gateway address, not at the forged one.
+      // That address differs per machine, so the spec checks the shape and that the forged value
+      // did not win.
+      const phoneIp = phoneRow.locator("[data-e2e=session-ip]")
+      await expect(phoneIp).toHaveText(/^(\d+\.\d+\.\d+\.\*|[0-9a-f]+:[0-9a-f]+:\*)$/i)
+      await expect(phoneIp).not.toHaveText("203.0.113.*")
 
       await phoneRow.getByRole("button", { name: "Sign out Safari on iPhone" }).click()
       await page.locator("[data-e2e=session-end-confirm]").getByRole("button", { name: "Sign out" })
