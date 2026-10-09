@@ -139,7 +139,8 @@ test.describe("restoring deleted notes", () => {
         name: "Undo",
       }).click()
       await expect(ownerTitles).toHaveText(["Trip"])
-      await expect(ownerPage.locator(WAITING)).toHaveCount(0)
+      // Offline, with nothing waiting: the taken-back delete left no queued write.
+      await expect(ownerPage.locator(WAITING)).toHaveText("Offline")
       await ownerContext.setOffline(false)
       // The taken-back delete never reached the server.
       const server = await ownerPage.request.get(`${apiBase}/api/groups/${groupId}/notes`)
