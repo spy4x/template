@@ -97,6 +97,45 @@ test.describe("installable app", () => {
     }
   })
 
+  test("the install offer appears when the browser allows install, and stays hidden after Not now", async ({ page, request }) => {
+    const user = "e2e_pwa_install@example.com"
+    await cleanup(request, user)
+    try {
+      await signUp(request, user)
+      await signIn(page, user, password)
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+      const offer = page.getByRole("region", { name: "Install this app" })
+      await expect(offer).toHaveCount(0)
+
+      // Chromium fires this event when the app can be installed; the page keeps it for its button.
+      const fire = () =>
+        page.evaluate(() => {
+          const event = new Event("beforeinstallprompt", { cancelable: true }) as Event & {
+            prompt: () => Promise<void>
+            userChoice: Promise<{ outcome: string }>
+          }
+          event.prompt = () => Promise.resolve()
+          event.userChoice = Promise.resolve({ outcome: "dismissed" })
+          globalThis.dispatchEvent(event)
+        })
+      await fire()
+      await expect(offer).toBeVisible()
+      await expect(offer.getByRole("button", { name: "Install" })).toBeVisible()
+
+      await offer.getByRole("button", { name: "Not now" }).click()
+      await expect(offer).toHaveCount(0)
+
+      // A person who said "not now" is not asked again, even when the browser offers once more.
+      await page.reload()
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+      await fire()
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+      await expect(offer).toHaveCount(0)
+    } finally {
+      await cleanup(request, user)
+    }
+  })
+
   test("a phone 360 px wide shows the notes with no sideways scroll and room to tap", async ({ browser, request }) => {
     const user = "e2e_pwa_phone@example.com"
     await cleanup(request, user)
