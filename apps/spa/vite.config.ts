@@ -10,30 +10,10 @@ import {
   preactThemeCss,
   requireComponentCss,
   serviceWorker,
+  webManifest,
 } from "@spy4x/preact-theme/vite"
 
 const SW_ENTRY = fromFileUrl(new URL("./src/sw.ts", import.meta.url))
-
-/** The worker bundled as one classic script, the way `serviceWorker()` writes it for a build. */
-async function bundleWorker(buildId: string): Promise<string> {
-  const result = await build({
-    configFile: false,
-    publicDir: false,
-    logLevel: "warn",
-    plugins: [deno()],
-    define: { __BUILD_ID__: JSON.stringify(buildId) },
-    build: {
-      write: false,
-      lib: { entry: SW_ENTRY, formats: ["iife"], name: "sw", fileName: () => "sw.js" },
-    },
-  })
-  const outputs = (Array.isArray(result) ? result : [result]) as Array<{
-    output: Array<{ type: string; code?: string }>
-  }>
-  const chunk = outputs[0].output.find((file) => file.type === "chunk")
-  if (!chunk?.code) throw new Error("the worker build produced no script")
-  return chunk.code
-}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -52,23 +32,41 @@ export default defineConfig({
       readDir: Deno.readDir,
       readFile: Deno.readFile,
     }),
-    {
-      // The dev server has no `dist`, so it serves the same worker from memory at `/sw.js`. Without
-      // it the e2e offline specs, which run against the dev server, would have no worker.
-      name: "dev-service-worker",
-      apply: "serve",
-      configureServer(server) {
-        let script: Promise<string> | undefined
-        server.middlewares.use("/sw.js", (_request, response, next) => {
-          script ??= bundleWorker("dev")
-          script.then((code) => {
-            response.setHeader("Content-Type", "text/javascript")
-            response.setHeader("Cache-Control", "no-cache")
-            response.end(code)
-          }, next)
-        })
+    // The dev server serves the same worker from memory at `/sw.js`, so the offline e2e specs,
+    // which run against it, have a worker too.
+    webManifest({
+      writeTextFile: Deno.writeTextFile,
+      manifest: {
+        name: `App Template`,
+        short_name: `App`,
+        theme_color: `#581c87`,
+        background_color: `#F3F4F6`,
+        icons: [
+          {
+            src: `/img/android/android-launchericon-192-192.png`,
+            sizes: `192x192`,
+            type: `image/png`,
+          },
+          {
+            src: `/img/android/android-launchericon-512-512.png`,
+            sizes: `512x512`,
+            type: `image/png`,
+          },
+          {
+            src: `/img/pwa/maskable-192.png`,
+            sizes: `192x192`,
+            type: `image/png`,
+            purpose: `maskable`,
+          },
+          {
+            src: `/img/pwa/maskable-512.png`,
+            sizes: `512x512`,
+            type: `image/png`,
+            purpose: `maskable`,
+          },
+        ],
       },
-    },
+    }),
     {
       // Paints the stored (or system) light/dark choice before the first frame, so a dark reader
       // never sees a light flash. `index.html` cannot call the library, so the build injects it.
