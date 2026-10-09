@@ -11,13 +11,14 @@ the SPA works without them ([how to remove the layer](#removing-the-layer)).
 
 | Piece                                       | What it does                                                                                                              |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `offline/local-store.ts`                    | The Dexie (IndexedDB) database, one per signed-in user: the last notes and groups the server sent, and the outbox.        |
+| `offline/local-store.ts`                    | Opens, for one signed-in user, the data cache (`createDataCache`) holding the last notes and groups the server sent, and the IndexedDB outbox store (`createIndexedDbOutboxStore`). |
 | `offline/notes-outbox.ts`                   | Puts the notes (commands, error codes, wording, local store) behind the outbox of `@spy4x/realtime/outbox`, and applies queued writes to a list. |
 | `offline/notes-offline.ts`, `groups-offline.ts` | Wrap the notes and groups stores' dependencies: reads keep and serve the local copy, note writes go through the outbox. |
-| `offline/OfflineStatus.tsx`                 | Shows "N changes are waiting to sync" and each conflict, with "Keep mine" and "Use the server's".                         |
+| `offline/OfflineStatus.tsx`                 | Binds the queue to `SyncStatus` (offline, waiting, syncing, failed with Retry) and `ConflictChooser` (each conflict, with "Keep mine" and "Use the server's"), both from `@spy4x/preact-system`. |
+| `install.ts`                                | `createInstallPrompt` from `@spy4x/preact-signals`; `app.tsx` renders `InstallPrompt` from `@spy4x/preact-system` for it.     |
 | `offline/session-cache.ts`                  | Remembers who was signed in, so an offline start does not show the sign-in page.                                          |
 | `offline/index.ts`                          | Starts and stops the layer for a user; the one place that touches the socket.                                             |
-| `public/offline-shell.js`                   | The service worker code that caches the app's page, scripts and styles.                                                   |
+| `sw.ts`, `sw-options.ts`                    | The service worker: the app's page, scripts and styles cached by `installOfflineShell`, and the push handlers.            |
 
 ### Reads: the device first
 
@@ -42,12 +43,17 @@ The queue and its rules are not in this repository: they are the outbox of
 `@spy4x/realtime/outbox` (one entry per entity, a new key after an unknown outcome, keys that must
 still match before an entry is cleared, one writer at a time, conflicts left to a person).
 `offline/notes-outbox.ts` supplies what is about notes, and `offline/notes-outbox.test.ts` checks
-those rules through it. The Dexie store keeps the queue (`offline/local-store.ts`; database version
-2 moves rows of version 1 into the outbox's shape).
+those rules through it. The queue is kept by `createIndexedDbOutboxStore` from `@spy4x/realtime/outbox-indexeddb`, in its
+own IndexedDB database per user (`offline:user:<id>:outbox`); the notes and groups the server last
+sent are kept by `createDataCache` from `@spy4x/platform/browser/data-cache`
+(`offline:user:<id>:notes` and `:groups`). A device that ran the earlier Dexie version keeps its
+old `offline:user:<id>` database, which is no longer read: a write still queued there is not sent.
 
 A note create, update or delete is saved in the outbox, in IndexedDB, then sent at once if the
 socket is open. If it is not, the entry waits, and the person sees the change in the list with a
-"waiting to sync" line. `App` sends the queue in order before every read, and the read runs after
+"waiting to sync" line. The sync runner (`createSyncRunner` from `@spy4x/realtime/sync-runner`) sends the queue when the layer
+starts, when the browser comes back online, when the tab becomes visible or the window gains focus, and
+again after a failed run, waiting longer each time. `App` also sends the queue in order before every read, and the read runs after
 every reconnect and after every pushed hint.
 
 - **Idempotency.** Every entry carries its own idempotency key, sent with the command, so a send
@@ -65,6 +71,13 @@ every reconnect and after every pushed hint.
   cannot reach the server.
 - **Base version.** An update or delete carries the version the note had when the person started
   the edit. The server rejects it when the note moved on.
+- **Undo.** Undo after a delete first asks the outbox to take the delete back (`withdraw`). When the
+  delete has not been sent, it is removed from the queue and the note is shown again, with no
+  network and no call to the server. Once a send has started, Undo restores the note on the
+  server, which needs a connection.
+- **Keeping the data.** When the layer starts it asks the browser to keep the site's storage
+  (`requestPersistentStorage`), so a browser short of space, or Safari after a week of no visits,
+  does not drop the queue.
 
 ### Conflicts
 
@@ -92,8 +105,9 @@ A write made online that the server refuses is not queued: the notes store shows
 
 ### The app shell
 
-`public/offline-shell.js` is loaded by `public/sw.js` with `importScripts`. On install it stores
-`/` and every script, style and image the page names. After that:
+`src/sw.ts` calls `installOfflineShell` from `@spy4x/platform/browser/offline-shell`, with the
+options in `src/sw-options.ts`. On install it stores `/`, `/config.json` and every script, style and
+image the page names. After that:
 
 - files under `/assets/` (a build names them by content hash, so a copy is never stale) are
   answered from the cache first;
@@ -105,18 +119,31 @@ A write made online that the server refuses is not queued: the notes store shows
 - `/api` and `/ws` (the route Traefik sends to the API) are never touched; an e2e test checks that
   no cached URL starts with either.
 
-Files of old builds stay in the cache until the cache name in the file changes.
+The cache is named `shell-<build id>`. The build id is a hash of every built file, so a deploy gives
+the worker a new name and new bytes, and the old cache is deleted when the new worker activates.
+
+A browser cannot load a worker that imports a `jsr:` specifier, so `serviceWorker()` from
+`@spy4x/preact-theme/vite` (in `vite.config.ts`) bundles `src/sw.ts` into one classic `dist/sw.js`
+after the app build and defines `__BUILD_ID__`. On the dev server the same plugin serves the bundle
+from memory at `/sw.js`, with the build id `dev` (since preact-theme 3.8.0), which the e2e specs
+need. The web manifest comes from `webManifest()` in the same file, written as
+`manifest.webmanifest` and served by the dev server; `index.html` links it. The
+worker's file must stay uncached by nginx (`apps/spa/nginx.conf`), or browsers would not see an
+update.
 
 `SWUpdater` from `@spy4x/preact-system` already registered `/sw.js` for push notifications, so no
-registration was added. A person's first visit is online by definition; the app can go offline
-after the worker installed, which is after that first load.
+registration was added. The same worker answers its `skipWaiting` message when a visitor accepts
+the "New version available" prompt. A person's first visit is online by definition; the app can go
+offline after the worker installed, which is after that first load.
 
 ### Signing out
 
 Signing out drops the cached notes and groups and the remembered user. The outbox stays: a write
 that never reached the server is the person's work, and goes out the next time the same user signs
 in on this browser. Those unsent note texts stay in IndexedDB on a shared device until that user
-signs in again, so on a shared browser use the browser's own "clear site data". Signing out with no
+signs in again, so on a shared browser use the browser's own "clear site data". A device that ran
+the earlier Dexie version also keeps its old `offline:user:<id>` database: signing out does not
+clear it, so its cached notes stay on that device until the browser's "clear site data". Signing out with no
 network, or while the server answers with an error, signs the page out at once and records that a
 sign-out is owed to the server (`localStorage`, `auth:sign-out-owed`). The app sends it first thing
 at the next start, before asking who is signed in, and again when the browser comes back online. The
@@ -141,8 +168,12 @@ updates. Do these steps. The guard test `tests/offline-removal.test.ts` fails wh
 layer is missing from this list. Following them on this repository ends with `deno task check` and
 `deno task spa:build` passing.
 
-1. Delete the folder `apps/spa/src/offline/` and the file `apps/spa/public/offline-shell.js`.
-2. In `apps/spa/public/sw.js`, delete the `importScripts("/offline-shell.js")` line.
+1. Delete the folder `apps/spa/src/offline/`, and the files `apps/spa/src/sw-options.ts` and
+   `apps/spa/src/sw-options.test.ts`.
+2. In `apps/spa/src/sw.ts`, delete the `@spy4x/platform/browser/offline-shell` and `./sw-options.ts`
+   imports and the `installOfflineShell(...)` call, and add back the one listener `SWUpdater` needs:
+   `scope.addEventListener("message", (event) => { if (event.data?.action === "skipWaiting") scope.skipWaiting() })`.
+   The push handlers stay.
 3. In `apps/spa/src/app.tsx`, delete the two `./offline/` imports and their uses:
    `bootstrapSession(recallUser)` becomes `bootstrapSession()`; drop the effect that remembers the
    user, the `stopOffline` line, the `flushOutbox()` line in `pull` and the `startOffline(userId)`
@@ -154,8 +185,7 @@ layer is missing from this list. Following them on this repository ends with `de
 5. In `apps/spa/src/state/realtime.ts`, delete `isRealtimeOpen`.
 6. In `apps/spa/src/views/NotesView.tsx` and `apps/spa/src/views/NoteEditorView.tsx`, delete the
    `OfflineStatus` import and element.
-7. Remove `dexie` from `deno.jsonc` and run `deno install` to update `deno.lock`.
-8. Delete the spec `e2e/offline.e2e.ts`, and this guard test with its clause at the end of the
+7. Delete the spec `e2e/offline.e2e.ts`, and this guard test with its clause at the end of the
    `test` task in `deno.jsonc`: `tests/offline-removal.test.ts`. The unit tests lived in the
    folder and went with it.
 

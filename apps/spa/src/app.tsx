@@ -1,5 +1,6 @@
 import "./app.css"
 import { useEffect, useState } from "preact/hooks"
+import { InstallPrompt } from "@spy4x/preact-system/install-prompt"
 import { SWUpdater } from "@spy4x/preact-system/sw-updater"
 import { LoadingSpinner } from "@spy4x/preact-ui/loading-spinner"
 import { Toastr } from "@spy4x/preact-ui/toastr"
@@ -17,6 +18,7 @@ import { emailStore } from "./state/email.ts"
 import { flushOutbox, startOffline, stopOffline } from "./offline/index.ts"
 import { forgetUser, recallUser, rememberUser } from "./offline/session-cache.ts"
 import { toasts } from "./state/toasts.ts"
+import { install } from "./install.ts"
 import { AuthView } from "./views/AuthView.tsx"
 import { EmailView } from "./views/EmailView.tsx"
 import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView.tsx"
@@ -123,6 +125,12 @@ function Frame() {
   if (session.user && !session.isMfaRequired) {
     return (
       <AppShell user={session.user} wsStatus={connectionDisplay(session)}>
+        <InstallPrompt
+          mode={install.visible.value ? install.mode.value : "unavailable"}
+          onInstall={() => install.install()}
+          onDismiss={() => install.dismiss()}
+          class="mx-auto mb-4 w-full max-w-3xl"
+        />
         <Routes />
       </AppShell>
     )

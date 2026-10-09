@@ -2,6 +2,8 @@ import { type APIRequestContext, type Page } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
 import { signIn } from "./fixtures/app.ts"
 
+/** The sync line while changes wait or the device is offline; absent once everything is sent. */
+const WAITING = "[data-e2e=offline-status] [data-sync-state]:not([data-sync-state=synced])"
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 const password = "Passw0rd!"
@@ -115,7 +117,7 @@ test.describe("restoring deleted notes", () => {
       await memberPage.locator("[data-e2e=notes-show-live]").click()
       await expect(memberTitles).toHaveText(["Trip"])
 
-      // Undo needs a connection: offline, the delete is queued and Undo says so.
+      // Offline, the delete is queued, and Undo takes it back from the queue: no connection is needed.
       // The service worker must hold the app before the page can start without a network.
       await ownerPage.evaluate(async () => {
         await navigator.serviceWorker.ready
@@ -136,13 +138,13 @@ test.describe("restoring deleted notes", () => {
       await ownerPage.locator("[data-e2e=note-undo-toast]").getByRole("button", {
         name: "Undo",
       }).click()
-      // The socket is not open, so Undo refuses at once, not after the call's retries (about six
-      // seconds), and focus goes to "More actions" in place of the page's body.
-      await expect(ownerPage.getByText("Restoring a note needs a connection.")).toBeVisible({
-        timeout: 1_000,
-      })
-      await expect(ownerPage.locator("[data-e2e=notes-menu]")).toBeFocused()
+      await expect(ownerTitles).toHaveText(["Trip"])
+      // Offline, with nothing waiting: the taken-back delete left no queued write.
+      await expect(ownerPage.locator(WAITING)).toHaveText("Offline")
       await ownerContext.setOffline(false)
+      // The taken-back delete never reached the server.
+      const server = await ownerPage.request.get(`${apiBase}/api/groups/${groupId}/notes`)
+      expect((await server.json()).notes.map((n: { title: string }) => n.title)).toEqual(["Trip"])
     } finally {
       await ownerContext.close()
       await memberContext.close()

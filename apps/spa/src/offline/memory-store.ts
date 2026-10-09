@@ -39,6 +39,5 @@ export function createMemoryStore(): LocalStore {
       groups = []
       return Promise.resolve()
     },
-    close() {},
   }
 }

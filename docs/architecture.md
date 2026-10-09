@@ -22,13 +22,13 @@ migrations; backfill is idempotent and safe to rerun during rollout.
 ## Target architecture
 
 Apps compose bounded domain and platform libraries: Postgres is authoritative, browser data is
-a Dexie projection, and REST endpoints dispatch CQRS flows with versioned, cursor-based,
+a local projection in IndexedDB, and REST endpoints dispatch CQRS flows with versioned, cursor-based,
 idempotent sync.
 
 Target apps:
 
 - `apps/api`: REST, auth, authorization, CQRS dispatch, and sync transport.
-- `apps/spa`: offline-capable Preact/Vite client backed by Dexie.
+- `apps/spa`: offline-capable Preact/Vite client backed by the shared data cache and outbox in IndexedDB.
 - `apps/mpa`: the product's public website, server-rendered: home page, pricing, legal pages and
   the newsletter. It has no session; the product itself is the SPA.
 - `apps/worker`: asynchronous event handlers, projections, and integrations.

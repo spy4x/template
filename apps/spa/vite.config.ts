@@ -1,11 +1,19 @@
 /// <reference lib="deno.ns" />
-import { defineConfig } from "vite"
+import { build, defineConfig } from "vite"
 import { fromFileUrl } from "@std/path"
 import deno from "@deno/vite-plugin"
 import preact from "@preact/preset-vite"
 import tailwindcss from "@tailwindcss/vite"
 import { themeBootstrapScript } from "@spy4x/preact-signals/theme"
-import { npmSpecifiers, preactThemeCss, requireComponentCss } from "@spy4x/preact-theme/vite"
+import {
+  npmSpecifiers,
+  preactThemeCss,
+  requireComponentCss,
+  serviceWorker,
+  webManifest,
+} from "@spy4x/preact-theme/vite"
+
+const SW_ENTRY = fromFileUrl(new URL("./src/sw.ts", import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -16,6 +24,48 @@ export default defineConfig({
     preactThemeCss(),
     tailwindcss(),
     requireComponentCss(),
+    // A build writes `dist/sw.js`, named after a hash of the built files. The dev server serves the
+    // same worker from memory at `/sw.js`, so the offline e2e specs, which run against it, have one.
+    serviceWorker({
+      entry: SW_ENTRY,
+      build,
+      plugins: [deno()],
+      readDir: Deno.readDir,
+      readFile: Deno.readFile,
+    }),
+    webManifest({
+      writeTextFile: Deno.writeTextFile,
+      manifest: {
+        name: `App Template`,
+        short_name: `App`,
+        theme_color: `#581c87`,
+        background_color: `#F3F4F6`,
+        icons: [
+          {
+            src: `/img/android/android-launchericon-192-192.png`,
+            sizes: `192x192`,
+            type: `image/png`,
+          },
+          {
+            src: `/img/android/android-launchericon-512-512.png`,
+            sizes: `512x512`,
+            type: `image/png`,
+          },
+          {
+            src: `/img/pwa/maskable-192.png`,
+            sizes: `192x192`,
+            type: `image/png`,
+            purpose: `maskable`,
+          },
+          {
+            src: `/img/pwa/maskable-512.png`,
+            sizes: `512x512`,
+            type: `image/png`,
+            purpose: `maskable`,
+          },
+        ],
+      },
+    }),
     {
       // Paints the stored (or system) light/dark choice before the first frame, so a dark reader
       // never sees a light flash. `index.html` cannot call the library, so the build injects it.
@@ -37,11 +87,11 @@ export default defineConfig({
   },
   optimizeDeps: {
     // These come in through the Deno plugin's resolver, which the dev server's dependency scan
-    // does not follow: dexie, tailwind-merge (through the JSR package @spy4x/preact-cn) and
+    // does not follow: tailwind-merge (through the JSR package @spy4x/preact-cn) and
     // arktype (through @spy4x/validation and its siblings). Found late, each triggers a re-bundle
     // that leaves a page that loaded meanwhile blank ("Outdated Optimize Dep"), so they are named
     // up front.
-    include: ["dexie", "tailwind-merge", "arktype"],
+    include: ["tailwind-merge", "arktype"],
   },
   server: {
     host: "0.0.0.0",

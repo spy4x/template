@@ -2,6 +2,8 @@ import { type APIRequestContext, type BrowserContext, type Page } from "@playwri
 import { expect, test } from "./fixtures/stack.ts"
 import { gotoApp, signIn } from "./fixtures/app.ts"
 
+/** The sync line while changes wait or the device is offline; absent once everything is sent. */
+const WAITING = "[data-e2e=offline-status] [data-sync-state]:not([data-sync-state=synced])"
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
 const password = "Passw0rd!"
@@ -114,21 +116,84 @@ test.describe("offline notes", () => {
       await expect(page).toHaveURL(/\/notes\/[0-9a-f-]{36}$/)
       await page.locator("[data-e2e=page-back]").click()
       await expect(titles).toHaveText(["Written offline", "Written online"])
-      await expect(page.locator("[data-e2e=offline-pending]")).toHaveText(
-        "1 change is waiting to sync.",
+      await expect(page.locator(WAITING)).toHaveText(
+        "Offline, 1 change waiting",
       )
 
       await context.setOffline(false)
       await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online", {
         timeout: 20_000,
       })
-      await expect(page.locator("[data-e2e=offline-pending]")).toHaveCount(0)
+      await expect(page.locator(WAITING)).toHaveCount(0)
       await expect.poll(async () => (await serverNotes(page, groupId)).map((n) => n.title))
         .toEqual(["Written offline", "Written online"])
 
       // Still there after a fresh load.
       await gotoApp(page, page.url(), page.locator("[data-e2e=shell-ws-status]"))
       await expect(titles).toHaveText(["Written offline", "Written online"])
+    } finally {
+      await context.close()
+      await cleanup(request, user)
+    }
+  })
+
+  test("notes edited and deleted with no network are sent when the network is back, and an Undo before that takes the delete back", async ({ browser, request }) => {
+    const user = "e2e_offline_edit_delete@example.com"
+    await cleanup(request, user)
+    const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    try {
+      await signUp(request, user)
+      const page = await context.newPage()
+      await signInOnline(page, user)
+      const { groupId } = await groupWithNote(page, "Edit team", "Keep as it is")
+      for (const title of ["Edit me", "Delete me", "Undo me"]) {
+        const created = await page.request.post(`${apiBase}/api/groups/${groupId}/notes`, {
+          headers,
+          data: { id: crypto.randomUUID(), title, body: "" },
+        })
+        expect(created.status(), await created.text()).toBe(201)
+      }
+      await openNotesAndCacheShell(page, groupId)
+      await reloadOffline(context, page)
+      const titles = page.locator("[data-e2e=note-item-title]")
+      await expect(titles).toHaveCount(4)
+
+      const deleteOpenNote = async () => {
+        await page.locator("[data-e2e=note-menu]").click()
+        await page.getByRole("menuitem", { name: "Delete" }).click()
+        await page.locator("[data-e2e=note-delete-dialog]").getByRole("button", {
+          name: "Delete",
+          exact: true,
+        }).click()
+        await expect(page).toHaveURL("/notes")
+      }
+
+      await page.getByRole("link", { name: "Edit me" }).click()
+      await page.locator("[data-e2e=note-title]").fill("Edited offline")
+      await page.locator("[data-e2e=note-save]").click()
+      await expect(page).toHaveURL("/notes")
+
+      await page.getByRole("link", { name: "Delete me" }).click()
+      await deleteOpenNote()
+
+      await page.getByRole("link", { name: "Undo me" }).click()
+      await deleteOpenNote()
+      await expect(titles).toHaveCount(2)
+      await page.locator("[data-e2e=note-undo]").click()
+      await expect(titles).toHaveCount(3)
+
+      // The edit and the delete wait; the undone delete is not among them.
+      await expect(page.locator(WAITING)).toHaveText(
+        "Offline, 2 changes waiting",
+      )
+
+      await context.setOffline(false)
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online", {
+        timeout: 20_000,
+      })
+      await expect(page.locator(WAITING)).toHaveCount(0)
+      await expect.poll(async () => (await serverNotes(page, groupId)).map((n) => n.title).sort())
+        .toEqual(["Edited offline", "Keep as it is", "Undo me"])
     } finally {
       await context.close()
       await cleanup(request, user)
@@ -197,25 +262,25 @@ test.describe("offline notes", () => {
         await page.locator("[data-e2e=note-title]").fill(title)
         await page.locator("[data-e2e=note-save]").click()
         await expect(page.locator("[data-e2e=note-item-title]")).toHaveText([title])
-        await expect(page.locator("[data-e2e=offline-pending]")).toBeVisible()
+        await expect(page.locator(WAITING)).toBeVisible()
       }
 
       // Device A reconnects first: its edit reaches the server.
       await contextA.setOffline(false)
-      await expect(a.locator("[data-e2e=offline-pending]")).toHaveCount(0, { timeout: 20_000 })
+      await expect(a.locator(WAITING)).toHaveCount(0, { timeout: 20_000 })
       await expect.poll(async () => (await serverNotes(a, groupId)).map((n) => n.title))
         .toEqual(["Edited on A"])
 
       // Device B reconnects second: its edit is not applied over A's, and it is not dropped.
       await contextB.setOffline(false)
-      const conflict = b.locator("[data-e2e=note-sync-conflict]")
+      const conflict = b.locator("[data-e2e=offline-status] li")
       await expect(conflict).toHaveCount(1, { timeout: 20_000 })
       await expect(conflict.locator("[data-e2e=conflict-mine]")).toContainText("Edited on B")
       await expect(conflict.locator("[data-e2e=conflict-theirs]")).toContainText("Edited on A")
       expect((await serverNotes(a, groupId)).map((n) => n.title)).toEqual(["Edited on A"])
 
       // Keeping mine sends B's text on top of A's.
-      await conflict.locator("[data-e2e=conflict-keep-mine]").click()
+      await conflict.getByRole("button", { name: "Keep mine" }).click()
       await expect(conflict).toHaveCount(0)
       await expect.poll(async () => (await serverNotes(a, groupId)).map((n) => n.title))
         .toEqual(["Edited on B"])
@@ -254,9 +319,9 @@ test.describe("offline notes", () => {
       expect(changed.status(), await changed.text()).toBe(200)
 
       await contextB.setOffline(false)
-      const conflict = b.locator("[data-e2e=note-sync-conflict]")
+      const conflict = b.locator("[data-e2e=offline-status] li")
       await expect(conflict).toHaveCount(1, { timeout: 20_000 })
-      await conflict.locator("[data-e2e=conflict-use-theirs]").click()
+      await conflict.getByRole("button", { name: "Use the server's" }).click()
       await expect(conflict).toHaveCount(0)
       await expect(b.locator("[data-e2e=note-item-title]")).toHaveText(["Edited on A"])
       expect((await serverNotes(a, groupId)).map((n) => n.title)).toEqual(["Edited on A"])

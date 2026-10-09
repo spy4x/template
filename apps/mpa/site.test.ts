@@ -100,7 +100,9 @@ describe("the public website", () => {
       expect(html).toContain(formatMoney(plan.amount, plan.currency))
       expect(html).toContain(`name="planId" value="${plan.id}"`)
     }
-    expect(html.match(/<form method="post" action="\/pricing"/g)).toHaveLength(PLANS.length)
+    expect(html.match(/<form [^>]*action="\/pricing"[^>]*method="post"/g)).toHaveLength(
+      PLANS.length,
+    )
     expect(html).toContain(`<link rel="canonical" href="${site}/pricing"`)
   })
 

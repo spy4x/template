@@ -1,7 +1,7 @@
 {
   "tasks": {
     "build": "deno run -A --node-modules-dir=auto npm:vite@7.3.6 build .",
-    "check": "deno check src/main.tsx vite.config.ts",
+    "check": "deno check src/main.tsx src/sw.ts vite.config.ts",
     "dev": "deno run -A --node-modules-dir=auto npm:vite@7.3.6 ."
   },
   "imports": {
