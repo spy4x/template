@@ -1,6 +1,7 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { RealtimeRequestError } from "@spy4x/realtime"
+import type { ReadCache } from "@spy4x/realtime/read-cache"
 import { type GroupDetails, GroupRole } from "@domain/groups"
 import {
   createGroupsStore,
@@ -11,8 +12,8 @@ import {
   groupsOnDevice,
   type ReadChannel,
 } from "./groups.ts"
-import { memoryReads } from "./memory-reads.ts"
-import { noLocalReads } from "../modules.ts"
+import { createMemoryReadCache, memoryReads } from "./memory-reads.ts"
+import { createLocalReads, noLocalReads } from "../modules.ts"
 
 function item(id: string, sequence: string, name = id): GroupItem {
   return {
@@ -544,6 +545,25 @@ describe("the groups list on the device", () => {
     state.failure = new Error("Forbidden")
 
     await expect(deps.fetchPage(null, "rest")).rejects.toThrow("Forbidden")
+  })
+
+  it("does not paint a copy the device hands over only after the server refused the read", async () => {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => release = resolve)
+    const cache = createMemoryReadCache()
+    await cache.set("members:g-1", ["Ann"])
+    const slow: ReadCache = { ...cache, get: async (key) => (await held, await cache.get(key)) }
+    const painted: unknown[] = []
+
+    await createLocalReads(() => slow).through(
+      "members:g-1",
+      () => Promise.reject(new Error("forbidden")),
+      (copy) => void painted.push(copy?.value),
+    ).catch(() => {})
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(painted).toEqual([])
   })
 
   it("shows the device's groups before the server has answered", async () => {
