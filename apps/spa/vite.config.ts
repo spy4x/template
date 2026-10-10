@@ -83,10 +83,12 @@ export default defineConfig({
     {
       // nginx serves the built page, so it sends the security headers. The policy holds the hash of
       // each inline block of the built `index.html`, so the file nginx includes is written from
-      // that page after every build, next to `dist` (`nginx.conf` says where it goes).
+      // that page after every build, next to `dist` (`nginx.conf` says where it goes). The hook
+      // is the one that runs once the page is written and never after a failed build, whose own
+      // error it would otherwise hide.
       name: "nginx-security-headers",
       apply: "build" as const,
-      closeBundle: async () => {
+      writeBundle: async () => {
         const page = await Deno.readTextFile(BUILT_PAGE)
         await Deno.writeTextFile(SECURITY_HEADERS, await nginxSecurityHeaders(page))
       },
