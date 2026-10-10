@@ -1,6 +1,8 @@
 # The MPA: Fresh, built into the image and served by Deno. Build context is the repository root.
-ARG DENO_VERSION=2.9.0
-FROM app/deno-base:${DENO_VERSION}
+ARG DENO_VERSION=2.9.7
+# The release pipeline starts from the published base image instead (BASE_IMAGE).
+ARG BASE_IMAGE=app/deno-base:${DENO_VERSION}
+FROM ${BASE_IMAGE}
 
 USER root
 COPY --chown=1000:1000 . .

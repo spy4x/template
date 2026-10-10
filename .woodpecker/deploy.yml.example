@@ -6,6 +6,10 @@
 #      Docker client and no Docker socket. It needs an image with Docker and access to the socket.
 #   2. It should wait for `ci.yml`: add a top-level `depends_on: [ci]` to the workflow.
 # The branch is `main`, the default branch of this repository.
+#
+# Images are not built here for releases: release.yml publishes `<IMAGE_PREFIX>-api`, `-spa` and
+# `-mpa` for every version tag. A deploy that runs a released version should pull those images,
+# which also removes problem 1 above (no Docker client needed to build).
 
 when:
   event: push
@@ -16,7 +20,7 @@ steps:
   # Step 2: Build Docker Images (Production)
   # ============================================================================
   pre-deploy-build:
-    image: denoland/deno:2.9.0
+    image: denoland/deno:2.9.7
     environment:
       ENV: prod
       DENO_VERSION:
@@ -79,7 +83,7 @@ steps:
   # Step 3: Deploy to Production
   # ============================================================================
   deploy:
-    image: denoland/deno:2.9.0
+    image: denoland/deno:2.9.7
     environment:
       SSH_TO_SERVER:
         from_secret: ssh_to_server
