@@ -61,6 +61,7 @@ import {
   secondFactorSatisfied,
   SecondFactorStatus,
   SessionCookie,
+  type SessionDevice,
   SessionManager,
   SessionStatus,
   type SessionStore,
@@ -76,13 +77,14 @@ import {
 import { EmailCodeError } from "@spy4x/server/auth/email-code"
 import {
   createPasswordSignIn,
-  DEFAULT_MIN_PASSWORD_LENGTH,
   PASSWORD_METHOD,
   type PasswordSignIn,
   PasswordSignInError,
   type PasswordSignInOptions,
 } from "@spy4x/server/auth/password"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
+import { ipHint } from "@spy4x/net/ip"
+import { deviceName } from "@spy4x/net/user-agent"
 import type { MiddlewareHandler } from "hono"
 import { GroupError } from "@domain/groups"
 import {
@@ -99,8 +101,6 @@ import {
 import type { AppDbBase } from "./db-base.ts"
 import { consumePasswordReset } from "@server/auth/password-reset.ts"
 import { passwordKeyOf, proveEmailCode, readEmailStatus } from "@server/auth/email-verification.ts"
-import { deviceName, ipHint } from "@server/auth/session-device.ts"
-import type { SessionDevice } from "@server/auth/sessions.ts"
 
 /** Longest username, in characters (code points), after normalisation. */
 export const USERNAME_MAX_LENGTH = 50
@@ -372,11 +372,11 @@ export function createSignIn(options: SignInOptions): SignIn {
    * reason to refuse or slow anyone.
    */
   function touchSession(sessionId: number, userId: number): void {
-    db.sessionDevices.touch(sessionId).catch((error) => {
+    sessions.touch(userId, sessionId).catch((error) => {
       console.error("error: cannot record when a session was last used", error)
     })
     // The person's own "last seen" (#152): the same activity, throttled per person in the query.
-    db.sessionDevices.touchUser(userId).catch((error) => {
+    db.userSeen.touch(userId).catch((error) => {
       console.error("error: cannot record when a user was last seen", error)
     })
   }
@@ -472,32 +472,6 @@ export function createSignIn(options: SignInOptions): SignIn {
     ),
   })
 
-  /**
-   * Replaces the password of `userId` and leaves every session as it is: a password change where
-   * the person chose to stay signed in elsewhere. Checks the current password as `checkPassword`
-   * does, refuses a new one shorter than the package's minimum as its own change does, and hashes
-   * the new one before writing, so a refused password changes nothing.
-   */
-  async function replacePasswordOnly(
-    userId: number,
-    password: string,
-    newPassword: string,
-  ): Promise<boolean> {
-    // Code points, as the package counts them: the route schema counts UTF-16 units, so four
-    // emoji pass it.
-    if ([...newPassword].length < DEFAULT_MIN_PASSWORD_LENGTH) return false
-    const key = await passwordKeyOf(db.authStore, userId)
-    if (!key?.secret || !(await hasher.verify(password, key.secret)).valid) return false
-    let secret: string
-    try {
-      secret = await hasher.hash(newPassword)
-    } catch (error) {
-      if (error instanceof RangeError || error instanceof TypeError) return false
-      throw error
-    }
-    return await db.authStore.updateKeySecret(key.id, secret)
-  }
-
   return {
     auth,
 
@@ -533,7 +507,7 @@ export function createSignIn(options: SignInOptions): SignIn {
             // The route schema is the sign-up length rule (8 to 50 UTF-16 units), as before; the
             // package's own minimum counts code points and would refuse some passwords it accepts.
             minPasswordLength: 1,
-          }).signUp({ email: rawEmail, password })
+          }).signUp({ email: rawEmail, password, device: deviceOf(c) })
           const user = await tx.user.createForAuthUser(signedUp.user.id, {
             firstName: "",
             lastName: "",
@@ -544,7 +518,6 @@ export function createSignIn(options: SignInOptions): SignIn {
           await tx.group.createFirst({ id: firstGroupId, name: "Personal" }, user.id)
           // The worker makes the welcome note, so a slow job never holds up the sign-up.
           await tx.starterData.queue(user.id)
-          await tx.sessionDevices.record(signedUp.session.session.id, deviceOf(c))
           await tx.authAudit.insert(
             auditRow(c, user.id, AuthAuditEventType.SIGNED_UP, normalizeEmail(rawEmail)),
           )
@@ -586,8 +559,7 @@ export function createSignIn(options: SignInOptions): SignIn {
           userId: checked.user.id,
           keyId: checked.key.id,
           secondFactor,
-        })
-        await tx.sessionDevices.record(started.session.id, deviceOf(c))
+        }, deviceOf(c))
         // A deleted row takes no update; the code that restores it comes later.
         const user = waiting ?? await tx.user.updateOne({
           id: checked.user.id,
@@ -713,22 +685,21 @@ export function createSignIn(options: SignInOptions): SignIn {
     },
 
     async changePassword(c, { user }, password, newPassword, signOutOthers = true) {
-      if (!signOutOthers) return await replacePasswordOnly(user.id, password, newPassword)
-      let result
+      const change = { userId: user.id, currentPassword: password, newPassword }
       try {
-        result = await changePasswords.changePassword({
-          userId: user.id,
-          currentPassword: password,
-          newPassword,
-        })
+        if (!signOutOthers) {
+          // The person chose to stay signed in elsewhere: the password is replaced after the same
+          // checks, and no session is touched or created, so this device keeps its cookie.
+          await changePasswords.changePassword({ ...change, keepSessions: true })
+          return true
+        }
+        const result = await changePasswords.changePassword({ ...change, device: deviceOf(c) })
+        await cookie.set(c, result.session.session, result.session.cookieValue)
+        return true
       } catch (error) {
         if (error instanceof PasswordSignInError) return false
         throw error
       }
-      // The package created this device's new session outside any transaction of ours.
-      await db.sessionDevices.record(result.session.session.id, deviceOf(c))
-      await cookie.set(c, result.session.session, result.session.cookieValue)
-      return true
     },
 
     async resetPassword(rawEmail, code, newPassword) {
@@ -889,8 +860,7 @@ export function createSignIn(options: SignInOptions): SignIn {
           secondFactor: user.mfa === UserMFAStatus.CONFIGURED
             ? SecondFactorStatus.Completed
             : SecondFactorStatus.NotRequired,
-        })
-        await tx.sessionDevices.record(created.session.id, deviceOf(c))
+        }, deviceOf(c))
         await tx.authStore.deleteKey(user.id, key.id)
         await tx.emailChange.remove(user.id)
         return { outcome: EmailVerifyOutcome.Verified, created }
@@ -916,7 +886,7 @@ export function createSignIn(options: SignInOptions): SignIn {
     },
 
     async listSessions({ session }) {
-      const rows = await db.sessionDevices.listLive(session.userId)
+      const rows = await sessions.listForUser(session.userId)
       const devices = rows.map((row): SignedInDevice => ({
         id: row.id,
         deviceName: row.deviceName,
@@ -932,7 +902,7 @@ export function createSignIn(options: SignInOptions): SignIn {
     async endSession(c, { session, user }, sessionId) {
       if (sessionId === session.id) return false
       return await db.begin(async (tx) => {
-        if (!(await tx.sessionDevices.deleteOwn(user.id, sessionId))) return false
+        if (!(await sessionsOver(tx.sessionStore).deleteForUser(user.id, sessionId))) return false
         await tx.authAudit.insert(
           auditRow(c, user.id, AuthAuditEventType.SESSIONS_ENDED, String(sessionId)),
         )
@@ -942,7 +912,9 @@ export function createSignIn(options: SignInOptions): SignIn {
 
     async endOtherSessions(c, { session, user }) {
       return await db.begin(async (tx) => {
-        const ended = await tx.sessionDevices.deleteOthers(user.id, session.id)
+        // Ends nothing unless `session.id` is this user's live session, so a wrong id cannot sign
+        // the person out everywhere.
+        const ended = await sessionsOver(tx.sessionStore).deleteOthers(user.id, session.id)
         if (ended > 0) {
           await tx.authAudit.insert(
             auditRow(c, user.id, AuthAuditEventType.SESSIONS_ENDED, "all other sessions"),
