@@ -1,3 +1,4 @@
+import { effect } from "@preact/signals"
 import { useEffect } from "preact/hooks"
 import type { notesStore } from "../state/notes.ts"
 import { toasts } from "../state/toasts.ts"
@@ -21,6 +22,14 @@ export function useUndoToast(store: typeof notesStore): void {
       dataE2E: "note-undo-toast",
       action: { label: "Undo", dataE2E: "note-undo", onAction: () => void store.undoDelete() },
     })
-    return () => toasts.remove(offer.id)
-  }, [offer])
+    // Dismiss and the toast's own timer take it off the list: that ends the offer too, so it does
+    // not come back when the person returns to the list.
+    const stop = effect(() => {
+      if (!toasts.list.value.some((toast) => toast.id === offer.id)) store.dismissUndo()
+    })
+    return () => {
+      stop()
+      toasts.remove(offer.id)
+    }
+  }, [offer, store])
 }

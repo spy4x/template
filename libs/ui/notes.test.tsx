@@ -673,7 +673,7 @@ describe("NoteEditorScreen", () => {
   it("shows a viewer the note as text, with no form and no way to change it", () => {
     const html = renderToString(<NoteEditorScreen {...editing} group={viewerOfTeam} />)
 
-    expect(html).toMatch(/data-e2e="note-read-title"[^>]*>(?:<span\b[^>]*>)?Groceries</)
+    expect(html).toMatch(/data-e2e="note-read-title"[^>]*><span\b[^>]*>Groceries</)
     expect(html).toContain("milk")
     expect(html).toContain("Only an editor can change it.")
     expect(html).not.toContain("<form")

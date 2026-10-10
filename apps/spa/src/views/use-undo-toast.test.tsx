@@ -34,6 +34,9 @@ function fakeStore() {
   const undo = signal<UndoOffer | null>(null)
   const store = {
     undo,
+    dismissUndo: () => {
+      undo.value = null
+    },
     undoDelete: () => {
       undone.push(undo.value?.id ?? "")
       return Promise.resolve(true)
@@ -104,6 +107,21 @@ describe("useUndoToast", () => {
     const { store, undo } = fakeStore()
     undo.value = { id: "n1", title: "Milk", until: Date.now() - 1 }
 
+    await mount(store)
+
+    expect(toasts.list.value).toHaveLength(0)
+  })
+
+  it("does not bring back a toast the person dismissed when they return to the list", async () => {
+    const { store, undo } = fakeStore()
+    await mount(store)
+    await act(() => {
+      undo.value = { id: "n1", title: "Milk", until: Date.now() + 10_000 }
+    })
+
+    // What Toastr's Dismiss does: onDismiss={toasts.remove}.
+    await act(() => toasts.remove("n1"))
+    await act(() => render(null, root!))
     await mount(store)
 
     expect(toasts.list.value).toHaveLength(0)
