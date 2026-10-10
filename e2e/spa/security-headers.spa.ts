@@ -1,9 +1,12 @@
 import { type APIResponse, expect, test } from "@playwright/test"
 import { gotoApp, signIn } from "../fixtures/app.ts"
-import { watchCspViolations } from "../fixtures/csp.ts"
+import { refusalSource, watchCspViolations } from "../fixtures/csp.ts"
 
 const TRACKER = Deno.env.get("ERROR_TRACKER_ORIGIN")
 if (!TRACKER) throw new Error("ERROR_TRACKER_ORIGIN is required: e2e/spa/run.sh sets it")
+
+/** arktype's test for a policy that forbids `eval`, as the built script holds it. */
+const PROBE = `new Function("return false")`
 
 /** The one value of a header, which fails on a header nginx sent twice. */
 function header(response: APIResponse, name: string): string | undefined {
@@ -72,6 +75,12 @@ test("nginx sends the security headers with the page, a script, the worker, the 
   const refused = await request.post("/favicon.ico")
   expect(refused.status()).toBe(405)
   expectSecurityHeaders(refused)
+
+  // A byte range past the end of a file: nginx's 416 would repeat every header, so ranges are off
+  // and the whole file comes back.
+  const range = await request.get("/favicon.ico", { headers: { range: "bytes=99999999-" } })
+  expect(range.status()).toBe(200)
+  expectSecurityHeaders(range)
 })
 
 test("a signed-in walk through the app meets no refusal under the content security policy", async ({ context, page, request, baseURL }) => {
@@ -158,12 +167,25 @@ test("a signed-in walk through the app meets no refusal under the content securi
     await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
 
     // One refusal is expected on every page load and is the policy at work: arktype, the
-    // validation library, tries `new Function` once inside a try/catch to learn whether it may
-    // compile its validators, is refused, and validates without compiling. Anything else the
-    // browser refused fails the spec.
-    const evalProbe = /^script-src blocked eval on /
-    expect(violations.filter((line) => !evalProbe.test(line))).toEqual([])
-    expect(violations.filter((line) => evalProbe.test(line)).length).toBeGreaterThan(0)
+    // validation library, tries `new Function("return false")` once inside a try/catch to learn
+    // whether it may compile its validators, is refused, and validates without compiling. The
+    // browser says where in which script each refused `eval` was: every one must be that probe,
+    // read here from the script itself. Anything else the browser refused fails the spec.
+    const refusedEval = /^script-src blocked eval on /
+    expect(violations.filter((line) => !refusedEval.test(line))).toEqual([])
+    const evals = [...new Set(violations.filter((line) => refusedEval.test(line)))]
+    expect(evals.length, "arktype's probe was refused").toBeGreaterThan(0)
+    for (const refusal of evals) {
+      const source = refusalSource(refusal)
+      expect(source, `the browser names the script of: ${refusal}`).toBeDefined()
+      const script = await (await request.get(source!.file)).text()
+      const code = script.split("\n")[source!.line - 1] ?? ""
+      const around = code.slice(
+        Math.max(0, source!.column - 1 - PROBE.length),
+        source!.column - 1 + PROBE.length,
+      )
+      expect(around, `a refused eval that is not arktype's probe: ${refusal}`).toContain(PROBE)
+    }
   } finally {
     await cleanup({ soft: true })
   }
