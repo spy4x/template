@@ -289,8 +289,20 @@ export function flushOutbox(): Promise<void> {
  * a screen to show before the server has answered.
  */
 export interface LocalReads {
-  /** Rejects as `read` does, except when the server is unreachable and a copy exists. */
-  through<T>(key: string, read: () => Promise<T>): Promise<ReadResult<T>>
+  /**
+   * Rejects as `read` does, except when the server is unreachable and a copy exists. `early` is
+   * given the copy when the device has one before the server has answered, so a screen with
+   * nothing to show paints it first; it is never given a copy after the answer. When the server
+   * then refuses the read, `early` is called once more with `undefined`: the screen takes back
+   * what it painted, so a refusal is never read next to a list the person may no longer see. A
+   * screen that did not paint the copy (it had a list already) returns `false`, and is not asked
+   * to take anything back.
+   */
+  through<T>(
+    key: string,
+    read: () => Promise<T>,
+    early?: (copy: ReadResult<T> | undefined) => boolean | void,
+  ): Promise<ReadResult<T>>
   /** The copy under `key`, or `undefined`. Never rejects. */
   copy<T>(key: string): Promise<ReadResult<T> | undefined>
 }
@@ -298,7 +310,30 @@ export interface LocalReads {
 /** {@link LocalReads} over the cache `current` names at the moment of each read, or over none. */
 export function createLocalReads(current: () => ReadCache | undefined): LocalReads {
   return {
-    through: (key, read) => cachedRead(current(), key, read),
+    async through<T>(
+      key: string,
+      read: () => Promise<T>,
+      early?: (copy: ReadResult<T> | undefined) => boolean | void,
+    ) {
+      const cache = current()
+      let answered = false
+      let painted = false
+      if (early && cache) {
+        void readCopy<T>(cache, key).then((copy) => {
+          if (!copy || answered) return
+          painted = early(copy) !== false
+        })
+      }
+      try {
+        return await cachedRead(cache, key, read)
+      } catch (refusal) {
+        // An unreachable server is answered by the copy above, so this is the server saying no.
+        if (painted) early?.(undefined)
+        throw refusal
+      } finally {
+        answered = true
+      }
+    },
     copy: (key) => readCopy(current(), key),
   }
 }

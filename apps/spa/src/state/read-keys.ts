@@ -17,3 +17,15 @@ export const READ_KEYS = {
   apiTokens: "api-tokens",
   devices: "devices",
 } as const
+
+/**
+ * Carries a refusal out of a read made through the device. `LocalReads.through` keeps an answer and
+ * falls back to the copy only when the server is unreachable; a store whose read answers with a
+ * result object throws this for a refusal, so the refusal is neither kept nor hidden by the copy.
+ */
+export class ReadRefused<F> extends Error {
+  constructor(readonly failure: F) {
+    super("The server refused the read")
+    this.name = "ReadRefused"
+  }
+}
