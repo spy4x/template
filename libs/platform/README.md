@@ -9,5 +9,5 @@ event bus, the cache, tokens) now come from the published `@spy4x/validation` an
 `@spy4x/platform` packages. Add code here only when it is platform-level and not in those
 packages.
 
-`error-reporter.ts` is the exception: a Sentry-protocol error reporter that moves to
-`spy4x/ts-libs` once published there (docs/stack.md, "Error tracking").
+Nothing is left here today: the error reporter moved to `@spy4x/platform` too (docs/stack.md,
+"Error tracking").

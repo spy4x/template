@@ -1,6 +1,1 @@
-{
-  "tasks": {
-    "check": "deno check error-reporter.ts",
-    "test": "deno test error-reporter.test.ts"
-  }
-}
+{}

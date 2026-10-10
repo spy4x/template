@@ -62,12 +62,12 @@ stack trace and alerts. The tracker is [GlitchTip](https://glitchtip.com) (MIT l
 Sentry's protocol, runs on Postgres and Valkey). Any Sentry-compatible tracker works, because the
 app only needs a DSN.
 
-**In the app.** `libs/platform/error-reporter.ts` is a small reporter that posts Sentry's envelope
+**In the app.** `createErrorReporter` from `@spy4x/platform` is a small reporter that posts Sentry's envelope
 format, about 270 lines and no dependency, instead of the 30 KB `@sentry/browser`.
 
 - The SPA reports `error` and `unhandledrejection` events and the errors its `ErrorBoundary`
   catches (`apps/spa/src/error-reporting.ts`). The MPA has no client script, so it reports nothing.
-- The API's base middleware (`apps/api/base-middleware.ts`) logs and reports every error answered
+- The API's base middleware (`applyBaseMiddleware` from `@spy4x/server/request-log/base-middleware`) logs and reports every error answered
   with status 500 or more, with the request id, the method and the path. That includes an error a
   route's own `onError` answered; the answer is unchanged. It never sends a query string, a header
   or a body. An `HTTPException` below 500 is an answer, not a failure, and is not reported.
