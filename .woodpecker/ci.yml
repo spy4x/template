@@ -1,9 +1,10 @@
-# Continuous integration: runs on every pull request and every push to main.
+# Continuous integration: runs on every pull request, every push to main and every tag (release.yml
+# waits for it).
 #
 # Woodpecker reads every `*.yml` in this folder as its own workflow. Deploys are not wired up: see
 # `deploy.yml.example` and docs/woodpecker-ci-setup.md.
 #
-# Deno 2.9.0 is the version the repository uses (`DENO_VERSION` in infra/envs/.env.example and
+# Deno 2.9.7 is the version the repository uses (`DENO_VERSION` in infra/envs/.env.example and
 # Dockerfile.base). Playwright 1.57.0 is the version `deno task e2e` runs (deno.jsonc); the e2e
 # image tag must match it, because the browser build inside the image is tied to that version.
 
@@ -11,21 +12,24 @@ when:
   - event: pull_request
   - event: push
     branch: main
+  - event: tag
 
 steps:
   check:
-    image: denoland/deno:2.9.0
+    image: denoland/deno:2.9.7
     commands:
+      - deno install --frozen
       - deno task check
 
   build:
-    image: denoland/deno:2.9.0
+    image: denoland/deno:2.9.7
     commands:
+      - deno install --frozen
       - deno task build
     depends_on: [check]
 
   integration:
-    image: denoland/deno:2.9.0
+    image: denoland/deno:2.9.7
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
@@ -36,6 +40,7 @@ steps:
       KV_PORT: "6379"
       KV_PASSWORD: ci-throwaway
     commands:
+      - deno install --frozen
       # Wait over TCP. Postgres first runs a temporary server that listens on a unix socket only,
       # so a successful TCP connection means the real server is up (docs/handoff.md, trap 3).
       # Valkey has no such phase.
@@ -64,8 +69,15 @@ steps:
     # (`playwright install`) downloads it and then hangs (issue 48), so nothing is installed here.
     image: mcr.microsoft.com/playwright:v1.57.0-noble
     commands:
-      - npm install --global deno@2.9.0
+      # npm's newest `deno` package lags the binary, so take the pinned release itself.
+      - |
+          curl -fsSL -o /tmp/deno.zip https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-unknown-linux-gnu.zip
+          echo "c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490  /tmp/deno.zip" | sha256sum -c -
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends unzip
+          unzip -q -o /tmp/deno.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/deno
       - deno --version
+      - deno install --frozen
       # The other two e2e tests need the full Docker stack; this one serves its own fixture.
       - deno task e2e url-filters
     depends_on: [check]
@@ -87,8 +99,15 @@ steps:
       KV_PORT: "6379"
       KV_PASSWORD: ci-throwaway
     commands:
-      - npm install --global deno@2.9.0
+      # npm's newest `deno` package lags the binary, so take the pinned release itself.
+      - |
+          curl -fsSL -o /tmp/deno.zip https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-unknown-linux-gnu.zip
+          echo "c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490  /tmp/deno.zip" | sha256sum -c -
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends unzip
+          unzip -q -o /tmp/deno.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/deno
       - deno --version
+      - deno install --frozen
       # Postgres first runs a temporary server that listens on a unix socket only, so a TCP
       # connection means the real one is up (docs/handoff.md, trap 3). Valkey has no such phase.
       - |

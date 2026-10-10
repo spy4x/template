@@ -209,6 +209,21 @@ the state of the migration and the traps in this codebase. To add a product feat
 [docs/aggregates.md](docs/aggregates.md): it walks through every file of the notes aggregate, in
 order.
 
+## Releases
+
+A version tag on `main` publishes the images to Docker Hub as `<IMAGE_PREFIX>-api`, `-spa` and
+`-mpa` (the worker runs the API image); `IMAGE_PREFIX` is set in
+[`.woodpecker/release.yml`](.woodpecker/release.yml). To cut a release:
+
+```sh
+git switch main && git pull --ff-only   # the tag must point at a commit on main
+git tag v1.2.3                          # v1.2.3-rc.1 publishes that tag only, never `latest`
+git push origin v1.2.3
+```
+
+The pipeline refuses a tag whose commit is not on `main`. Setup and the steps:
+[docs/woodpecker-ci-setup.md](docs/woodpecker-ci-setup.md#releases).
+
 ## Built by
 
 I'm [Anton Shubin](https://antonshubin.com), a senior full-stack engineer and tech lead. This
