@@ -302,8 +302,22 @@ describe("what the device keeps", () => {
 
       // The session store's own reaction to "nobody is signed in" comes first; the start, which
       // holds the sign-in page back, asks second and finds nobody remembered.
-      void forgetUser(storage)
-      await forgetUser(storage)
+      // The device takes a moment to delete, as IndexedDB does.
+      const slow: typeof storage = {
+        ...storage,
+        openReads(userId) {
+          const reads = storage.openReads(userId)
+          return {
+            ...reads,
+            clear: async () => {
+              await new Promise((resolve) => setTimeout(resolve, 5))
+              await reads.clear()
+            },
+          }
+        },
+      }
+      void forgetUser(slow)
+      await forgetUser(slow)
 
       expect([...device.reads.keys()]).toEqual([])
     } finally {

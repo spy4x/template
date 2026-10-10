@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd"
 import type { NoteItem, NotePage, NotesDependencies } from "../state/notes.ts"
 import type { CallPort } from "@spy4x/realtime/calls"
 import { createCollections } from "@spy4x/realtime/collections"
+import { RealtimeRequestError } from "@spy4x/realtime"
 import { createMemoryOutboxStore } from "@spy4x/realtime/outbox"
 import { signal } from "@preact/signals"
 import { createMemoryNotesCache } from "./memory-notes-cache.ts"
@@ -104,6 +105,24 @@ describe("offline notes reads", () => {
     await deps.create({ groupId, id: "mine", title: "Offline note", body: "" })
     const page = await deps.fetchPage(groupId, null)
     expect(page.notes.map((n) => n.title)).toEqual(["Offline note", "a"])
+  })
+
+  it("shows a note created offline in its own group only", async () => {
+    const layer = layerWith({ socket: false })
+    const { online } = network([[note("a")]])
+    const deps = offlineNotes(online, () => layer)
+    await deps.create({ groupId: "g-2", id: "elsewhere", title: "In the other group", body: "" })
+    const page = await deps.fetchPage(groupId, null)
+    expect(page.notes.map((n) => n.title)).toEqual(["a"])
+  })
+
+  it("opens a note created offline although the server says it does not exist", async () => {
+    const layer = layerWith({ socket: false })
+    const { online } = network([[]])
+    const notFound = new RealtimeRequestError("not_found", "Note not found")
+    const deps = offlineNotes({ ...online, get: () => Promise.reject(notFound) }, () => layer)
+    await deps.create({ groupId, id: "mine", title: "Offline note", body: "" })
+    expect((await deps.get(groupId, "mine")).note.title).toBe("Offline note")
   })
 
   it("does not hide a server error behind the cached list", async () => {

@@ -267,7 +267,7 @@ describe("ApiTokens", () => {
   it("says nothing about a copy when the server answered", async () => {
     await mount(<ApiTokens {...tokensProps([], { savedAt: null })} />)
 
-    expect(document.querySelector("[data-e2e=api-tokens-saved-copy]")).toBeNull()
+    expect(document.querySelectorAll("[data-e2e=api-tokens-saved-copy]").length).toBe(0)
   })
 })
 

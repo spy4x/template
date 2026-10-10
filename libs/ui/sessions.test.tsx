@@ -202,7 +202,7 @@ describe("SignedInDevices", () => {
   it("says nothing about a copy when the server answered", async () => {
     await mount(<SignedInDevices {...devicesProps([], { savedAt: null })} />)
 
-    expect(document.querySelector("[data-e2e=sessions-saved-copy]")).toBeNull()
+    expect(document.querySelectorAll("[data-e2e=sessions-saved-copy]").length).toBe(0)
   })
 })
 
