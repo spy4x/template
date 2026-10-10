@@ -98,7 +98,7 @@ function startPage(id: number, storage: ReturnType<typeof createMemoryStorage>):
 }
 
 /** What the page's `localStorage` holds: the remembered user and the deletions still owed. */
-let kept = new Map<string, string>()
+let kept: ReturnType<typeof installLocalStorage>["kept"]
 let restoreLocalStorage = () => {}
 const OWED = "offline:owed-deletion"
 
@@ -296,23 +296,23 @@ describe("what the device keeps", () => {
   it("remembers the signed-in user under the key a device already holds, and nobody when what is stored there is not a user", () => {
     configureModules({ realtime: false, offline: true })
     // What the app wrote before it used the library's hint.
-    kept.set("offline:session", JSON.stringify(user(7)))
+    kept.setItem("offline:session", JSON.stringify(user(7)))
     expect(recallUser()).toEqual(user(7))
 
     rememberUser(user(8))
-    expect(JSON.parse(kept.get("offline:session") ?? "null")).toEqual(user(8))
+    expect(JSON.parse(kept.getItem("offline:session") ?? "null")).toEqual(user(8))
 
-    kept.set("offline:session", JSON.stringify({ firstName: "No id" }))
+    kept.setItem("offline:session", JSON.stringify({ firstName: "No id" }))
     expect(recallUser()).toBeNull()
-    kept.set("offline:session", "not json")
+    kept.setItem("offline:session", "not json")
     expect(recallUser()).toBeNull()
   })
 
   it("remembers nobody while the local-data module is off", () => {
     configureModules({ realtime: false, offline: false })
     rememberUser(user(7))
-    expect([...kept.keys()]).toEqual([])
-    kept.set("offline:session", JSON.stringify(user(7)))
+    expect(kept.size).toBe(0)
+    kept.setItem("offline:session", JSON.stringify(user(7)))
     expect(recallUser()).toBeNull()
   })
 
@@ -373,7 +373,7 @@ describe("what the device keeps", () => {
       // The next start is a new page: what `localStorage` holds is all it has to find the copies by.
       expect(recallUser()).toBeNull()
       expect([...device.reads.keys()]).toEqual(["groups"])
-      expect(kept.get(OWED)).toBe("[7]")
+      expect(kept.getItem(OWED)).toBe("[7]")
     } finally {
       finish()
     }
@@ -383,19 +383,19 @@ describe("what the device keeps", () => {
     const { storage, device } = await deviceInUse()
     configureModules({ realtime: false, offline: true })
     // What a page that closed while deleting left behind: nobody remembered, one deletion owed.
-    kept.set(OWED, "[7]")
+    kept.setItem(OWED, "[7]")
 
     await forgetUser(storage)
 
     expect([...device.reads.keys()]).toEqual([])
     expect(await device.notes.readNotes("g-1")).toEqual([])
-    expect(kept.has(OWED)).toBe(false)
+    expect(kept.getItem(OWED)).toBeNull()
   })
 
   it("deletes the copies an earlier page still owed before the layer of the next sign-in opens", async () => {
     const { storage, device } = await deviceInUse()
     server()
-    kept.set(OWED, "[7]")
+    kept.setItem(OWED, "[7]")
 
     startPage(7, storage)
     // No layer yet: a list read now goes to the server alone, so no owed copy can be shown.
@@ -403,7 +403,7 @@ describe("what the device keeps", () => {
     await settle()
 
     expect([...device.reads.keys()]).toEqual([])
-    expect(kept.has(OWED)).toBe(false)
+    expect(kept.getItem(OWED)).toBeNull()
     expect(currentLayer()?.userId).toBe(7)
   })
 
@@ -420,7 +420,7 @@ describe("what the device keeps", () => {
       await forgetUser(refusing)
 
       expect([...device.reads.keys()]).toEqual(["groups"])
-      expect(kept.get(OWED)).toBe("[7]")
+      expect(kept.getItem(OWED)).toBe("[7]")
       expect(warned.map(([text]) => String(text))).toEqual([
         "The copies of user 7 kept on this device could not be deleted. The next start tries again.",
       ])
@@ -429,7 +429,7 @@ describe("what the device keeps", () => {
       await forgetUser(storage)
 
       expect([...device.reads.keys()]).toEqual([])
-      expect(kept.has(OWED)).toBe(false)
+      expect(kept.getItem(OWED)).toBeNull()
     } finally {
       console.warn = realWarn
     }
@@ -438,7 +438,7 @@ describe("what the device keeps", () => {
   it("does not open the layer of a person whose own owed copies the device could not delete", async () => {
     const { storage, device } = await deviceInUse()
     server()
-    kept.set(OWED, "[7]")
+    kept.setItem(OWED, "[7]")
     const realWarn = console.warn
     console.warn = () => {}
     try {
@@ -447,7 +447,7 @@ describe("what the device keeps", () => {
 
       expect(currentLayer()).toBeNull()
       expect([...device.reads.keys()]).toEqual(["groups"])
-      expect(kept.get(OWED)).toBe("[7]")
+      expect(kept.getItem(OWED)).toBe("[7]")
     } finally {
       console.warn = realWarn
     }
@@ -464,13 +464,13 @@ describe("what the device keeps", () => {
     try {
       forgetModules()
       await settle()
-      expect(kept.get(OWED)).toBe("[7]")
+      expect(kept.getItem(OWED)).toBe("[7]")
     } finally {
       finish()
     }
     await settle()
     expect([...device.reads.keys()]).toEqual([])
-    expect(kept.has(OWED)).toBe(false)
+    expect(kept.getItem(OWED)).toBeNull()
   })
 
   it("stops the running layer of the person whose copies it deletes", async () => {
@@ -487,7 +487,7 @@ describe("what the device keeps", () => {
 
   it("deletes what the module kept for the remembered person once it is switched off", async () => {
     const { storage, device } = await deviceInUse()
-    kept.set("offline:session", JSON.stringify(user(7)))
+    kept.setItem("offline:session", JSON.stringify(user(7)))
     visiblePage()
     configureModules({ realtime: false, offline: false })
 
@@ -496,7 +496,7 @@ describe("what the device keeps", () => {
 
     expect([...device.reads.keys()]).toEqual([])
     expect(await device.notes.readNotes("g-1")).toEqual([])
-    expect([...kept.keys()]).toEqual([])
+    expect(kept.size).toBe(0)
   })
 
   it("opens no store on a device that holds no trace of the module while it is off", async () => {
@@ -514,6 +514,139 @@ describe("what the device keeps", () => {
     await forgetUser(watched)
 
     expect(opened).toEqual([])
-    expect([...kept.keys()]).toEqual([])
+    expect(kept.size).toBe(0)
+  })
+})
+
+describe("two people on one device", () => {
+  async function used(storage: ReturnType<typeof createMemoryStorage>, id: number) {
+    const device = storage.of(id)
+    device.reads.set("groups", { value: [{ id: `g-of-${id}` }], savedAt: 1 })
+    await device.notes.putNote(note(`n-of-${id}`))
+    await device.queue.putEntry({ ...QUEUED_BY_AN_EARLIER_VERSION, status: "conflict" })
+    return device
+  }
+
+  /** `storage` on which one part of `who`'s copies cannot be deleted. */
+  function failingFor(
+    storage: ReturnType<typeof createMemoryStorage>,
+    who: number,
+    part: "reads" | "notes",
+  ): typeof storage {
+    return {
+      ...storage,
+      openReads(id) {
+        const reads = storage.openReads(id)
+        return id === who && part === "reads"
+          ? { ...reads, clear: () => Promise.reject(new Error("blocked")) }
+          : reads
+      },
+      openNotes(id) {
+        const notes = storage.openNotes(id)
+        return id === who && part === "notes"
+          ? { ...notes, clear: () => Promise.reject(new Error("blocked")) }
+          : notes
+      },
+    }
+  }
+
+  /** Runs `run` and gives back the warnings it logged. */
+  async function warnings(run: () => Promise<void>): Promise<string[]> {
+    const warned: string[] = []
+    const real = console.warn
+    console.warn = (text: unknown) => void warned.push(String(text))
+    try {
+      await run()
+    } finally {
+      console.warn = real
+    }
+    return warned
+  }
+
+  it("deletes the first person's owed copies before the second person's layer opens, and keeps the first person's queue and the second person's copies", async () => {
+    const storage = createMemoryStorage()
+    const first = await used(storage, 7)
+    const second = await used(storage, 8)
+    server()
+    kept.setItem(OWED, "[7]")
+
+    startPage(8, storage)
+    expect(currentLayer()).toBeNull()
+    await settle()
+
+    expect([...first.reads.keys()]).toEqual([])
+    expect(await first.notes.readNotes("g-1")).toEqual([])
+    expect((await first.queue.readOutbox()).length).toBe(1)
+    expect([...second.reads.keys()]).toEqual(["groups"])
+    expect(kept.getItem(OWED)).toBeNull()
+    expect(currentLayer()?.userId).toBe(8)
+  })
+
+  it("keeps owing the person whose deletion failed when another person's succeeded", async () => {
+    const storage = createMemoryStorage()
+    const first = await used(storage, 7)
+    const third = await used(storage, 9)
+    configureModules({ realtime: false, offline: true })
+    kept.setItem(OWED, "[7,9]")
+
+    await warnings(() => forgetUser(failingFor(storage, 7, "reads")))
+
+    expect([...third.reads.keys()]).toEqual([])
+    expect([...first.reads.keys()]).toEqual(["groups"])
+    expect(kept.getItem(OWED)).toBe("[7]")
+  })
+
+  it("keeps the deletion owed when only the notes copy could not be deleted", async () => {
+    const storage = createMemoryStorage()
+    const first = await used(storage, 7)
+    configureModules({ realtime: false, offline: true })
+    rememberUser(user(7))
+
+    await warnings(() => forgetUser(failingFor(storage, 7, "notes")))
+
+    expect((await first.notes.readNotes("g-1")).length).toBe(1)
+    expect(kept.getItem(OWED)).toBe("[7]")
+  })
+
+  it("opens no layer for a person who signed out while an owed deletion was still running", async () => {
+    const storage = createMemoryStorage()
+    await used(storage, 7)
+    server()
+    kept.setItem(OWED, "[7]")
+
+    startPage(8, storage)
+    forgetModules()
+    sessionState.value = signedOut
+    await settle()
+
+    expect(currentLayer()).toBeNull()
+  })
+
+  it("deletes a person's copies once on sign-out, and warns once when the device refuses", async () => {
+    const storage = createMemoryStorage()
+    await used(storage, 7)
+    server()
+    let tried = 0
+    const refusing: typeof storage = {
+      ...storage,
+      openReads(id) {
+        const reads = storage.openReads(id)
+        return { ...reads, clear: () => (tried++, Promise.reject(new Error("blocked"))) }
+      },
+    }
+    startPage(7, refusing)
+    rememberUser(user(7))
+    await settle()
+
+    // Signing out as the app does it: the session's own reaction first, then the modules'.
+    const warned = await warnings(async () => {
+      void forgetUser(refusing)
+      forgetModules()
+      await settle()
+    })
+
+    expect(tried).toBe(1)
+    expect(warned.length).toBe(1)
+    expect(kept.getItem(OWED)).toBe("[7]")
   })
 })
