@@ -22,6 +22,7 @@ import {
 import { createSameOriginMutationGuard } from "@spy4x/server/http/same-origin"
 import { actorFromAuth } from "../cqrs/actor.ts"
 import type { APIContext } from "../_types.ts"
+import { requireBoundUser } from "../middlewares/bound-user.ts"
 import { noteErrorResponse, NoteFeatureError } from "../features/notes/errors.ts"
 import {
   DEFAULT_NOTE_LIST_LIMIT,
@@ -70,6 +71,7 @@ export function createNotesRoute(dependencies: NotesRouteDependencies): Hono<API
   return new Hono<APIContext>()
     .onError((error, c) => noteErrorResponse(c, error))
     .use(requireAuthentication)
+    .use(requireBoundUser)
     .get("/", async (c) => {
       const page = await listNotesPage(dependencies, actorOf(c), groupIdOf(c), {
         limit: parseLimit(c.req.query("limit")),

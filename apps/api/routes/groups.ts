@@ -40,6 +40,7 @@ import {
 import { createSameOriginMutationGuard } from "@spy4x/server/http/same-origin"
 import { actorFromAuth } from "../cqrs/actor.ts"
 import { APIContext } from "../_types.ts"
+import { requireBoundUser } from "../middlewares/bound-user.ts"
 import { groupErrorResponse, GroupFeatureError } from "../features/groups/errors.ts"
 import { readApiJson } from "@api/services/json-body.ts"
 import { listGroupsPage } from "../features/groups/list.ts"
@@ -90,6 +91,7 @@ export function createGroupsRoute(dependencies: GroupsRouteDependencies): Hono<A
   return new Hono<APIContext>()
     .onError((error, c) => groupErrorResponse(c, error))
     .use(requireGroupAuthentication)
+    .use(requireBoundUser)
     .get("/", async (c) => {
       const actor = actorFromAuth(c.get("auth")!)
       const limit = parseLimit(c.req.query("limit"))

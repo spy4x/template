@@ -521,6 +521,32 @@ describe("groups route same-origin guard", () => {
     expect(deps.createCommand).not.toBe(null)
   })
 
+  it("refuses a list read whose page names another user than the session's, and reads nothing", async () => {
+    const deps = dependencies()
+    const app = buildApp(deps)
+
+    const responses = await Promise.all(
+      ["/groups", "/groups/selected", "/groups/deleted"].map((path) =>
+        app.request(`http://local${path}`, { headers: { "x-realtime-user": "8" } })
+      ),
+    )
+
+    expect(responses.map((response) => response.status)).toEqual([401, 401, 401])
+    expect((await responses[0].json()).error.code).toBe("unauthorized")
+    expect([deps.listQuery, deps.selectedQuery]).toEqual([null, null])
+  })
+
+  it("lists for a page that names the session's user", async () => {
+    const deps = dependencies()
+
+    const response = await buildApp(deps).request("http://local/groups", {
+      headers: { "x-realtime-user": "7" },
+    })
+
+    expect(response.status).toBe(200)
+    expect(deps.listQuery).not.toBeNull()
+  })
+
   it("answers a cross-site POST without a session with 401, not 403", async () => {
     const { deps, response } = await post({
       ...mutationHeaders,

@@ -240,6 +240,25 @@ describe("notes route", () => {
     expect(seen.create).toBe(null)
   })
 
+  it("refuses a list read whose page names another user than the session's, and reads nothing", async () => {
+    const { request, seen } = harness()
+
+    const other = await request("GET", `${groupId}/notes`, undefined, { "x-realtime-user": "8" })
+
+    expect(other.status).toBe(401)
+    expect((await other.json()).error.code).toBe("unauthorized")
+    expect(seen.list).toBeNull()
+  })
+
+  it("lists for a page that names the session's user", async () => {
+    const { request, seen } = harness()
+
+    const response = await request("GET", `${groupId}/notes`, undefined, { "x-realtime-user": "7" })
+
+    expect(response.status).toBe(200)
+    expect(seen.list).not.toBeNull()
+  })
+
   it("refuses a request without a session", async () => {
     const { request } = harness(true, null)
 
