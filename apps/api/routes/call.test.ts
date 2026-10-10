@@ -9,6 +9,7 @@ import {
   crossSiteHeaders,
   mountRoute,
   sameOriginHeaders,
+  sameOriginWithoutCookieHeaders,
   WEB_APP_URL,
 } from "../_testing/mutation-requests.ts"
 import { toRequestError } from "../services/realtime.ts"
@@ -117,6 +118,23 @@ describe("call route", () => {
 
     const response = await app.request(
       ...call("group.create", { name: "Team" }, { "idempotency-key": "key-1" }),
+    )
+
+    expect(response.status).toBe(401)
+    expect((await response.json()).error.code).toBe("unauthorized")
+    expect(calls).toEqual([])
+  })
+
+  it("answers a caller whose cookie is gone as unauthorized, which signs its page out", async () => {
+    const { app, calls } = buildApp(null)
+
+    const response = await app.request(
+      ...call(
+        "group.create",
+        { name: "Team" },
+        { "idempotency-key": "key-1" },
+        sameOriginWithoutCookieHeaders,
+      ),
     )
 
     expect(response.status).toBe(401)
