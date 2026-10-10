@@ -38,9 +38,9 @@ function groupPath(groupId: string, rest = ""): string {
  * Invitations on both sides: a group's pending ones with create and revoke, for its owner and
  * admins, and the one behind a link or sent to the person's address, with accept and decline.
  *
- * It calls `fetch` itself instead of `apiFetch`: these answers say why an invitation no longer
- * works in `error.message`, which `apiFetch` drops. The created link is kept in memory only, and
- * dropped when the page closes, since it is never shown again.
+ * It calls `fetch` itself instead of `apiFetch`: a plan refusal names its entitlement and limit
+ * beside `error.code` and `error.message`, and `apiFetch` keeps only those two. The created link
+ * is kept in memory only, and dropped when the page closes, since it is never shown again.
  */
 export function createInvitationsStore(
   { fetch = globalThis.fetch, origin = () => globalThis.location.origin }: {
