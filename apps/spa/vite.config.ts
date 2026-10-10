@@ -13,7 +13,11 @@ import {
   webManifest,
 } from "@spy4x/preact-theme/vite"
 
+import { nginxSecurityHeaders } from "@client/vite/nginx-security-headers.ts"
+
 const SW_ENTRY = fromFileUrl(new URL("./src/sw.ts", import.meta.url))
+const BUILT_PAGE = fromFileUrl(new URL("./dist/index.html", import.meta.url))
+const SECURITY_HEADERS = fromFileUrl(new URL("./security-headers.conf", import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -75,6 +79,17 @@ export default defineConfig({
         children: themeBootstrapScript(),
         injectTo: "head-prepend" as const,
       }],
+    },
+    {
+      // nginx serves the built page, so it sends the security headers. The policy holds the hash of
+      // each inline block of the built `index.html`, so the file nginx includes is written from
+      // that page after every build, next to `dist` (`nginx.conf` says where it goes).
+      name: "nginx-security-headers",
+      apply: "build" as const,
+      closeBundle: async () => {
+        const page = await Deno.readTextFile(BUILT_PAGE)
+        await Deno.writeTextFile(SECURITY_HEADERS, await nginxSecurityHeaders(page))
+      },
     },
   ],
   resolve: {
