@@ -179,7 +179,8 @@ export function startOffline(
 /**
  * Stops the layer. `forget` also deletes the read copies and the notes, as signing out must; the
  * queue stays, because a write that never reached the server is the person's work and goes out the
- * next time they sign in on this browser.
+ * next time they sign in on this browser. It rejects when the device could not delete them: the
+ * caller keeps the deletion owed (`modules.ts`).
  */
 export async function stopOffline({ forget = false } = {}): Promise<void> {
   const closing = layer
@@ -191,13 +192,16 @@ export async function stopOffline({ forget = false } = {}): Promise<void> {
   if (forget) await forgetCopies(closing.reads, closing.cache)
 }
 
+/** Deletes both copies. Each is tried even when the other fails; a failure rejects. */
 async function forgetCopies(reads: ReadCache, cache: NotesCache): Promise<void> {
-  await Promise.all([reads.clear().catch(() => {}), cache.clear().catch(() => {})])
+  const [readsGone, notesGone] = await Promise.allSettled([reads.clear(), cache.clear()])
+  if (readsGone.status === "rejected") throw readsGone.reason
+  if (notesGone.status === "rejected") throw notesGone.reason
 }
 
 /**
- * Deletes what the device kept of the server's answers for `userId` when no layer runs for them: a
- * start that finds the session gone. The queue stays, as on sign-out.
+ * Deletes what the device kept of the server's answers for `userId`, stopping their layer first
+ * when it runs. The queue stays, as on sign-out. It rejects when the device could not delete.
  */
 export async function forgetDeviceCopy(
   userId: number,

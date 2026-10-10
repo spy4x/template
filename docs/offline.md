@@ -166,7 +166,17 @@ offline after the worker installed, which is after that first load.
 
 Signing out deletes every read copy (the `reads:<id>` database's entries and the notes) and the
 remembered user. A start that finds no session, because it ended elsewhere or expired, does the
-same for the person the device remembered, before the sign-in page shows. The outbox stays: a write
+same for the person the device remembered, before the sign-in page shows.
+
+The person is forgotten at once; their copies take IndexedDB a moment. So before a deletion starts,
+the user's id is written to a second `localStorage` key, `offline:owed-deletion`, and removed only
+after the device has deleted the copies. A page that closes in between, or a device that refuses to
+delete (the app logs a warning), leaves the id there. Every start deletes what is owed first: a
+start with no session before the sign-in page shows, a signed-in start before the device copy is
+opened. A person whose own copies the device still cannot delete works against the server alone for
+that visit.
+
+The outbox stays: a write
 that never reached the server is the person's work, and goes out the next time the same user signs
 in on this browser. Those unsent note texts stay in IndexedDB on a shared device until that user
 signs in again, so on a shared browser use the browser's own "clear site data". A device that ran
@@ -237,8 +247,9 @@ person's change within about 30 seconds instead of at once. The e2e spec
 remembered user. Every screen needs the network, and a note is written straight to the server. The
 service worker still caches the app's files, so the page itself loads fast. The e2e spec
 `e2e/local-data.e2e.ts` runs the core flows this way and fails if the page created an IndexedDB
-database. Copies written before the switch was turned off are not looked for, because looking would
-create the databases; they stay until the browser's "clear site data".
+database. Copies written before the switch was turned off are deleted at the next start, for the
+person the device remembered and for anyone still owed a deletion; that person's unsent note writes
+stay queued, as on sign-out. A device with neither key in `localStorage` is not opened.
 
 ### Removing the WebSocket module
 

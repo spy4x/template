@@ -1,5 +1,5 @@
 import { expect } from "@std/expect"
-import { afterEach, describe, it } from "@std/testing/bdd"
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd"
 import {
   configureModules,
   forgetModules,
@@ -12,13 +12,14 @@ import {
 } from "../modules.ts"
 import type { NoteItem } from "../state/notes.ts"
 import { sessionState, type SessionUser } from "../state/session.ts"
-import { currentLayer, startOffline, stopOffline } from "./index.ts"
+import { currentLayer, forgetDeviceCopy, startOffline, stopOffline } from "./index.ts"
+import { installLocalStorage } from "../state/memory-local-storage.ts"
 import { createMemoryStorage } from "./memory-storage.ts"
 import type { NoteEntry } from "./notes-cache.ts"
 import { notesCollection } from "./notes-collection.ts"
 
 const realFetch = globalThis.fetch
-const globals = globalThis as { document?: unknown; localStorage?: Storage }
+const globals = globalThis as { document?: unknown }
 const signedOut = sessionState.value
 const user = (id: number) => ({ id }) as SessionUser
 
@@ -96,9 +97,23 @@ function startPage(id: number, storage: ReturnType<typeof createMemoryStorage>):
   startModules(id, reads, { storage })
 }
 
+/** What the page's `localStorage` holds: the remembered user and the deletions still owed. */
+let kept = new Map<string, string>()
+let restoreLocalStorage = () => {}
+const OWED = "offline:owed-deletion"
+
+beforeEach(() => {
+  const installed = installLocalStorage()
+  kept = installed.kept
+  restoreLocalStorage = installed.restore
+})
+
 afterEach(async () => {
   stopChanges()
   await stopOffline()
+  // Every deletion a test started has been tried before the next test begins.
+  await forgetUser(createMemoryStorage())
+  restoreLocalStorage()
   configureModules({})
   sessionState.value = signedOut
   globalThis.fetch = realFetch
@@ -266,105 +281,239 @@ describe("what the device keeps", () => {
 
   it("deletes the remembered user's copies at a start that finds no session, and keeps their queue", async () => {
     const { storage, device } = await deviceInUse()
-    const kept = new Map<string, string>()
-    globals.localStorage = {
-      getItem: (key: string) => kept.get(key) ?? null,
-      setItem: (key: string, value: string) => void kept.set(key, value),
-      removeItem: (key: string) => void kept.delete(key),
-    } as Storage
-    try {
-      configureModules({ realtime: false, offline: true })
-      rememberUser(user(7))
+    configureModules({ realtime: false, offline: true })
+    rememberUser(user(7))
 
-      // No layer runs: the page found no session and shows the sign-in page.
-      await forgetUser(storage)
+    // No layer runs: the page found no session and shows the sign-in page.
+    await forgetUser(storage)
 
-      expect(recallUser()).toBeNull()
-      expect([...device.reads.keys()]).toEqual([])
-      expect(await device.notes.readNotes("g-1")).toEqual([])
-      expect((await device.queue.readOutbox()).map((entry) => entry.entityId)).toEqual(["n-1"])
-    } finally {
-      delete globals.localStorage
-    }
+    expect(recallUser()).toBeNull()
+    expect([...device.reads.keys()]).toEqual([])
+    expect(await device.notes.readNotes("g-1")).toEqual([])
+    expect((await device.queue.readOutbox()).map((entry) => entry.entityId)).toEqual(["n-1"])
   })
 
   it("remembers the signed-in user under the key a device already holds, and nobody when what is stored there is not a user", () => {
-    const kept = new Map<string, string>()
-    globals.localStorage = {
-      getItem: (key: string) => kept.get(key) ?? null,
-      setItem: (key: string, value: string) => void kept.set(key, value),
-      removeItem: (key: string) => void kept.delete(key),
-    } as Storage
-    try {
-      configureModules({ realtime: false, offline: true })
-      // What the app wrote before it used the library's hint.
-      kept.set("offline:session", JSON.stringify(user(7)))
-      expect(recallUser()).toEqual(user(7))
+    configureModules({ realtime: false, offline: true })
+    // What the app wrote before it used the library's hint.
+    kept.set("offline:session", JSON.stringify(user(7)))
+    expect(recallUser()).toEqual(user(7))
 
-      rememberUser(user(8))
-      expect(JSON.parse(kept.get("offline:session") ?? "null")).toEqual(user(8))
+    rememberUser(user(8))
+    expect(JSON.parse(kept.get("offline:session") ?? "null")).toEqual(user(8))
 
-      kept.set("offline:session", JSON.stringify({ firstName: "No id" }))
-      expect(recallUser()).toBeNull()
-      kept.set("offline:session", "not json")
-      expect(recallUser()).toBeNull()
-    } finally {
-      delete globals.localStorage
-    }
+    kept.set("offline:session", JSON.stringify({ firstName: "No id" }))
+    expect(recallUser()).toBeNull()
+    kept.set("offline:session", "not json")
+    expect(recallUser()).toBeNull()
   })
 
   it("remembers nobody while the local-data module is off", () => {
-    const kept = new Map<string, string>()
-    globals.localStorage = {
-      getItem: (key: string) => kept.get(key) ?? null,
-      setItem: (key: string, value: string) => void kept.set(key, value),
-      removeItem: (key: string) => void kept.delete(key),
-    } as Storage
-    try {
-      configureModules({ realtime: false, offline: false })
-      rememberUser(user(7))
-      expect([...kept.keys()]).toEqual([])
-      kept.set("offline:session", JSON.stringify(user(7)))
-      expect(recallUser()).toBeNull()
-    } finally {
-      delete globals.localStorage
-    }
+    configureModules({ realtime: false, offline: false })
+    rememberUser(user(7))
+    expect([...kept.keys()]).toEqual([])
+    kept.set("offline:session", JSON.stringify(user(7)))
+    expect(recallUser()).toBeNull()
   })
 
   it("are gone before the sign-in page shows, even when the page asked twice to forget", async () => {
     const { storage, device } = await deviceInUse()
-    const kept = new Map<string, string>()
-    globals.localStorage = {
-      getItem: (key: string) => kept.get(key) ?? null,
-      setItem: (key: string, value: string) => void kept.set(key, value),
-      removeItem: (key: string) => void kept.delete(key),
-    } as Storage
-    try {
-      configureModules({ realtime: false, offline: true })
-      rememberUser(user(7))
+    configureModules({ realtime: false, offline: true })
+    rememberUser(user(7))
 
-      // The session store's own reaction to "nobody is signed in" comes first; the start, which
-      // holds the sign-in page back, asks second and finds nobody remembered.
-      // The device takes a moment to delete, as IndexedDB does.
-      const slow: typeof storage = {
-        ...storage,
-        openReads(userId) {
-          const reads = storage.openReads(userId)
-          return {
-            ...reads,
-            clear: async () => {
-              await new Promise((resolve) => setTimeout(resolve, 5))
-              await reads.clear()
-            },
-          }
-        },
-      }
-      void forgetUser(slow)
-      await forgetUser(slow)
+    // The session store's own reaction to "nobody is signed in" comes first; the start, which
+    // holds the sign-in page back, asks second and finds nobody remembered.
+    // The device takes a moment to delete, as IndexedDB does.
+    const slow: typeof storage = {
+      ...storage,
+      openReads(userId) {
+        const reads = storage.openReads(userId)
+        return {
+          ...reads,
+          clear: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 5))
+            await reads.clear()
+          },
+        }
+      },
+    }
+    void forgetUser(slow)
+    await forgetUser(slow)
+
+    expect([...device.reads.keys()]).toEqual([])
+  })
+
+  /** `storage` with a read-copy deletion that `clear` replaces: one that waits, or one that fails. */
+  function deleting(
+    storage: ReturnType<typeof createMemoryStorage>,
+    clear: (really: () => Promise<void>) => Promise<void>,
+  ): typeof storage {
+    return {
+      ...storage,
+      openReads(userId) {
+        const reads = storage.openReads(userId)
+        return { ...reads, clear: () => clear(() => reads.clear()) }
+      },
+    }
+  }
+
+  it("forgets the person at once and still owes their copies a deletion when the page closes while they are being deleted", async () => {
+    const { storage, device } = await deviceInUse()
+    configureModules({ realtime: false, offline: true })
+    rememberUser(user(7))
+    let finish!: () => void
+    const held = new Promise<void>((resolve) => finish = resolve)
+    // IndexedDB is still deleting when the page goes away: nothing after this point runs there.
+    const closing = deleting(storage, async (really) => (await held, await really()))
+
+    try {
+      void forgetUser(closing)
+      await settle()
+
+      // The next start is a new page: what `localStorage` holds is all it has to find the copies by.
+      expect(recallUser()).toBeNull()
+      expect([...device.reads.keys()]).toEqual(["groups"])
+      expect(kept.get(OWED)).toBe("[7]")
+    } finally {
+      finish()
+    }
+  })
+
+  it("deletes the copies an earlier page still owed at a start that finds no session", async () => {
+    const { storage, device } = await deviceInUse()
+    configureModules({ realtime: false, offline: true })
+    // What a page that closed while deleting left behind: nobody remembered, one deletion owed.
+    kept.set(OWED, "[7]")
+
+    await forgetUser(storage)
+
+    expect([...device.reads.keys()]).toEqual([])
+    expect(await device.notes.readNotes("g-1")).toEqual([])
+    expect(kept.has(OWED)).toBe(false)
+  })
+
+  it("deletes the copies an earlier page still owed before the layer of the next sign-in opens", async () => {
+    const { storage, device } = await deviceInUse()
+    server()
+    kept.set(OWED, "[7]")
+
+    startPage(7, storage)
+    // No layer yet: a list read now goes to the server alone, so no owed copy can be shown.
+    expect(currentLayer()).toBeNull()
+    await settle()
+
+    expect([...device.reads.keys()]).toEqual([])
+    expect(kept.has(OWED)).toBe(false)
+    expect(currentLayer()?.userId).toBe(7)
+  })
+
+  it("keeps the deletion owed when the device could not delete, says so, and deletes at the next start", async () => {
+    const { storage, device } = await deviceInUse()
+    configureModules({ realtime: false, offline: true })
+    rememberUser(user(7))
+    const warned: unknown[][] = []
+    const realWarn = console.warn
+    console.warn = (...line: unknown[]) => void warned.push(line)
+    try {
+      const refusing = deleting(storage, () => Promise.reject(new Error("storage is blocked")))
+
+      await forgetUser(refusing)
+
+      expect([...device.reads.keys()]).toEqual(["groups"])
+      expect(kept.get(OWED)).toBe("[7]")
+      expect(warned.map(([text]) => String(text))).toEqual([
+        "The copies of user 7 kept on this device could not be deleted. The next start tries again.",
+      ])
+
+      // The next start, on a device that deletes again.
+      await forgetUser(storage)
 
       expect([...device.reads.keys()]).toEqual([])
+      expect(kept.has(OWED)).toBe(false)
     } finally {
-      delete globals.localStorage
+      console.warn = realWarn
     }
+  })
+
+  it("does not open the layer of a person whose own owed copies the device could not delete", async () => {
+    const { storage, device } = await deviceInUse()
+    server()
+    kept.set(OWED, "[7]")
+    const realWarn = console.warn
+    console.warn = () => {}
+    try {
+      startPage(7, deleting(storage, () => Promise.reject(new Error("storage is blocked"))))
+      await settle()
+
+      expect(currentLayer()).toBeNull()
+      expect([...device.reads.keys()]).toEqual(["groups"])
+      expect(kept.get(OWED)).toBe("[7]")
+    } finally {
+      console.warn = realWarn
+    }
+  })
+
+  it("owes the deletion from sign-out until the device has deleted the copies", async () => {
+    const { storage, device } = await deviceInUse()
+    server()
+    let finish!: () => void
+    const held = new Promise<void>((resolve) => finish = resolve)
+    startPage(7, deleting(storage, async (really) => (await held, await really())))
+    await settle()
+
+    try {
+      forgetModules()
+      await settle()
+      expect(kept.get(OWED)).toBe("[7]")
+    } finally {
+      finish()
+    }
+    await settle()
+    expect([...device.reads.keys()]).toEqual([])
+    expect(kept.has(OWED)).toBe(false)
+  })
+
+  it("stops the running layer of the person whose copies it deletes", async () => {
+    const { storage, device } = await deviceInUse()
+    server()
+    startPage(7, storage)
+    await settle()
+
+    await forgetDeviceCopy(7, storage)
+
+    expect(currentLayer()).toBeNull()
+    expect([...device.reads.keys()]).toEqual([])
+  })
+
+  it("deletes what the module kept for the remembered person once it is switched off", async () => {
+    const { storage, device } = await deviceInUse()
+    kept.set("offline:session", JSON.stringify(user(7)))
+    visiblePage()
+    configureModules({ realtime: false, offline: false })
+
+    startModules(7, reads, { storage })
+    await settle()
+
+    expect([...device.reads.keys()]).toEqual([])
+    expect(await device.notes.readNotes("g-1")).toEqual([])
+    expect([...kept.keys()]).toEqual([])
+  })
+
+  it("opens no store on a device that holds no trace of the module while it is off", async () => {
+    const storage = createMemoryStorage()
+    const opened: number[] = []
+    const watched: typeof storage = {
+      ...storage,
+      openReads: (userId) => (opened.push(userId), storage.openReads(userId)),
+      openNotes: (userId) => (opened.push(userId), storage.openNotes(userId)),
+    }
+    visiblePage()
+    configureModules({ realtime: false, offline: false })
+
+    startModules(7, reads, { storage: watched })
+    await forgetUser(watched)
+
+    expect(opened).toEqual([])
+    expect([...kept.keys()]).toEqual([])
   })
 })

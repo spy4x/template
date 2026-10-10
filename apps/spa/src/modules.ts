@@ -192,7 +192,22 @@ export function startModules(userId: number, reads: ChangeReads, options: StartO
   }
   session = opened
   if (switches.offline) {
-    startOfflineLayer(userId, offlineTransportFor(userId, port), options.storage)
+    const start = () => {
+      startOfflineLayer(userId, offlineTransportFor(userId, port), options.storage)
+    }
+    // Copies an earlier page still owes a deletion are deleted before the layer opens, so none of
+    // them can be shown. Until then, and for this visit when the device could not delete this
+    // person's own, the stores talk to the server alone.
+    if (owedIds().length === 0) start()
+    else {
+      void settleOwed(options.storage).then(() => {
+        if (session === opened && !owedIds().includes(userId)) start()
+      })
+    }
+  } else {
+    // What the module kept before it was switched off is deleted; nothing is opened on a device
+    // that holds no trace of it.
+    void forgetUser(options.storage)
   }
   // The runner runs on these events too; marking the run first makes it the pull, not the check.
   // A hidden tab reads nothing, and an open socket brings the page up to date itself.
@@ -244,7 +259,12 @@ export function stopChanges(): void {
 export function forgetModules(): void {
   stopChanges()
   disconnectRealtime({ forget: true })
-  void stopOfflineLayer({ forget: true })
+  const running = offlineLayer()
+  const deleting = stopOfflineLayer({ forget: true })
+  if (!running) return
+  // Owed until the device has deleted them: a page closed before that leaves the next start to it.
+  owe(running.userId)
+  settle(running.userId, () => deleting)
 }
 
 /** Records that the page now holds a group up to `sequence`, so a later hint for it is a repeat. */
@@ -366,24 +386,83 @@ export function rememberUser(user: SessionUser): void {
 }
 
 /**
- * Drops the remembered user, and with them what the device kept of the server's answers for them:
- * a start that found no session must not leave the last person's lists on a shared device. The
- * queue of unsent writes stays, as on sign-out. Resolves once the copies are deleted.
+ * The users whose copies on this device are owed a deletion, kept in `localStorage` beside the
+ * remembered user (the library's holder is a safe JSON value under one key, which is all this
+ * needs). An id is written before its deletion starts and removed only after the device has
+ * deleted the copies, so a page that closes in between, or a device that refuses, leaves the next
+ * start knowing whose copies to delete.
  */
-export function forgetUser(storage?: OfflineStorage): Promise<void> {
-  // While the module is off nothing was kept, and looking would create the databases.
-  const remembered = switches.offline ? signedInHint.recall() : null
-  signedInHint.forget()
-  if (remembered) {
-    const { id } = remembered
-    forgetting = forgetting.then(() => forgetDeviceCopy(id, storage)).catch(() => {})
+const owedDeletions = createSignedInHint<number[]>("offline:owed-deletion", {
+  validate: (value): value is number[] =>
+    Array.isArray(value) && value.every((id) => typeof id === "number"),
+})
+
+function owedIds(): number[] {
+  return owedDeletions.recall() ?? []
+}
+
+function owe(userId: number): void {
+  const ids = owedIds()
+  if (!ids.includes(userId)) owedDeletions.remember([...ids, userId])
+}
+
+function disown(userId: number): void {
+  const rest = owedIds().filter((id) => id !== userId)
+  if (rest.length > 0) owedDeletions.remember(rest)
+  else owedDeletions.forget()
+}
+
+/** The deletions started on this page, in order; resolved when all of them have been tried. */
+let forgetting: Promise<void> = Promise.resolve()
+
+/** The users {@link settleOwed} is deleting for right now, so a second caller starts no second. */
+const settling = new Set<number>()
+
+/**
+ * Queues one deletion. Only a deletion that succeeded ends the debt; a failed one is reported and
+ * stays owed for the next start.
+ */
+function settle(userId: number, deletion: () => Promise<void>): void {
+  forgetting = forgetting.then(deletion).then(
+    () => disown(userId),
+    (error) => {
+      console.warn(
+        `The copies of user ${userId} kept on this device could not be deleted. ` +
+          `The next start tries again.`,
+        error,
+      )
+    },
+  )
+}
+
+/**
+ * Deletes the copies of every user who is owed it, `also` included even on a device that could not
+ * write the marker. Resolves once every deletion was tried; it never rejects.
+ */
+function settleOwed(storage?: OfflineStorage, also?: number): Promise<void> {
+  const ids = new Set(owedIds())
+  if (also !== undefined) ids.add(also)
+  for (const id of ids) {
+    if (settling.has(id)) continue
+    settling.add(id)
+    settle(id, () => forgetDeviceCopy(id, storage).finally(() => settling.delete(id)))
   }
-  // A second caller finds nobody remembered, and still waits for the deletion the first started.
   return forgetting
 }
 
-/** The deletions {@link forgetUser} started, in order; resolved when all of them are done. */
-let forgetting: Promise<void> = Promise.resolve()
+/**
+ * Drops the remembered user at once, and deletes what the device kept of the server's answers for
+ * them and for anyone an earlier page still owes it: a start that found no session must not leave
+ * the last person's lists on a shared device. The queue of unsent writes stays, as on sign-out.
+ * Resolves once the deletions were tried. It runs with the module off too, so switching the module
+ * off deletes what it kept; a device with nobody remembered and nothing owed is not opened.
+ */
+export function forgetUser(storage?: OfflineStorage): Promise<void> {
+  const remembered = signedInHint.recall()
+  signedInHint.forget()
+  if (remembered) owe(remembered.id)
+  return settleOwed(storage, remembered?.id)
+}
 
 /** The remembered user, or `null`: always `null` while the module is off. */
 export function recallUser(): SessionUser | null {
