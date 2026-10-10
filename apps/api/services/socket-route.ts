@@ -2,10 +2,14 @@
 import { Hono } from "hono"
 import type { Context } from "hono"
 import { adaptWebSocket } from "@spy4x/realtime"
+import { isBoundToUser } from "@spy4x/realtime/operations"
 import { createSameOriginUpgradeGuard } from "@spy4x/server/http/same-origin"
 import type { APIContext } from "../_types.ts"
 import type { Realtime } from "./realtime.ts"
 import type { AppAuthState, SignIn } from "./sign-in.ts"
+
+/** The query parameter of the handshake that names the user the page was started for. */
+export const SOCKET_USER_PARAM = "user"
 
 /** What {@link createSocketRoute} needs from the app. */
 export interface SocketRouteDependencies {
@@ -31,6 +35,10 @@ export interface SocketRouteDependencies {
  *    attaches the session cookie to a socket that a page on a sibling subdomain opens, and that
  *    page can read every message; `SameSite=Lax` does not stop it, and CORS does not govern
  *    handshakes.
+ * 3. The handshake names the user the page was started for (`?user=<id>`; a browser cannot set a
+ *    header on a socket), and the session must be that user's, or the upgrade is refused with 401.
+ *    A cookie can change under a running page, and a socket opened as someone else would carry the
+ *    page's calls as them.
  *
  * Every later frame is authorized again by {@link Realtime}; nothing here is trusted afterwards.
  */
@@ -45,6 +53,9 @@ export function createSocketRoute(deps: SocketRouteDependencies): Hono<APIContex
         const auth = c.get("auth")
         if (!auth) {
           return c.json({ error: "Not authenticated" }, 401)
+        }
+        if (!isBoundToUser(c.req.query(SOCKET_USER_PARAM), auth.user.id)) {
+          return c.json({ error: "The session belongs to another user" }, 401)
         }
         if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
           return c.json({ error: "Upgrade required" }, 426)

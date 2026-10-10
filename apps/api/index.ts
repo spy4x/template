@@ -43,7 +43,9 @@ import { listenForGroupNews } from "./services/group-news.ts"
 import { groupListCursor } from "./services/group-list-cursor.ts"
 import { noteListCursor } from "./services/note-list-cursor.ts"
 import { activityCursor } from "./services/activity-cursor.ts"
-import { realtime } from "./services/realtimeHub.ts"
+import { operations, realtime } from "./services/realtimeHub.ts"
+import { toRequestError } from "./services/realtime.ts"
+import { createCallRoute } from "./routes/call.ts"
 import { createHealthRoute } from "./routes/health.ts"
 import { isCacheConnected, kv } from "./services/cache.ts"
 import { createRedisRateLimitStore } from "@spy4x/server/kv"
@@ -176,6 +178,8 @@ app.route(
   }),
 )
 app.route("/ws", wsRoute)
+// The operations the socket serves, over plain HTTP: a page with no socket does the same work.
+app.route("/call", createCallRoute({ operations, mapError: toRequestError, log, expectedOrigin }))
 // Before "/groups": its authentication middleware would otherwise answer for these paths too.
 app.route(
   "/groups/:groupId/notes",

@@ -115,9 +115,14 @@ interface Connection {
 
 let current: Connection | null = null
 
-function socketUrl(): string {
+/**
+ * The socket's address. A browser cannot set a header on a socket, so the user this page was
+ * started for travels in the query: the server refuses the upgrade when the session cookie now
+ * belongs to somebody else (`apps/api/services/socket-route.ts`).
+ */
+function socketUrl(userId: number): string {
   const protocol = location.protocol === "https:" ? "wss" : "ws"
-  return `${protocol}://${location.host}/api/ws`
+  return `${protocol}://${location.host}/api/ws?user=${userId}`
 }
 
 function cursorsFor(userId: number): PersistentCursorStore {
@@ -140,7 +145,7 @@ export function connectRealtime(userId: number, pull: (gap?: GapReport) => void 
   disconnectRealtime()
   const cursors = cursorsFor(userId)
   const transport = new ClientTransport({
-    url: socketUrl(),
+    url: socketUrl(userId),
     socketFactory: createWebSocketFactory(),
     clock: createSystemClock(),
     cursors,

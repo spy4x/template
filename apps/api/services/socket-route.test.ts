@@ -26,6 +26,9 @@ function buildApp(auth: AppAuthState | null = buildAuthData({ user: { id: 7 } })
   return { app: mountRoute("/ws", route, auth), upgrades }
 }
 
+/** The handshake's address as the page of user 7 opens it. */
+const SOCKET_URL = `${API_URL}/ws?user=7`
+
 /** A signed-in browser's WebSocket handshake, with `origin` as its Origin header when given. */
 function handshake(origin?: string, extra: Record<string, string> = {}): RequestInit {
   const headers: Record<string, string> = {
@@ -41,35 +44,44 @@ function handshake(origin?: string, extra: Record<string, string> = {}): Request
 describe("socket route", () => {
   it("refuses an upgrade from a foreign origin", async () => {
     const { app, upgrades } = buildApp()
-    const response = await app.request(`${API_URL}/ws`, handshake("https://attacker.example"))
+    const response = await app.request(SOCKET_URL, handshake("https://attacker.example"))
     expect(response.status).toBe(403)
     expect(upgrades).toEqual([])
   })
 
   it("refuses an upgrade from a sibling subdomain", async () => {
     const { app, upgrades } = buildApp()
-    const response = await app.request(`${API_URL}/ws`, handshake("https://grafana.example.com"))
+    const response = await app.request(SOCKET_URL, handshake("https://grafana.example.com"))
     expect(response.status).toBe(403)
     expect(upgrades).toEqual([])
   })
 
   it("refuses an upgrade without an Origin header", async () => {
     const { app, upgrades } = buildApp()
-    const response = await app.request(`${API_URL}/ws`, handshake())
+    const response = await app.request(SOCKET_URL, handshake())
     expect(response.status).toBe(403)
     expect(upgrades).toEqual([])
   })
 
   it("upgrades the signed-in user when Origin is the web app's origin", async () => {
     const { app, upgrades } = buildApp()
-    const response = await app.request(`${API_URL}/ws`, handshake(WEB_APP_URL))
+    const response = await app.request(SOCKET_URL, handshake(WEB_APP_URL))
     expect(response.status).toBe(200)
     expect(upgrades).toEqual([7])
   })
 
+  it("refuses an upgrade whose page names another user than the session's, or names none", async () => {
+    const { app, upgrades } = buildApp()
+    for (const url of [`${API_URL}/ws?user=8`, `${API_URL}/ws`, `${API_URL}/ws?user=07`]) {
+      const response = await app.request(url, handshake(WEB_APP_URL))
+      expect(response.status).toBe(401)
+    }
+    expect(upgrades).toEqual([])
+  })
+
   it("refuses an upgrade without a session, whatever the Origin", async () => {
     const { app, upgrades } = buildApp(null)
-    const response = await app.request(`${API_URL}/ws`, handshake(WEB_APP_URL))
+    const response = await app.request(SOCKET_URL, handshake(WEB_APP_URL))
     expect(response.status).toBe(401)
     expect(upgrades).toEqual([])
   })
@@ -81,14 +93,14 @@ describe("socket route", () => {
         session: { secondFactor: SecondFactorStatus.Pending },
       }),
     )
-    const response = await app.request(`${API_URL}/ws`, handshake(WEB_APP_URL))
+    const response = await app.request(SOCKET_URL, handshake(WEB_APP_URL))
     expect(response.status).toBe(401)
     expect(upgrades).toEqual([])
   })
 
   it("asks a plain GET from the right origin to upgrade", async () => {
     const { app, upgrades } = buildApp()
-    const response = await app.request(`${API_URL}/ws`, {
+    const response = await app.request(SOCKET_URL, {
       headers: { origin: WEB_APP_URL, cookie: "sessionIdToken=1:token" },
     })
     expect(response.status).toBe(426)

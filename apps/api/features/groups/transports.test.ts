@@ -37,7 +37,7 @@ import {
   createGroupTransferHandler,
   createGroupUpdateDetailsHandler,
 } from "./handlers.ts"
-import { createGroupSocketRequests } from "./socket.ts"
+import { createGroupOperations } from "./operations.ts"
 
 /**
  * Rename, delete, restore and the member commands over both transports, on one pair of buses as the API wires them:
@@ -154,7 +154,7 @@ function socket(buses: GroupsRouteDependencies, userId: number) {
     clock: new FakeClock(),
     entitledSession: () => Promise.resolve(auth),
     memberUserIds: () => Promise.resolve([]),
-    requests: createGroupSocketRequests(buses),
+    operations: createGroupOperations(buses),
     log: () => {},
   })
   const ws = new FakeSocket("wss://app.example.com/api/ws")
