@@ -12,6 +12,8 @@ registerBoundaryTests({
   test: Deno.test,
   root: new URL("../", import.meta.url),
   directories: ["libs/ui"],
+  // The runner also skips `build`, `.vite` and `_fresh` by default; a screen there is still a screen.
+  skipDirectories: ["node_modules", "dist"],
   boundary: { appAliases: ["@api/", "@spa/", "@mpa/", "@worker/"], appDirectories: ["apps"] },
   // An empty walk would pass silently, so require a file the screens cannot lose.
   requiredFiles: ["libs/ui/auth-screen.tsx"],
