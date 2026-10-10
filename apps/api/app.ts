@@ -13,9 +13,10 @@ import type { APIContext } from "./_types.ts"
  * whose page names another user than the session's is refused, whatever it asks for (ADR 003). It
  * is here, and not in each route, so a new route cannot forget it.
  *
- * The security headers go first, so they are on every answer: a route's, a refusal, the 404 of an
- * unknown address and the 500 of an error. The API answers JSON and no page, so the policy is the
- * library's strictest, with nothing added (docs/security-headers.md).
+ * The security headers go first, so no middleware can answer in front of them: they are on a
+ * route's answer, on the refusal of the page-user check, on the 404 of an unknown address and on
+ * the 500 of an error. The API answers JSON and no page, so the policy is the library's strictest,
+ * with nothing added (docs/security-headers.md).
  */
 export async function createApiApp(options: BaseMiddlewareOptions): Promise<Hono<APIContext>> {
   const app = new Hono<APIContext>().basePath("/api")
