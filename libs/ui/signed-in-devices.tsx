@@ -6,8 +6,8 @@ import { Button } from "@spy4x/preact-ui/button"
 import { ConfirmDialog } from "@spy4x/preact-ui/confirm-dialog"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import type { SignedInDevice } from "@domain/identity"
-import { TOUCH_TARGET } from "./page-header.tsx"
-import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
+import { TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
+import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-row"
 
 /** The message shown when ending a session failed without a message of its own. */
 export const SESSIONS_FAILURE = "Signing that device out failed"
@@ -42,7 +42,7 @@ export function SignedInDevices(
     <SettingGroup
       title="Signed-in devices"
       description="Where your account is signed in. Sign out of any device you do not recognise."
-      e2e="sessions"
+      dataE2E="sessions"
     >
       <ErrorState message={error} />
       {sessions === null ? <p class="text-sm text-muted">Loading your devices…</p> : (
@@ -50,7 +50,7 @@ export function SignedInDevices(
           {sessions.map((session) => (
             <SettingRow
               key={session.id}
-              e2e={session.current ? "session-current" : `session-${session.id}`}
+              dataE2E={session.current ? "session-current" : `session-${session.id}`}
               label={session.deviceName}
               value={<DeviceDetails session={session} />}
               action={!session.current && (

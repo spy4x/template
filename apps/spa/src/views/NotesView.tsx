@@ -5,7 +5,7 @@ import { moveTargetsOf, NotesScreen } from "@ui/notes-screen.tsx"
 import { groupsStore } from "../state/groups.ts"
 import { notesStore } from "../state/notes.ts"
 import { selectionStore } from "../state/selection.ts"
-import { UndoDeleteToast } from "./UndoDeleteToast.tsx"
+import { useUndoToast } from "./use-undo-toast.ts"
 import { OfflineStatus } from "../offline/OfflineStatus.tsx"
 
 /**
@@ -16,6 +16,7 @@ import { OfflineStatus } from "../offline/OfflineStatus.tsx"
 export function NotesView() {
   const [, navigate] = useLocation()
   const store = notesStore
+  useUndoToast(store)
   const groupId = selectionStore.groupId.value
   useEffect(() => {
     if (groupId) void store.open(groupId, null)
@@ -65,7 +66,6 @@ export function NotesView() {
         onUndoFocused={() => store.clearUndoOutcome()}
         navigate={navigate}
       />
-      <UndoDeleteToast store={store} />
     </>
   )
 }

@@ -37,7 +37,7 @@ screens were redesigned against these rules in October 2026.
    (`libs/ui/frame.tsx`, 42 rem) for account pages, 48 rem (`max-w-3xl`) for group settings and
    billing. Lists and tables may use the full content width (64 rem). Inputs never stretch 900 px
    wide.
-7. **One page header on every signed-in page** (`PageHeader`, `libs/ui/page-header.tsx`): the page
+7. **One page header on every signed-in page** (`PageHeader` from `@spy4x/preact-ui/page-header`): the page
    title (h1) on the left; the primary action and, if needed, one overflow `Dropdown` ("More
    actions", a three-dots icon button with that accessible name) on the right. On a phone the title
    stays on one line, truncating if it must, and the actions stay beside it as icon buttons with

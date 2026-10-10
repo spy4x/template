@@ -54,7 +54,7 @@ says what is missing. Do not copy the gap into a new screen.
   (`libs/ui/progressive.tsx`): `EnhancedForm` with its status taken from the screen's `pending`
   prop, so a pending form is disabled and refuses a second submit. A form takes its submit over
   with `onSubmit`; only the newsletter's pass `action` too.
-- **One page header.** Every signed-in page starts with `PageHeader` (`libs/ui/page-header.tsx`):
+- **One page header.** Every signed-in page starts with `PageHeader` (from `@spy4x/preact-ui/page-header`):
   the title, the primary action and one "More actions" menu. Do not draw a second one.
 - **Laid out by the rules in [docs/design/ui-layout.md](docs/design/ui-layout.md):** one primary
   action per screen, rare actions in a menu or dialog, destructive ones confirmed, mobile first.

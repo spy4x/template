@@ -31,12 +31,23 @@ import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
 import { GROUP_PATHS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
-const own = { document: globalThis.document, FormData: globalThis.FormData }
+const own = {
+  document: globalThis.document,
+  FormData: globalThis.FormData,
+  location: globalThis.location,
+  getComputedStyle: globalThis.getComputedStyle,
+}
 
 beforeAll(() => {
   // Preact draws into `document`; EnhancedForm reads a form with `new FormData(form)`, which only
-  // the DOM's own FormData can do.
-  Object.assign(globalThis, { document: window.document, FormData: window.FormData })
+  // the DOM's own FormData can do. A link is routed only when it points at the page's own origin
+  // (`location`), and a dialog locks the page's scroll after reading its style (`getComputedStyle`).
+  Object.assign(globalThis, {
+    document: window.document,
+    FormData: window.FormData,
+    location: window.location,
+    getComputedStyle: window.getComputedStyle.bind(window),
+  })
 })
 
 afterAll(async () => {
