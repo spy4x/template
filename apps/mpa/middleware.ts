@@ -2,7 +2,60 @@ import type { MpaConfig } from "./config.ts"
 import { createApi } from "./api.ts"
 import { FormRejected } from "./forms.ts"
 import { define } from "./utils.ts"
+import { HttpError } from "fresh"
 import { createSameOriginCheck } from "@spy4x/server/http/same-origin"
+import { securityHeaders } from "@spy4x/server/http/security-headers"
+import { Hono } from "hono"
+
+const CSP = "content-security-policy"
+const OWN_FORMS = "form-action 'self'"
+
+/**
+ * The header set `securityHeaders` of `@spy4x/server` sends, read once from a response it made: the
+ * helper is Hono middleware and the MPA runs on Fresh. No option is passed, because a page here
+ * loads one stylesheet from its own origin and no script, inline block, image or font, so the
+ * policy is the helper's strictest: everything from `'self'` only, no plugins and no framing. Its
+ * `Referrer-Policy: no-referrer` also covers the newsletter pages, whose address carries a token.
+ *
+ * One directive is widened. The pricing page's form posts to the MPA, which redirects to the SPA's
+ * sign-up, and a browser applies `form-action` to that redirect too. On a domain of its own the
+ * MPA therefore allows the SPA's origin there; the helper has no option for this directive.
+ */
+async function securityHeaderSet(config: MpaConfig): Promise<[string, string][]> {
+  const app = new Hono().use(await securityHeaders()).get("/", (c) => c.body(null))
+  const headers = (await app.request("/")).headers
+  const policy = headers.get(CSP) ?? ""
+  if (!policy.split("; ").includes(OWN_FORMS)) {
+    throw new Error(`securityHeaders sent no "${OWN_FORMS}" to widen: ${policy}`)
+  }
+  if (config.apiOrigin !== config.webAppOrigin) {
+    headers.set(CSP, policy.replace(OWN_FORMS, `${OWN_FORMS} ${config.apiOrigin}`))
+  }
+  return [...headers]
+}
+
+/**
+ * Puts the security headers on every response: pages, static files, redirects, refusals and the
+ * answer to an error a route throws. It goes first in the app, before the static files.
+ */
+export async function securityHeadersMiddleware(config: MpaConfig) {
+  const set = await securityHeaderSet(config)
+  return define.middleware(async (ctx) => {
+    let response: Response
+    try {
+      response = await ctx.next()
+    } catch (error) {
+      response = errorResponse(error)
+    }
+    const headers = new Headers(response.headers)
+    for (const [name, value] of set) headers.set(name, value)
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    })
+  })
+}
 
 /**
  * Runs around every page and action:
@@ -13,8 +66,9 @@ import { createSameOriginCheck } from "@spy4x/server/http/same-origin"
  * 2. gives the route an API client bound to this request, which presents an MPA on its own domain
  *    to the API as the API's origin once step 1 has passed;
  * 3. answers a form it cannot read with {@link FormRejected}'s status;
- * 4. forbids framing, so another site cannot trick a click on a form, and keeps pages out of shared
- *    caches, since the newsletter pages carry a token in their address.
+ * 4. keeps pages out of shared caches, since the newsletter pages carry a token in their address.
+ *
+ * Framing is forbidden by {@link securityHeadersMiddleware}, which runs before this one.
  */
 export function pageMiddleware(
   config: MpaConfig,
@@ -50,6 +104,20 @@ export function pageMiddleware(
   })
 }
 
+/**
+ * The answer to an error no route caught, such as the 404 of an unknown address: what Fresh's
+ * default handler answers. Fresh makes that answer outside every middleware, so it would leave
+ * without the security headers; an error page (`routes/_error.tsx`) catches the error earlier.
+ */
+function errorResponse(error: unknown): Response {
+  if (error instanceof HttpError && error.status < 500) {
+    return new Response(error.message, { status: error.status })
+  }
+  console.error(error)
+  const status = error instanceof HttpError ? error.status : 500
+  return new Response("Internal server error", { status })
+}
+
 function remoteAddress(info: Deno.ServeHandlerInfo): string {
   const address = info.remoteAddr
   return address.transport === "tcp" || address.transport === "udp" ? address.hostname : ""
@@ -57,8 +125,6 @@ function remoteAddress(info: Deno.ServeHandlerInfo): string {
 
 function withPageHeaders(response: Response): Response {
   const headers = new Headers(response.headers)
-  headers.set("x-frame-options", "DENY")
-  headers.set("content-security-policy", "frame-ancestors 'none'")
   if (headers.get("content-type")?.startsWith("text/html")) {
     headers.set("cache-control", "no-store")
   }
