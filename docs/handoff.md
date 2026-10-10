@@ -111,7 +111,8 @@ Documentation drifts here, so check status before believing anything.
 | Document                                            | Status                                                                                                                               |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `docs/decisions/001-deno-platform-template.md`      | Authoritative, except transport and sync rules, which ADR 002 replaced                                                               |
-| `docs/decisions/002-realtime-transport-and-sync.md` | Authoritative. Most recent decision                                                                                                  |
+| `docs/decisions/002-realtime-transport-and-sync.md` | Authoritative, except "Transport per app", which ADR 003 amended |
+| `docs/decisions/003-swappable-transport-and-local-data.md` | Authoritative. Most recent decision |
 | `docs/design/group-sync.md`                         | Superseded in part. Its change log, cursor, idempotency and conflict rules still stand; its "WebSocket is optional" framing does not |
 | `docs/prd/group-sync-platform.md`                   | Superseded in part. Read "REST" as "through the shared CQRS handlers"                                                                |
 | `docs/stack.md`                                     | Current. What is actually running and deployed                                                                                       |
