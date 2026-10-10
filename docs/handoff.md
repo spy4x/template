@@ -357,7 +357,7 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
 
 ## How a group call travels
 
-1. `apps/spa/src/state/realtime.ts` opens `/api/ws`. The upgrade runs the same session gate as
+1. `apps/spa/src/realtime/index.ts` opens `/api/ws`. The upgrade runs the same session gate as
    REST and the `Origin` check, then `apps/api/services/realtime.ts` remembers which session each
    socket belongs to.
 2. `group.create`, `group.list`, `group.get`, `group.select` and `group.selected` are dispatched on the same command and query buses REST uses,
