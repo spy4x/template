@@ -56,6 +56,10 @@ deno task proxy:start        # Traefik
 deno task dev                # Postgres, Valkey, MinIO, API, worker, SPA, Loki, Prometheus, Grafana
 ```
 
+Compose joins every service that Traefik routes to a Docker network named `proxy`. `proxy:start` and
+`dev` create it when it is missing (`deno task proxy:network` does only that) and leave an existing one
+alone, so a fresh machine needs no extra command.
+
 Then open `http://<DOMAIN>` from the env file: http://app.localhost with the values in
 `infra/envs/.env.example`.
 

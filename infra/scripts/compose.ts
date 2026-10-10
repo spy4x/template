@@ -1,5 +1,6 @@
 /// <reference lib="deno.ns" />
 import { readEnvFile } from "./env-file.ts";
+import { ensureProxyNetwork, runContainerCli } from "./proxy-network.ts";
 
 const envFilePath = `./infra/envs/.env`;
 const envVars = await readEnvFile(envFilePath);
@@ -9,6 +10,11 @@ const args = Deno.args;
 const composeFile = `./infra/compose/compose.${envName}.yml`;
 const sharedComposeFile = `./infra/compose/compose.shared.yml`;
 const containerProvider: 'docker' | 'podman' = envVars["CONTAINER_PROVIDER"] === "docker" ? "docker" : "podman";
+
+// Every compose file joins the external "proxy" network; create it on a fresh machine.
+if (args.includes("up") && await ensureProxyNetwork(containerProvider, runContainerCli)) {
+  console.log("Created the proxy network");
+}
 
 // Build base image first if we're doing "up" or "build"
 const needsBaseImage = args.includes("up") || args.includes("build");
