@@ -16,7 +16,7 @@ the SPA works without them ([how to remove the layer](#removing-the-layer)).
 | `state/read-keys.ts`                        | The key of every offline-readable list in the read cache (`@spy4x/realtime/read-cache`). |
 | `offline/OfflineStatus.tsx`                 | Binds the queue to `SyncStatus` (offline, waiting, syncing, failed with Retry) and `ConflictChooser` (each conflict, with "Keep mine" and "Use the server's"), both from `@spy4x/preact-system`. |
 | `install.ts`                                | `createInstallPrompt` from `@spy4x/preact-signals`; `app.tsx` renders `InstallPrompt` from `@spy4x/preact-system` for it.     |
-| `offline/session-cache.ts`                  | Remembers who was signed in, so an offline start does not show the sign-in page.                                          |
+| `modules.ts` (`signedInHint`)               | Remembers who was signed in, so an offline start does not show the sign-in page: `createSignedInHint` from `@spy4x/platform/browser/signed-in-hint`, under the `localStorage` key `offline:session`. It is a hint for what to show, never a credential. |
 | `offline/index.ts`                          | Starts and stops the layer for a user: the read cache, the notes copy and the queue. It is given the calls port and sends the queue through it. |
 | `sw.ts`, `sw-options.ts`                    | The service worker: the app's page, scripts and styles cached by `installOfflineShell`, and the push handlers.            |
 

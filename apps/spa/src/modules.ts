@@ -1,6 +1,7 @@
 import { ConnectionLostError, type GapReport } from "@spy4x/realtime"
 import { type CallPort, type RetryOptions, sendCommand, sendQuery } from "@spy4x/realtime/calls"
 import { signal } from "@preact/signals"
+import { createSignedInHint } from "@spy4x/platform/browser/signed-in-hint"
 import { cachedRead, type ReadCache, readCopy, type ReadResult } from "@spy4x/realtime/read-cache"
 import { createSyncRunner, type SyncRunner } from "@spy4x/realtime/sync-runner"
 import {
@@ -23,11 +24,6 @@ import {
 } from "./offline/index.ts"
 import { offlineNotes as notesOverLayer } from "./offline/notes-collection.ts"
 import { OfflineStatus as OfflineStatusLine } from "./offline/OfflineStatus.tsx"
-import {
-  forgetUser as forgetCachedUser,
-  recallUser as recallCachedUser,
-  rememberUser as rememberCachedUser,
-} from "./offline/session-cache.ts"
 import type { RuntimeConfig } from "./runtime-config.ts"
 import { canCallAs, createAppCallPort } from "./state/realtime-call.ts"
 import type { SessionState, SessionUser } from "./state/session.ts"
@@ -353,9 +349,20 @@ export const offlineNotes = notesOverLayer
 /** The offline status line and the conflict screen. */
 export const OfflineStatus = OfflineStatusLine
 
+/**
+ * Who was signed in on this device, kept in `localStorage` under the key it has always had, so the
+ * app can open with no network: the cookie says nothing until the server is reached. It is a hint
+ * for what to show, never a credential.
+ */
+const signedInHint = createSignedInHint<SessionUser>("offline:session", {
+  validate: (value): value is SessionUser =>
+    typeof value === "object" && value !== null &&
+    typeof (value as { id?: unknown }).id === "number",
+})
+
 /** Remembers who is signed in for a start with no network; nothing while the module is off. */
 export function rememberUser(user: SessionUser): void {
-  if (switches.offline) rememberCachedUser(user)
+  if (switches.offline) signedInHint.remember(user)
 }
 
 /**
@@ -365,8 +372,8 @@ export function rememberUser(user: SessionUser): void {
  */
 export function forgetUser(storage?: OfflineStorage): Promise<void> {
   // While the module is off nothing was kept, and looking would create the databases.
-  const remembered = switches.offline ? recallCachedUser() : null
-  forgetCachedUser()
+  const remembered = switches.offline ? signedInHint.recall() : null
+  signedInHint.forget()
   if (remembered) {
     const { id } = remembered
     forgetting = forgetting.then(() => forgetDeviceCopy(id, storage)).catch(() => {})
@@ -380,5 +387,5 @@ let forgetting: Promise<void> = Promise.resolve()
 
 /** The remembered user, or `null`: always `null` while the module is off. */
 export function recallUser(): SessionUser | null {
-  return switches.offline ? recallCachedUser() : null
+  return switches.offline ? signedInHint.recall() : null
 }

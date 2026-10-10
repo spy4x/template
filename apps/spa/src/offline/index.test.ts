@@ -288,6 +288,49 @@ describe("what the device keeps", () => {
     }
   })
 
+  it("remembers the signed-in user under the key a device already holds, and nobody when what is stored there is not a user", () => {
+    const kept = new Map<string, string>()
+    globals.localStorage = {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => void kept.set(key, value),
+      removeItem: (key: string) => void kept.delete(key),
+    } as Storage
+    try {
+      configureModules({ realtime: false, offline: true })
+      // What the app wrote before it used the library's hint.
+      kept.set("offline:session", JSON.stringify(user(7)))
+      expect(recallUser()).toEqual(user(7))
+
+      rememberUser(user(8))
+      expect(JSON.parse(kept.get("offline:session") ?? "null")).toEqual(user(8))
+
+      kept.set("offline:session", JSON.stringify({ firstName: "No id" }))
+      expect(recallUser()).toBeNull()
+      kept.set("offline:session", "not json")
+      expect(recallUser()).toBeNull()
+    } finally {
+      delete globals.localStorage
+    }
+  })
+
+  it("remembers nobody while the local-data module is off", () => {
+    const kept = new Map<string, string>()
+    globals.localStorage = {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => void kept.set(key, value),
+      removeItem: (key: string) => void kept.delete(key),
+    } as Storage
+    try {
+      configureModules({ realtime: false, offline: false })
+      rememberUser(user(7))
+      expect([...kept.keys()]).toEqual([])
+      kept.set("offline:session", JSON.stringify(user(7)))
+      expect(recallUser()).toBeNull()
+    } finally {
+      delete globals.localStorage
+    }
+  })
+
   it("are gone before the sign-in page shows, even when the page asked twice to forget", async () => {
     const { storage, device } = await deviceInUse()
     const kept = new Map<string, string>()
