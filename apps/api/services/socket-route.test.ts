@@ -71,6 +71,28 @@ describe("socket route", () => {
     expect(upgrades).toEqual([7])
   })
 
+  it("answers the upgrade with the subprotocol the page offered, which a browser requires", async () => {
+    // No fake upgrade here: the route's own, so the answer is the real handshake's.
+    const route = createSocketRoute({
+      auth: testSessionGuards(),
+      expectedOrigin: WEB_APP_URL,
+      realtime: { attach: () => true },
+    })
+    const app = mountRoute("/ws", route, buildAuthData({ user: { id: 7 } }))
+    const response = await app.request(
+      SOCKET_URL,
+      handshake(WEB_APP_URL, {
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        "sec-websocket-version": "13",
+        "sec-websocket-protocol": "chat, user.7",
+      }),
+    )
+    expect([response.status, response.headers.get("sec-websocket-protocol")]).toEqual([
+      101,
+      "user.7",
+    ])
+  })
+
   it("refuses an upgrade whose page names another user than the session's, or names none", async () => {
     const { app, upgrades } = buildApp()
     for (const offered of ["user.8", "", "user.07", "chat, user.8"]) {

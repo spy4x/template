@@ -12,6 +12,7 @@ import {
 } from "@spy4x/realtime"
 import { type AvailableCallPort, createSocketCallPort } from "@spy4x/realtime/calls"
 import { watchPageResume } from "@spy4x/realtime/page-lifecycle"
+import { SOCKET_USER_PROTOCOL } from "@domain/identity"
 import { apiFetch } from "../state/api.ts"
 import { type SessionState, sessionState } from "../state/session.ts"
 
@@ -130,9 +131,6 @@ interface Connection {
 
 let current: Connection | null = null
 
-/** The prefix of the subprotocol that names the user the page was started for. */
-export const SOCKET_USER_PROTOCOL = "user."
-
 /**
  * How long a call made while the first socket is still opening waits for it before it goes over
  * HTTP instead.
@@ -166,9 +164,14 @@ function cursorsFor(userId: number): PersistentCursorStore {
  * Opens the socket for a signed-in user and keeps it open. `pull` is the REST read that brings the
  * page up to date: the transport calls it after every open, the first one included, and for every
  * hint that is news.
+ * `onOpenChange` hears whether the socket is open, every time its status changes.
  * Calling it again for the same user does nothing.
  */
-export function connectRealtime(userId: number, pull: (gap?: GapReport) => void | Promise<void>) {
+export function connectRealtime(
+  userId: number,
+  pull: (gap?: GapReport) => void | Promise<void>,
+  onOpenChange?: (open: boolean) => void,
+) {
   if (current?.userId === userId) return
   disconnectRealtime()
   const cursors = cursorsFor(userId)
@@ -192,6 +195,7 @@ export function connectRealtime(userId: number, pull: (gap?: GapReport) => void 
     if (wsStatus === "open" || wsStatus === "closed") settleFirstOpen()
     if (wsStatus === "open") clearResumeNotice()
     sessionState.value = { ...sessionState.value, wsStatus }
+    onOpenChange?.(wsStatus === "open")
   })
   // The app came back (shown again, back online, restored from the back-forward cache): do not
   // wait for the next reconnect timer. Only a page that was hidden stays quiet about the gap for a

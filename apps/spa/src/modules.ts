@@ -13,6 +13,7 @@ import {
   currentLayer as offlineLayer,
   flushOutbox as flushOfflineOutbox,
   type OfflineLayer,
+  type OfflineTransport,
   startOffline as startOfflineLayer,
   stopOffline as stopOfflineLayer,
 } from "./offline/index.ts"
@@ -67,14 +68,20 @@ export function moduleSwitches(): Readonly<ModuleSwitches> {
 
 // --- Calls -------------------------------------------------------------------------------------
 
-/** How often a page with no socket checks for changes while it is visible. */
+/** How often a visible page whose socket is not open checks for changes. */
 export const POLL_INTERVAL_MS = 30_000
 
 interface Session {
   userId: number
+  /**
+   * The calls port of this user: HTTP always, the socket in front of it while the WebSocket module
+   * runs and its socket is open.
+   */
   port: CallPort
-  /** The timers and page events that trigger the pull when there is no socket. */
-  runner: SyncRunner | null
+  /** The timer and page events that trigger the pull while no socket is open. */
+  runner: SyncRunner
+  /** Whether the runner is started: it is while no socket is open. */
+  polling: boolean
   /** Whether the next run of the runner is the full pull, not the cheap check. */
   full: boolean
   stopEvents: () => void
@@ -82,37 +89,38 @@ interface Session {
 
 let session: Session | null = null
 
-function portOrThrow(): CallPort {
+/** The signed-in session. Before sign-in every call fails as a dropped connection. */
+function sessionOrThrow(): Session {
   if (!session) throw new ConnectionLostError("nobody is signed in")
-  return session.port
-}
-
-/**
- * The calls port of the signed-in user: HTTP always, the socket in front of it while the WebSocket
- * module runs and its socket is open. Before sign-in every call fails as a dropped connection.
- */
-export const calls: CallPort = {
-  command: async (name, payload, options) => await portOrThrow().command(name, payload, options),
-  query: async (name, payload, options) => await portOrThrow().query(name, payload, options),
+  return session
 }
 
 /**
  * A command with an idempotency key, sent again with the same key when its outcome is unknown.
- * Without the socket no hint follows the write, so the page checks for changes itself.
+ * Every try goes through the port of the user who was signed in when the command started: when
+ * somebody else signs in on this page during a wait between tries, the command is still sent as
+ * its own user, and the server refuses it. While no socket is open no hint follows the write, so
+ * the page checks for changes itself.
  */
 export async function callCommand<T>(
   name: string,
   payload: unknown,
   options?: RetryOptions,
 ): Promise<T> {
-  const result = await sendCommand<T>(calls, name, payload, options)
-  void session?.runner?.kick()
+  const started = sessionOrThrow()
+  const result = await sendCommand<T>(started.port, name, payload, options)
+  // A stopped runner (the socket is open, or the session ended) does nothing.
+  void started.runner.kick()
   return result
 }
 
-/** A query, sent again when the server could not be reached. */
-export function callQuery<T>(name: string, payload?: unknown, options?: RetryOptions): Promise<T> {
-  return sendQuery<T>(calls, name, payload, options)
+/** A query, sent again when the server could not be reached, always as the user who asked. */
+export async function callQuery<T>(
+  name: string,
+  payload?: unknown,
+  options?: RetryOptions,
+): Promise<T> {
+  return await sendQuery<T>(sessionOrThrow().port, name, payload, options)
 }
 
 /** Whether a call made now reaches the server as the signed-in user. */
@@ -131,28 +139,32 @@ export interface ChangeReads {
 }
 
 /**
- * Starts everything that talks to the server for a signed-in user: the calls port, the local-data
- * module, and what triggers the pull. With the socket that is its hints and reconnects. Without
- * it: the start, the browser back online, the tab shown again, the page's own write, and a timer
- * while the tab is visible. Calling it again for the same user does nothing.
+ * How the local-data module reaches the server for `userId`: through that user's own port, and
+ * only while they are the one signed in on this page, owe no second factor and the browser has a
+ * network. So one person's queue is never sent as another.
  */
-export function startModules(userId: number, reads: ChangeReads): void {
+export function offlineTransportFor(userId: number, port: CallPort): OfflineTransport {
+  return { calls: port, canSend: () => session?.userId === userId && canCallAs(userId) }
+}
+
+/** Options of {@link startModules}. */
+export interface StartOptions {
+  /** How often the page checks for changes while no socket is open. A test passes a short one. */
+  pollIntervalMs?: number
+}
+
+/**
+ * Starts everything that talks to the server for a signed-in user: the calls port, the local-data
+ * module, and what triggers the pull. An open socket triggers it with its hints and reconnects.
+ * While no socket is open (the WebSocket module is off, or its socket is connecting, dropped or
+ * blocked) the page triggers it itself: at the start, when the browser is back online, when the
+ * tab is shown again, after its own write, and on a timer while the tab is visible. Calling it
+ * again for the same user does nothing.
+ */
+export function startModules(userId: number, reads: ChangeReads, options: StartOptions = {}): void {
   if (session?.userId === userId) return
   stopChanges()
   const port = createAppCallPort({ userId, socket: switches.realtime ? socketCalls : undefined })
-  const opened: Session = { userId, port, runner: null, full: true, stopEvents: () => {} }
-  session = opened
-  if (switches.offline) {
-    startOfflineLayer(userId, {
-      calls,
-      canSend: () => session?.userId === userId && canCallAs(userId),
-    })
-  }
-  if (switches.realtime) {
-    void Promise.resolve(reads.pull()).catch(() => {})
-    connectRealtime(userId, reads.pull)
-    return
-  }
   const runner = createSyncRunner({
     flush: async () => {
       const full = opened.full
@@ -165,12 +177,22 @@ export function startModules(userId: number, reads: ChangeReads): void {
         throw error
       }
     },
-    pollIntervalMs: POLL_INTERVAL_MS,
+    pollIntervalMs: options.pollIntervalMs ?? POLL_INTERVAL_MS,
   })
-  opened.runner = runner
+  const opened: Session = {
+    userId,
+    port,
+    runner,
+    polling: false,
+    full: true,
+    stopEvents: () => {},
+  }
+  session = opened
+  if (switches.offline) startOfflineLayer(userId, offlineTransportFor(userId, port))
   // The runner runs on these events too; marking the run first makes it the pull, not the check.
+  // A hidden tab reads nothing, and an open socket brings the page up to date itself.
   const wake = () => {
-    if (document.visibilityState === "hidden") return
+    if (!opened.polling || document.visibilityState === "hidden") return
     opened.full = true
     void runner.kick()
   }
@@ -186,7 +208,17 @@ export function startModules(userId: number, reads: ChangeReads): void {
     removeEventListener("offline", network)
     document.removeEventListener("visibilitychange", wake)
   }
-  runner.start()
+  /** Starts the runner (it runs once at once, then on its timer), or stops it. */
+  const poll = (on: boolean) => {
+    if (session !== opened || opened.polling === on) return
+    opened.polling = on
+    if (on) runner.start()
+    else runner.stop()
+  }
+  // The first run is the start-up pull.
+  poll(true)
+  // The socket's hints replace the timer while it is open, and only then.
+  if (switches.realtime) connectRealtime(userId, reads.pull, (open) => poll(!open))
 }
 
 /**
@@ -196,7 +228,7 @@ export function startModules(userId: number, reads: ChangeReads): void {
 export function stopChanges(): void {
   const closing = session
   session = null
-  closing?.runner?.stop()
+  closing?.runner.stop()
   closing?.stopEvents()
   disconnectRealtime()
 }

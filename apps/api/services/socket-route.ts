@@ -4,12 +4,10 @@ import type { Context } from "hono"
 import { adaptWebSocket } from "@spy4x/realtime"
 import { isBoundToUser } from "@spy4x/realtime/operations"
 import { createSameOriginUpgradeGuard } from "@spy4x/server/http/same-origin"
+import { SOCKET_USER_PROTOCOL } from "@domain/identity"
 import type { APIContext } from "../_types.ts"
 import type { Realtime } from "./realtime.ts"
 import type { AppAuthState, SignIn } from "./sign-in.ts"
-
-/** The prefix of the subprotocol that names the user the page was started for: `user.<id>`. */
-export const SOCKET_USER_PROTOCOL = "user."
 
 /** The `user.<id>` subprotocol the handshake offered, or `null` when it offered none. */
 export function offeredUserProtocol(request: Request): string | null {
