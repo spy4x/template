@@ -6,7 +6,7 @@ import {
   createHttpCallPort,
   withUnauthorizedHook,
 } from "@spy4x/realtime/calls"
-import { apiFetch } from "./api.ts"
+import { apiFetch as send } from "@spy4x/platform/api"
 import { sessionState } from "./session.ts"
 
 /**
@@ -67,16 +67,39 @@ export function canCallAs(
 }
 
 /**
- * A list read (`GET`), which both transports share. It names the user the page was started for,
- * as a call does, and an `unauthorized` answer signs the page out. The caller sees a failed read
- * and so writes nothing to a device copy.
+ * A read (`GET`) of a REST route. It names the user the page was started for, as a call does, and
+ * an `unauthorized` answer signs the page out: the session ended, or the cookie now belongs to
+ * somebody else. The caller sees a failed read and so writes nothing to a device copy.
+ *
+ * A page with nobody signed in names nobody and is never signed out by an answer: the start-up
+ * read of `/api/auth/me` and the second-factor step read as they always did.
  */
-export async function apiRead<T>(path: string, fetcher: typeof apiFetch = apiFetch) {
+export async function apiRead<T>(path: string, init?: RequestInit, fetcher: typeof send = send) {
   const userId = sessionState.value.user?.id
-  const result = await fetcher<T>(
-    path,
-    userId === undefined ? undefined : { headers: { [REALTIME_USER_HEADER]: String(userId) } },
-  )
+  if (userId === undefined) return await fetcher<T>(path, init)
+  const result = await fetcher<T>(path, { ...init, headers: asUser(userId, init?.headers) })
   if (!result.ok && result.status === 401) signOutPage()
   return result
+}
+
+/**
+ * {@link apiRead} for a store that reads the answer itself, such as the invitations store, which
+ * needs more of a refusal than `apiFetch` keeps. Same rule: the read names the page's user, and a
+ * 401 signs the page out.
+ */
+export async function fetchRead(
+  url: string,
+  init?: RequestInit,
+  fetcher: (url: string, init?: RequestInit) => Promise<Response> = globalThis.fetch,
+): Promise<Response> {
+  const userId = sessionState.value.user?.id
+  if (userId === undefined) return await fetcher(url, init)
+  const response = await fetcher(url, { ...init, headers: asUser(userId, init?.headers) })
+  if (response.status === 401) signOutPage()
+  return response
+}
+
+/** The caller's headers with the page's user named beside them. */
+function asUser(userId: number, given?: HeadersInit): Record<string, string> {
+  return { ...Object.fromEntries(new Headers(given)), [REALTIME_USER_HEADER]: String(userId) }
 }

@@ -95,8 +95,11 @@ An aggregate lists its operations once, in `operations.ts`. Both transports serv
 through one dispatcher: the socket (`/api/ws`) and the call route, `POST /api/call/<name>`
 (`apps/api/routes/call.ts`), which takes the payload as the JSON body and a command's key in the
 `Idempotency-Key` header. Both refuse a call whose session is not the user the page names. A new
-aggregate therefore writes no per-command REST route: it needs only its list (`GET`) route, which
-the SPA reads with `apiRead`. The per-command routes of notes and groups in the table above are
+aggregate therefore writes no per-command REST route: it needs only its list (`GET`) route. Every
+route under `/api` stands behind one check (`createApiApp` in `apps/api/app.ts`) that refuses a
+request whose page names another user, and the SPA names its user on every read: its one REST
+function, `apiFetch` in `apps/spa/src/state/api.ts`, sends each `GET` through `apiRead`
+(`tests/spa-reads.test.ts` fails when a store reads another way). The per-command routes of notes and groups in the table above are
 older than the call route and are still used by the e2e specs to seed data; do not copy them.
 
 Then wire them: mount the route in `apps/api/index.ts` (before `/groups`), add the operations

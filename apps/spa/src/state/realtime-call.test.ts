@@ -3,6 +3,7 @@ import { afterEach, describe, it } from "@std/testing/bdd"
 import { ConnectionLostError, RealtimeRequestError } from "@spy4x/realtime"
 import type { AvailableCallPort } from "@spy4x/realtime/calls"
 import type { User } from "@domain/identity"
+import { apiFetch } from "./api.ts"
 import { apiRead, canCallAs, createAppCallPort } from "./realtime-call.ts"
 import { sessionState } from "./session.ts"
 
@@ -146,7 +147,7 @@ describe("canCallAs", () => {
   })
 })
 
-describe("a list read", () => {
+describe("a read of a REST route", () => {
   const realFetch = globalThis.fetch
   afterEach(() => {
     globalThis.fetch = realFetch
@@ -181,6 +182,59 @@ describe("a list read", () => {
 
     await apiRead("/api/groups/x/notes")
 
+    expect(sessionState.value.user?.id).toBe(7)
+  })
+
+  it("names nobody and leaves the second-factor step alone while nobody is signed in", async () => {
+    sessionState.value = { ...sessionState.value, user: null, isMfaRequired: true }
+    const { fetch, sent } = server([[401, UNAUTHORIZED]])
+    globalThis.fetch = fetch
+
+    await apiRead("/api/auth/me")
+
+    expect(sent[0].headers["x-realtime-user"]).toBeUndefined()
+    expect(sessionState.value.isMfaRequired).toBe(true)
+  })
+
+  it("keeps the headers the caller gave beside the user's", async () => {
+    signedInAs(7)
+    const { fetch, sent } = server([[200, {}]])
+    globalThis.fetch = fetch
+
+    await apiRead("/api/tokens", { headers: { "x-test": "kept" } })
+
+    expect([sent[0].headers["x-test"], sent[0].headers["x-realtime-user"]]).toEqual(["kept", "7"])
+  })
+})
+
+describe("the SPA's one REST function", () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  it("sends every read as the page's user, and signs the page out when one is refused as unauthorized", async () => {
+    signedInAs(7)
+    const { fetch, sent } = server([[200, {}], [200, {}], [401, UNAUTHORIZED]])
+    globalThis.fetch = fetch
+
+    await apiFetch("/api/notifications")
+    await apiFetch("/api/tokens", { method: "get" })
+    const refused = await apiFetch("/api/auth/sessions")
+
+    expect(sent.map((request) => request.headers["x-realtime-user"])).toEqual(["7", "7", "7"])
+    expect(refused.ok).toBe(false)
+    expect(sessionState.value.user).toBeNull()
+  })
+
+  it("sends a write as it is, and a refused write does not sign the page out", async () => {
+    signedInAs(7)
+    const { fetch, sent } = server([[401, { error: { code: "WRONG_PASSWORD", message: "no" } }]])
+    globalThis.fetch = fetch
+
+    await apiFetch("/api/auth/password/change", { method: "POST", body: "{}" })
+
+    expect(sent[0].headers["x-realtime-user"]).toBeUndefined()
     expect(sessionState.value.user?.id).toBe(7)
   })
 })
