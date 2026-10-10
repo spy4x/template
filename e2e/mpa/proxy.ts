@@ -41,7 +41,10 @@ Deno.serve({ hostname: "127.0.0.1", port: frontPort }, async (request) => {
   })
 })
 
-/** Opens the same socket on the upstream, with the browser's cookie and origin, and joins the two. */
+/**
+ * Opens the same socket on the upstream, with the browser's cookie, origin and subprotocol, and
+ * joins the two.
+ */
 function bridgeWebSocket(request: Request, upstream: URL): Response {
   // Read first: the upgrade closes the request.
   const headers: Record<string, string> = {}
@@ -49,10 +52,14 @@ function bridgeWebSocket(request: Request, upstream: URL): Response {
     const value = request.headers.get(name)
     if (value) headers[name] = value
   }
-  const { socket: browser, response } = Deno.upgradeWebSocket(request)
+  // The SPA offers one subprotocol, which names its user; the API accepts it, and a browser closes
+  // a socket whose server accepted none of what it offered. So both sides here speak it too.
+  const protocols = (request.headers.get("sec-websocket-protocol") ?? "").split(",")
+    .map((value) => value.trim()).filter((value) => value !== "")
+  const { socket: browser, response } = Deno.upgradeWebSocket(request, { protocol: protocols[0] })
   upstream.protocol = "ws:"
   // Deno's WebSocket takes request headers; the browser type this file is checked against does not.
-  const options = { headers } as unknown as string[]
+  const options = { headers, protocols } as unknown as string[]
   const server = new WebSocket(upstream, options)
   // What the browser sends before the upstream socket is open.
   const early: Parameters<WebSocket["send"]>[0][] = []
