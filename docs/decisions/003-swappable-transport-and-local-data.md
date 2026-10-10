@@ -76,7 +76,9 @@ as this user" (`canSend`), never merely "the socket is open". The queue of one p
 not be sent as another over either transport.
 
 List pages and bootstrap stay plain `GET` routes with a cursor, as ADR 002 decided. They are reads
-that both modules share; they are not part of the calls port.
+that both modules share; they are not part of the calls port. They carry the same user id as a
+call and are refused the same way: a read whose session belongs to anyone else answers
+`unauthorized`, signs the page out, and writes nothing to the device copy.
 
 **Changes.** The pull stays the one path that makes a page correct (ADR 002). What varies is only
 what triggers it. Without the socket: the start, the browser coming back online, the tab becoming
@@ -201,7 +203,8 @@ entry. Tags are the parent and notes depend on them. Four rules make that safe:
    lock spans the whole flush, and a write submitted while online goes through the same flush, so a
    note can never overtake the tag queue.
 2. **A note waits for its tags.** A note entry is not sent while a tag it names is still queued or
-   is in conflict. It stays "waiting", with its text safe on the device.
+   is in conflict. It stays "waiting", with its text safe on the device. The status line reports it
+   as waiting on the person's choice about the tag, not as a send that keeps failing.
 3. **A tag that will never exist leaves the notes that name it.** When a queued tag create is
    undone, dropped (created and deleted before any send) or discarded after the server refused it,
    the layer removes that tag from the queued notes and tells the person. The notes then send
@@ -209,7 +212,8 @@ entry. Tags are the parent and notes depend on them. Four rules make that safe:
 4. **The server ignores tag ids it does not know in a note write.** Deleting a tag removes its
    links (#170), and another member may delete a tag at any moment, so a write that names a tag
    deleted a second ago must not fail. The answer carries the tags the note really has, and the
-   page shows those.
+   page shows those. Removing a tag's links does not change the version of the notes that had it,
+   so deleting a tag never turns an offline edit of such a note into a conflict.
 
 So a refused tag never costs a note's text: the worst outcome is a note saved without one tag, and
 the person is told.
