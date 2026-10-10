@@ -50,7 +50,7 @@ sent are kept by `createDataCache` from `@spy4x/platform/browser/data-cache`
 old `offline:user:<id>` database, which is no longer read: a write still queued there is not sent.
 
 A note create, update or delete is saved in the outbox, in IndexedDB, then sent at once if the
-socket is open. If it is not, the entry waits, and the person sees the change in the list with a
+server can be reached as its user, over the socket or over HTTP. If it cannot, the entry waits, and the person sees the change in the list with a
 "waiting to sync" line. The sync runner (`createSyncRunner` from `@spy4x/realtime/sync-runner`) sends the queue when the layer
 starts, when the browser comes back online, when the tab becomes visible or the window gains focus, and
 again after a failed run, waiting longer each time. `App` also sends the queue in order before every read, and the read runs after
@@ -92,7 +92,7 @@ the notes screen shows both sides:
 | The server refused the write (role) | **Discard mine**.                                            |
 
 **Moving notes is never queued.** A move names two groups and needs edit rights in both, which the
-device cannot know, so it is sent only while the socket is open; offline, the person sees "Moving
+device cannot know, so it is sent only while the server can be reached; offline, the person sees "Moving
 notes needs a connection". A write queued for a note that someone moves meanwhile does **not**
 follow it: the entry names the old group, the server answers "not found" there, and it becomes a
 conflict instead of silently editing the note in a group the person never chose. The person's text
@@ -158,8 +158,9 @@ Creating a group, the profile, two-factor set-up and sign-in need the server. Ev
 sending one entry) holds a `navigator.locks` lock named for the user, so tabs take turns. After a
 send, the entry is removed, or marked a conflict, only if it still carries the key that was sent;
 an edit another tab made meanwhile has a new key and stays queued. The queue sends only while the
-socket is open and the page is signed in as the queue's user: the socket's reconnect check
-refuses a cookie that now belongs to someone else.
+browser has a network and the page is signed in as the queue's user. Every send names that user, so
+the server refuses one whose cookie now belongs to someone else, and a refused entry stays queued
+for its owner's next sign-in.
 
 ## The modules and their switches
 
@@ -177,10 +178,11 @@ ports from that file and never from a module's folder; two guard tests,
   socket is open; a socket that drops under a call is answered by sending the call over HTTP with
   the same idempotency key. Every call names the user the page was started for, and an
   `unauthorized` answer over either signs the page out.
-- **Changes:** `startModules` starts what triggers the pull. With the socket that is its hints and
-  reconnects. Without it: the start, the browser back online, the tab shown again, the page's own
-  write, and a timer every 30 seconds while the tab is visible. The timer and the page's own write
-  run the cheap check (`createChangeCheck` in `apps/spa/src/state/pull.ts`): it reads the groups
+- **Changes:** `startModules` starts what triggers the pull: the start, the browser back online,
+  the tab shown again, the page's own write, and a timer every 30 seconds while the tab is visible.
+  An open socket replaces those with its hints and reconnects, so the timer runs whenever the
+  socket is not open: the module is off, or its socket is blocked or has dropped. The timer and the
+  page's own write run the cheap check (`createChangeCheck` in `apps/spa/src/state/pull.ts`): it reads the groups
   list and reads the open group's notes again only when that group's change sequence moved.
 - **Local data:** the device copy, the queue and the offline status line. The queue is sent only
   while the calls port is reachable as its user (`canCallAs`): the page is signed in as them and
