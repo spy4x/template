@@ -207,6 +207,7 @@ for (
     expect(result.code).not.toBe(0)
     expect(result.conf).toBeUndefined()
     expect(result.stderr).toContain("SPA_ERROR_REPORT_DSN")
-    expect(result.stderr).not.toContain("example")
+    // Every address above carries the key `k`.
+    expect(result.stderr).not.toContain("k@")
   })
 }
