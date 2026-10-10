@@ -6,8 +6,8 @@ import { render } from "preact"
 import { App } from "./app.tsx"
 import { getEnvVar } from "@client/vite/env.ts"
 import { createThemeStore } from "@spy4x/preact-signals/theme"
-import { ErrorBoundary } from "./error-boundary.tsx"
-import { startErrorReporting } from "./error-reporting.ts"
+import { ErrorBoundary } from "@spy4x/preact-ui/error-boundary"
+import { reportCaughtError, startErrorReporting } from "./error-reporting.ts"
 import { loadRuntimeConfig } from "./runtime-config.ts"
 import { install } from "./install.ts"
 import { configureModules } from "./modules.ts"
@@ -33,7 +33,7 @@ startErrorReporting(
 )
 
 render(
-  <ErrorBoundary>
+  <ErrorBoundary onError={reportCaughtError} dataE2E="render-error">
     <App />
   </ErrorBoundary>,
   document.getElementById("app") as HTMLElement,

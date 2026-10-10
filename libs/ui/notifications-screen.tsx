@@ -6,7 +6,7 @@ import { Stack } from "@spy4x/preact-ui/layout"
 import { followLinkClick } from "@spy4x/preact-ui/link"
 import { timeAgo } from "@spy4x/platform/universal/time"
 import { describeNotification, type Notification } from "@domain/notifications"
-import { PageHeader } from "./page-header.tsx"
+import { PageHeader } from "@spy4x/preact-ui/page-header"
 import type { Navigate } from "./progressive.tsx"
 
 /** One notification as the API sends it: the times are ISO timestamps, `readAt` is `null` unread. */

@@ -14,9 +14,9 @@ import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
 import { RadioGroup } from "@spy4x/preact-ui/radio"
 import { API_TOKEN_EXPIRY_DAYS, type ApiToken, ApiTokenAccess } from "@domain/api-tokens"
-import { TOUCH_TARGET } from "./page-header.tsx"
+import { TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
 import { ScreenForm } from "./progressive.tsx"
-import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
+import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-row"
 
 /** The create form's fields. `expiresInDays` is `null` for a token that never expires. */
 export interface ApiTokenFormValues {
@@ -110,7 +110,7 @@ export function ApiTokens(props: ApiTokensProps): JSX.Element {
     <SettingGroup
       title="API tokens"
       description="Let a script or another service use one of your groups without your password. Resetting a forgotten password revokes every token; changing your password keeps them."
-      e2e="api-tokens"
+      dataE2E="api-tokens"
     >
       <ErrorState message={errors.list} />
       {tokens === null
@@ -131,7 +131,7 @@ export function ApiTokens(props: ApiTokensProps): JSX.Element {
               {tokens.map((token) => (
                 <SettingRow
                   key={token.id}
-                  e2e={`api-token-${token.id}`}
+                  dataE2E={`api-token-${token.id}`}
                   label={token.name}
                   value={<TokenDetails token={token} />}
                   action={

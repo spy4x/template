@@ -13,10 +13,18 @@ import { ApiTokens, type ApiTokensProps } from "./api-tokens.tsx"
 import { ProfileScreen } from "./profile-screen.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
-const own = { document: globalThis.document, FormData: globalThis.FormData }
+const own = {
+  document: globalThis.document,
+  FormData: globalThis.FormData,
+  getComputedStyle: globalThis.getComputedStyle,
+}
 
 beforeAll(() => {
-  Object.assign(globalThis, { document: window.document, FormData: window.FormData })
+  Object.assign(globalThis, {
+    document: window.document,
+    FormData: window.FormData,
+    getComputedStyle: window.getComputedStyle.bind(window),
+  })
 })
 
 afterAll(async () => {

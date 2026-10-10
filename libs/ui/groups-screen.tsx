@@ -13,7 +13,7 @@ import { Modal } from "@spy4x/preact-ui/modal"
 import { GROUP_RESTORE_DAYS, type GroupColor, GroupRole } from "@domain/groups"
 import { GroupMark } from "./group-appearance.tsx"
 import { useClosesWhenDone } from "./group-page.tsx"
-import { PageAction, PageHeader } from "./page-header.tsx"
+import { PageAction, PageHeader } from "@spy4x/preact-ui/page-header"
 import { GROUP_PATHS, type Navigate, ScreenForm } from "./progressive.tsx"
 
 /** One group as the screen shows it. */

@@ -187,7 +187,7 @@ mention `restore`:
    that hard-deletes rows deleted more than the restore window ago. It takes `now` as a parameter, so
    a test sets the clock. Notes use 30 days (`NOTE_RESTORE_DAYS`). Anything that hangs off the row,
    such as attachments, must be removed with it, or the purge leaves orphans.
-6. **Screens and SPA.** A delete offers Undo for ten seconds (`UndoDeleteToast`), and the list's menu
+6. **Screens and SPA.** A delete offers Undo for ten seconds (`useUndoToast`, which pushes it to the app's toast list), and the list's menu
    has "Show deleted notes", which lists the deleted rows with a Restore button for editors. The
    store never queues a restore: it needs the server, like a move.
 7. **Tests.** Both transports (every role, stranger, a live row, the cap), Postgres (version,

@@ -31,7 +31,7 @@ import {
   useFocusAfterRemoval,
   useFreshError,
 } from "./group-page.tsx"
-import { MoreMenu } from "./page-header.tsx"
+import { MoreMenu } from "@spy4x/preact-ui/page-header"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import { type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 
