@@ -127,9 +127,18 @@ async function signOut(page: Page): Promise<void> {
   await page.locator("[data-e2e=signin-required]").waitFor()
 }
 
-/** Opens `path` with no network: the app starts from the worker's cache and the device's copies. */
+/**
+ * Opens `path` with no network: the app starts from the worker's cache and the device's copies.
+ *
+ * It opens the page once more when the app did not start. Against the dev server, in about one
+ * run of this spec in five, the group activity page stops loading its scripts (the browser reports
+ * them aborted, with every one of them in the worker's cache) and stays blank; opening the address
+ * again starts the app. The cause is not known. No script of the app has been evaluated by then.
+ */
 async function openOffline(page: Page, path: string): Promise<void> {
   await page.goto(path)
+  const started = await online(page).waitFor({ timeout: 3_000 }).then(() => true, () => false)
+  if (!started) await page.goto(path)
   await expect(online(page)).not.toHaveText("Online")
 }
 
