@@ -1,12 +1,10 @@
-import { Hono } from "hono"
-import { applyBaseMiddleware } from "@spy4x/server/request-log/base-middleware"
+import { createApiApp } from "./app.ts"
 import { db, sql } from "@api/services/db.ts"
 import { config } from "@api/services/config.ts"
 import { log } from "@api/services/log.ts"
 import { parseAuth, signIn } from "@api/services/auth.ts"
 import { eventBus } from "@api/services/eventBus.ts"
 import { getWebPush } from "@api/services/webPush.ts"
-import { APIContext } from "./_types.ts"
 import { ONE_HOUR_IN_MILLISECONDS } from "@spy4x/platform/universal/time-constants"
 import { startSessionExpiry } from "./services/session-expiry.ts"
 import { createAuthRoute } from "./routes/auth.ts"
@@ -74,7 +72,6 @@ const REALTIME_REVALIDATE_INTERVAL_MS = 15_000
 const mailWarning = mailOffWarning(readMailSetup(Deno.env))
 if (mailWarning) log(mailWarning)
 
-const app = new Hono<APIContext>().basePath("/api")
 // Without ERROR_REPORT_DSN the reporter is off and sends nothing.
 const errorReporter = createErrorReporter({
   dsn: config.errorReportDsn,
@@ -83,7 +80,8 @@ const errorReporter = createErrorReporter({
   maxPerSession: 100,
   windowMs: 60 * 60 * 1000,
 })
-applyBaseMiddleware(app, {
+// Every route stands behind the base middleware and the page-user check (`./app.ts`).
+const app = createApiApp({
   write: log,
   skipLogPaths: ["/api/health"],
   parseAuth,
