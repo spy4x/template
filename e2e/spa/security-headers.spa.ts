@@ -83,6 +83,29 @@ test("nginx sends the security headers with the page, a script, the worker, the 
   expectSecurityHeaders(range)
 })
 
+// The API answers behind the same origin as the SPA. It serves JSON and no page, so its policy is
+// the library's default with nothing added.
+test("the API sends the security headers with an answer and with an unknown address", async ({ request }) => {
+  const health = await request.get("/api/health")
+  expect(health.status()).toBe(200)
+  const unknown = await request.get("/api/no-such-route")
+  expect(unknown.status()).toBe(404)
+
+  for (const response of [health, unknown]) {
+    expect(header(response, "content-security-policy")).toBe(
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+        "connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; " +
+        "frame-ancestors 'none'",
+    )
+    expect(header(response, "x-content-type-options")).toBe("nosniff")
+    expect(header(response, "referrer-policy")).toBe("no-referrer")
+    expect(header(response, "x-frame-options")).toBe("DENY")
+    expect(header(response, "strict-transport-security")).toBe(
+      "max-age=15552000; includeSubDomains",
+    )
+  }
+})
+
 test("a signed-in walk through the app meets no refusal under the content security policy", async ({ context, page, request, baseURL }) => {
   const violations = await watchCspViolations(context)
   // Google's two font hosts, answered here: the run needs no internet, and a request the policy
