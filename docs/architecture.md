@@ -90,6 +90,7 @@ job, and only the worker signs links and sends.
 
 - [Architecture decision](decisions/001-deno-platform-template.md)
 - [Realtime transport and sync protocol](decisions/002-realtime-transport-and-sync.md)
+- [Swappable transport and local data](decisions/003-swappable-transport-and-local-data.md)
 - [Group sync design](design/group-sync.md)
 - [Realtime transport and sync-on-reconnect](design/realtime-websockets.md)
 - [Contributing](../CONTRIBUTING.md)
