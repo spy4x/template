@@ -131,8 +131,8 @@ vertical, through per-service resource limits.
 
 CI is Woodpecker. `.woodpecker/ci.yml` runs `deno task check`, the SPA build, the integration
 tests against a Postgres service and the `url-filters` browser test on every pull request and every
-push to `main`; see [woodpecker-ci-setup.md](woodpecker-ci-setup.md). Deploys are not wired up
-(`.woodpecker/deploy.yml.example`).
+push to `main`; see [woodpecker-ci-setup.md](woodpecker-ci-setup.md). A `v*` tag publishes the
+images (`.woodpecker/release.yml`). Deploys are not wired up (`.woodpecker/deploy.yml.example`).
 
 ## Conventions worth keeping
 
