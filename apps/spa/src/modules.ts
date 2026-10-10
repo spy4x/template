@@ -1,6 +1,7 @@
 import { ConnectionLostError, type GapReport } from "@spy4x/realtime"
 import { type CallPort, type RetryOptions, sendCommand, sendQuery } from "@spy4x/realtime/calls"
 import { signal } from "@preact/signals"
+import { cachedRead, type ReadCache, readCopy, type ReadResult } from "@spy4x/realtime/read-cache"
 import { createSyncRunner, type SyncRunner } from "@spy4x/realtime/sync-runner"
 import {
   advanceGroupCursor as advanceSocketCursor,
@@ -13,13 +14,14 @@ import {
 import {
   currentLayer as offlineLayer,
   flushOutbox as flushOfflineOutbox,
+  forgetDeviceCopy,
   type OfflineLayer,
+  type OfflineStorage,
   type OfflineTransport,
   startOffline as startOfflineLayer,
   stopOffline as stopOfflineLayer,
 } from "./offline/index.ts"
-import { offlineGroups as groupsOverLayer } from "./offline/groups-offline.ts"
-import { offlineNotes as notesOverLayer } from "./offline/notes-offline.ts"
+import { offlineNotes as notesOverLayer } from "./offline/notes-collection.ts"
 import { OfflineStatus as OfflineStatusLine } from "./offline/OfflineStatus.tsx"
 import {
   forgetUser as forgetCachedUser,
@@ -152,6 +154,8 @@ export function offlineTransportFor(userId: number, port: CallPort): OfflineTran
 export interface StartOptions {
   /** How often the page checks for changes while no socket is open. A test passes a short one. */
   pollIntervalMs?: number
+  /** Where the local-data module keeps its data. Defaults to IndexedDB; a test passes memory. */
+  storage?: OfflineStorage
 }
 
 /**
@@ -191,7 +195,9 @@ export function startModules(userId: number, reads: ChangeReads, options: StartO
     stopEvents: () => {},
   }
   session = opened
-  if (switches.offline) startOfflineLayer(userId, offlineTransportFor(userId, port))
+  if (switches.offline) {
+    startOfflineLayer(userId, offlineTransportFor(userId, port), options.storage)
+  }
   // The runner runs on these events too; marking the run first makes it the pull, not the check.
   // A hidden tab reads nothing, and an open socket brings the page up to date itself.
   const wake = () => {
@@ -276,8 +282,37 @@ export function flushOutbox(): Promise<void> {
   return flushOfflineOutbox()
 }
 
-/** The stores' server dependencies with the device copy and the queue in front of them. */
-export const offlineGroups = groupsOverLayer
+/**
+ * The read copies of the offline-readable lists (ADR 003, level 2). A store reads its list
+ * `through` a key: the answer replaces the device's copy, and when the server is unreachable the
+ * copy answers instead (`fresh: false`, with the time it was taken). `copy` is the copy alone, for
+ * a screen to show before the server has answered.
+ */
+export interface LocalReads {
+  /** Rejects as `read` does, except when the server is unreachable and a copy exists. */
+  through<T>(key: string, read: () => Promise<T>): Promise<ReadResult<T>>
+  /** The copy under `key`, or `undefined`. Never rejects. */
+  copy<T>(key: string): Promise<ReadResult<T> | undefined>
+}
+
+/** {@link LocalReads} over the cache `current` names at the moment of each read, or over none. */
+export function createLocalReads(current: () => ReadCache | undefined): LocalReads {
+  return {
+    through: (key, read) => cachedRead(current(), key, read),
+    copy: (key) => readCopy(current(), key),
+  }
+}
+
+/** Reads with no device behind them: every read goes to the server and nothing is kept. */
+export const noLocalReads: LocalReads = createLocalReads(() => undefined)
+
+/**
+ * The read copies of the signed-in user. While the module is off, or nobody is signed in, it is
+ * {@link noLocalReads}: nothing is written to the device.
+ */
+export const localReads: LocalReads = createLocalReads(() => offlineLayer()?.reads)
+
+/** The notes store's server dependencies with the device copy and the queue in front of them. */
 export const offlineNotes = notesOverLayer
 
 /** The offline status line and the conflict screen. */
@@ -288,9 +323,16 @@ export function rememberUser(user: SessionUser): void {
   if (switches.offline) rememberCachedUser(user)
 }
 
-/** Drops the remembered user. */
-export function forgetUser(): void {
+/**
+ * Drops the remembered user, and with them what the device kept of the server's answers for them:
+ * a start that found no session must not leave the last person's lists on a shared device. The
+ * queue of unsent writes stays, as on sign-out. Resolves once the copies are deleted.
+ */
+export async function forgetUser(storage?: OfflineStorage): Promise<void> {
+  // While the module is off nothing was kept, and looking would create the databases.
+  const remembered = switches.offline ? recallCachedUser() : null
   forgetCachedUser()
+  if (remembered) await forgetDeviceCopy(remembered.id, storage).catch(() => {})
 }
 
 /** The remembered user, or `null`: always `null` while the module is off. */
