@@ -22,7 +22,8 @@ check ──┬── build
   and a `valkey/valkey:8.1` service (password `ci-throwaway`, host `valkey`). It waits over TCP for
   both servers, see docs/handoff.md trap 3.
 - `e2e` runs `deno task e2e url-filters` in `mcr.microsoft.com/playwright`, which ships Chromium and
-  its system libraries, and installs Deno with npm. Playwright's own browser download, run through
+  its system libraries, and installs the pinned Deno release from GitHub, checked against its
+  SHA-256. Playwright's own browser download, run through
   Deno in the plain Deno image, hangs. The image tag must equal the Playwright version in
   `deno.jsonc` (`e2e` task), because the browser build in the image belongs to that version. The
   other three e2e specs, `auth-profile-ws-push`, `groups-socket` and `two-factor-sign-in`, need the full Docker stack
@@ -140,13 +141,33 @@ Or via the Web UI:
 - Pull request: `check`, then `build`, `integration` and `e2e` in parallel.
 - Push to `main`: the same steps.
 - Push to any other branch: nothing. Open a pull request to run the pipeline.
+- Tag `v<digit>*`: `ci.yml` runs again, then `release.yml` (below).
+
+Every Deno step runs `deno install --frozen` first, so a `deno.lock` that does not match
+`deno.jsonc` fails the pipeline instead of being rewritten.
+
+## Releases
+
+`.woodpecker/release.yml` waits for `ci.yml` and runs when a tag `v<digit>*` is pushed. Setup:
+
+1. In the Woodpecker server, make the global secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+   available to the `tag` event.
+2. Set `IMAGE_PREFIX` at the top of `release.yml` (the Docker Hub name, without the image suffix).
+3. Keep the images public: the product images start from the published base image.
+
+Steps: `guard` (the tagged commit must be an ancestor of `main`), `build-base`, `publish-base`, then
+`build-api`, `build-spa` and `build-mpa` in parallel, each followed by its `publish-*`. Kaniko
+builds into a tar file without any secret, and crane, the only step with the token, pushes it. A
+version without a pre-release suffix also gets `latest`. The worker and the migration run the API
+image, so there is no worker image. How to cut a release: [README](../README.md#releases).
 
 ## Customization
 
 ### Modify the Deno version
 
-Change the tag in every `image: denoland/deno:<version>` line of `ci.yml`, and the `deno@<version>`
-in the `e2e` step. Keep them equal to `DENO_VERSION` in `infra/envs/.env.example` and
+Change the tag in every `image: denoland/deno:<version>` line of `ci.yml`, and the release URL and
+SHA-256 in the two Playwright steps (`e2e`, `e2e-mpa`). Keep them equal to `DENO_VERSION` in
+`infra/envs/.env.example` and
 `Dockerfile.base`.
 
 ### Add Environment-Specific Deployments
@@ -155,7 +176,7 @@ To add staging deployment:
 
 ```yaml
 deploy-staging:
-  image: denoland/deno:2.9.0
+  image: denoland/deno:2.9.7
   environment:
     - SSH_TO_SERVER=${SSH_TO_SERVER_STAGING}
     - PATH_ON_SERVER=${PATH_ON_SERVER_STAGING}
