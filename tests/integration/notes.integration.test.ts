@@ -36,7 +36,8 @@ import {
   createNoteUpdateHandler,
   type NoteHandlerDependencies,
 } from "../../apps/api/features/notes/handlers.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * Notes against a real Postgres built from the migrations, through the same handlers, session gate
@@ -58,7 +59,7 @@ interface OutboxRow extends postgres.Row {
 }
 
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const settings = requireDbConnection()
+  const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1, onnotice: () => {} })
   const schema = `notes_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

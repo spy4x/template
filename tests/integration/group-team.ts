@@ -6,7 +6,8 @@ import {
   listenForGroupAccessLoss,
 } from "@server/groups/group-change-notify.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * What the group integration tests share: a schema of their own built from schema.sql, users, a
@@ -18,7 +19,7 @@ export interface IdRow extends postgres.Row {
 }
 
 export async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const connection = requireDbConnection()
+  const connection = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...connection, max: 1, onnotice: () => {} })
   const schema = `lifecycle_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

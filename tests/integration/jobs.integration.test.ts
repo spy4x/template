@@ -23,7 +23,8 @@ import type { EmailMessage } from "@spy4x/email/message"
 import type { EmailSender } from "@spy4x/email/sender"
 import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 const JOB = {
   eventKind: OUTBOX_CLEANUP_JOB,
@@ -33,7 +34,7 @@ const JOB = {
 
 /** Runs `body` on a fresh schema built from schema.sql. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const connection = requireDbConnection()
+  const connection = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...connection, max: 1 })
   const schema = `jobs_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

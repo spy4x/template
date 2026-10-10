@@ -23,7 +23,8 @@ import {
   PASSWORD_RESET_PURPOSE,
 } from "../../libs/server/auth/password-reset.ts"
 import { sha256Hex } from "@spy4x/platform/tokens"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * Sign-up, sign-in, sign-out and the authenticator app against a real Postgres, through the exact
@@ -70,7 +71,7 @@ async function withSchema(
   migrations: string[],
   body: (sql: postgres.Sql) => Promise<void>,
 ): Promise<void> {
-  const settings = requireDbConnection()
+  const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1 })
   const schema = `auth_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({
@@ -224,9 +225,85 @@ async function signUpRowCounts(sql: postgres.Sql): Promise<number[]> {
   return rows.map((row: CountRow) => row.count)
 }
 
-Deno.test("the auth migration carries the package schema verbatim", async () => {
-  const migration = await Deno.readTextFile(`libs/server/db/migrations/${AUTH_MIGRATION}`)
-  expect(migration).toContain(AUTH_POSTGRES_SCHEMA)
+/** One schema's package tables: every column, constraint and index, by name. */
+interface TableShapes {
+  columns: Record<string, unknown>
+  constraints: Record<string, string>
+  indexes: Record<string, string>
+}
+
+/**
+ * Creates a schema, runs `statements` in it and reads the shape of `tables` there (every table of
+ * the schema when `tables` is omitted), then drops the schema. The schema's own name is cut from
+ * every definition, so two schemas with the same tables give equal answers.
+ */
+async function shapesOf(statements: string[], tables?: string[]): Promise<TableShapes> {
+  const settings = buildPostgresOptions(requireDbConnection())
+  const schema = `auth_shape_${crypto.randomUUID().replaceAll("-", "")}`
+  const sql = postgres({ ...settings, max: 1, onnotice: () => {} })
+  const unqualified = (definition: string) => definition.replaceAll(`${schema}.`, "")
+  try {
+    await sql.unsafe(`CREATE SCHEMA ${schema}`)
+    // Session-wide on the one connection, so the statements and the definitions both use it.
+    await sql.unsafe(`SET search_path TO ${schema}`)
+    for (const statement of statements) await sql.unsafe(statement)
+    const names = tables ?? (await sql<{ name: string }[]>`
+      SELECT table_name AS name FROM information_schema.tables WHERE table_schema = ${schema}
+    `).map((row) => row.name)
+    const columns = await sql<Record<string, string | null>[]>`
+      SELECT table_name, column_name, data_type, is_nullable, column_default, is_identity,
+        identity_generation, is_generated, generation_expression, character_maximum_length
+      FROM information_schema.columns
+      WHERE table_schema = ${schema} AND table_name = ANY(${names})
+    `
+    const constraints = await sql<{ name: string; definition: string }[]>`
+      SELECT c.relname || '.' || k.conname AS name, pg_get_constraintdef(k.oid) AS definition
+      FROM pg_constraint k
+      JOIN pg_class c ON c.oid = k.conrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = ${schema} AND c.relname = ANY(${names})
+    `
+    const indexes = await sql<{ name: string; definition: string }[]>`
+      SELECT indexname AS name, indexdef AS definition FROM pg_indexes
+      WHERE schemaname = ${schema} AND tablename = ANY(${names})
+    `
+    return {
+      columns: Object.fromEntries(
+        columns.map(({ table_name, column_name, ...rest }) => [
+          `${table_name}.${column_name}`,
+          { ...rest, column_default: rest.column_default && unqualified(rest.column_default) },
+        ]),
+      ),
+      constraints: Object.fromEntries(
+        constraints.map((row) => [row.name, unqualified(row.definition)]),
+      ),
+      indexes: Object.fromEntries(indexes.map((row) => [row.name, unqualified(row.definition)])),
+    }
+  } finally {
+    await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+    await sql.end({ timeout: 5 })
+  }
+}
+
+Deno.test("the migrations build the package's tables with its columns, constraints and indexes", async () => {
+  const dir = "libs/server/db/migrations"
+  const names = [...Deno.readDirSync(dir)].map((entry) => entry.name).sort()
+  const migrations = await Promise.all(names.map((name) => Deno.readTextFile(`${dir}/${name}`)))
+
+  const packaged = await shapesOf([AUTH_POSTGRES_SCHEMA])
+  const tables = [...new Set(Object.keys(packaged.columns).map((key) => key.split(".")[0]))]
+  const migrated = await shapesOf(migrations, tables)
+
+  expect(tables.sort()).toEqual([
+    "auth_challenges",
+    "auth_email_owners",
+    "auth_keys",
+    "auth_sessions",
+    "auth_users",
+  ])
+  expect(migrated.columns).toEqual(packaged.columns)
+  expect(migrated.constraints).toEqual(packaged.constraints)
+  expect(migrated.indexes).toEqual(packaged.indexes)
 })
 
 Deno.test("sign-up, sign-in and sign-out through the package tables", async (t) => {

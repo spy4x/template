@@ -3,7 +3,8 @@ import { expect } from "@std/expect"
 import postgres from "postgres"
 import { GroupError, GroupListPageKey, GroupRole } from "@domain/groups"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 interface IdRow extends postgres.Row {
   id: number
@@ -20,7 +21,7 @@ interface MetadataRow extends postgres.Row {
 Deno.test({
   name: "group core Postgres integration",
   async fn(t) {
-    const connection = requireDbConnection()
+    const connection = buildPostgresOptions(requireDbConnection())
     const admin = postgres({ ...connection, max: 1 })
     const schema = `groups_test_${crypto.randomUUID().replace(/-/g, "")}`
     const snapshotSchema = `${schema}_snapshot`

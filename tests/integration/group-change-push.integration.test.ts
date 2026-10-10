@@ -9,7 +9,8 @@ import { PostgresGroupRepository } from "@server/groups/postgres-group-repositor
 import { Realtime } from "../../apps/api/services/realtime.ts"
 import { type GroupNewsTarget, listenForGroupNews } from "../../apps/api/services/group-news.ts"
 import { buildAuthData } from "../../apps/api/_testing/fake-auth.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 interface IdRow extends postgres.Row {
   id: number
@@ -48,7 +49,7 @@ function onlyGroup(realtime: Realtime, groupId: string) {
 
 /** Runs `body` on a fresh schema built from schema.sql. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const connection = requireDbConnection()
+  const connection = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...connection, max: 1, onnotice: () => {} })
   const schema = `push_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

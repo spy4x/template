@@ -23,7 +23,8 @@ import type { EmailMessage } from "@spy4x/email/message"
 import type { EmailSender } from "@spy4x/email/sender"
 import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * Webhook events applied to a real Postgres built from the migrations. Needs `DB_HOST`, `DB_USER`,
@@ -34,7 +35,7 @@ import { requireDbConnection } from "./db-connection.ts"
 const MIGRATIONS_DIR = "libs/server/db/migrations"
 
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const settings = requireDbConnection()
+  const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1, onnotice: () => {} })
   const schema = `billing_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

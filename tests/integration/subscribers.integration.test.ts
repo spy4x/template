@@ -23,7 +23,8 @@ import {
   type SubscribersSetup,
   subscriberUnsubscribeLink,
 } from "@server/subscribers/subscribers.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /** A throwaway secret for this test only. */
 const SETUP: SubscribersSetup = {
@@ -35,7 +36,7 @@ const BRAND = { webAppUrl: `https://app.example.com` }
 
 /** Runs `body` on a fresh schema built from schema.sql. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const connection = requireDbConnection()
+  const connection = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...connection, max: 1 })
   const schema = `subscribers_test_${crypto.randomUUID().replaceAll(`-`, ``)}`
   const sql = postgres({

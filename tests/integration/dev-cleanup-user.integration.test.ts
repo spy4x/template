@@ -7,7 +7,8 @@ import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
 import { createDevRoute } from "../../apps/api/routes/dev.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * The development-only `POST /test/cleanup-user` against a real Postgres, for users made through
@@ -37,7 +38,7 @@ interface CountRow extends postgres.Row {
 
 /** Runs `body` against a fresh schema with every migration applied, and drops the schema after. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const settings = requireDbConnection()
+  const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1, onnotice: () => {} })
   const schema = `dev_cleanup_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

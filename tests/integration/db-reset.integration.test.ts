@@ -2,21 +2,20 @@
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import { recreateDatabase } from "../../infra/scripts/db-reset.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 Deno.test("recreateDatabase empties an existing database and keeps its name", async () => {
-  const c = requireDbConnection()
+  const { connection: c } = requireDbConnection()
   const name = `reset_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`
   const env = {
     DB_HOST: c.host,
     DB_PORT: String(c.port),
     DB_USER: c.user,
-    DB_PASS: c.pass,
+    DB_PASS: c.password,
     DB_NAME: name,
   }
-  const connect = (database: string) =>
-    postgres({ host: c.host, port: c.port, user: c.user, password: c.pass, database, max: 1 })
-  const admin = connect(c.db)
+  const connect = (database: string) => postgres({ ...c, database, max: 1 })
+  const admin = connect(c.database)
   try {
     await recreateDatabase(env)
     let sql = connect(name)

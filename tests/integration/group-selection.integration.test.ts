@@ -2,7 +2,8 @@
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * The selected group against a real Postgres built from schema.sql. Needs `DB_HOST`, `DB_USER`,
@@ -14,7 +15,7 @@ interface IdRow extends postgres.Row {
 }
 
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const connection = requireDbConnection()
+  const connection = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...connection, max: 1, onnotice: () => {} })
   const schema = `selection_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({
