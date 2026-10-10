@@ -177,7 +177,10 @@ steps:
           '
       - apt-get install -y -qq --no-install-recommends nginx
       - SPA_SERVER=nginx e2e/spa/run.sh
-    depends_on: [check]
+    # The steps share one checkout. This one builds the SPA into apps/spa/dist, as `build` does,
+    # and both run scripts keep the API's vapid.json in the repository root while they run, so it
+    # waits for those two steps instead of running beside them.
+    depends_on: [build, e2e-mpa]
 
 services:
   postgres:
