@@ -4,34 +4,25 @@ import { FormRejected } from "./forms.ts"
 import { define } from "./utils.ts"
 import { HttpError } from "fresh"
 import { createSameOriginCheck } from "@spy4x/server/http/same-origin"
-import { securityHeaders } from "@spy4x/server/http/security-headers"
-import { Hono } from "hono"
-
-const CSP = "content-security-policy"
-const OWN_FORMS = "form-action 'self'"
+import { securityHeaderList } from "@spy4x/server/http/security-headers"
 
 /**
- * The header set `securityHeaders` of `@spy4x/server` sends, read once from a response it made: the
- * helper is Hono middleware and the MPA runs on Fresh. No option is passed, because a page here
- * loads one stylesheet from its own origin and no script, inline block, image or font, so the
- * policy is the helper's strictest: everything from `'self'` only, no plugins and no framing. Its
- * `Referrer-Policy: no-referrer` also covers the newsletter pages, whose address carries a token.
+ * The header set `securityHeaders` of `@spy4x/server` sends; the helper itself is Hono middleware
+ * and the MPA runs on Fresh. A page here loads one stylesheet from its own origin and no script,
+ * inline block, image or font, so the policy is the library's strictest: everything from `'self'`
+ * only, no plugins and no framing. Its `Referrer-Policy: no-referrer` also covers the newsletter
+ * pages, whose address carries a token.
  *
  * One directive is widened. The pricing page's form posts to the MPA, which redirects to the SPA's
  * sign-up, and a browser applies `form-action` to that redirect too. On a domain of its own the
- * MPA therefore allows the SPA's origin there; the helper has no option for this directive.
+ * MPA therefore allows the SPA's origin there.
  */
-async function securityHeaderSet(config: MpaConfig): Promise<[string, string][]> {
-  const app = new Hono().use(await securityHeaders()).get("/", (c) => c.body(null))
-  const headers = (await app.request("/")).headers
-  const policy = headers.get(CSP) ?? ""
-  if (!policy.split("; ").includes(OWN_FORMS)) {
-    throw new Error(`securityHeaders sent no "${OWN_FORMS}" to widen: ${policy}`)
-  }
-  if (config.apiOrigin !== config.webAppOrigin) {
-    headers.set(CSP, policy.replace(OWN_FORMS, `${OWN_FORMS} ${config.apiOrigin}`))
-  }
-  return [...headers]
+function securityHeaderSet(config: MpaConfig): Promise<[string, string][]> {
+  return securityHeaderList({
+    extraSources: config.apiOrigin === config.webAppOrigin
+      ? undefined
+      : { formAction: [config.apiOrigin] },
+  })
 }
 
 /**
