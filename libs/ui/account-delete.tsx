@@ -13,9 +13,9 @@ import {
   AccountDeletionBlockReason,
   DELETED_USER_NAME,
 } from "@domain/identity"
-import { TOUCH_TARGET } from "./page-header.tsx"
+import { TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
 import { GROUP_PATHS, type Navigate, ScreenForm } from "./progressive.tsx"
-import { SettingList, SettingRow } from "./setting-row.tsx"
+import { SettingList, SettingRow } from "@spy4x/preact-ui/setting-row"
 
 /** What the person has typed into the deletion dialog. */
 export interface AccountDeleteValues {

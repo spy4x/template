@@ -16,12 +16,23 @@ import { type NoteRow, NotesScreen, type NotesScreenProps } from "./notes-screen
 import { NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
-const own = { document: globalThis.document, FormData: globalThis.FormData }
+const own = {
+  document: globalThis.document,
+  FormData: globalThis.FormData,
+  location: globalThis.location,
+  getComputedStyle: globalThis.getComputedStyle,
+}
 
 beforeAll(() => {
   // Preact draws into `document`; EnhancedForm reads a form with `new FormData(form)`, which only
-  // the DOM's own FormData can do.
-  Object.assign(globalThis, { document: window.document, FormData: window.FormData })
+  // the DOM's own FormData can do. A link is routed only when it points at the page's own origin
+  // (`location`), and a dialog locks the page's scroll after reading its style (`getComputedStyle`).
+  Object.assign(globalThis, {
+    document: window.document,
+    FormData: window.FormData,
+    location: window.location,
+    getComputedStyle: window.getComputedStyle.bind(window),
+  })
 })
 
 afterAll(async () => {
@@ -168,7 +179,7 @@ describe("NotesScreen", () => {
   it("heads the page with Notes, the group's name under it, and New note opening the create page", () => {
     const html = renderToString(<NotesScreen {...listDefaults} />)
 
-    expect(html).toMatch(/<h1\b[^>]*>Notes<\/h1>/)
+    expect(html).toMatch(/<h1\b[^>]*><span\b[^>]*>Notes<\/span><\/h1>/)
     expect(html).toMatch(/data-e2e="notes-group"[^>]*>Team</)
     expect(tagOf(html, "note-new")).toContain(`href="${NOTE_PATHS.new}"`)
     // The button is an icon on a phone; its name stays "New note" for a screen reader.
@@ -639,7 +650,7 @@ describe("NoteEditorScreen", () => {
       />,
     )
 
-    expect(html).toMatch(/<h1\b[^>]*>New note<\/h1>/)
+    expect(html).toMatch(/<h1\b[^>]*><span\b[^>]*>New note<\/span><\/h1>/)
     expect(html).toMatch(/data-e2e="notes-group"[^>]*>Team</)
     expect(tagOf(html, "page-back")).toContain(`href="${NOTE_PATHS.list}"`)
     expect(tagOf(html, "page-back")).toContain(`aria-label="Back to notes"`)
@@ -650,7 +661,7 @@ describe("NoteEditorScreen", () => {
   it("puts Move and Delete of an existing note in the page's menu, not on the page", () => {
     const html = renderToString(<NoteEditorScreen {...editing} />)
 
-    expect(html).toMatch(/<h1\b[^>]*>Edit note<\/h1>/)
+    expect(html).toMatch(/<h1\b[^>]*><span\b[^>]*>Edit note<\/span><\/h1>/)
     expect(html).toContain(`aria-label="More actions"`)
     expect(html).toContain("Move to Family")
     expect(html).toContain("Move to Work")
@@ -662,7 +673,7 @@ describe("NoteEditorScreen", () => {
   it("shows a viewer the note as text, with no form and no way to change it", () => {
     const html = renderToString(<NoteEditorScreen {...editing} group={viewerOfTeam} />)
 
-    expect(html).toMatch(/data-e2e="note-read-title"[^>]*>Groceries</)
+    expect(html).toMatch(/data-e2e="note-read-title"[^>]*>(?:<span\b[^>]*>)?Groceries</)
     expect(html).toContain("milk")
     expect(html).toContain("Only an editor can change it.")
     expect(html).not.toContain("<form")

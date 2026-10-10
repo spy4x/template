@@ -16,7 +16,7 @@ import {
   type NoteFormErrors,
   type NotesGroup,
 } from "./notes-screen.tsx"
-import { PageHeader } from "./page-header.tsx"
+import { PageHeader } from "@spy4x/preact-ui/page-header"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 

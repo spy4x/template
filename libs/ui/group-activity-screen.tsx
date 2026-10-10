@@ -6,7 +6,7 @@ import { Stack } from "@spy4x/preact-ui/layout"
 import { Link } from "@spy4x/preact-ui/link"
 import { timeAgo } from "@spy4x/platform/universal/time"
 import { type ActivityEvent, describeActivity } from "@domain/groups"
-import { PageHeader } from "./page-header.tsx"
+import { PageHeader } from "@spy4x/preact-ui/page-header"
 import { GROUP_PATHS, type Navigate, NOTE_PATHS } from "./progressive.tsx"
 
 /** One event as the API sends it: `at` is an ISO timestamp. */

@@ -21,7 +21,7 @@ import {
   PAID_PLANS,
   type SeatPrice,
 } from "@domain/billing"
-import { PageHeader } from "./page-header.tsx"
+import { PageHeader } from "@spy4x/preact-ui/page-header"
 import { GROUP_PATHS, type Navigate } from "./progressive.tsx"
 
 /**

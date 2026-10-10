@@ -15,12 +15,12 @@ import { Modal } from "@spy4x/preact-ui/modal"
 import { type EmailStatus, UserMFAStatus, type UserPushTokenPublic } from "@domain/identity"
 import { AccountDelete, type AccountDeleteProps } from "./account-delete.tsx"
 import { ACCOUNT_COLUMN } from "./frame.tsx"
-import { PageHeader, TOUCH_TARGET } from "./page-header.tsx"
+import { PageHeader, TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
 import { type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
-import { SettingGroup, SettingList, SettingRow } from "./setting-row.tsx"
+import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-row"
 import { SignedInDevices, type SignedInDevicesProps } from "./signed-in-devices.tsx"
 import { ApiTokens, type ApiTokensProps } from "./api-tokens.tsx"
-import { useSucceeded } from "./use-succeeded.ts"
+import { useSucceeded } from "@spy4x/preact-ui/use-succeeded"
 import { TwoFactorStep, twoFactorStep } from "./two-factor.ts"
 
 /** The messages shown when an action failed without a message of its own. */
@@ -321,7 +321,7 @@ export function ProfileScreen(
           />
           <SettingRow
             label="Two-factor sign-in"
-            e2e="totp-row"
+            dataE2E="totp-row"
             value={step === TwoFactorStep.Disable
               ? (
                 <span class="flex flex-wrap items-center gap-2">
@@ -395,7 +395,7 @@ export function ProfileScreen(
                 {pushDevices.map((device) => (
                   <SettingRow
                     key={device.id}
-                    e2e={`push-device-${device.deviceId}`}
+                    dataE2E={`push-device-${device.deviceId}`}
                     label={`Device ${device.deviceId.slice(0, 8)}`}
                     value={`Added ${new Date(device.createdAt).toLocaleString()}`}
                     action={

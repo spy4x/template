@@ -14,7 +14,7 @@ import { timeAgo } from "@spy4x/platform/universal/time"
 import type { PlanRefusal } from "@domain/billing"
 import { canMutateNotes, type GroupRole } from "@domain/groups"
 import { NOTE_RESTORE_DAYS } from "@domain/notes"
-import { PageAction, PageHeader } from "./page-header.tsx"
+import { PageAction, PageHeader } from "@spy4x/preact-ui/page-header"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 

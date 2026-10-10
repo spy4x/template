@@ -30,12 +30,20 @@ import {
 } from "./subscribe-screen.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
-const own = { document: globalThis.document, FormData: globalThis.FormData }
+const own = {
+  document: globalThis.document,
+  FormData: globalThis.FormData,
+  getComputedStyle: globalThis.getComputedStyle,
+}
 
 beforeAll(() => {
   // Preact draws into `document`; EnhancedForm reads a form with `new FormData(form)`, which only
   // the DOM's own FormData can do.
-  Object.assign(globalThis, { document: window.document, FormData: window.FormData })
+  Object.assign(globalThis, {
+    document: window.document,
+    FormData: window.FormData,
+    getComputedStyle: window.getComputedStyle.bind(window),
+  })
 })
 
 afterAll(async () => {
