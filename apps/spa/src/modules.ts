@@ -260,11 +260,16 @@ export function forgetModules(): void {
   stopChanges()
   disconnectRealtime({ forget: true })
   const running = offlineLayer()
-  const deleting = stopOfflineLayer({ forget: true })
-  if (!running) return
+  // `forgetUser` got here first and has this person's deletion queued: one deletion is enough.
+  if (!running || settling.has(running.userId)) return void stopOfflineLayer()
+  const { userId } = running
   // Owed until the device has deleted them: a page closed before that leaves the next start to it.
-  owe(running.userId)
-  settle(running.userId, () => deleting)
+  owe(userId)
+  settling.add(userId)
+  const deleting = stopOfflineLayer({ forget: true }).finally(() => settling.delete(userId))
+  // A refusal is reported by `settle`, which may only get to it after an earlier deletion.
+  deleting.catch(() => {})
+  settle(userId, () => deleting)
 }
 
 /** Records that the page now holds a group up to `sequence`, so a later hint for it is a repeat. */
