@@ -19,7 +19,7 @@ export function useUndoToast(store: typeof notesStore): void {
       body: offer.title ? `"${offer.title}" was deleted.` : "The note was deleted.",
       duration: left,
       dataE2E: "note-undo-toast",
-      action: { label: "Undo", onAction: () => void store.undoDelete() },
+      action: { label: "Undo", dataE2E: "note-undo", onAction: () => void store.undoDelete() },
     })
     return () => toasts.remove(offer.id)
   }, [offer])

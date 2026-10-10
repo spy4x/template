@@ -68,6 +68,7 @@ describe("useUndoToast", () => {
     expect(toast.duration).toBeGreaterThan(9_000)
     expect(toast.duration).toBeLessThanOrEqual(10_000)
     expect(toast.action?.label).toBe("Undo")
+    expect(toast.action?.dataE2E).toBe("note-undo")
     toast.action?.onAction()
     expect(undone).toEqual(["n1"])
   })
