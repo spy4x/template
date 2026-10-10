@@ -16,7 +16,8 @@ import {
 import type { APIContext } from "../../apps/api/_types.ts"
 import { issuePasswordReset } from "../../libs/server/auth/password-reset.ts"
 import { sendEmailCode } from "../../libs/server/auth/email-verification.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * Proving an address with a code (#140), through the exact `createSignIn` and `AppDbBase` the API
@@ -31,7 +32,7 @@ const COOKIE_SECRET = "integration-test-only-cookie-secret-0123456789"
 const PASSWORD = "Passw0rd!"
 
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const settings = requireDbConnection()
+  const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1 })
   const schema = `email_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

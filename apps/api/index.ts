@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import { applyBaseMiddleware } from "./base-middleware.ts"
+import { applyBaseMiddleware } from "@spy4x/server/request-log/base-middleware"
 import { db, sql } from "@api/services/db.ts"
 import { config } from "@api/services/config.ts"
 import { log } from "@api/services/log.ts"
@@ -63,7 +63,7 @@ import {
   subscribersOffWarning,
 } from "@server/subscribers/subscribers.ts"
 import { createPostgresSubscriberStore } from "@spy4x/server/subscribers/postgres"
-import { createErrorReporter } from "@platform/error-reporter.ts"
+import { createErrorReporter } from "@spy4x/platform"
 import "./cqrs/+init.ts"
 
 const REALTIME_REVALIDATE_INTERVAL_MS = 15_000
@@ -83,6 +83,7 @@ const errorReporter = createErrorReporter({
 })
 applyBaseMiddleware(app, {
   write: log,
+  skipLogPaths: ["/api/health"],
   parseAuth,
   reportError: (error, context) => void errorReporter.report(error, context),
 })

@@ -7,7 +7,8 @@ import { SessionStatus } from "@spy4x/server/sign-in"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * Signed-in devices (#151) against a real Postgres: what a session remembers about its device, the
@@ -32,7 +33,7 @@ const SAFARI_IPHONE =
 
 /** Runs `body` against a fresh schema with every migration applied, and drops the schema after. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const settings = requireDbConnection()
+  const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1, onnotice: () => {} })
   const schema = `sessions_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({
@@ -377,16 +378,16 @@ Deno.test("a user's last-seen time moves at most once every five minutes, whatev
     const at = (minutes: number) => new Date(start.getTime() + minutes * 60_000)
     expect(await seen()).toBeNull()
 
-    await db.sessionDevices.touchUser(userId, start)
+    await db.userSeen.touch(userId, start)
     expect(await seen()).toBe(start.getTime())
     // Activity on any session, one minute and then just under five minutes later, writes nothing.
-    await db.sessionDevices.touchUser(userId, at(1))
-    await db.sessionDevices.touchUser(userId, new Date(at(5).getTime() - 1))
+    await db.userSeen.touch(userId, at(1))
+    await db.userSeen.touch(userId, new Date(at(5).getTime() - 1))
     expect(await seen()).toBe(start.getTime())
     // At five minutes it writes, and the window starts again from that write.
-    await db.sessionDevices.touchUser(userId, at(5))
+    await db.userSeen.touch(userId, at(5))
     expect(await seen()).toBe(at(5).getTime())
-    await db.sessionDevices.touchUser(userId, at(9))
+    await db.userSeen.touch(userId, at(9))
     expect(await seen()).toBe(at(5).getTime())
 
     // A real request on either session records the first sighting through the middleware.
@@ -401,12 +402,11 @@ Deno.test("a user's last-seen time moves at most once every five minutes, whatev
 
 /** A database whose last-used write always fails, as during a short Postgres outage. */
 class FailingTouchDb extends AppDbBase {
-  override get sessionDevices() {
-    return {
-      ...super.sessionDevices,
-      touch: () => Promise.reject(new Error("database is down")),
-      touchUser: () => Promise.reject(new Error("database is down")),
-    }
+  override get sessionStore() {
+    return { ...super.sessionStore, touch: () => Promise.reject(new Error("database is down")) }
+  }
+  override get userSeen() {
+    return { touch: () => Promise.reject(new Error("database is down")) }
   }
 }
 

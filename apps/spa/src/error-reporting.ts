@@ -2,7 +2,7 @@ import {
   createErrorReporter,
   type ErrorEventTarget,
   type ErrorReporter,
-} from "@platform/error-reporter.ts"
+} from "@spy4x/platform/universal/error-reporter"
 
 /** What the SPA reads from its build environment (`VITE_` prefix optional). */
 export interface ErrorReportingEnv {

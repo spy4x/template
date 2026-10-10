@@ -2,7 +2,8 @@
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import { type OutboxEvent, OutboxProcessor, PostgresOutboxRepository } from "@spy4x/server/outbox"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 interface CountRow extends postgres.Row {
   count: number
@@ -30,7 +31,7 @@ const MIGRATIONS = [
 Deno.test({
   name: "outbox drain Postgres integration",
   async fn(t) {
-    const connection = requireDbConnection()
+    const connection = buildPostgresOptions(requireDbConnection())
     const admin = postgres({ ...connection, max: 1 })
     const schema = `outbox_test_${crypto.randomUUID().replace(/-/g, "")}`
     const sql = postgres({

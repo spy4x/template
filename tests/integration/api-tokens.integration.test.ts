@@ -28,7 +28,8 @@ import type { AuthRateLimits } from "../../apps/api/middlewares/auth-rate-limits
 import { issuePasswordReset } from "../../libs/server/auth/password-reset.ts"
 import { createTokenApiRoute } from "../../apps/api/routes/token-api.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * Personal API tokens (#167) against a real Postgres, through the real sign-in, the real token
@@ -48,7 +49,7 @@ const WEB_APP_URL = "https://app.example.com"
 const API = "http://app.example.com/api"
 
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const settings = requireDbConnection()
+  const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1, onnotice: () => {} })
   const schema = `api_tokens_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

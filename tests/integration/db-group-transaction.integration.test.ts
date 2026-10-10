@@ -2,7 +2,8 @@
 import { expect } from "@std/expect"
 import postgres from "postgres"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * Proves docs/handoff.md trap 5 against the real class `apps/api/services/db.ts`'s `DbService`
@@ -47,7 +48,7 @@ const MIGRATIONS = [
 Deno.test({
   name: "a repository built through db.group rolls back with its transaction",
   async fn() {
-    const connection = requireDbConnection()
+    const connection = buildPostgresOptions(requireDbConnection())
     const admin = postgres({ ...connection, max: 1 })
     const schema = `db_group_tx_test_${crypto.randomUUID().replace(/-/g, "")}`
     const sql = postgres({

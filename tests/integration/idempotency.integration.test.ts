@@ -8,7 +8,8 @@ import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { UserMFAStatus } from "@domain/identity"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { createIdempotencyMiddleware, PostgresIdempotencyStore } from "@spy4x/server/idempotency"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 interface IdRow extends postgres.Row {
   id: number
@@ -21,7 +22,7 @@ interface SequenceRow extends postgres.Row {
 
 /** Runs `body` on a fresh schema built from schema.sql. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const connection = requireDbConnection()
+  const connection = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...connection, max: 1 })
   const schema = `idem_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

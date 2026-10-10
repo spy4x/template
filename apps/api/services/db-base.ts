@@ -26,15 +26,7 @@ import {
 } from "@server/jobs/account-deletion.ts"
 import { scheduleStarterData } from "@server/jobs/starter-data.ts"
 import type { AccountDeletionBlocker } from "@domain/identity"
-import {
-  deleteOtherSessions,
-  deleteOwnSession,
-  listLiveSessions,
-  recordSessionDevice,
-  type SessionDevice,
-  touchSession,
-  touchUserSeen,
-} from "@server/auth/sessions.ts"
+import { touchUserSeen } from "@server/auth/sessions.ts"
 import { type ApiTokenRows, apiTokenRows } from "@server/api-tokens/api-tokens.ts"
 
 /** A user's authenticator-app enrolment, one row of `user_totp`. */
@@ -134,31 +126,24 @@ export class AppDbBase extends DbServiceBase {
     return createPostgresAuthStore(this.sql)
   }
 
-  /** The `@spy4x/server` session store over `auth_sessions`. Built per access, like `group`. */
-  get sessionStore(): SessionStore<AuthSessionRecord> {
+  /**
+   * The `@spy4x/server` session store over `auth_sessions`: sessions, what the devices list shows
+   * about them, and ending them. Built per access, like `group`, so inside `begin()` it writes
+   * through the transaction.
+   */
+  get sessionStore(): Required<SessionStore<AuthSessionRecord>> {
     return createPostgresSessionStore(this.sql)
   }
 
   /**
-   * What the devices list shows about the sessions, and ending them (`@server/auth/sessions.ts`).
-   * Built per access, like `group`, so inside `begin()` it writes through the transaction.
+   * When each person was last active (`users.last_seen_at`, `@server/auth/sessions.ts`). Built per
+   * access, like `group`.
    */
-  get sessionDevices() {
+  get userSeen() {
     const sql = this.sql
     return {
-      /** Records the device on a session just created. */
-      record: (sessionId: number, device: SessionDevice) =>
-        recordSessionDevice(sql, sessionId, device),
-      /** Records that the session was used now, at most every few minutes. */
-      touch: (sessionId: number) => touchSession(sql, sessionId),
       /** Records that the user was active at `now`, at most every five minutes. */
-      touchUser: (userId: number, now?: Date) => touchUserSeen(sql, userId, now),
-      /** The user's sessions that can still act, last used first. */
-      listLive: (userId: number) => listLiveSessions(sql, userId),
-      /** Deletes the user's own session; `false` when the user has no such session. */
-      deleteOwn: (userId: number, sessionId: number) => deleteOwnSession(sql, userId, sessionId),
-      /** Deletes every session of the user but `keepId`; returns how many. */
-      deleteOthers: (userId: number, keepId: number) => deleteOtherSessions(sql, userId, keepId),
+      touch: (userId: number, now?: Date) => touchUserSeen(sql, userId, now),
     }
   }
 

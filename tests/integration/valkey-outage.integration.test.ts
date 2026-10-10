@@ -11,7 +11,8 @@ import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createCacheService } from "../../apps/api/services/cache-service.ts"
 import { createSignIn } from "../../apps/api/services/sign-in.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * A signed-in request against a real Postgres and the API's real `RedisKvStore`, while the
@@ -145,7 +146,7 @@ async function withValkeyApp(
     stopValkey: () => void
   }) => Promise<void>,
 ): Promise<void> {
-  const settings = requireDbConnection()
+  const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1 })
   const schema = `valkey_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

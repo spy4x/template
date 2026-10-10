@@ -25,7 +25,8 @@ import {
   accountDeletionMailJob,
   accountRestoredMailJob,
 } from "../../libs/server/jobs/account-deletion.ts"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /**
  * Deleting one's own account (#144) against a real Postgres: the request, the refusal while a group
@@ -57,7 +58,7 @@ function totpCode(timestamp: number): string {
 
 /** Runs `body` against a fresh schema with every migration applied, and drops the schema after. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const settings = requireDbConnection()
+  const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1, onnotice: () => {} })
   const schema = `account_deletion_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

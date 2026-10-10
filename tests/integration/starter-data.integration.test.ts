@@ -12,11 +12,12 @@ import { entitlementsOf, FREE_PLAN_ID } from "@domain/billing"
 import { JOB_AGGREGATE } from "@server/jobs/jobs.ts"
 import type { OutboxEvent } from "@spy4x/server/outbox"
 import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 /** Runs `body` on a fresh schema built from schema.sql. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
-  const connection = requireDbConnection()
+  const connection = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...connection, max: 1 })
   const schema = `starter_test_${crypto.randomUUID().replaceAll("-", "")}`
   const sql = postgres({

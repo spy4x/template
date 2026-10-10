@@ -5,7 +5,8 @@ import { createPushTokenStore } from "../../apps/api/services/push-token-store.t
 import { createWebPushService } from "../../apps/api/services/web-push-service.ts"
 import { browserKeys, fakePushService } from "../../apps/api/_testing/web-push.ts"
 import { generateVapidKeyPair } from "@spy4x/integrations/push"
-import { requireDbConnection } from "./db-connection.ts"
+import { buildPostgresOptions } from "@spy4x/server/db/postgres"
+import { requireDbConnection } from "@spy4x/server/db/testing"
 
 interface IdRow extends postgres.Row {
   id: number
@@ -43,7 +44,7 @@ async function insertUser(sql: postgres.Sql): Promise<number> {
 Deno.test({
   name: "web push subscriptions in Postgres",
   async fn(t) {
-    const connection = requireDbConnection()
+    const connection = buildPostgresOptions(requireDbConnection())
     const admin = postgres({ ...connection, max: 1 })
     const schema = `web_push_test_${crypto.randomUUID().replace(/-/g, "")}`
     const open = () =>
