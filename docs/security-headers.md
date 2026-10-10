@@ -59,7 +59,11 @@ that adds a header includes the file again. A new `location` with an `add_header
 `e2e/spa/security-headers.spa.ts` checks the ones that exist.
 
 The Vite dev server sends none of these headers: it injects inline scripts and styles of its own
-that no fixed policy fits. The policy is therefore checked against the production image.
+that no fixed policy fits. The policy is therefore checked behind nginx.
+
+nginx serves no byte ranges (`max_ranges 0`): its answer to a range it cannot satisfy, a 416, would
+carry every header twice. A product that serves video or large downloads from the SPA's own origin
+needs ranges back, and then a `location` for those files that sets the headers itself.
 
 ### Letting the app load something new
 
@@ -71,8 +75,9 @@ the table above. Prefer serving the file from the app's own origin, which needs 
 
 arktype, the validation library, tries `new Function` once per page load, inside a `try`, to learn
 whether it may compile its validators. The policy refuses it, the browser records the refusal, and
-arktype validates without compiling. The app works; the walk in `e2e/spa` expects this refusal and
-no other.
+arktype validates without compiling. The app works. The walk in `e2e/spa` reads from the script
+the place the browser names for each refused `eval`, and fails unless it is that probe: any other
+`eval` in the app fails it.
 
 ## The MPA's policy
 
@@ -97,8 +102,11 @@ because Fresh would answer those outside every middleware, without the headers.
 | The MPA's headers on real responses; a walk with no refusal under the policy   | `e2e/mpa/security-headers.mpa.ts`                        | `e2e/mpa/run.sh` (CI step `e2e-mpa`)     |
 | The SPA's policy: its sources, the hashes of the inline blocks, the nginx lines | `libs/client/vite/nginx-security-headers.test.ts`        | `deno task check`                        |
 | The tracker origin the container writes, and what it refuses                   | `tests/spa-runtime-config.test.ts`                       | `deno task check`                        |
-| nginx's real responses; a signed-in walk with no refusal under the policy      | `e2e/spa/security-headers.spa.ts`                        | `e2e/spa/run.sh`, on a machine with a container tool |
+| nginx's real responses; a signed-in walk with no refusal under the policy      | `e2e/spa/security-headers.spa.ts`                        | `e2e/spa/run.sh` (CI step `e2e-spa`)     |
 
-`e2e/spa/run.sh` builds the image of `apps/spa/dockerfile.prod`, starts it beside the API and runs
-the specs against it. It needs a container tool, which the CI steps do not have, so CI does not run
-it yet; run it before changing `nginx.conf`, the policy or the page's inline blocks.
+`e2e/spa/run.sh` has two modes. By default it builds the image of `apps/spa/dockerfile.prod` with
+the container tool, as a deploy does, runs it beside the API and removes the image afterwards: use
+this on a machine. CI steps have no container tool, so the step runs it with `SPA_SERVER=nginx`,
+which builds the SPA and installs it, `nginx.conf` and the header file into the step's own nginx at
+the paths the image uses. That mode does not prove the `COPY` lines of the Dockerfile; the release
+pipeline's image build stops if the header file is missing.
