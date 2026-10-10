@@ -39,6 +39,9 @@ function codeOf(error: RealtimeRequestError): string | null {
 /** Reads a failed note command: unreachable (try later) or the server's refusal and its code. */
 export function classifyNoteError(error: unknown): SendFailure {
   if (!(error instanceof RealtimeRequestError) || isRetryable(error)) return { kind: "unreachable" }
+  // The session ended, belongs to someone else or owes a second factor (the server answers all
+  // three as `unauthorized`): the write was not judged, so it stays queued for its owner.
+  if (error.code === "unauthorized") return { kind: "unreachable" }
   switch (codeOf(error)) {
     case "VERSION_CONFLICT":
       return { kind: "version" }
