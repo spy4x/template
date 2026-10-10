@@ -26,8 +26,8 @@ function buildApp(auth: AppAuthState | null = buildAuthData({ user: { id: 7 } })
   return { app: mountRoute("/ws", route, auth), upgrades }
 }
 
-/** The handshake's address as the page of user 7 opens it. */
-const SOCKET_URL = `${API_URL}/ws?user=7`
+/** The socket's address. The page of user 7 names them in the handshake's subprotocol. */
+const SOCKET_URL = `${API_URL}/ws`
 
 /** A signed-in browser's WebSocket handshake, with `origin` as its Origin header when given. */
 function handshake(origin?: string, extra: Record<string, string> = {}): RequestInit {
@@ -35,6 +35,7 @@ function handshake(origin?: string, extra: Record<string, string> = {}): Request
     upgrade: "websocket",
     connection: "Upgrade",
     cookie: "sessionIdToken=1:token",
+    "sec-websocket-protocol": "user.7",
     ...extra,
   }
   if (origin !== undefined) headers.origin = origin
@@ -72,8 +73,11 @@ describe("socket route", () => {
 
   it("refuses an upgrade whose page names another user than the session's, or names none", async () => {
     const { app, upgrades } = buildApp()
-    for (const url of [`${API_URL}/ws?user=8`, `${API_URL}/ws`, `${API_URL}/ws?user=07`]) {
-      const response = await app.request(url, handshake(WEB_APP_URL))
+    for (const offered of ["user.8", "", "user.07", "chat, user.8"]) {
+      const response = await app.request(
+        SOCKET_URL,
+        handshake(WEB_APP_URL, { "sec-websocket-protocol": offered }),
+      )
       expect(response.status).toBe(401)
     }
     expect(upgrades).toEqual([])

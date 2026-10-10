@@ -8,8 +8,16 @@ import type { APIContext } from "../_types.ts"
 import type { Realtime } from "./realtime.ts"
 import type { AppAuthState, SignIn } from "./sign-in.ts"
 
-/** The query parameter of the handshake that names the user the page was started for. */
-export const SOCKET_USER_PARAM = "user"
+/** The prefix of the subprotocol that names the user the page was started for: `user.<id>`. */
+export const SOCKET_USER_PROTOCOL = "user."
+
+/** The `user.<id>` subprotocol the handshake offered, or `null` when it offered none. */
+export function offeredUserProtocol(request: Request): string | null {
+  const offered = request.headers.get("sec-websocket-protocol")?.split(",") ?? []
+  return offered.map((value) => value.trim()).find((value) =>
+    value.startsWith(SOCKET_USER_PROTOCOL)
+  ) ?? null
+}
 
 /** What {@link createSocketRoute} needs from the app. */
 export interface SocketRouteDependencies {
@@ -35,8 +43,9 @@ export interface SocketRouteDependencies {
  *    attaches the session cookie to a socket that a page on a sibling subdomain opens, and that
  *    page can read every message; `SameSite=Lax` does not stop it, and CORS does not govern
  *    handshakes.
- * 3. The handshake names the user the page was started for (`?user=<id>`; a browser cannot set a
- *    header on a socket), and the session must be that user's, or the upgrade is refused with 401.
+ * 3. The handshake names the user the page was started for, as the subprotocol `user.<id>` (a
+ *    browser cannot set a header on a socket), and the session must be that user's, or the upgrade
+ *    is refused with 401.
  *    A cookie can change under a running page, and a socket opened as someone else would carry the
  *    page's calls as them.
  *
@@ -54,11 +63,12 @@ export function createSocketRoute(deps: SocketRouteDependencies): Hono<APIContex
         if (!auth) {
           return c.json({ error: "Not authenticated" }, 401)
         }
-        if (!isBoundToUser(c.req.query(SOCKET_USER_PARAM), auth.user.id)) {
-          return c.json({ error: "The session belongs to another user" }, 401)
-        }
         if (c.req.header("upgrade")?.toLowerCase() !== "websocket") {
           return c.json({ error: "Upgrade required" }, 426)
+        }
+        const claimed = offeredUserProtocol(c.req.raw)?.slice(SOCKET_USER_PROTOCOL.length)
+        if (!isBoundToUser(claimed, auth.user.id)) {
+          return c.json({ error: "The session belongs to another user" }, 401)
         }
         return upgrade(c, auth)
       },
@@ -70,7 +80,10 @@ function upgradeWebSocket(
   auth: AppAuthState,
   realtime: Pick<Realtime, "attach">,
 ): Response {
-  const { socket, response } = Deno.upgradeWebSocket(c.req.raw)
+  // A browser closes a socket whose server accepted none of the subprotocols it offered.
+  const { socket, response } = Deno.upgradeWebSocket(c.req.raw, {
+    protocol: offeredUserProtocol(c.req.raw) ?? undefined,
+  })
   realtime.attach(adaptWebSocket(socket), auth)
   return response
 }
