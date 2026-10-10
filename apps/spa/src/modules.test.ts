@@ -270,7 +270,7 @@ describe("a page whose socket module is on", () => {
     ])
   })
 
-  it("sends the first call after the start over the socket once it opens, not over HTTP beside it", async () => {
+  it("sends the start-up pull's call over the socket once it opens, not over HTTP beside it", async () => {
     pageWithSockets()
     configureModules({ realtime: true, offline: false })
     const overHttp: string[] = []
@@ -278,10 +278,15 @@ describe("a page whose socket module is on", () => {
       overHttp.push(String(input instanceof Request ? input.url : input))
       return Promise.resolve(Response.json({ result: { groups: ["over HTTP"] } }))
     }) as typeof fetch
-    startModules(7, checksOf([]))
-    const socket = FakeWebSocket.opened[0]
+    let answer: Promise<unknown> | undefined
+    // The start-up pull makes the page's first call, in the same turn as the start.
+    const reads = {
+      pull: () => {},
+      check: async () => void await (answer ??= callQuery("group.list", {})),
+    }
 
-    const answer = callQuery("group.list", {})
+    startModules(7, reads)
+    const socket = FakeWebSocket.opened[0]
     await pause(5)
     socket.accept()
     await until(() =>
