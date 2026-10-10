@@ -33,6 +33,12 @@ export interface AppCallPortOptions {
   userId: number
   /** The socket module's port, when the product has one: preferred while its socket is open. */
   socket?: AvailableCallPort
+  /**
+   * The socket's first open while it is pending, or `null`. A call made meanwhile waits for it
+   * (the library's `firstOpenWait`), so the page's first reads do not go over HTTP beside a
+   * socket that is about to open.
+   */
+  socketFirstOpen?: () => Promise<void> | null
   /** Defaults to {@link signOutPage}. */
   onUnauthorized?: () => void
   /** Defaults to the global `fetch`; a test passes its own. */
@@ -50,7 +56,14 @@ export function createAppCallPort(options: AppCallPortOptions): CallPort {
     userId: String(options.userId),
     fetch: options.fetch,
   })
-  const port = options.socket ? createComposedCallPort({ socket: options.socket, http }) : http
+  const { socket, socketFirstOpen } = options
+  const port = socket
+    ? createComposedCallPort({
+      socket,
+      http,
+      firstOpenWait: socketFirstOpen && { pending: socketFirstOpen },
+    })
+    : http
   return withUnauthorizedHook(port, options.onUnauthorized ?? signOutPage)
 }
 

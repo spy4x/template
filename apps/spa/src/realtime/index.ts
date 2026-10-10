@@ -117,9 +117,9 @@ interface Connection {
   /** The calls the open socket carries. */
   calls: AvailableCallPort
   /**
-   * Settles once the first socket has opened or failed, or took too long: `null` from then on. A
-   * call made at start-up waits for it, so the page's first reads go over the socket it is opening
-   * and not over HTTP beside it.
+   * Settles once the first socket has opened or failed: `null` from then on. The composed port
+   * makes a call at start-up wait for it ({@link socketFirstOpen}), so the page's first reads go
+   * over the socket it is opening and not over HTTP beside it.
    */
   firstOpen: Promise<void> | null
   cursors: PersistentCursorStore
@@ -130,12 +130,6 @@ interface Connection {
 }
 
 let current: Connection | null = null
-
-/**
- * How long a call made while the first socket is still opening waits for it before it goes over
- * HTTP instead.
- */
-export const FIRST_OPEN_WAIT_MS = 3_000
 
 function socketUrl(): string {
   const protocol = location.protocol === "https:" ? "wss" : "ws"
@@ -189,7 +183,6 @@ export function connectRealtime(
   // gap itself: it pulls once the server has acknowledged the first open, as after a reconnect.
   let settleFirstOpen = () => {}
   const firstOpen = new Promise<void>((resolve) => settleFirstOpen = resolve)
-  const firstOpenTimer = setTimeout(() => settleFirstOpen(), FIRST_OPEN_WAIT_MS)
   const stopStatus = transport.onStatus((snapshot) => {
     const wsStatus = STATUS_TEXT[snapshot.status]
     if (wsStatus === "open" || wsStatus === "closed") settleFirstOpen()
@@ -233,7 +226,6 @@ export function connectRealtime(
     cursors,
     stopStatus: () => {
       stopStatus()
-      clearTimeout(firstOpenTimer)
       settleFirstOpen()
     },
     stopWatching,
@@ -272,25 +264,26 @@ export function advanceGroupCursor(groupId: string, sequence: number): void {
   current?.cursors.advanceTo(groupId, sequence)
 }
 
-/** The connection's port, once its first socket has opened or failed. */
-async function settledCalls(): Promise<AvailableCallPort> {
-  const connection = current
-  if (connection?.firstOpen) await connection.firstOpen
-  if (!connection || connection !== current) {
-    throw new ConnectionLostError("the socket is not open")
-  }
-  return connection.calls
+function openCalls(): AvailableCallPort {
+  if (!current) throw new ConnectionLostError("the socket is not open")
+  return current.calls
 }
 
 /**
  * The calls port of the socket, for the composed port in `modules.ts`: available while the socket
- * is open, and while the first one is still opening (a call then waits for it, at most
- * {@link FIRST_OPEN_WAIT_MS}). Without an open socket every call fails as a dropped connection,
- * which the composed port answers by sending the call over HTTP.
+ * is open. Without an open socket every call fails as a dropped connection, which the composed
+ * port answers by sending the call over HTTP.
  */
 export const socketCalls: AvailableCallPort = {
-  isAvailable: () =>
-    current !== null && (current.firstOpen !== null || current.calls.isAvailable()),
-  command: async (name, payload, options) => (await settledCalls()).command(name, payload, options),
-  query: async (name, payload, options) => (await settledCalls()).query(name, payload, options),
+  isAvailable: () => current?.calls.isAvailable() ?? false,
+  command: async (name, payload, options) => await openCalls().command(name, payload, options),
+  query: async (name, payload, options) => await openCalls().query(name, payload, options),
+}
+
+/**
+ * The first open of the socket while it is still pending, for the composed port's `firstOpenWait`
+ * (`@spy4x/realtime/calls`): a call made meanwhile waits for it, for as long as the library allows.
+ */
+export function socketFirstOpen(): Promise<void> | null {
+  return current?.firstOpen ?? null
 }

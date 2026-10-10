@@ -49,7 +49,11 @@ class FakeWebSocket {
   removeEventListener(type: string, listener: (event: unknown) => void) {
     this.#listeners.get(type)?.delete(listener)
   }
-  send() {}
+  /** The frames the page sent, parsed. */
+  sent: Record<string, unknown>[] = []
+  send(data: string) {
+    this.sent.push(JSON.parse(data))
+  }
   close() {
     this.readyState = 3
   }
@@ -60,6 +64,10 @@ class FakeWebSocket {
   accept() {
     this.readyState = 1
     this.#emit("open", {})
+  }
+  /** The server sent `frame`. */
+  receive(frame: unknown) {
+    this.#emit("message", { data: JSON.stringify(frame) })
   }
   /** The network dropped the socket. */
   drop() {
@@ -260,6 +268,30 @@ describe("a page whose socket module is on", () => {
     expect(FakeWebSocket.opened.map((socket) => [socket.url, socket.protocols])).toEqual([
       ["wss://app.example.com/api/ws", ["user.7"]],
     ])
+  })
+
+  it("sends the first call after the start over the socket once it opens, not over HTTP beside it", async () => {
+    pageWithSockets()
+    configureModules({ realtime: true, offline: false })
+    const overHttp: string[] = []
+    globalThis.fetch = ((input: string | URL | Request) => {
+      overHttp.push(String(input instanceof Request ? input.url : input))
+      return Promise.resolve(Response.json({ result: { groups: ["over HTTP"] } }))
+    }) as typeof fetch
+    startModules(7, checksOf([]))
+    const socket = FakeWebSocket.opened[0]
+
+    const answer = callQuery("group.list", {})
+    await pause(5)
+    socket.accept()
+    await until(() =>
+      socket.sent.some((frame) => frame.name === "group.list") || overHttp.length > 0
+    )
+    const frame = socket.sent.find((sent) => sent.name === "group.list")
+    socket.receive({ kind: "server.result", requestId: frame?.id, payload: { groups: [] } })
+
+    expect(await answer).toEqual({ groups: [] })
+    expect(overHttp).toEqual([])
   })
 
   it("checks on the timer while the socket is not open, stops once it opens, and starts again when it drops", async () => {

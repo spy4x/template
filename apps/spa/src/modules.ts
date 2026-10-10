@@ -8,6 +8,7 @@ import {
   connectRealtime,
   disconnectRealtime,
   socketCalls,
+  socketFirstOpen,
 } from "./realtime/index.ts"
 import {
   currentLayer as offlineLayer,
@@ -164,7 +165,9 @@ export interface StartOptions {
 export function startModules(userId: number, reads: ChangeReads, options: StartOptions = {}): void {
   if (session?.userId === userId) return
   stopChanges()
-  const port = createAppCallPort({ userId, socket: switches.realtime ? socketCalls : undefined })
+  const port = createAppCallPort(
+    switches.realtime ? { userId, socket: socketCalls, socketFirstOpen } : { userId },
+  )
   const runner = createSyncRunner({
     flush: async () => {
       const full = opened.full
@@ -215,10 +218,12 @@ export function startModules(userId: number, reads: ChangeReads, options: StartO
     if (on) runner.start()
     else runner.stop()
   }
+  // The socket's hints replace the timer while it is open, and only then. It starts opening before
+  // the first call is made: the calls port decides once, at its first call, whether to wait for
+  // the first open, and must find it pending.
+  if (switches.realtime) connectRealtime(userId, reads.pull, (open) => poll(!open))
   // The first run is the start-up pull.
   poll(true)
-  // The socket's hints replace the timer while it is open, and only then.
-  if (switches.realtime) connectRealtime(userId, reads.pull, (open) => poll(!open))
 }
 
 /**
