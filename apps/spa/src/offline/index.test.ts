@@ -287,4 +287,27 @@ describe("what the device keeps", () => {
       delete globals.localStorage
     }
   })
+
+  it("are gone before the sign-in page shows, even when the page asked twice to forget", async () => {
+    const { storage, device } = await deviceInUse()
+    const kept = new Map<string, string>()
+    globals.localStorage = {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => void kept.set(key, value),
+      removeItem: (key: string) => void kept.delete(key),
+    } as Storage
+    try {
+      configureModules({ realtime: false, offline: true })
+      rememberUser(user(7))
+
+      // The session store's own reaction to "nobody is signed in" comes first; the start, which
+      // holds the sign-in page back, asks second and finds nobody remembered.
+      void forgetUser(storage)
+      await forgetUser(storage)
+
+      expect([...device.reads.keys()]).toEqual([])
+    } finally {
+      delete globals.localStorage
+    }
+  })
 })

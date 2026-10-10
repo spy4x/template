@@ -363,12 +363,20 @@ export function rememberUser(user: SessionUser): void {
  * a start that found no session must not leave the last person's lists on a shared device. The
  * queue of unsent writes stays, as on sign-out. Resolves once the copies are deleted.
  */
-export async function forgetUser(storage?: OfflineStorage): Promise<void> {
+export function forgetUser(storage?: OfflineStorage): Promise<void> {
   // While the module is off nothing was kept, and looking would create the databases.
   const remembered = switches.offline ? recallCachedUser() : null
   forgetCachedUser()
-  if (remembered) await forgetDeviceCopy(remembered.id, storage).catch(() => {})
+  if (remembered) {
+    const { id } = remembered
+    forgetting = forgetting.then(() => forgetDeviceCopy(id, storage)).catch(() => {})
+  }
+  // A second caller finds nobody remembered, and still waits for the deletion the first started.
+  return forgetting
 }
+
+/** The deletions {@link forgetUser} started, in order; resolved when all of them are done. */
+let forgetting: Promise<void> = Promise.resolve()
 
 /** The remembered user, or `null`: always `null` while the module is off. */
 export function recallUser(): SessionUser | null {
