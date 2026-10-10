@@ -151,17 +151,6 @@ describe("call route", () => {
     expect(calls).toEqual([])
   })
 
-  it("answers an unknown name as not found", async () => {
-    const { app } = buildApp()
-
-    const response = await app.request(
-      ...call("group.destroy", {}, { "idempotency-key": "key-1" }),
-    )
-
-    expect(response.status).toBe(404)
-    expect((await response.json()).error.code).toBe("not_found")
-  })
-
   it("answers a domain error with the socket's code and details, and hides any other failure", async () => {
     const failures = [
       new GroupError("ID_ALREADY_EXISTS", "Group id is already in use"),

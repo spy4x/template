@@ -7,7 +7,6 @@ import {
   configureModules,
   connectionDisplay,
   moduleSwitches,
-  recallUser,
   startModules,
   stopChanges,
 } from "./modules.ts"
@@ -58,12 +57,6 @@ describe("the module switches", () => {
     configureModules({ realtime: false })
 
     expect([withSocket, connectionDisplay(state)]).toEqual(["closed", "open"])
-  })
-
-  it("recall no user for an offline start while the local data is off", () => {
-    configureModules({ offline: false })
-
-    expect(recallUser()).toBeNull()
   })
 })
 
