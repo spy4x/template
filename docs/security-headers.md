@@ -1,9 +1,8 @@
 # Security headers
 
-The SPA and the MPA send the header set of `securityHeaders` in
+The API, the SPA and the MPA send the header set of `securityHeaders` in
 [`@spy4x/server/http/security-headers`](https://jsr.io/@spy4x/server/doc), with every response,
-error pages included. The API does not send it yet
-([issue 311](https://github.com/spy4x/template/issues/311)).
+error answers included.
 
 | Header                                                               | What it does                                                                |
 | -------------------------------------------------------------------- | --------------------------------------------------------------------------- |
@@ -43,10 +42,11 @@ nginx serves the SPA, so the library's middleware cannot run there. Two files ca
 into `apps/spa/nginx.conf`:
 
 - **At build:** a plugin in `apps/spa/vite.config.ts` reads the built `dist/index.html` and writes
-  `apps/spa/security-headers.conf`, one `add_header … always;` line per header
-  (`libs/client/vite/nginx-security-headers.ts`). It calls the library's `securityHeaders` with the
-  built page, so the hashes always match the inline blocks of that build: a library update that
-  changes the theme script changes the hash with it. The file is not committed.
+  `apps/spa/security-headers.conf`, one `add_header … always;` line per header. Both halves are
+  the library's: `securityHeaderList` gives the headers for the built page and `nginxAddHeaders`
+  writes them as nginx lines, refusing a value that could break out of the quoted string. The
+  hashes therefore always match the inline blocks of that build: a library update that changes the
+  theme script changes the hash with it. The file is not committed.
 - **At container start:** `apps/spa/csp-connect.sh` writes `/tmp/csp-connect.conf`, which sets the
   nginx variable `$csp_error_tracker` to the origin of `SPA_ERROR_REPORT_DSN`, or to nothing. One
   image serves every environment, and the tracker is the only part of the policy that differs
@@ -67,9 +67,9 @@ needs ranges back, and then a `location` for those files that sets the headers i
 
 ### Letting the app load something new
 
-Add the source to `EXTRA_SOURCES` in `libs/client/vite/nginx-security-headers.ts`, add it to the
-list in `nginx-security-headers.test.ts`, which names every source beyond the app itself, and to
-the table above. Prefer serving the file from the app's own origin, which needs no change.
+Add the source to `EXTRA_SOURCES` in `apps/spa/vite.config.ts`, to the directives
+`e2e/spa/security-headers.spa.ts` expects, and to the table above. Prefer serving the file from the
+app's own origin, which needs no change.
 
 ### One refusal to expect
 
@@ -78,6 +78,13 @@ whether it may compile its validators. The policy refuses it, the browser record
 arktype validates without compiling. The app works. The walk in `e2e/spa` reads from the script
 the place the browser names for each refused `eval`, and fails unless it is that probe: any other
 `eval` in the app fails it.
+
+## The API's policy
+
+The API answers JSON and no page, so it sends the library's default policy with nothing added, the
+same one as the MPA below. `createApiApp` in `apps/api/app.ts` mounts `securityHeaders` first,
+before the request log and every route, so the headers are on a route's answer, a refusal, the 404
+of an unknown address and the 500 of an error. A WebSocket upgrade passes through it untouched.
 
 ## The MPA's policy
 
@@ -98,11 +105,12 @@ because Fresh would answer those outside every middleware, without the headers.
 
 | What                                                                          | Where                                                    | Runs in                                  |
 | ----------------------------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------- |
+| The API's headers on an answer, a refusal, a 404 and a 500 | `apps/api/app.test.ts` | `deno task check` |
+| The running API's headers on an answer and a 404 | `e2e/spa/security-headers.spa.ts` | `e2e/spa/run.sh` (CI step `e2e-spa`) |
 | The MPA's headers on a page, a 404, a 500 and a refusal                        | `apps/mpa/app.test.ts`                                   | `deno task check`                        |
 | The MPA's headers on real responses; a walk with no refusal under the policy   | `e2e/mpa/security-headers.mpa.ts`                        | `e2e/mpa/run.sh` (CI step `e2e-mpa`)     |
-| The SPA's policy: its sources, the hashes of the inline blocks, the nginx lines | `libs/client/vite/nginx-security-headers.test.ts`        | `deno task check`                        |
 | The tracker origin the container writes, and what it refuses                   | `tests/spa-runtime-config.test.ts`                       | `deno task check`                        |
-| nginx's real responses; a signed-in walk with no refusal under the policy      | `e2e/spa/security-headers.spa.ts`                        | `e2e/spa/run.sh` (CI step `e2e-spa`)     |
+| nginx's real responses and the policy's sources; a signed-in walk with no refusal      | `e2e/spa/security-headers.spa.ts`                        | `e2e/spa/run.sh` (CI step `e2e-spa`)     |
 
 `e2e/spa/run.sh` has two modes. By default it builds the image of `apps/spa/dockerfile.prod` with
 the container tool, as a deploy does, runs it beside the API and removes the image afterwards: use
