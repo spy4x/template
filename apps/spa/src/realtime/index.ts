@@ -1,18 +1,25 @@
 import {
+  adaptWebSocket,
   type BackoffConfig,
   ClientTransport,
   ConnectionLostError,
   createSystemClock,
-  createWebSocketFactory,
   type GapReport,
   type KeyValueStore,
   PersistentCursorStore,
+  type SocketFactory,
   TransportStatus,
 } from "@spy4x/realtime"
+import { type AvailableCallPort, createSocketCallPort } from "@spy4x/realtime/calls"
 import { watchPageResume } from "@spy4x/realtime/page-lifecycle"
-import { apiFetch } from "./api.ts"
-import { type CallPort, type RetryOptions, sendCommand, sendQuery } from "./realtime-call.ts"
-import { type SessionState, sessionState } from "./session.ts"
+import { apiFetch } from "../state/api.ts"
+import { type SessionState, sessionState } from "../state/session.ts"
+
+/**
+ * The WebSocket module: the socket, its reconnects, the hints it receives and the calls it carries.
+ * Only `apps/spa/src/modules.ts` imports this folder (`tests/realtime-removal.test.ts`); a product
+ * that never wants the socket deletes the folder and its lines there (`docs/offline.md`).
+ */
 
 type ConnectionStatus = "idle" | "connecting" | "open" | "closed"
 
@@ -106,6 +113,14 @@ export function sessionGate(userId: number) {
 interface Connection {
   userId: number
   transport: ClientTransport
+  /** The calls the open socket carries. */
+  calls: AvailableCallPort
+  /**
+   * Settles once the first socket has opened or failed, or took too long: `null` from then on. A
+   * call made at start-up waits for it, so the page's first reads go over the socket it is opening
+   * and not over HTTP beside it.
+   */
+  firstOpen: Promise<void> | null
   cursors: PersistentCursorStore
   stopStatus: () => void
   stopWatching: () => void
@@ -115,9 +130,27 @@ interface Connection {
 
 let current: Connection | null = null
 
+/** The prefix of the subprotocol that names the user the page was started for. */
+export const SOCKET_USER_PROTOCOL = "user."
+
+/**
+ * How long a call made while the first socket is still opening waits for it before it goes over
+ * HTTP instead.
+ */
+export const FIRST_OPEN_WAIT_MS = 3_000
+
 function socketUrl(): string {
   const protocol = location.protocol === "https:" ? "wss" : "ws"
   return `${protocol}://${location.host}/api/ws`
+}
+
+/**
+ * Opens the socket as `userId`. A browser cannot set a header on a socket, so the user this page
+ * was started for travels as the subprotocol `user.<id>`: the server refuses the upgrade when the
+ * session cookie now belongs to somebody else (`apps/api/services/socket-route.ts`).
+ */
+function socketFactoryFor(userId: number): SocketFactory {
+  return (url) => adaptWebSocket(new WebSocket(url, [`${SOCKET_USER_PROTOCOL}${userId}`]))
 }
 
 function cursorsFor(userId: number): PersistentCursorStore {
@@ -141,7 +174,7 @@ export function connectRealtime(userId: number, pull: (gap?: GapReport) => void 
   const cursors = cursorsFor(userId)
   const transport = new ClientTransport({
     url: socketUrl(),
-    socketFactory: createWebSocketFactory(),
+    socketFactory: socketFactoryFor(userId),
     clock: createSystemClock(),
     cursors,
     pull,
@@ -151,8 +184,12 @@ export function connectRealtime(userId: number, pull: (gap?: GapReport) => void 
   // The socket receives hints only once the server has adopted it, so a change made after the
   // start-up read and before that moment reaches this page by no hint. The transport covers that
   // gap itself: it pulls once the server has acknowledged the first open, as after a reconnect.
+  let settleFirstOpen = () => {}
+  const firstOpen = new Promise<void>((resolve) => settleFirstOpen = resolve)
+  const firstOpenTimer = setTimeout(() => settleFirstOpen(), FIRST_OPEN_WAIT_MS)
   const stopStatus = transport.onStatus((snapshot) => {
     const wsStatus = STATUS_TEXT[snapshot.status]
+    if (wsStatus === "open" || wsStatus === "closed") settleFirstOpen()
     if (wsStatus === "open") clearResumeNotice()
     sessionState.value = { ...sessionState.value, wsStatus }
   })
@@ -184,7 +221,22 @@ export function connectRealtime(userId: number, pull: (gap?: GapReport) => void 
     stopResume()
     document.removeEventListener("visibilitychange", trackHidden)
   }
-  current = { userId, transport, cursors, stopStatus, stopWatching, quietTimer: null }
+  current = {
+    userId,
+    transport,
+    calls: createSocketCallPort(transport),
+    firstOpen,
+    cursors,
+    stopStatus: () => {
+      stopStatus()
+      clearTimeout(firstOpenTimer)
+      settleFirstOpen()
+    },
+    stopWatching,
+    quietTimer: null,
+  }
+  const opened = current
+  void firstOpen.then(() => opened.firstOpen = null)
   sessionState.value = { ...sessionState.value, wsStatus: "connecting" }
   transport.connect()
 }
@@ -216,36 +268,25 @@ export function advanceGroupCursor(groupId: string, sequence: number): void {
   current?.cursors.advanceTo(groupId, sequence)
 }
 
+/** The connection's port, once its first socket has opened or failed. */
+async function settledCalls(): Promise<AvailableCallPort> {
+  const connection = current
+  if (connection?.firstOpen) await connection.firstOpen
+  if (!connection || connection !== current) {
+    throw new ConnectionLostError("the socket is not open")
+  }
+  return connection.calls
+}
+
 /**
- * Whether the socket is open now and this page is signed in as `userId`, so a call made this moment
- * reaches the server as that user. A tab whose cookie now belongs to someone else is not.
+ * The calls port of the socket, for the composed port in `modules.ts`: available while the socket
+ * is open, and while the first one is still opening (a call then waits for it, at most
+ * {@link FIRST_OPEN_WAIT_MS}). Without an open socket every call fails as a dropped connection,
+ * which the composed port answers by sending the call over HTTP.
  */
-export function isRealtimeOpen(userId: number): boolean {
-  return sessionState.value.wsStatus === "open" && sessionState.value.user?.id === userId
-}
-
-/** Calls over the open socket. Without one, every call fails as a dropped connection. */
-export const realtimePort: CallPort = {
-  command(name, payload, options) {
-    if (!current) return Promise.reject(new ConnectionLostError("the socket is not open"))
-    return current.transport.command(name, payload, options)
-  },
-  query(name, payload) {
-    if (!current) return Promise.reject(new ConnectionLostError("the socket is not open"))
-    return current.transport.query(name, payload)
-  },
-}
-
-/** A command over the socket with an idempotency key, sent again with the same key if it drops. */
-export function realtimeCommand<T>(
-  name: string,
-  payload: unknown,
-  options?: RetryOptions,
-): Promise<T> {
-  return sendCommand<T>(realtimePort, name, payload, options)
-}
-
-/** A query over the socket, sent again if the socket drops. */
-export function realtimeQuery<T>(name: string, payload?: unknown, options?: RetryOptions) {
-  return sendQuery<T>(realtimePort, name, payload, options)
+export const socketCalls: AvailableCallPort = {
+  isAvailable: () =>
+    current !== null && (current.firstOpen !== null || current.calls.isAvailable()),
+  command: async (name, payload, options) => (await settledCalls()).command(name, payload, options),
+  query: async (name, payload, options) => (await settledCalls()).query(name, payload, options),
 }
