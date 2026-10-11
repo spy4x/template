@@ -1,4 +1,4 @@
-import { ConnectionLostError, type GapReport } from "@spy4x/realtime"
+import { ConnectionLostError, type GapReport, RealtimeRequestError } from "@spy4x/realtime"
 import { type CallPort, type RetryOptions, sendCommand, sendQuery } from "@spy4x/realtime/calls"
 import { signal } from "@preact/signals"
 import { createSignedInHint } from "@spy4x/platform/browser/signed-in-hint"
@@ -331,6 +331,21 @@ export interface LocalReads {
   copy<T>(key: string): Promise<ReadResult<T> | undefined>
 }
 
+/** Whether the server answered that this person may not read the list (or that it is gone). */
+function isRefusal(error: unknown): boolean {
+  return error instanceof RealtimeRequestError &&
+    (error.code === "unauthorized" || error.code === "forbidden" || error.code === "not_found")
+}
+
+/** Deletes the saved copy of a list the server refused, so it is not shown again offline. */
+async function dropCopy(cache: ReadCache, key: string): Promise<void> {
+  try {
+    await cache.delete(key)
+  } catch {
+    // The device cannot delete; the refusal is still what the caller sees.
+  }
+}
+
 /** {@link LocalReads} over the cache `current` names at the moment of each read, or over none. */
 export function createLocalReads(current: () => ReadCache | undefined): LocalReads {
   return {
@@ -353,6 +368,7 @@ export function createLocalReads(current: () => ReadCache | undefined): LocalRea
       } catch (refusal) {
         // An unreachable server is answered by the copy above, so this is the server saying no.
         if (painted) early?.(undefined)
+        if (cache && isRefusal(refusal)) await dropCopy(cache, key)
         throw refusal
       } finally {
         answered = true

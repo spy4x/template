@@ -1,4 +1,5 @@
 import { expect } from "@std/expect"
+import { RealtimeRequestError } from "@spy4x/realtime"
 import { afterEach, describe, it } from "@std/testing/bdd"
 import { type LocalReads, noLocalReads } from "../modules.ts"
 import { createActivityStore } from "./activity.ts"
@@ -36,7 +37,7 @@ function server<T>(first: T) {
     /** The network is gone: `fetch` rejects with a `TypeError`. */
     goesDown: () => void (state.failure = new TypeError("Failed to fetch")),
     /** The server answers, and says no. */
-    refuses: () => void (state.failure = new Error("Forbidden")),
+    refuses: () => void (state.failure = new RealtimeRequestError("forbidden", "Forbidden")),
     /** Holds every answer until the returned function is called. */
     holds(): () => void {
       let release!: () => void
@@ -285,6 +286,19 @@ for (const list of CASES) {
       const device = memoryReads()
       const api = await visited(device)
       api.refuses()
+
+      const page = list.open(api.read, device)
+      await page.load()
+
+      expect(page.shown()).toEqual(list.empty)
+    })
+
+    it("are deleted when the server refuses the read, so they are not shown offline later", async () => {
+      const device = memoryReads()
+      const api = await visited(device)
+      api.refuses()
+      await list.open(api.read, device).load()
+      api.goesDown()
 
       const page = list.open(api.read, device)
       await page.load()
