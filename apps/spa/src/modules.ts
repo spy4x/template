@@ -335,7 +335,9 @@ export interface LocalReads {
 /**
  * Whether the server answered that this person may not read the list (or that it is gone): a
  * socket read refused with `unauthorized`, `forbidden` or `not_found`, or a REST read answered
- * 401, 403 or 404. Any other failure, such as a 500 or a timeout, says nothing about access.
+ * 401, 403 or 404. Any other failure, such as a 500 or a timeout, says nothing about access. A 404
+ * without the API's error code is a proxy's, not the API's, and never reaches here: see
+ * `ReadRefused.isUnreachable`.
  */
 function isRefusal(error: unknown): boolean {
   if (error instanceof ReadRefused) return REFUSING_STATUSES.includes(error.status)
@@ -372,7 +374,17 @@ export function createLocalReads(current: () => ReadCache | undefined): LocalRea
         })
       }
       try {
-        return await cachedRead(cache, key, read)
+        return await cachedRead(cache, key, async () => {
+          try {
+            return await read()
+          } catch (error) {
+            // A proxy answering for the API is no answer: the copy stands in, as with no network.
+            if (error instanceof ReadRefused && error.isUnreachable) {
+              throw new ConnectionLostError(`the API did not answer (status ${error.status})`)
+            }
+            throw error
+          }
+        })
       } catch (refusal) {
         // An unreachable server is answered by the copy above, so this is the server saying no.
         if (painted) early?.(undefined)

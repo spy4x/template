@@ -188,9 +188,17 @@ offline after the worker installed, which is after that first load.
 
 Signing out deletes every read copy (the `reads:<id>` database's entries and the notes) and the
 remembered user. While signed in, a list's copy is also deleted when the server refuses that read
-with 401, 403 or 404: the person lost access, or the thing is gone, and the copy must not come back
-offline later. An answer that says nothing about access keeps the copy: a 500, a timeout, or no
-network at all, since the server may well accept the same read a moment later. A start that finds no session, because it ended elsewhere or expired, does the
+with 401, 403 or 404 of the API: the person lost access, or the thing is gone, and the copy must
+not come back offline later. An answer that says nothing about access keeps the copy: a 500 of the
+API, a timeout, or no network at all, since the server may well accept the same read a moment later.
+
+A read counts as "unreachable", and the copy answers with its saved time as it does with no network,
+when the answer is not the API's. The API's own answers always carry `{ error: { code, message } }`.
+So a status of 500 or more, a 404 or a 429 **without** that code is a proxy's answer, which it gives
+for a few seconds while the API's container is replaced, and it is read as no answer
+(`ReadRefused.isUnreachable`, the rule `createHttpCallPort` applies to calls). It never deletes the
+copy and never takes back a copy the page already painted. A 404 that carries the API's code (a
+group that is gone) still deletes it. A start that finds no session, because it ended elsewhere or expired, does the
 same for the person the device remembered, before the sign-in page shows.
 
 The person is forgotten at once; their copies take IndexedDB a moment. So before a deletion starts,

@@ -16,8 +16,8 @@ import { sessionState } from "./session.ts"
 /**
  * What a list does with its saved copy when the server answers it with an error (ADR 003). The
  * stores are the production ones, over their own readers; only the network is replaced, by a
- * `fetch` that answers with a real `Response`. A refusal (401, 403, 404) deletes the copy, so it is
- * not shown offline later; a struggling server (500) keeps it.
+ * `fetch` that answers with a real `Response`. A refusal (401, 403, 404 with the API's error code) deletes the copy, so it is
+ * not shown offline later; a struggling server (500), or a proxy's 502 or bare 404 while the API is replaced, keeps it.
  */
 
 const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
@@ -155,7 +155,8 @@ const CASES: Case[] = [
   },
 ]
 
-type Answer = number | "offline"
+/** An answer of the API carries its error code; a proxy's, such as a 502 or a bare 404, does not. */
+type Answer = number | "offline" | { status: number; bare: true }
 
 describe("a saved copy and the answer of the server", () => {
   const realFetch = globalThis.fetch
@@ -165,10 +166,12 @@ describe("a saved copy and the answer of the server", () => {
   beforeEach(() => {
     globalThis.fetch = (() => {
       if (answer === "offline") return Promise.reject(new TypeError("Failed to fetch"))
+      if (answer === 200) return Promise.resolve(Response.json(body))
+      if (typeof answer === "object") {
+        return Promise.resolve(new Response("<html>Bad Gateway</html>", { status: answer.status }))
+      }
       return Promise.resolve(
-        answer === 200
-          ? Response.json(body)
-          : Response.json({ error: { message: "No" } }, { status: answer }),
+        Response.json({ error: { code: "SOME_API_CODE", message: "No" } }, { status: answer }),
       )
     }) as typeof fetch
   })
@@ -180,7 +183,7 @@ describe("a saved copy and the answer of the server", () => {
   for (const list of CASES) {
     describe(list.name, () => {
       /** One visit that worked, then one that got `status`, then the network goes. */
-      async function afterAnswer(status: number) {
+      async function afterAnswer(status: number | { status: number; bare: true }) {
         // A store may let a failed read throw; the screen shows what the store holds either way.
         const quietly = async (open: ReturnType<Case["open"]>) => {
           await open.load().catch(() => {})
@@ -204,6 +207,15 @@ describe("a saved copy and the answer of the server", () => {
           const { shownOnline, shownOffline } = await afterAnswer(status)
           expect(shownOnline).not.toEqual(list.empty)
           expect(shownOffline).toEqual(list.empty)
+        })
+      }
+
+      for (const status of [502, 503, 504, 404]) {
+        it(`are kept, and shown when the proxy answers ${status} with no error of the API`, async () => {
+          const bare = { status, bare: true } as const
+          const { shownOnline, shownOffline } = await afterAnswer(bare)
+          expect(shownOnline).not.toEqual(list.empty)
+          expect(shownOffline).toEqual(shownOnline)
         })
       }
 

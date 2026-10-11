@@ -110,7 +110,13 @@ export function createInvitationsStore(
     try {
       const answer = await device.through(key, async () => {
         const result = await request<T>("GET", url)
-        if (!result.ok) throw new ReadRefused(result.failure, result.status ?? 0)
+        if (!result.ok) {
+          throw new ReadRefused(
+            result.failure,
+            result.status ?? 0,
+            result.failure.code ?? undefined,
+          )
+        }
         return result.data
       }, (copy) => early(copy?.value))
       return { ok: true, data: answer.value }
