@@ -350,10 +350,12 @@ services:
   # endregion Monitoring
 
   # region Apps
-  # Base image with Deno and dependencies pre-installed for caching
+  # Base image with Deno and dependencies pre-installed for caching. Named after the project, as
+  # every container is: two projects on one host hold different dependencies, and one shared tag
+  # would let either build start from the other's. Each build below takes it as BASE_IMAGE.
   deno-base:
     container_name: ${PROJECT}-deno-base
-    image: app/deno-base:${DENO_VERSION}
+    image: ${PROJECT}/deno-base:${DENO_VERSION}
     build:
       context: ../..
       dockerfile: Dockerfile.base
@@ -375,6 +377,7 @@ services:
       dockerfile: apps/api/dockerfile
       args:
         - DENO_VERSION=${DENO_VERSION}
+        - BASE_IMAGE=${PROJECT}/deno-base:${DENO_VERSION}
     command: [ 'deno', 'task', 'db:migrate' ]
     deploy:
       resources:
@@ -413,6 +416,7 @@ services:
       dockerfile: apps/api/dockerfile
       args:
         - DENO_VERSION=${DENO_VERSION}
+        - BASE_IMAGE=${PROJECT}/deno-base:${DENO_VERSION}
     volumes:
       - ../../apps:/app/apps:z
       - ../../libs:/app/libs:z
@@ -524,6 +528,7 @@ services:
       dockerfile: apps/api/dockerfile
       args:
         - DENO_VERSION=${DENO_VERSION}
+        - BASE_IMAGE=${PROJECT}/deno-base:${DENO_VERSION}
     command: [ 'deno', 'run', '--allow-sys', '--allow-env', '--allow-net', 'apps/worker/+main.ts' ]
     volumes:
       - ../../apps:/app/apps:z
@@ -584,6 +589,7 @@ services:
       dockerfile: apps/spa/dockerfile.prod
       args:
         - DENO_VERSION=${DENO_VERSION}
+        - BASE_IMAGE=${PROJECT}/deno-base:${DENO_VERSION}
     environment:
       - DENO_DIR=/tmp/deno-cache
       - DENO_LOG=${DENO_LOG}
@@ -642,6 +648,7 @@ services:
       dockerfile: apps/mpa/dockerfile.prod
       args:
         - DENO_VERSION=${DENO_VERSION}
+        - BASE_IMAGE=${PROJECT}/deno-base:${DENO_VERSION}
     environment:
       - ENV=${ENV}
       - DOMAIN=${DOMAIN}
@@ -686,11 +693,8 @@ services:
   # endregion API & SPA
 
 # region Networking
+# The project's own network (`default`) is not declared: the engine then gives each project a free
+# subnet. A fixed one stopped a second project on the same host ("Pool overlaps").
 networks:
   proxy:
     external: true
-  default:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.50.0.0/16
