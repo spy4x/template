@@ -415,11 +415,17 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    `available_at` has come. `scheduleOutboxEvent` (from `@spy4x/server/outbox`) writes one, in the
    transaction of the change that needs it. Add a handler to the `JobPublisher` (from `@spy4x/server/outbox`) in
    `libs/server/jobs/wiring.ts`; it reads what it needs from the database. A failing job backs off
-   (1 s, 2 s, 4 s, up to 5 minutes) and after 10 attempts stops with its error in
-   `last_error_code`. A repeating job is listed in `repeatEveryMs`: a successful run writes the
+   (1 s, 2 s, 4 s, up to 15 minutes) and after 20 attempts, about two and a half hours, stops with
+   its error's class in `last_error_code` (`JOB_RETRY` in `libs/server/jobs/job-failures.ts`). The
+   worker logs every failed attempt with the job's kind and the error's message, and the last one
+   as `abandoned`: search the worker's log for that word, or the table for unprocessed rows with
+   `attempt_count = 20`. A repeating job is listed in `repeatEveryMs`: a successful run writes the
    next one. The worker starts one, `outbox.cleanup`, at 03:00 UTC and then daily: it removes
-   outbox rows processed more than 7 days ago. A job that gave up stays unprocessed, so the
-   worker does not restart it; look for rows with `last_error_code` set.
+   outbox rows processed more than 7 days ago and runs every purge, each as its own step
+   (`cleanupSteps`). A step that throws is logged with its message and stops no other step; the
+   job is then retried like any other, but its last attempt ends normally, so the next night's run
+   is always written. A cleanup row that used up its attempts all the same (a worker that died
+   mid-run each time) is replaced when the worker next starts.
 6. A listener on the in-process event bus that throws is isolated, logged as one JSON line with the
    event and listener names and the request id, and counted in `event_listener_failures_total`
    (a `createCounter` from `@spy4x/platform/universal/metrics`). Register listeners with `subscribe` (not `eventBus.on`) so the

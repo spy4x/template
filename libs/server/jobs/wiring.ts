@@ -2,7 +2,6 @@ import type postgres from "postgres"
 import { nextUtcHour } from "@spy4x/platform/universal/time"
 import {
   ensureScheduledOutboxEvent,
-  JobPublisher,
   OutboxProcessor,
   PostgresOutboxRepository,
 } from "@spy4x/server/outbox"
@@ -33,7 +32,7 @@ import {
 } from "./account-deletion.ts"
 import { STARTER_DATA_JOB, starterDataJob } from "./starter-data.ts"
 import { API_TOKEN_CREATED_MAIL_JOB, apiTokenCreatedMailJob } from "./api-token-mail.ts"
-import { billingNoticeMailJob } from "./billing-notice-mail.ts"
+import { type BillingNoticeMailDeps, billingNoticeMailJob } from "./billing-notice-mail.ts"
 import {
   EMAIL_CODE_MAIL_JOB,
   emailCodeMailJob,
@@ -55,6 +54,7 @@ import {
   subscriberWelcomeMailJob,
 } from "./subscriber-mail.ts"
 import type { SubscribersSetup } from "../subscribers/subscribers.ts"
+import { cleanupJob, type CleanupStep, JOB_RETRY, ReportingJobPublisher } from "./job-failures.ts"
 import {
   JOB_AGGREGATE,
   JOB_AGGREGATE_ID,
@@ -83,7 +83,12 @@ const NIGHTLY_HOUR_UTC = 3
  * nothing.
  *
  * With a `provider`, the welcome note of a new account respects the group's plan cap, counting the
- * plan with `graceDays`; without one, nothing caps it.
+ * plan with `graceDays`; without one, nothing caps it. The billing notice mails say what
+ * `graceDays` and `trialRequiresCard` make true.
+ *
+ * A row that fails is retried by {@link JOB_RETRY}; every failed attempt is logged through
+ * `mail.log` with the row's kind, and the last one as abandoned. A cleanup step that throws stops
+ * no other step and never ends the nightly chain.
  *
  * With `subscribers`, the subscriber jobs sign and mail confirm links, welcomes and issues. Without
  * it, they drop what they find.
@@ -94,51 +99,19 @@ export function createOutboxProcessor(
   provider: BillingProvider | null = null,
   subscribers: SubscribersSetup | null = null,
   graceDays = 0,
+  trialRequiresCard = true,
 ): OutboxProcessor {
   const notifier = new GroupChangeNotifier(sql)
   return new OutboxProcessor(
     new PostgresOutboxRepository(sql),
-    new JobPublisher({
+    new ReportingJobPublisher({
       aggregateType: JOB_AGGREGATE,
       handlers: {
-        [OUTBOX_CLEANUP_JOB]: async () => {
-          const removed = await removeProcessedOutboxEvents(sql)
-          if (removed > 0) console.log(`Removed ${removed} old processed outbox row(s)`)
-          const stale = await removeStalePasswordResetRequests(sql)
-          if (stale > 0) console.log(`Removed ${stale} unsent password reset request(s)`)
-          const staleCodes = await removeStaleEmailCodeRequests(sql)
-          if (staleCodes > 0) console.log(`Removed ${staleCodes} unsent e-mail code request(s)`)
-          const staleSubs = await removeStaleSubscriptionRequests(sql)
-          if (staleSubs > 0) console.log(`Removed ${staleSubs} unsent subscription request(s)`)
-          const groups = await purgeDeletedGroups(sql)
-          if (groups.removed > 0) console.log(`Removed ${groups.removed} deleted group(s) for good`)
-          if (groups.kept > 0) {
-            console.warn(
-              `Kept ${groups.kept} deleted group(s) with a live subscription; cancel it in Stripe`,
-            )
-          }
-          const notes = await purgeDeletedNotes(sql)
-          if (notes.removed > 0) console.log(`Removed ${notes.removed} deleted note(s) for good`)
-          const invitations = await purgeDeadInvitations(sql)
-          if (invitations > 0) console.log(`Removed ${invitations} dead group invitation(s)`)
-          const tokens = await purgeExpiredApiTokens(sql)
-          if (tokens > 0) console.log(`Removed ${tokens} expired or revoked API token(s) for good`)
-          const audit = await purgeOldAuditEvents(sql)
-          if (audit > 0) console.log(`Removed ${audit} audit event(s) past their retention`)
-          const inbox = await purgeReadNotifications(sql)
-          if (inbox > 0) console.log(`Removed ${inbox} read notification(s) past their retention`)
-          const accounts = await hardDeleteDueAccounts(sql)
-          if (accounts.deleted > 0) console.log(`Deleted ${accounts.deleted} account(s) for good`)
-          if (accounts.blocked > 0) {
-            console.warn(
-              `Kept ${accounts.blocked} account(s) due for deletion: a shared or paid group`,
-            )
-          }
-          if (provider) {
-            const drifted = await queueSeatDrift(sql)
-            if (drifted > 0) console.log(`Queued a seat sync for ${drifted} group(s)`)
-          }
-        },
+        [OUTBOX_CLEANUP_JOB]: cleanupJob(
+          cleanupSteps(sql, provider, mail.log),
+          JOB_RETRY.maxAttempts,
+          mail.log,
+        ),
         [SEAT_SYNC_JOB]: provider ? seatSyncJob({ sql, provider }) : async () => {},
         [PASSWORD_RESET_MAIL_JOB]: passwordResetMailJob({ sql, ...mail }),
         [EMAIL_CODE_MAIL_JOB]: emailCodeMailJob({ sql, ...mail }),
@@ -147,7 +120,7 @@ export function createOutboxProcessor(
         [API_TOKEN_CREATED_MAIL_JOB]: apiTokenCreatedMailJob({ sql, ...mail }),
         [ACCOUNT_HARD_DELETE_JOB]: accountHardDeleteJob({ sql, log: mail.log }),
         [STARTER_DATA_JOB]: starterDataJob(sql, { billingEnabled: provider !== null, graceDays }),
-        ...billingNoticeJobs(sql, mail),
+        ...billingNoticeJobs(sql, mail, { graceDays, trialRequiresCard }),
         [SUBSCRIBER_CONFIRM_MAIL_JOB]: subscriberConfirmMailJob({
           sql,
           ...mail,
@@ -161,15 +134,93 @@ export function createOutboxProcessor(
         [SUBSCRIBER_SEND_ISSUE_JOB]: subscriberSendIssueJob({ sql, ...mail, setup: subscribers }),
       },
       fallback: provider ? new SeatSyncPublisher(sql, notifier) : notifier,
+      maxAttempts: JOB_RETRY.maxAttempts,
+      log: mail.log,
     }),
-    { repeatEveryMs: { [OUTBOX_CLEANUP_JOB]: DAY_MS } },
+    { repeatEveryMs: { [OUTBOX_CLEANUP_JOB]: DAY_MS }, ...JOB_RETRY },
   )
+}
+
+/**
+ * The parts of the nightly cleanup, in the order they run. Each removes only what is due, so one
+ * that ran again finds nothing.
+ */
+function cleanupSteps(
+  sql: postgres.Sql,
+  provider: BillingProvider | null,
+  log: (line: string) => void,
+): CleanupStep[] {
+  return [
+    ["remove old processed outbox rows", async () => {
+      const removed = await removeProcessedOutboxEvents(sql)
+      if (removed > 0) console.log(`Removed ${removed} old processed outbox row(s)`)
+    }],
+    ["remove unsent password reset requests", async () => {
+      const stale = await removeStalePasswordResetRequests(sql)
+      if (stale > 0) console.log(`Removed ${stale} unsent password reset request(s)`)
+    }],
+    ["remove unsent e-mail code requests", async () => {
+      const staleCodes = await removeStaleEmailCodeRequests(sql)
+      if (staleCodes > 0) console.log(`Removed ${staleCodes} unsent e-mail code request(s)`)
+    }],
+    ["remove unsent subscription requests", async () => {
+      const staleSubs = await removeStaleSubscriptionRequests(sql)
+      if (staleSubs > 0) console.log(`Removed ${staleSubs} unsent subscription request(s)`)
+    }],
+    ["purge deleted groups", async () => {
+      const groups = await purgeDeletedGroups(sql)
+      if (groups.removed > 0) console.log(`Removed ${groups.removed} deleted group(s) for good`)
+      if (groups.kept > 0) {
+        console.warn(
+          `Kept ${groups.kept} deleted group(s) with a live subscription; cancel it in Stripe`,
+        )
+      }
+    }],
+    ["purge deleted notes", async () => {
+      const notes = await purgeDeletedNotes(sql)
+      if (notes.removed > 0) console.log(`Removed ${notes.removed} deleted note(s) for good`)
+    }],
+    ["purge dead invitations", async () => {
+      const invitations = await purgeDeadInvitations(sql)
+      if (invitations > 0) console.log(`Removed ${invitations} dead group invitation(s)`)
+    }],
+    ["purge expired API tokens", async () => {
+      const tokens = await purgeExpiredApiTokens(sql)
+      if (tokens > 0) console.log(`Removed ${tokens} expired or revoked API token(s) for good`)
+    }],
+    ["purge old audit events", async () => {
+      const audit = await purgeOldAuditEvents(sql)
+      if (audit > 0) console.log(`Removed ${audit} audit event(s) past their retention`)
+    }],
+    ["purge read notifications", async () => {
+      const inbox = await purgeReadNotifications(sql)
+      if (inbox > 0) console.log(`Removed ${inbox} read notification(s) past their retention`)
+    }],
+    ["delete accounts whose wait is over", async () => {
+      const accounts = await hardDeleteDueAccounts(sql, log)
+      if (accounts.deleted > 0) console.log(`Deleted ${accounts.deleted} account(s) for good`)
+      if (accounts.blocked > 0) {
+        console.warn(
+          `Kept ${accounts.blocked} account(s) due for deletion: a shared or paid group`,
+        )
+      }
+      if (accounts.failed > 0) {
+        throw new Error(`${accounts.failed} account(s) due for deletion were not deleted`)
+      }
+    }],
+    ["queue seat syncs for drifted groups", async () => {
+      if (!provider) return
+      const drifted = await queueSeatDrift(sql)
+      if (drifted > 0) console.log(`Queued a seat sync for ${drifted} group(s)`)
+    }],
+  ]
 }
 
 /** One mail job per billing notice. */
 function billingNoticeJobs(
   sql: postgres.Sql,
   { sender, brand, log }: Omit<PasswordResetMailDeps, "sql">,
+  billing: Pick<BillingNoticeMailDeps, "graceDays" | "trialRequiresCard">,
 ): Record<string, JobHandler> {
   const kinds = [
     BillingNoticeKind.TrialEnding,
@@ -179,13 +230,39 @@ function billingNoticeJobs(
   return Object.fromEntries(
     kinds.map((kind) => [
       BILLING_NOTICE_JOBS[kind],
-      billingNoticeMailJob(kind, { sql, sender, brand, log }),
+      billingNoticeMailJob(kind, { sql, sender, brand, log, ...billing }),
     ]),
   )
 }
 
-/** Starts the nightly cleanup chain at the next 03:00 UTC unless one is already waiting. */
-export async function scheduleNightlyJobs(sql: postgres.Sql, now = new Date()): Promise<void> {
+/**
+ * Starts the nightly cleanup chain at the next 03:00 UTC unless one is already waiting. A cleanup
+ * row that used up its attempts would count as waiting for good, so it is marked done first and
+ * told to `log`: the chain then starts again. The cleanup job itself never fails its last attempt,
+ * so such a row comes from a worker that died mid-run each time, or from before that was so.
+ */
+export async function scheduleNightlyJobs(
+  sql: postgres.Sql,
+  now = new Date(),
+  log: (line: string) => void = console.warn,
+): Promise<void> {
+  const gaveUp = await sql<{ lastErrorCode: string | null }[]>`
+    UPDATE outbox_events
+    SET processed_at = now()
+    WHERE event_kind = ${OUTBOX_CLEANUP_JOB}
+      AND aggregate_type = ${JOB_AGGREGATE}
+      AND aggregate_id = ${JOB_AGGREGATE_ID}
+      AND processed_at IS NULL
+      AND attempt_count >= ${JOB_RETRY.maxAttempts}
+    RETURNING last_error_code AS "lastErrorCode"
+  `
+  for (const { lastErrorCode } of gaveUp) {
+    log(
+      `warn: the nightly cleanup had stopped after ${JOB_RETRY.maxAttempts} attempts (last error: ${
+        lastErrorCode ?? "none stored"
+      }); starting it again`,
+    )
+  }
   await ensureScheduledOutboxEvent(
     sql,
     { eventKind: OUTBOX_CLEANUP_JOB, aggregateType: JOB_AGGREGATE, aggregateId: JOB_AGGREGATE_ID },

@@ -9,8 +9,10 @@ import {
 } from "@spy4x/server/outbox"
 import { JOB_AGGREGATE, JOB_AGGREGATE_ID, OUTBOX_CLEANUP_JOB } from "@server/jobs/jobs.ts"
 import { createOutboxProcessor, scheduleNightlyJobs } from "@server/jobs/wiring.ts"
+import { JOB_RETRY } from "@server/jobs/job-failures.ts"
 import {
   enqueuePasswordResetMail,
+  PASSWORD_RESET_MAIL_JOB,
   removeStalePasswordResetRequests,
 } from "@server/jobs/password-reset-mail.ts"
 import { enqueueEmailCodeMail, removeStaleEmailCodeRequests } from "@server/jobs/email-code-mail.ts"
@@ -63,6 +65,23 @@ async function advanceClock(sql: postgres.Sql, minutes: number): Promise<void> {
     SET available_at = available_at - make_interval(mins => ${minutes}),
         processed_at = processed_at - make_interval(mins => ${minutes})
   `
+}
+
+/**
+ * Makes every waiting row due now and answers how long, in milliseconds, the longest of them still
+ * had to wait: the clock jumping to the processor's next retry.
+ */
+async function skipWait(sql: postgres.Sql): Promise<number> {
+  const rows = await sql<{ waitMs: number }[]>`
+    WITH waiting AS (
+      SELECT id, available_at FROM outbox_events WHERE processed_at IS NULL FOR UPDATE
+    )
+    UPDATE outbox_events SET available_at = now()
+    FROM waiting
+    WHERE outbox_events.id = waiting.id
+    RETURNING (extract(epoch FROM waiting.available_at - now()) * 1000)::float8 AS "waitMs"
+  `
+  return Math.max(0, ...rows.map((row) => row.waitMs))
 }
 
 const BRAND = { webAppUrl: "http://app.localhost" }
@@ -471,5 +490,188 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
       await insert(groupId, userId, 3)
       await insert(null, null, 4)
     })
+  })
+})
+
+Deno.test("the worker's processor when a job keeps failing", async (t) => {
+  await withSchema(async (sql) => {
+    const store = createPostgresAuthStore(sql)
+    await store.createUserWithKey({
+      method: PASSWORD_METHOD,
+      subject: "ann@example.com",
+      email: "ann@example.com",
+      secret: "hash",
+      provenAt: null,
+    })
+    const HOUR_MS = 60 * 60_000
+    const cleanupRows = () =>
+      sql<{ attemptCount: number; processed: boolean; hours: number }[]>`
+        SELECT attempt_count, processed_at IS NOT NULL AS processed,
+          round(extract(epoch FROM available_at - now()) / 3600)::int AS hours
+        FROM outbox_events WHERE event_kind = ${OUTBOX_CLEANUP_JOB} ORDER BY created_at, id
+      `
+
+    await t.step("a mail job survives a mail server that is down for an hour", async () => {
+      const sender = recordingSender()
+      sender.failing = true
+      const processor = createOutboxProcessor(sql, { store, sender, brand: BRAND, log: () => {} })
+      await enqueuePasswordResetMail(sql, "ann@example.com")
+
+      // Every retry while the server is down fails; the clock jumps to each next one.
+      let downMs = 0
+      while (downMs < HOUR_MS) {
+        expect((await processor.drainOnce()).failed).toBe(1)
+        downMs += await skipWait(sql)
+      }
+      sender.failing = false
+
+      expect((await processor.drainOnce()).published).toBe(1)
+      expect(sender.sent.map((mail) => mail.to)).toEqual(["ann@example.com"])
+    })
+
+    await sql`DELETE FROM outbox_events`
+
+    await t.step("a job that is given up writes a log line that names its kind", async () => {
+      const sender = recordingSender()
+      sender.failing = true
+      const logged: string[] = []
+      const processor = createOutboxProcessor(sql, {
+        store,
+        sender,
+        brand: BRAND,
+        log: (line) => logged.push(line),
+      })
+      await enqueuePasswordResetMail(sql, "ann@example.com")
+      const [{ id }] = await sql<{ id: string }[]>`SELECT id FROM password_reset_requests`
+
+      let attempts = 0
+      while ((await processor.drainOnce()).failed === 1) {
+        attempts++
+        await skipWait(sql)
+      }
+
+      expect(attempts).toBe(JOB_RETRY.maxAttempts)
+      const about = `job ${PASSWORD_RESET_MAIL_JOB} (${JOB_AGGREGATE} ${id})`
+      const reported = logged.filter((line) => line.includes(about))
+      expect(reported).toHaveLength(JOB_RETRY.maxAttempts)
+      expect(reported[0]).toBe(
+        `warn: ${about} failed, attempt 1 of ${JOB_RETRY.maxAttempts}: password reset mail not sent`,
+      )
+      expect(reported.at(-1)).toBe(
+        `error: ${about} abandoned after ${JOB_RETRY.maxAttempts} attempts: password reset mail not sent`,
+      )
+      expect(logged.join("\n")).not.toContain("ann@example.com")
+    })
+
+    await sql`DELETE FROM outbox_events`
+
+    await t.step(
+      "with one cleanup step throwing, the other steps still run that night and the failure is logged with its message",
+      async () => {
+        const [{ userId }] = await sql<{ userId: number }[]>`
+          WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id)
+          INSERT INTO users (id) SELECT id FROM auth_user RETURNING id AS user_id
+        `
+        await sql`
+          INSERT INTO groups (id, name, owner_user_id, created_by_user_id, deleted_at)
+          VALUES (${uuidV7()}, 'expired', ${userId}, ${userId}, now() - interval '31 days')
+        `
+        const logged: string[] = []
+        const processor = createOutboxProcessor(sql, {
+          ...mailOff(sql),
+          log: (line) => logged.push(line),
+        })
+        await scheduleNightlyJobs(sql, new Date())
+        await skipWait(sql)
+        // The second step of the cleanup reads this table; the group purge runs three steps later.
+        await sql`ALTER TABLE password_reset_requests RENAME TO password_reset_requests_gone`
+
+        const result = await processor.drainOnce()
+
+        expect(result).toEqual({ claimed: 1, published: 0, failed: 1 })
+        expect(await sql`SELECT 1 FROM groups WHERE name = 'expired'`).toEqual([])
+        expect(logged[0]).toBe(
+          `error: nightly cleanup step "remove unsent password reset requests" failed: ` +
+            `relation "password_reset_requests" does not exist`,
+        )
+        expect(logged[1]).toContain(`job ${OUTBOX_CLEANUP_JOB} `)
+        expect(logged[1]).toContain(`failed, attempt 1 of ${JOB_RETRY.maxAttempts}`)
+        expect(await cleanupRows()).toHaveLength(1)
+      },
+    )
+
+    await t.step(
+      "a cleanup that still fails on its last attempt writes the next night's run all the same",
+      async () => {
+        const logged: string[] = []
+        const processor = createOutboxProcessor(sql, {
+          ...mailOff(sql),
+          log: (line) => logged.push(line),
+        })
+        await sql`
+          UPDATE outbox_events SET attempt_count = ${JOB_RETRY.maxAttempts - 1}
+          WHERE event_kind = ${OUTBOX_CLEANUP_JOB}
+        `
+        await skipWait(sql)
+
+        const result = await processor.drainOnce()
+
+        expect(result).toEqual({ claimed: 1, published: 1, failed: 0 })
+        expect(logged.at(-1)).toBe(
+          `error: nightly cleanup gave up on "remove unsent password reset requests" after ` +
+            `${JOB_RETRY.maxAttempts} attempts; the next run is tomorrow`,
+        )
+        expect(await cleanupRows()).toEqual([
+          { attemptCount: JOB_RETRY.maxAttempts, processed: true, hours: expect.any(Number) },
+          { attemptCount: 0, processed: false, hours: 24 },
+        ])
+        await sql`ALTER TABLE password_reset_requests_gone RENAME TO password_reset_requests`
+      },
+    )
+
+    await sql`DELETE FROM outbox_events`
+
+    await t.step(
+      "a cleanup row that used up its attempts is replaced at the next worker start",
+      async () => {
+        const stuck = uuidV7()
+        await sql`
+          INSERT INTO outbox_events (
+            id, event_kind, aggregate_type, aggregate_id, aggregate_version, attempt_count,
+            last_error_code, available_at
+          ) VALUES (
+            ${stuck}, ${OUTBOX_CLEANUP_JOB}, ${JOB_AGGREGATE}, ${JOB_AGGREGATE_ID}, 1,
+            ${JOB_RETRY.maxAttempts - 1}, 'PostgresError', now() - interval '3 days'
+          )
+        `
+        const logged: string[] = []
+        const log = (line: string) => void logged.push(line)
+
+        // One attempt left: the row is still waiting, and the start leaves it alone.
+        await scheduleNightlyJobs(sql, new Date(), log)
+        expect((await cleanupRows()).map((row) => row.processed)).toEqual([false])
+        expect(logged).toEqual([])
+
+        await sql`UPDATE outbox_events SET attempt_count = ${JOB_RETRY.maxAttempts}`
+        await scheduleNightlyJobs(sql, new Date(), log)
+        await scheduleNightlyJobs(sql, new Date(), log)
+
+        const rows = await cleanupRows()
+        expect(rows.map((row) => [row.attemptCount, row.processed])).toEqual([
+          [JOB_RETRY.maxAttempts, true],
+          [0, false],
+        ])
+        expect(rows[1].hours).toBeGreaterThanOrEqual(0)
+        expect(rows[1].hours).toBeLessThanOrEqual(24)
+        expect(logged).toEqual([
+          `warn: the nightly cleanup had stopped after ${JOB_RETRY.maxAttempts} attempts ` +
+          `(last error: PostgresError); starting it again`,
+        ])
+        // The new row runs: the chain is alive again.
+        await skipWait(sql)
+        const processor = createOutboxProcessor(sql, mailOff(sql))
+        expect(await processor.drainOnce()).toEqual({ claimed: 1, published: 1, failed: 0 })
+      },
+    )
   })
 })
