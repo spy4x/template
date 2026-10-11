@@ -163,6 +163,30 @@ describe("the saved notes and tags and the answer of the server", () => {
         })
       }
 
+      it("show the server's refusal and warn when the device cannot delete the copy", async () => {
+        body = list.body
+        const layer = device()
+        answer = 200
+        await list.read(layer)
+        const broken = () => Promise.reject(new Error("the device is full"))
+        layer.cache.replaceNotes = broken
+        layer.tagsCache.replaceTags = broken
+        const warnings: unknown[][] = []
+        const realWarn = console.warn
+        console.warn = (...args: unknown[]) => void warnings.push(args)
+        try {
+          answer = 403
+          const shown = await list.read(layer).catch((error: Error) => error)
+
+          expect((shown as Error).message).toBe("No")
+          expect(warnings.length).toBe(1)
+          expect(String(warnings[0][0])).toContain(`of group ${groupId} could not be deleted`)
+          expect((warnings[0][1] as Error).message).toBe("the device is full")
+        } finally {
+          console.warn = realWarn
+        }
+      })
+
       it("keep another group's copy when one group is refused", async () => {
         body = list.body
         const layer = device()

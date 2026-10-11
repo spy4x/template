@@ -143,7 +143,11 @@ export function offlineTags(
         await layer.tagsCache.replaceTags(groupId, base)
       } catch (error) {
         // The person left the group, or it is gone: its tags must not come back offline later.
-        if (isRefusal(error)) await layer.tagsCache.replaceTags(groupId, []).catch(() => {})
+        if (isRefusal(error)) {
+          await layer.tagsCache.replaceTags(groupId, []).catch((failure) =>
+            console.warn(`The saved tags of group ${groupId} could not be deleted.`, failure)
+          )
+        }
         // A proxy's answer, such as a 502 during a deploy, is an unreachable server too.
         if (!isUnreachable(error) && !isProxyAnswer(error)) throw error
         base = await layer.tagsCache.readTags(groupId)
