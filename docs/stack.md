@@ -65,12 +65,16 @@ their log to standard output, and everything else happens around them.
 Two parts always run, in every mode:
 
 - **vmagent** scrapes the targets in `infra/configs/vmagent.yml` (itself, Vector, the Postgres
-  exporter, and node-exporter and cAdvisor when they run) and pushes every sample on, with a
-  `project` label.
-- **Vector** reads the log of every container whose name starts with `${PROJECT}-`, and of no
-  other container on the host, and sends each line on with `project`, `container_name` and
-  `stream` (`infra/configs/vector.yml`). It also counts the API's answers from its request log as
-  `api_requests_total{status="2xx"|"4xx"|"5xx"}`, because the API has no metrics endpoint yet.
+  exporter, and the bundled VictoriaMetrics, node-exporter and cAdvisor when they run) and pushes
+  every sample on, with a `project` label.
+- **Vector** reads the log of every container of this Compose project, and of no other container
+  on the host, and sends each line on with `project`, `container_name` and `stream`
+  (`infra/configs/vector.yml`). It picks them by the label Compose sets
+  (`com.docker.compose.project`), which is exact: a project named `app` does not get the logs of
+  a project named `app-staging`. It also counts the API's answers from its request log as
+  `api_requests_total`, one series per status class (`status="2xx"` to `"5xx"`), because the API
+  has no metrics endpoint yet. `tests/monitoring-alerts.test.ts` holds the pattern to the lines
+  the API's logger writes.
 
 Where they send is the only difference between the two modes, and the env file alone decides it.
 
@@ -78,8 +82,8 @@ Where they send is the only difference between the two modes, and the env file a
 and `VM_REMOTE_WRITE_URL` and `VLOGS_URL` are empty. Compose then also runs VictoriaMetrics,
 VictoriaLogs, Grafana, vmalert and Alertmanager, and vmagent and Vector send to them. Grafana is at
 `grafana.<DOMAIN>` (user `admin`, password `GRAFANA_PASS`) with both data sources already there
-(`infra/configs/grafana-datasources.yml`); it downloads the VictoriaLogs data source plugin at its
-first start. Both databases keep 14 days, under `.volumes/victoriametrics` and
+(`infra/configs/grafana-datasources.yml`); it downloads the VictoriaLogs data source plugin, at
+the version pinned in the Compose file, at its first start. Both databases keep 14 days, under `.volumes/victoriametrics` and
 `.volumes/victorialogs`.
 
 **External**: take `monitoring` out of `COMPOSE_PROFILES` and name the other server:
@@ -94,7 +98,15 @@ VLOGS_PASSWORD=...
 ```
 
 The user names and passwords are HTTP basic auth; leave them empty for a server that asks for
-none. None of the five bundled containers starts. What vmagent cannot send waits on disk
+none. A password may hold any character. None of the five bundled containers starts; but Compose
+does not stop one that is already running when its profile is turned off, so a project that ran
+the bundled mode before removes them once, by name:
+
+```sh
+deno task compose rm --stop --force victoriametrics victorialogs vmalert alertmanager grafana
+```
+
+Their data stays in `.volumes/victoriametrics`, `.volumes/victorialogs` and `.volumes/grafana`. What vmagent cannot send waits on disk
 (`.volumes/vmagent`, up to 1 GiB) and is sent when the server is back; Vector retries too, with a
 small queue in memory. Grafana, the alert rules and the retention are then the other server's.
 
@@ -107,20 +119,35 @@ Bundled mode only. vmalert evaluates `infra/configs/alerts.yml` every minute:
 
 - **ApiErrors** - the API answered 5 or more requests with a 5xx status within 5 minutes.
 - **DataDiskSpaceLow** - the disk holding `.volumes` (Postgres' data too) has under 2 GiB free
-  for 10 minutes. VictoriaMetrics reports this about its own storage, so no host exporter is
-  needed.
+  for 10 minutes. VictoriaMetrics reports this about its own storage and vmagent scrapes it, so no
+  host exporter is needed.
 - **HostDiskSpaceLow** - any disk of the host has under 10% free for 10 minutes. It has data only
   with the `host-monitoring` profile.
 
 Alertmanager sends what fires, and what resolves, to ntfy: `ALERT_NTFY_URL` (the ntfy server),
 `ALERT_NTFY_TOPIC` (default `alerts`) and `ALERT_NTFY_TOKEN` (an access token, empty for an open
-topic). ntfy formats the message itself (`?template=alertmanager`, ntfy 2.14 or later). With
+topic). ntfy formats the message itself (`?template=alertmanager`, ntfy 2.14 or later), and each
+message starts with the project's name, so several projects can share a topic. With
 `ALERT_NTFY_URL` empty the alerts show in vmalert and Alertmanager and are sent nowhere. In the
 external mode, give the same rules file to the other server's vmalert: every series carries the
 `project` label.
 
 There is no alert for failing event listeners yet: the API counts them
 (`event_listener_failures_total`) but exposes no endpoint to scrape.
+
+### The Docker socket
+
+Vector reads the container logs through `/var/run/docker.sock`, in every deployment. The mount
+says `:ro`, but that does not limit anything: the socket is the whole Docker API, and a read-only
+mount of it still accepts every call, such as starting a container that mounts the host's disk.
+Whoever controls the Vector container controls the host. Traefik's mount in
+`infra/compose/compose.proxy.yml` is the same.
+
+This is accepted for now, and the container is given nothing else to make it harder to take over:
+it has no Linux capability and cannot gain one (`cap_drop: [ALL]`, `no-new-privileges`), its file
+system is read-only, it publishes no port, and it reads only its own tracked config. It still runs
+as root, because the socket belongs to root. A proxy in front of the socket that allows only
+listing containers and reading their events and logs would close the gap; it is not there yet.
 
 ### Trying the external mode
 

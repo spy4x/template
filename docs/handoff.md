@@ -283,7 +283,8 @@ These cost real time to find. Do not rediscover them.
     Vector (#159).** Which monitoring containers start is now decided by `COMPOSE_PROFILES`
     (docs/stack.md, "Monitoring"); an env file written before this change has no `monitoring`
     profile, so a deploy with it starts neither database nor Grafana. Compose also leaves the
-    containers of services that no longer exist running, and the old data stays on disk.
+    containers of services that no longer exist running, and does not stop a container whose
+    profile is now off, such as the old Grafana in the external mode; the old data stays on disk.
     **Deploy steps**, once, on the first deploy of this change:
 
     1. Before deploying, in the env file you deploy (`infra/envs/.env.prod`): add `monitoring`
@@ -292,13 +293,24 @@ These cost real time to find. Do not rediscover them.
        `ALERT_NTFY_URL`, `ALERT_NTFY_TOPIC` and `ALERT_NTFY_TOKEN` if alerts should reach ntfy.
        The `LOKI_*`, `PROMTAIL_*` and `PROMETHEUS_*` lines are no longer read and can go.
     2. `deno task deploy`.
-    3. On the server, in the app's directory, remove the four old containers and their data.
-       Replace `app` with the env file's `PROJECT`; the names must be exact, because a shared
-       server can run another project's promtail:
+    3. On the server, remove what the new files no longer run. The Compose task is the one the
+       deploy uses, so it reads the same env file and the same container engine, and it touches
+       this project's containers only. Replace `<app directory>` with `PATH_ON_SERVER`:
        ```sh
-       docker rm -f app-loki app-prometheus app-promtail app-minio-configure
+       cd <app directory>
+       export PATH="$HOME/.deno/bin:$PATH"
+       # Loki, Prometheus, promtail and minio-configure: their services are gone from the files.
+       deno task compose up -d --remove-orphans
+       # External mode only: the old Grafana, which the files still define but no longer start.
+       deno task compose rm --stop --force grafana
+       # Prometheus' data and Loki's two buckets. Nothing else under .volumes goes.
        sudo rm -rf .volumes/prometheus .volumes/minio/loki-data .volumes/minio/loki-ruler
        ```
+       `deno task compose ps --all` then lists no `loki`, `prometheus`, `promtail` or
+       `minio-configure`, and in the external mode no `grafana`. Postgres, Valkey and MinIO keep
+       running, and their data (`.volumes/postgres`, `.volumes/kv`, the rest of `.volumes/minio`)
+       is not touched; MinIO's container restarts once during the deploy, because its start
+       command changed.
     4. In Grafana, delete the Loki and Prometheus data sources if someone added them by hand:
        they are stored in `.volumes/grafana`, which the deploy keeps, and they no longer answer.
        The VictoriaMetrics and VictoriaLogs data sources come from
