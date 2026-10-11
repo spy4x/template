@@ -1,6 +1,7 @@
 import { expect } from "@std/expect"
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd"
-import { type LocalReads } from "../modules.ts"
+import { createMemoryReadCache } from "@spy4x/realtime/testing"
+import { createLocalReads, type LocalReads } from "../modules.ts"
 import { activityHttp, createActivityStore } from "./activity.ts"
 import { apiTokensHttp, createApiTokensStore } from "./api-tokens.ts"
 import { apiFetch } from "./api.ts"
@@ -10,6 +11,7 @@ import { createGroupsStore, groupsOnDevice, onlineGroups } from "./groups.ts"
 import { createInvitationsStore } from "./invitations.ts"
 import { createMembersStore, membersHttp } from "./members.ts"
 import { memoryReads } from "./memory-reads.ts"
+import { ReadRefused } from "./read-keys.ts"
 import { createNotificationsStore, notificationsHttp } from "./notifications.ts"
 import { sessionState } from "./session.ts"
 
@@ -254,5 +256,38 @@ describe("a saved copy and the answer of the server", () => {
 
     expect(store.tokens.value).toBeNull()
     expect(store.errors.value.list).toBe("Request failed")
+  })
+})
+
+describe("a saved copy the device cannot read just now", () => {
+  /** A device that holds a copy, fails to read it, and counts what it is asked to delete. */
+  async function unreadable() {
+    const cache = createMemoryReadCache(() => 0)
+    await cache.set("list", ["saved"])
+    const deleted: string[] = []
+    const reads = createLocalReads(() => ({
+      ...cache,
+      get: () => Promise.reject(new Error("the device cannot read")),
+      delete: (key) => (deleted.push(key), cache.delete(key)),
+    }))
+    const answered = (status: number, code?: string) =>
+      reads.through("list", () => Promise.reject(new ReadRefused("No", status, code))).catch(
+        (error) => error,
+      )
+    return { answered, deleted }
+  }
+
+  it("is not deleted by a 404 without the API's error code", async () => {
+    const { answered, deleted } = await unreadable()
+
+    expect(await answered(404)).toBeInstanceOf(ReadRefused)
+    expect(deleted).toEqual([])
+  })
+
+  it("is deleted by a 404 with the API's error code", async () => {
+    const { answered, deleted } = await unreadable()
+
+    expect(await answered(404, "GROUP_NOT_FOUND")).toBeInstanceOf(ReadRefused)
+    expect(deleted).toEqual(["list"])
   })
 })
