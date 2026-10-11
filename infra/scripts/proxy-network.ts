@@ -1,4 +1,5 @@
 /// <reference lib="deno.ns" />
+import { runCommand } from "@spy4x/platform/server"
 
 /** Name of the Docker network that Traefik and every stack's routed services share. */
 export const PROXY_NETWORK = `proxy`
@@ -25,11 +26,9 @@ export async function ensureProxyNetwork(
   return true
 }
 
-/** Runs the container CLI with its output hidden. */
+/** Runs the container CLI with its output hidden. A CLI that cannot start reads as exit code -1. */
 export const runContainerCli: RunContainerCli = async (provider, args) => {
-  const { code } = await new Deno.Command(provider, { args, stdout: `null`, stderr: `null` })
-    .output()
-  return code
+  return (await runCommand([provider, ...args])).code
 }
 
 if (import.meta.main) {
