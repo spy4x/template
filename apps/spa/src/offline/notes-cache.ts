@@ -22,7 +22,11 @@ export interface NotesCache {
   replaceNotes(groupId: string, notes: readonly NoteItem[]): Promise<void>
   putNote(note: NoteItem): Promise<void>
   removeNote(noteId: string): Promise<void>
-  /** Drops every note. The queue is another database and stays. */
+  /**
+   * Drops every note. The queue is another database and stays. The copy is finished after this: a
+   * write that arrives later saves nothing, so an answer still on its way at sign-out cannot put
+   * the notes back. The next start opens a new one.
+   */
   clear(): Promise<void>
 }
 
@@ -34,21 +38,26 @@ export function databasePrefix(userId: number): string {
 /**
  * The notes of one user on this browser (`createDataCache`), in a database named for the user and
  * never shared between users. Each group is a scope, so one group's full read replaces only its
- * own notes.
+ * own notes. `indexedDB` defaults to the browser's; a test passes its own.
  */
-export function openNotesCache(userId: number): NotesCache {
+export function openNotesCache(userId: number, indexedDB?: IDBFactory): NotesCache {
   const notes = createDataCache<NoteItem>({
     name: `${databasePrefix(userId)}:notes`,
     getId: (note) => note.id,
+    indexedDB,
   })
+  // Set by `clear`. Every write looks at it right before it reaches the database, after its own
+  // reads, so a write that was already running when the person signed out saves nothing either.
+  let cleared = false
   return {
     // A copy kept before tags existed has no `tagIds`: the note then has no tags.
     readNotes: async (groupId) =>
       (await notes.read(groupId)).map((note) => ({ ...note, tagIds: note.tagIds ?? [] })),
-    replaceNotes: (groupId, next) => notes.replace(groupId, next),
+    replaceNotes: (groupId, next) => cleared ? Promise.resolve() : notes.replace(groupId, next),
     async putNote(note) {
       // A moved note changes scope: drop it from every other group's copy in the same step.
       const others = (await notes.scopes()).filter((scope) => scope !== note.groupId)
+      if (cleared) return
       await notes.batch([
         ...others.map((scope) => ({ op: "delete" as const, scope, id: note.id })),
         { op: "put", scope: note.groupId, item: note },
@@ -57,8 +66,12 @@ export function openNotesCache(userId: number): NotesCache {
     async removeNote(noteId) {
       // A note's group is not known here, so remove it from every scope that holds notes.
       const scopes = await notes.scopes()
+      if (cleared) return
       await notes.batch(scopes.map((scope) => ({ op: "delete" as const, scope, id: noteId })))
     },
-    clear: () => notes.clearAll(),
+    clear() {
+      cleared = true
+      return notes.clearAll()
+    },
   }
 }

@@ -22,7 +22,10 @@ export interface TagsCache {
   replaceTags(groupId: string, tags: readonly TagItem[]): Promise<void>
   putTag(tag: TagItem): Promise<void>
   removeTag(tagId: string): Promise<void>
-  /** Drops every tag. The queue is another database and stays. */
+  /**
+   * Drops every tag. The queue is another database and stays. The copy is finished after this: a
+   * write that arrives later saves nothing, as with the notes (`NotesCache.clear`).
+   */
   clear(): Promise<void>
 }
 
@@ -31,20 +34,31 @@ export function tagsQueueDatabase(userId: number): string {
   return `${databasePrefix(userId)}:tags-outbox`
 }
 
-/** The tags of one user on this browser, in a database named for the user. Each group is a scope. */
-export function openTagsCache(userId: number): TagsCache {
+/**
+ * The tags of one user on this browser, in a database named for the user. Each group is a scope.
+ * `indexedDB` defaults to the browser's; a test passes its own.
+ */
+export function openTagsCache(userId: number, indexedDB?: IDBFactory): TagsCache {
   const tags = createDataCache<TagItem>({
     name: `${databasePrefix(userId)}:tags`,
     getId: (tag) => tag.id,
+    indexedDB,
   })
+  // Set by `clear`, and read right before every write reaches the database (`openNotesCache`).
+  let cleared = false
   return {
     readTags: (groupId) => tags.read(groupId),
-    replaceTags: (groupId, next) => tags.replace(groupId, next),
-    putTag: (tag) => tags.batch([{ op: "put", scope: tag.groupId, item: tag }]),
+    replaceTags: (groupId, next) => cleared ? Promise.resolve() : tags.replace(groupId, next),
+    putTag: (tag) =>
+      cleared ? Promise.resolve() : tags.batch([{ op: "put", scope: tag.groupId, item: tag }]),
     async removeTag(tagId) {
       const scopes = await tags.scopes()
+      if (cleared) return
       await tags.batch(scopes.map((scope) => ({ op: "delete" as const, scope, id: tagId })))
     },
-    clear: () => tags.clearAll(),
+    clear() {
+      cleared = true
+      return tags.clearAll()
+    },
   }
 }

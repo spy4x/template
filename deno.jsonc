@@ -192,6 +192,9 @@
     "@std/yaml": "jsr:@std/yaml@1.3.0",
     "@playwright/test": "npm:@playwright/test@1.57.0",
     "playwright": "npm:playwright@1.57.0",
+    // An IndexedDB for the unit tests of the SPA's device copies (Deno has none); the version
+    // ts-libs tests `createDataCache` with.
+    "fake-indexeddb": "npm:fake-indexeddb@6.2.5",
     // The npm name of `@spy4x/preact-system` above, for Playwright's loader; it moves with the five.
     "@jsr/spy4x__preact-system": "npm:@jsr/spy4x__preact-system@3.20.1",
     // The npm name of `@spy4x/platform` above, for the same reason: every e2e spec takes `uuidV7`
