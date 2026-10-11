@@ -279,6 +279,15 @@ These cost real time to find. Do not rediscover them.
    `page.reload` while online, gets none of this and brings the cold-start flakes back. The
    one plain reload left is the one made with the network cut (`e2e/offline.e2e.ts`).
 
+10. **Rolling the API back past the `api_tokens.revoked_at` migration brings revoked tokens back to
+    life (#293).** A revoked token keeps its row and hash for 30 days, and only code from that
+    change on reads `revoked_at`: older code finds the row and lets the token act. So every token
+    revoked in the last 30 days works again after such a rollback, among them the ones a password
+    change ended after a break-in. Before rolling back, delete those rows:
+    `DELETE FROM api_tokens WHERE revoked_at IS NOT NULL;`. Their audit rows stay and still name
+    them. Going forward is safe: old code runs against the new column, and compose runs the
+    migration before the new API starts.
+
 ## Running it
 
 ```sh
@@ -333,8 +342,14 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 
 **Personal API tokens: what is asked, what ends one, what is kept.** Creating a token asks for the
 account's current password (`signIn.checkPassword`, behind the strict per-user limit), so a stolen
-session cannot mint one; an account with no password cannot create tokens. The create queues the
-`api-token.created-mail` job, which mails the owner's proven address.
+session cannot mint one; an account with no password cannot create tokens and is told so. The
+password is checked inside the create's transaction, under the lock on the person's `users` row
+(`lockUser`). A password change and a reset take that lock too, after the password key's, and
+write the password and revoke the tokens in one transaction: both happen or neither, and a token
+made with the old password never outlives the change. The create queues the
+`api-token.created-mail` job, which mails the owner's proven address. A token's name is one line:
+line breaks and control characters are refused (`hasUnsafeTextCharacters`), since the name goes
+into that mail as plain text.
 
 A token is revoked by its owner, by a password change or reset (every token of the person; "sign
 out other devices" alone leaves them), when its owner leaves or is removed from its group, and when
@@ -342,6 +357,8 @@ its group is deleted. A restored group or a member added back does not get the t
 sets `api_tokens.revoked_at` and keeps the row, so the next request with that token can still be
 tied to its owner and audited. A revoked or expired token is refused and hidden from that moment.
 A token of a soft-deleted account is not revoked: it works again if the account is restored.
+The migration that added `revoked_at` also revoked the tokens the older code had left asleep: those
+of people no longer in the token's group and of groups in the trash, each with its audit row.
 
 The nightly `outbox.cleanup` job runs `purgeExpiredApiTokens`, which deletes a row
 `API_TOKEN_PURGE_GRACE_DAYS` (30) days after it expired or was revoked, by the database clock, so a
