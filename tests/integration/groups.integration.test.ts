@@ -84,7 +84,7 @@ Deno.test({
       await applyMigration(sql, "2026_10_26_0001_starter_data.sql")
       await applyMigration(sql, "2026_10_27_0001_tags.sql")
       await applyMigration(sql, "2026_10_28_0001_api_tokens_purged_audit.sql")
-      await applyMigration(sql, "2026_10_29_0001_idempotency_claim_token_text.sql")
+      await applyMigration(sql, "2026_10_29_0001_idempotency_claim_token_no_default.sql")
 
       await t.step("backfill is rerunnable and covers only active users", async () => {
         await applyMigration(sql, "2026_08_18_0002_personal_group_backfill.sql")

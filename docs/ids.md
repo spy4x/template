@@ -44,8 +44,11 @@ lets each through by its file and exact line:
   takes no webhooks.
 
 Code that already makes a value that is no id (a password hash, a salt, a nonce, a key, a code, a
-`randomBase64Url()` token such as an invitation link's) stays as it is. `@spy4x/server` 1.64.0
-makes the idempotency claim token that way itself, so `idempotency_keys.claim_token` is text.
+`randomBase64Url()` token such as an invitation link's) stays as it is.
+
+The idempotency claim token is made by `@spy4x/server`, as a version 7 UUID from 1.64.1 on, so
+`idempotency_keys.claim_token` stays `uuid`. It has no default: the store passes the token in
+every insert.
 
 ## Old ids stay valid
 
