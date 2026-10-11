@@ -44,6 +44,7 @@ import { createTagOperations } from "../../apps/api/features/tags/operations.ts"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { runBlockedOnLock } from "./group-team.ts"
 import { expectVersion7Ids } from "./ids.ts"
 
 /**
@@ -582,9 +583,11 @@ Deno.test("tags against Postgres", async (t) => {
       const { owner, groupId } = await seed()
       await fillTags(sql, groupId, owner, TAG_MAX_PER_GROUP - 1)
 
-      const results = await Promise.allSettled([
-        createTag(owner, groupId, "First"),
-        createTag(owner, groupId, "Second"),
+      // Both creates are held at the group's lock before either inserts, so a count taken before
+      // the lock would let both through.
+      const results = await runBlockedOnLock(sql, groupId, [
+        () => createTag(owner, groupId, "First"),
+        () => createTag(owner, groupId, "Second"),
       ])
 
       const refused = results.filter((result) => result.status === "rejected")
