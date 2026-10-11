@@ -38,6 +38,8 @@ function server<T>(first: T) {
     goesDown: () => void (state.failure = new TypeError("Failed to fetch")),
     /** The server answers, and says no. */
     refuses: () => void (state.failure = new RealtimeRequestError("forbidden", "Forbidden")),
+    /** The server answers with an error that says nothing about who may read: it is struggling. */
+    struggles: () => void (state.failure = new RealtimeRequestError("internal", "Try again")),
     /** Holds every answer until the returned function is called. */
     holds(): () => void {
       let release!: () => void
@@ -304,6 +306,19 @@ for (const list of CASES) {
       await page.load()
 
       expect(page.shown()).toEqual(list.empty)
+    })
+
+    it("are kept when the server fails without refusing the read", async () => {
+      const device = memoryReads()
+      const api = await visited(device)
+      api.struggles()
+      await list.open(api.read, device).load()
+      api.goesDown()
+
+      const page = list.open(api.read, device)
+      await page.load()
+
+      expect(page.shown()).toEqual(list.expected(older))
     })
 
     it("are not kept while the local-data module is off", async () => {
