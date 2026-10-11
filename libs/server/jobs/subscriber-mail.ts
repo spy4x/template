@@ -87,7 +87,7 @@ export function subscriberConfirmMailJob(deps: SubscriberMailDeps): JobHandler {
   return requestJob(deps, async (request, setup) => {
     const crypto = await createListCrypto(setup, request.listId)
     const link = subscriberConfirmLink(
-      deps.brand.webAppUrl,
+      setup.siteUrl ?? deps.brand.webAppUrl,
       request.listId,
       await crypto.confirmToken(request.email),
     )
