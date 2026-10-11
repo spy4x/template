@@ -22,25 +22,7 @@ import { parseEnvValues } from "@spy4x/server/env-age64"
 
 export { parseEnvValues }
 
-/** Raised when a variable a script needs is missing or blank. Never carries a value. */
-export class MissingEnvVarError extends Error {
-  constructor(name: string, path: string) {
-    super(`${name} must be set in ${path}`)
-    this.name = "MissingEnvVarError"
-  }
-}
-
 /** Reads and parses the env file at `path`. */
 export async function readEnvFile(path: string): Promise<Record<string, string>> {
   return parseEnvValues(await Deno.readTextFile(path), path)
-}
-
-/**
- * Returns `values[name]`, or throws {@link MissingEnvVarError} when it is missing or blank.
- * `path` only names the file in the error.
- */
-export function requireEnvVar(values: Record<string, string>, name: string, path: string): string {
-  const value = values[name]
-  if (value === undefined || value === "") throw new MissingEnvVarError(name, path)
-  return value
 }
