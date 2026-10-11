@@ -60,6 +60,8 @@ test.describe("tags", () => {
       await expect(notes.titles).toHaveText(["Trip", "Groceries"])
       await notes.filterChip("Urgent").click()
       await expect(notes.titles).toHaveText(["Groceries"])
+      // The address is written a frame after the click; wait for both tags before reloading.
+      await expect(page).toHaveURL(/tags=[^&]*(%2C|,)/)
       await page.reload()
       await expect(notes.titles).toHaveText(["Groceries"])
       await notes.filterChip("Urgent").click()

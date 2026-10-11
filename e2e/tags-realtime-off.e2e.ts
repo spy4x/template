@@ -73,6 +73,8 @@ test.describe("tags with the WebSocket module switched off", () => {
 
       await notes.filterChip("Urgent").click()
       await expect(notes.titles).toHaveText(["Groceries"])
+      // The address is written a frame after the click; wait for it before reloading.
+      await expect(page).toHaveURL(/tags=/)
       await page.reload()
       await expect(notes.titles).toHaveText(["Groceries"])
 
