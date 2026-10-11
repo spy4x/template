@@ -99,6 +99,18 @@ Deno.test("db:reset refuses before it touches the database when a seed variable 
   })
 })
 
+Deno.test("db:reset refuses before it touches the database when DB_PORT, DB_USER or DB_PASS is missing", async () => {
+  await withProdFile(PROD, async (flag) => {
+    for (const name of ["DB_PORT", "DB_USER", "DB_PASS"]) {
+      const r = await run([flag, "--yes"], { [name]: "" })
+      expect(r.code).toBe(1)
+      expect(r.out).toContain(name)
+      expect(r.out).not.toContain("Target:")
+      expect(r.out).not.toMatch(WENT_AHEAD)
+    }
+  })
+})
+
 Deno.test("db:reset --yes skips the question and goes ahead", async () => {
   await withProdFile(PROD, async (flag) => {
     const r = await run([flag, "--yes"], {}, "n\n")
