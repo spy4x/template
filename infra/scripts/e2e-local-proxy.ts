@@ -40,22 +40,28 @@ export function parseHead(head: string): RequestHead {
  * - The client's own `X-Real-IP` and `X-Forwarded-For` are dropped and both are set to
  *   `clientAddress`, the address the proxy sees, so a client cannot choose the address the API
  *   records for it. Traefik does the same in the compose stack.
- * - A request that is not a WebSocket handshake gets `Connection: close`, so one connection never
- *   carries a second request, which would skip this rewrite and the routing. The handshake keeps
- *   its `Connection: Upgrade`.
+ * - Every request gets `Connection: close`, so one connection never carries a second request,
+ *   which would skip this rewrite and the routing. A WebSocket handshake gets
+ *   `Connection: Upgrade, close`: the upgrade still happens, and an upstream that refuses it, as
+ *   for a plain request that only claims to be a handshake, closes the connection.
+ *
+ * Null when a line break of `head` is not CR LF: the proxy then closes the connection. The
+ * upstream reads a bare line feed or carriage return as a line break too, so a header after one
+ * would pass here as part of the line before it and reach the upstream as a header of its own.
  */
-export function forwardedHead(head: string, clientAddress: string): string {
+export function forwardedHead(head: string, clientAddress: string): string | null {
+  if (/\r(?!\n)|(?<!\r)\n/.test(head)) return null
   const { isWebSocket } = parseHead(head)
   const [requestLine, ...headers] = head.split("\r\n").filter((line) => line !== "")
   const kept = headers.filter((line) =>
-    !CLIENT_ADDRESS_HEADERS.test(line) && (isWebSocket || !/^connection\s*:/i.test(line))
+    !CLIENT_ADDRESS_HEADERS.test(line) && !/^connection\s*:/i.test(line)
   )
   return [
     requestLine,
     ...kept,
     `X-Real-IP: ${clientAddress}`,
     `X-Forwarded-For: ${clientAddress}`,
-    ...(isWebSocket ? [] : ["Connection: close"]),
+    isWebSocket ? "Connection: Upgrade, close" : "Connection: close",
     "",
     "",
   ].join("\r\n")
@@ -112,6 +118,8 @@ async function handle(conn: Deno.TcpConn, apiPort: number, spaPort: number): Pro
   const head = decoder.decode(read.subarray(0, end))
   const { path } = parseHead(head)
   const isApi = path === "/api" || path.startsWith("/api/") || path.startsWith("/api?")
+  const forwarded = forwardedHead(head, conn.remoteAddr.hostname)
+  if (forwarded === null) return conn.close()
   let upstream: Deno.Conn
   try {
     upstream = await Deno.connect({ hostname: "127.0.0.1", port: isApi ? apiPort : spaPort })
@@ -119,7 +127,7 @@ async function handle(conn: Deno.TcpConn, apiPort: number, spaPort: number): Pro
     return conn.close()
   }
   try {
-    await upstream.write(encoder.encode(forwardedHead(head, conn.remoteAddr.hostname)))
+    await upstream.write(encoder.encode(forwarded))
     // Whatever of the body arrived with the head.
     if (end < read.length) await upstream.write(read.subarray(end))
   } catch {

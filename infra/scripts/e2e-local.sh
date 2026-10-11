@@ -80,8 +80,11 @@ cleanup() {
   find vapid.json -delete 2>/dev/null
 }
 trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+# `deno task` forwards a signal the script also gets from its process group, so it arrives twice.
+# The first one switches both off: a second `exit` during cleanup would end the script with
+# cleanup half done.
+trap 'trap "" INT TERM; exit 130' INT
+trap 'trap "" INT TERM; exit 143' TERM
 
 # Starts "$@" in the background as the leader of its own process group, with its output in
 # $SCRATCH/<name>.log, and records it for cleanup.
