@@ -18,6 +18,7 @@
  * @module
  */
 
+import { MissingEnvError } from "@spy4x/server/config"
 import { parseEnvValues } from "@spy4x/server/env-age64"
 
 export { parseEnvValues }
@@ -25,4 +26,13 @@ export { parseEnvValues }
 /** Reads and parses the env file at `path`. */
 export async function readEnvFile(path: string): Promise<Record<string, string>> {
   return parseEnvValues(await Deno.readTextFile(path), path)
+}
+
+/**
+ * The line a script prints when it cannot plan its work. A missing variable also names the env
+ * file to fix, because the library error does not know it.
+ */
+export function describeEnvFileError(error: unknown, envFilePath: string): string {
+  if (error instanceof MissingEnvError) return `${error.message} in ${envFilePath}`
+  return error instanceof Error ? error.message : String(error)
 }

@@ -16,7 +16,7 @@
 
 import { error, log, success } from "./+lib.ts"
 import { createEnvReader, readEnvVar } from "@spy4x/server/config"
-import { readEnvFile } from "./env-file.ts"
+import { describeEnvFileError, readEnvFile } from "./env-file.ts"
 
 /** One `docker` invocation: its arguments and the variables it passes into the container. */
 export interface DockerRun {
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
   try {
     plan = planBackup(await readEnvFile(envFilePath), new Date())
   } catch (err) {
-    error(err instanceof Error ? err.message : err)
+    error(describeEnvFileError(err, envFilePath))
     Deno.exit(1)
   }
 
