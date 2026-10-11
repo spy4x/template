@@ -4,9 +4,10 @@ import postgres from "postgres"
 import { CommandBus, QueryBus } from "@spy4x/platform/cqrs"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { type Actor, UserMFAStatus } from "@domain/identity"
-import { GroupRole } from "@domain/groups"
+import { GroupCreateCommand, GroupRenameCommand, GroupRole } from "@domain/groups"
 import { NoteCreateCommand, NoteGetQuery, NoteMoveCommand, NoteUpdateCommand } from "@domain/notes"
 import {
+  TAG_MAX_PER_GROUP,
   TagCreateCommand,
   TagDeleteCommand,
   TagListQuery,
@@ -31,6 +32,15 @@ import {
   createTagListHandler,
   createTagUpdateHandler,
 } from "../../apps/api/features/tags/handlers.ts"
+import {
+  createGroupOperations,
+  type GroupOperationDependencies,
+} from "../../apps/api/features/groups/operations.ts"
+import {
+  createNoteOperations,
+  type NoteOperationDependencies,
+} from "../../apps/api/features/notes/operations.ts"
+import { createTagOperations } from "../../apps/api/features/tags/operations.ts"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
@@ -112,7 +122,74 @@ function buses(sql: postgres.Sql) {
   queries.use(createSessionGate([]))
   queries.register(NoteGetQuery, createNoteGetHandler(noteDependencies))
   queries.register(TagListQuery, createTagListHandler(tagDependencies))
-  return { commands, queries, groups }
+  // The operations table of the socket and `POST /api/call`, which is where a payload is parsed.
+  // A group create or rename goes straight to the repository: its handler adds nothing a name
+  // needs, and anything else a test does not call is left out.
+  const execute = <R>(command: object) => commands.execute(command as never) as Promise<R>
+  const operations = {
+    ...createTagOperations({
+      create: execute,
+      update: execute,
+      delete: execute,
+      list: (query) => queries.execute(query),
+      get: () => Promise.reject(new Error("not part of this test")),
+    }),
+    ...createNoteOperations(
+      { create: execute, update: execute, move: execute } as unknown as NoteOperationDependencies,
+    ),
+    ...createGroupOperations(
+      {
+        create: ({ data }: GroupCreateCommand) =>
+          groups.create({ id: data.id, name: data.name }, data.actor.userId),
+        rename: ({ data }: GroupRenameCommand) =>
+          groups.rename(data.groupId, data.name, data.actor.userId),
+      } as unknown as GroupOperationDependencies,
+    ),
+  }
+  return { commands, queries, groups, operations }
+}
+
+interface AuditRow {
+  eventKind: string
+  actorUserId: number
+  requestId: string | null
+  entityType: string | null
+  entityId: string | null
+  details: Record<string, string | number>
+}
+
+/** The group's tag audit events, oldest first. */
+async function tagAudit(sql: postgres.Sql, groupId: string): Promise<AuditRow[]> {
+  return await sql<AuditRow[]>`
+    SELECT event_kind, actor_user_id, request_id, entity_type, entity_id::text AS entity_id, details
+    FROM audit_events
+    WHERE group_id = ${groupId} AND event_kind LIKE 'tag.%' ORDER BY id
+  `
+}
+
+async function tagCount(sql: postgres.Sql, groupId: string): Promise<number> {
+  return (await sql<{ count: number }[]>`
+    SELECT count(*)::int AS count FROM tags WHERE group_id = ${groupId}
+  `)[0].count
+}
+
+/** Gives the group `count` more tags, named `Filler 1` and up, without going through the cap. */
+async function fillTags(
+  sql: postgres.Sql,
+  groupId: string,
+  userId: number,
+  count: number,
+): Promise<void> {
+  const rows = Array.from({ length: count }, (_, index) => ({
+    id: uuidV7(),
+    group_id: groupId,
+    name: `Filler ${index + 1}`,
+    color: "gray",
+    change_sequence: 1,
+    created_by_user_id: userId,
+    updated_by_user_id: userId,
+  }))
+  await sql`INSERT INTO tags ${sql(rows)}`
 }
 
 async function nextSequence(sql: postgres.Sql, groupId: string): Promise<bigint> {
@@ -136,7 +213,7 @@ async function refusal(promise: Promise<unknown>): Promise<unknown> {
 
 Deno.test("tags against Postgres", async (t) => {
   await withSchema(async (sql) => {
-    const { commands, queries, groups } = buses(sql)
+    const { commands, queries, groups, operations } = buses(sql)
 
     /** A group with an owner and a viewer, and a second group of the owner's. */
     async function seed() {
@@ -411,6 +488,239 @@ Deno.test("tags against Postgres", async (t) => {
         expect([...notes[0].tagIds].sort()).toEqual([existing.id, home2.id].sort())
         const sourceTags = await queries.execute(new TagListQuery({ actor: actor(owner), groupId }))
         expect(sourceTags.tags.map((tag) => tag.name)).toEqual(["Home", "Work"])
+      },
+    )
+
+    const call = (userId: number, name: string, payload: unknown) =>
+      Promise.resolve(operations[name].handle({
+        actor: actor(userId),
+        requestId: "req-tags",
+        signal: new AbortController().signal,
+        idempotencyKey: uuidV7(),
+        payload,
+      }))
+
+    await t.step(
+      "a NUL in a tag name, a note title or a group name is refused as invalid, and nothing is written",
+      async () => {
+        const { owner, groupId } = await seed()
+        const { tag } = await createTag(owner, groupId, "Work")
+        const { note } = await createNote(owner, groupId, [])
+        const nul = "a\u0000b"
+        const newGroupId = uuidV7()
+        const before = await nextSequence(sql, groupId)
+
+        const refusals = [
+          await refusal(call(owner, "tag.create", {
+            groupId,
+            id: uuidV7(),
+            name: nul,
+            color: "red",
+          })),
+          await refusal(call(owner, "tag.update", {
+            groupId,
+            id: tag.id,
+            name: nul,
+            color: "red",
+            version: 1,
+          })),
+          await refusal(call(owner, "note.create", {
+            groupId,
+            id: uuidV7(),
+            title: nul,
+            body: "",
+          })),
+          await refusal(call(owner, "note.update", {
+            groupId,
+            id: note.id,
+            title: nul,
+            body: "",
+            version: 1,
+          })),
+          await refusal(call(owner, "group.create", { id: newGroupId, name: nul })),
+          await refusal(call(owner, "group.rename", { groupId, name: nul })),
+        ]
+
+        // `INVALID_REQUEST` is the code every route and the socket answer with 400 or
+        // `bad_request`; a Postgres error would have no code of the domain's.
+        expect(refusals.map((error) => (error as { code?: string } | null)?.code)).toEqual(
+          Array(6).fill("INVALID_REQUEST"),
+        )
+        expect(await nextSequence(sql, groupId)).toBe(before)
+        expect(await sql`SELECT 1 FROM groups WHERE id = ${newGroupId}`).toHaveLength(0)
+        // The same calls with a clean name are stored, so the refusals above are the name's.
+        await call(owner, "tag.create", { groupId, id: uuidV7(), name: "a b", color: "red" })
+        await call(owner, "note.create", { groupId, id: uuidV7(), title: "a b", body: "" })
+        await call(owner, "group.create", { id: newGroupId, name: "a b" })
+        expect(await sql`SELECT 1 FROM groups WHERE id = ${newGroupId}`).toHaveLength(1)
+      },
+    )
+
+    await t.step(
+      "refuses the tag that would pass the cap, and answers a retry of the last one that fit",
+      async () => {
+        const { owner, groupId } = await seed()
+        await fillTags(sql, groupId, owner, TAG_MAX_PER_GROUP - 1)
+        const lastId = uuidV7()
+        const last = await createTag(owner, groupId, "Last", lastId)
+        const before = await nextSequence(sql, groupId)
+        const auditBefore = (await tagAudit(sql, groupId)).length
+
+        const over = await refusal(createTag(owner, groupId, "One too many"))
+        const retried = await createTag(owner, groupId, "Last", lastId)
+
+        expect(last.created).toBe(true)
+        expect(over).toMatchObject({ code: "TAG_LIMIT_REACHED" })
+        expect(retried).toMatchObject({ created: false, tag: { id: lastId } })
+        expect(await tagCount(sql, groupId)).toBe(TAG_MAX_PER_GROUP)
+        expect(await nextSequence(sql, groupId)).toBe(before)
+        expect(await tagAudit(sql, groupId)).toHaveLength(auditBefore)
+      },
+    )
+
+    await t.step("two creates at once cannot both take the last place under the cap", async () => {
+      const { owner, groupId } = await seed()
+      await fillTags(sql, groupId, owner, TAG_MAX_PER_GROUP - 1)
+
+      const results = await Promise.allSettled([
+        createTag(owner, groupId, "First"),
+        createTag(owner, groupId, "Second"),
+      ])
+
+      const refused = results.filter((result) => result.status === "rejected")
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+      expect(refused).toHaveLength(1)
+      expect((refused[0] as PromiseRejectedResult).reason).toMatchObject({
+        code: "TAG_LIMIT_REACHED",
+      })
+      expect(await tagCount(sql, groupId)).toBe(TAG_MAX_PER_GROUP)
+    })
+
+    await t.step(
+      "refuses a move whose tags do not fit the other group, and leaves the note and its tags",
+      async () => {
+        const { owner, groupId, otherGroupId } = await seed()
+        await fillTags(sql, otherGroupId, owner, TAG_MAX_PER_GROUP)
+        const { tag } = await createTag(owner, groupId, "Work")
+        const { note } = await createNote(owner, groupId, [tag.id])
+        const before = await nextSequence(sql, otherGroupId)
+
+        const refused = await refusal(commands.execute(
+          new NoteMoveCommand({
+            actor: actor(owner),
+            groupId,
+            toGroupId: otherGroupId,
+            noteIds: [note.id],
+          }),
+        ))
+
+        expect(refused).toMatchObject({ code: "TAG_LIMIT_REACHED" })
+        const read = await queries.execute(
+          new NoteGetQuery({ actor: actor(owner), groupId, id: note.id }),
+        )
+        expect(read.note).toMatchObject({ groupId, tagIds: [tag.id], version: 1 })
+        expect(await tagCount(sql, otherGroupId)).toBe(TAG_MAX_PER_GROUP)
+        expect(await nextSequence(sql, otherGroupId)).toBe(before)
+        expect(await tagAudit(sql, otherGroupId)).toEqual([])
+      },
+    )
+
+    await t.step(
+      "moves a note into a group that is full of tags when the group has its tags already",
+      async () => {
+        const { owner, groupId, otherGroupId } = await seed()
+        await fillTags(sql, otherGroupId, owner, TAG_MAX_PER_GROUP - 1)
+        const { tag: existing } = await createTag(owner, otherGroupId, "work")
+        const { tag } = await createTag(owner, groupId, "Work")
+        const { note } = await createNote(owner, groupId, [tag.id])
+
+        const { notes } = await commands.execute(
+          new NoteMoveCommand({
+            actor: actor(owner),
+            groupId,
+            toGroupId: otherGroupId,
+            noteIds: [note.id],
+          }),
+        )
+
+        expect(notes[0]).toMatchObject({ groupId: otherGroupId, tagIds: [existing.id] })
+        expect(await tagCount(sql, otherGroupId)).toBe(TAG_MAX_PER_GROUP)
+      },
+    )
+
+    await t.step(
+      "a tag's create, rename, recolour and delete each write an audit event with the request",
+      async () => {
+        const { owner, groupId } = await seed()
+        const id = uuidV7()
+        const tag = { groupId, id }
+        await call(owner, "tag.create", { ...tag, name: "Work", color: "blue" })
+        await createNote(owner, groupId, [id])
+        await createNote(owner, groupId, [id])
+
+        await call(owner, "tag.update", { ...tag, name: "Job", color: "blue", version: 1 })
+        await call(owner, "tag.update", { ...tag, name: "Job", color: "red", version: 2 })
+        await call(owner, "tag.delete", { ...tag, version: 3 })
+
+        const event = { actorUserId: owner, requestId: "req-tags", entityType: "tag", entityId: id }
+        expect(await tagAudit(sql, groupId)).toEqual([
+          { ...event, eventKind: "tag.created", details: { name: "Work" } },
+          { ...event, eventKind: "tag.updated", details: { name: "Job", from: "Work" } },
+          { ...event, eventKind: "tag.updated", details: { name: "Job", color: "red" } },
+          { ...event, eventKind: "tag.deleted", details: { name: "Job", notes: 2 } },
+        ])
+      },
+    )
+
+    await t.step("a refused tag write leaves no audit event", async () => {
+      const { owner, viewer, groupId } = await seed()
+      const { tag } = await createTag(owner, groupId, "Work")
+      await createTag(owner, groupId, "Home")
+      const written = (await tagAudit(sql, groupId)).length
+
+      await refusal(createTag(viewer, groupId, "Mine"))
+      await refusal(createTag(owner, groupId, "work"))
+      await refusal(commands.execute(
+        new TagUpdateCommand({
+          actor: actor(owner),
+          groupId,
+          id: tag.id,
+          name: "home",
+          color: "red",
+          version: 1,
+        }),
+      ))
+      await refusal(commands.execute(
+        new TagDeleteCommand({ actor: actor(owner), groupId, id: tag.id, version: 7 }),
+      ))
+
+      expect(await tagAudit(sql, groupId)).toHaveLength(written)
+    })
+
+    await t.step(
+      "a move writes an audit event for each tag it creates in the other group, and none for one it finds",
+      async () => {
+        const { owner, groupId, otherGroupId } = await seed()
+        const { tag: work } = await createTag(owner, groupId, "Work")
+        const { tag: home } = await createTag(owner, groupId, "Home")
+        await createTag(owner, otherGroupId, "work")
+        const { note } = await createNote(owner, groupId, [work.id, home.id])
+        const written = (await tagAudit(sql, otherGroupId)).length
+
+        await call(owner, "note.move", { groupId, toGroupId: otherGroupId, noteIds: [note.id] })
+
+        const created = (await tagAudit(sql, otherGroupId)).slice(written)
+        const home2 = (await sql<{ id: string }[]>`
+          SELECT id FROM tags WHERE group_id = ${otherGroupId} AND name = 'Home'
+        `)[0]
+        expect(created).toEqual([{
+          eventKind: "tag.created",
+          actorUserId: owner,
+          requestId: "req-tags",
+          entityType: "tag",
+          entityId: home2.id,
+          details: { name: "Home" },
+        }])
       },
     )
   })
