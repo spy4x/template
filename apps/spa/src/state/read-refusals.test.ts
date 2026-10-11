@@ -195,11 +195,13 @@ describe("a saved copy and the answer of the server", () => {
         await quietly(first)
         const shownOnline = await first.shown()
         answer = status
-        await quietly(list.open(device))
+        const during = list.open(device)
+        await quietly(during)
+        const shownDuring = await during.shown()
         answer = "offline"
         const offline = list.open(device)
         await quietly(offline)
-        return { shownOnline, shownOffline: await offline.shown() }
+        return { shownOnline, shownDuring, shownOffline: await offline.shown() }
       }
 
       for (const status of [401, 403, 404]) {
@@ -213,8 +215,9 @@ describe("a saved copy and the answer of the server", () => {
       for (const status of [502, 503, 504, 404]) {
         it(`are kept, and shown when the proxy answers ${status} with no error of the API`, async () => {
           const bare = { status, bare: true } as const
-          const { shownOnline, shownOffline } = await afterAnswer(bare)
+          const { shownOnline, shownDuring, shownOffline } = await afterAnswer(bare)
           expect(shownOnline).not.toEqual(list.empty)
+          expect(shownDuring).toEqual(shownOnline)
           expect(shownOffline).toEqual(shownOnline)
         })
       }
