@@ -26,6 +26,9 @@ interface ComposeService {
   entrypoint?: string[]
   environment?: string[]
   ports?: unknown[]
+  cap_drop?: string[]
+  read_only?: boolean
+  security_opt?: string[]
   volumes?: (string | { source?: string })[]
 }
 
@@ -122,7 +125,13 @@ Deno.test("Vector takes containers by the exact Compose project label, not by a 
     sources: { containers: { include_labels?: string[]; include_containers?: string[] } }
   }
   const { containers } = config.sources
-  expect(containers.include_labels).toEqual(["com.docker.compose.project=${PROJECT}"])
+  // Compose lower-cases the project name on the label, so the filter takes Compose's own
+  // variable; PROJECT as typed would match nothing when it holds a capital letter.
+  expect(containers.include_labels).toEqual([
+    "com.docker.compose.project=${COMPOSE_PROJECT_NAME}",
+  ])
+  const { vector } = await services()
+  expect(vector.environment).toContain("COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}")
   // A name is matched as a prefix, so `app-` would also take the project `app-staging`.
   expect(containers.include_containers).toBeUndefined()
 })
@@ -171,4 +180,11 @@ Deno.test("no monitoring service publishes a port on the host", async () => {
     }
   }
   expect(checked).toBeGreaterThanOrEqual(monitoring.length)
+})
+
+Deno.test("Vector, which holds the Docker socket, has no capability and a read-only file system", async () => {
+  const { vector } = await services()
+  expect(vector.cap_drop).toEqual([`ALL`])
+  expect(vector.read_only).toBe(true)
+  expect(vector.security_opt).toContain(`no-new-privileges:true`)
 })

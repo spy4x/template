@@ -7,8 +7,10 @@ sources:
   containers:
     type: docker_logs
     # The label Compose puts on every container of this project. It is an exact match; a name
-    # prefix would also take the containers of a project called `<this one>-staging`.
-    include_labels: ['com.docker.compose.project=${PROJECT}']
+    # prefix would also take the containers of a project called `<this one>-staging`. The value
+    # is Compose's own name for the project, which it writes in lower case whatever PROJECT says:
+    # with PROJECT as typed, a capital letter would match no container at all.
+    include_labels: ['com.docker.compose.project=${COMPOSE_PROJECT_NAME}']
     # Its own log would otherwise report every failed send as a new line to send.
     exclude_containers: ['${PROJECT}-vector']
 

@@ -231,11 +231,13 @@ services:
       - sh
     command: [/usr/local/bin/vector]
     environment:
-      # Lets infra/configs/vector.yml read PROJECT, VLOGS_URL and the VLOGS_AUTH made above. Vector
-      # calls it dangerous because a config from someone else could read any variable; this config
-      # is ours, and the four values below are all the container is given.
+      # Lets infra/configs/vector.yml read the project's two names, VLOGS_URL and the VLOGS_AUTH
+      # made above. Vector calls it dangerous because a config from someone else could read any
+      # variable; this config is ours, and the five values below are all the container is given.
       - VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION=true
       - PROJECT=${PROJECT}
+      # The project name as Compose writes it on its containers' labels: lower case.
+      - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
       - VLOGS_URL=${VLOGS_URL:-http://victorialogs:9428}
       - VLOGS_USERNAME=${VLOGS_USERNAME:-}
       - VLOGS_PASSWORD=${VLOGS_PASSWORD:-}

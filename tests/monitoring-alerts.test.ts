@@ -77,3 +77,14 @@ Deno.test("the ApiErrors rule asks for the metric and the status Vector makes of
   expect(asked?.[1]).toBe(metric.name)
   expect(asked?.[2]).toBe(await statusClassOf(serverError))
 })
+
+Deno.test("Vector counts the lines of the container the API runs as", async () => {
+  const vector = parse(await Deno.readTextFile(new URL("vector.yml", CONFIGS))) as VectorConfig
+  const counted = vector.transforms.api_requests.source.match(
+    /if \.container_name != "([^"]+)" \{ abort \}/,
+  )?.[1]
+  const compose = parse(
+    await Deno.readTextFile(new URL("../compose/compose.shared.yml", CONFIGS)),
+  ) as { services: { api: { container_name: string } } }
+  expect(counted).toBe(compose.services.api.container_name)
+})
