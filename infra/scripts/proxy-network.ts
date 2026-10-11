@@ -26,9 +26,14 @@ export async function ensureProxyNetwork(
   return true
 }
 
-/** Runs the container CLI with its output hidden. A CLI that cannot start reads as exit code -1. */
+/**
+ * Runs the container CLI with its output hidden and returns its exit code.
+ * @throws {Error} When the CLI could not be started (not installed, or not allowed to run).
+ */
 export const runContainerCli: RunContainerCli = async (provider, args) => {
-  return (await runCommand([provider, ...args])).code
+  const result = await runCommand([provider, ...args])
+  if (result.error !== undefined) throw new Error(`Could not run ${provider}: ${result.error}`)
+  return result.code
 }
 
 if (import.meta.main) {
