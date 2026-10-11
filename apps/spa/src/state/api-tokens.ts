@@ -17,6 +17,9 @@ import { READ_KEYS, ReadRefused } from "./read-keys.ts"
 /** The message shown when a token call failed without a message of its own. */
 export const API_TOKENS_FAILURE = "Something went wrong with your API tokens"
 
+/** The message under the password when the form is sent without one. */
+export const PASSWORD_MISSING = "Enter your password to create a token"
+
 /** One call's outcome: the data, or the message to show. */
 export type ApiTokensResult<T> = { ok: true; data: T } | {
   ok: false
@@ -60,6 +63,7 @@ async function call<T>(
 export function emptyApiTokenForm(groupId: string): ApiTokenFormValues {
   return {
     name: "",
+    password: "",
     groupId,
     access: ApiTokenAccess.READ,
     expiresInDays: API_TOKEN_DEFAULT_EXPIRY_DAYS,
@@ -77,9 +81,12 @@ export function createApiTokensStore(
 ) {
   const tokens = signal<readonly ApiToken[] | null>(null)
   const values = signal<ApiTokenFormValues>(emptyApiTokenForm(""))
-  const errors = signal<{ list: string | null; name: string | null; form: string | null }>({
+  const errors = signal<
+    { list: string | null; name: string | null; password: string | null; form: string | null }
+  >({
     list: null,
     name: null,
+    password: null,
     form: null,
   })
   const pending = signal({ create: false, revoke: false })
@@ -140,7 +147,7 @@ export function createApiTokensStore(
     /** Opens the form empty, for `groupId` first. */
     startCreate(groupId: string): void {
       values.value = emptyApiTokenForm(groupId)
-      errors.value = { ...errors.value, name: null, form: null }
+      errors.value = { ...errors.value, name: null, password: null, form: null }
     },
 
     setValue<K extends keyof ApiTokenFormValues>(field: K, value: ApiTokenFormValues[K]): void {
@@ -148,27 +155,36 @@ export function createApiTokensStore(
     },
 
     /**
-     * Checks the form, then creates the token. A bad name stays on the page with its message and
-     * sends nothing; any refusal of the API shows under the form.
+     * Checks the form, then creates the token. A bad name or a missing password stays on the page
+     * with its message and sends nothing. The API's refusal of the password shows on that field;
+     * any other refusal shows under the form. The password leaves the form once the token exists.
      */
     async create(): Promise<void> {
       if (pending.value.create) return
+      if (values.value.password === "") {
+        errors.value = { ...errors.value, name: null, password: PASSWORD_MISSING, form: null }
+        return
+      }
       let request: ApiTokenCreateRequest
       try {
         request = parseApiTokenCreateRequest(values.value)
       } catch (error) {
         if (!(error instanceof ApiTokenError)) throw error
-        errors.value = { ...errors.value, name: error.message, form: null }
+        errors.value = { ...errors.value, name: error.message, password: null, form: null }
         return
       }
-      errors.value = { ...errors.value, name: null, form: null }
+      errors.value = { ...errors.value, name: null, password: null, form: null }
       pending.value = { ...pending.value, create: true }
       const result = await dependencies.create(request)
       pending.value = { ...pending.value, create: false }
       if (!result.ok) {
-        errors.value = { ...errors.value, form: result.error || API_TOKENS_FAILURE }
+        const message = result.error || API_TOKENS_FAILURE
+        errors.value = result.code === "PASSWORD_INVALID"
+          ? { ...errors.value, password: message }
+          : { ...errors.value, form: message }
         return
       }
+      values.value = { ...values.value, password: "" }
       created.value = result.data
       tokens.value = [result.data.token, ...(tokens.value ?? [])]
       // The server answered, so the list is no longer the device's copy alone.
