@@ -8,9 +8,8 @@ import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd"
 import { Window } from "happy-dom"
 import { render, type VNode } from "preact"
 import { act } from "preact/test-utils"
-import { renderToString } from "preact-render-to-string"
 import { NoteEditorScreen, type NoteEditorScreenProps } from "./note-editor-screen.tsx"
-import { NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
+import { type NoteDraft, NotesScreen, type NotesScreenProps } from "./notes-screen.tsx"
 import { TagsScreen, type TagsScreenProps } from "./tags-screen.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
@@ -101,15 +100,6 @@ async function clickText(label: string, within = "body"): Promise<void> {
   await clickOn(target)
 }
 
-/** Ticks or unticks a checkbox the way a person does. */
-async function tick(selector: string, on = true): Promise<void> {
-  const box = find<HTMLInputElement>(selector)
-  box.checked = on
-  await act(() => {
-    box.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event)
-  })
-}
-
 /** Submits the form that holds the element `selector` finds, and lets its callback run. */
 async function submit(selector: string): Promise<boolean> {
   const form = find(selector).closest("form")!
@@ -126,18 +116,6 @@ async function submit(selector: string): Promise<boolean> {
 function focused(): string | undefined {
   const element = document.activeElement
   return element?.getAttribute("data-e2e") ?? element?.tagName
-}
-
-/** The row of the list that holds what has focus: its `data-e2e`. */
-function focusedRow(): string | null | undefined {
-  return document.activeElement?.closest("li")?.getAttribute("data-e2e")
-}
-
-/** The opening tag of the element marked `data-e2e="<hook>"` in `html`, or a failure naming it. */
-function tagOf(html: string, hook: string): string {
-  const tag = html.match(new RegExp(`<[a-z]+\\b[^>]*data-e2e="${hook}"[^>]*>`))?.[0]
-  if (!tag) throw new Error(`no element has data-e2e="${hook}"`)
-  return tag
 }
 
 /** Records every call made to the function it hands out. */
@@ -360,7 +338,7 @@ describe("NotesScreen tags", () => {
 
 describe("NoteEditorScreen tags", () => {
   it("shows the group's tags as a picker and reports the tags the person ticks", async () => {
-    const change = spy<[{ title: string; body: string; tagIds?: string[] }]>()
+    const change = spy<[NoteDraft]>()
     await mount(<NoteEditorScreen {...editorDefaults} onChange={change.fn} />)
     await clickText("Home", "[data-e2e=note-tags-picker]")
     expect(change.calls).toEqual([[{
@@ -371,7 +349,7 @@ describe("NoteEditorScreen tags", () => {
   })
 
   it("takes a tag off when the person unticks it", async () => {
-    const change = spy<[{ title: string; body: string; tagIds?: string[] }]>()
+    const change = spy<[NoteDraft]>()
     await mount(<NoteEditorScreen {...editorDefaults} onChange={change.fn} />)
     await clickText("Urgent", "[data-e2e=note-tags-picker]")
     expect(change.calls[0][0].tagIds).toEqual([])
