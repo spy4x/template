@@ -7,8 +7,14 @@ import {
   ApiTokenError,
   apiTokenExpiresAt,
 } from "@domain/api-tokens"
-import { type AuthAuditBase, AuthAuditEventType } from "@domain/identity"
-import { hashApiToken, type LiveApiToken, mintApiToken } from "@server/api-tokens/api-tokens.ts"
+import { AuthAuditEventType } from "@domain/identity"
+import {
+  type ApiTokenAuditRequest,
+  type ApiTokenRefusalReason,
+  hashApiToken,
+  type LiveApiToken,
+  mintApiToken,
+} from "@server/api-tokens/api-tokens.ts"
 import type { AppDbBase } from "./db-base.ts"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
 
@@ -20,7 +26,15 @@ export interface ApiTokensOptions {
    * the auth pepper; changing it makes every token stop working.
    */
   key: string
-  /** Told when recording a token's use failed; the request goes on. */
+  /** Whether `password` is the current password of user `userId`: the sign-in's own check. */
+  checkPassword: (userId: number, password: string) => Promise<boolean>
+  /**
+   * Whether one more refusal may be audited under `key`, a token's id and the reason. It spends
+   * the budget that keeps a flood of refused requests from filling `auth_audits`
+   * (`TokenRateLimits.refusalAudit`). When it throws, the refusal is not audited.
+   */
+  mayAuditRefusal: (key: string) => Promise<boolean>
+  /** Told when recording a token's use or refusal failed; the request goes on. */
   logError: (message: string, error: unknown) => void
   /** Injected by tests. */
   now?: () => Date
@@ -31,9 +45,11 @@ export interface ApiTokens {
   /** The user's live tokens, newest first. */
   list(userId: number): Promise<ApiToken[]>
   /**
-   * Creates a token for `userId` with its audit row, in one transaction, and returns it with the
-   * secret, which is never available again. Throws `GROUP_NOT_FOUND` when the user is not a member
-   * of the group and `TOO_MANY_TOKENS` at the cap.
+   * Creates a token for `userId` with its audit row and the mail that tells them, in one
+   * transaction, and returns it with the secret, which is never available again. Throws
+   * `PASSWORD_INVALID` unless `request.password` is the person's current password, which a stolen
+   * session does not have (an account with no password can create none), `GROUP_NOT_FOUND` when
+   * the user is not a member of the group and `TOO_MANY_TOKENS` at the cap.
    */
   create(
     c: Context,
@@ -41,26 +57,50 @@ export interface ApiTokens {
     request: ApiTokenCreateRequest,
   ): Promise<ApiTokenCreateResponse>
   /**
-   * Revokes token `tokenId` of `userId` with its audit row, in one transaction. `false` when the
-   * user has no such token, the answer for another person's token too.
+   * Revokes token `tokenId` of `userId` with its audit row, in one statement. `false` when the
+   * user has no such live token, the answer for another person's token too.
    */
   revoke(c: Context, userId: number, tokenId: string): Promise<boolean>
   /**
    * The token `presented` names, when it may act now; `null` for anything else. Reads Postgres on
    * every call, so a revoked or expired token is refused at once. Records the use, and audits it,
-   * at most once every few minutes per token.
+   * at most once every few minutes per token. A revoked or an expired token is audited as refused
+   * ({@link ApiTokens.auditRefusal}); a token nobody has leaves no row, as it has no owner.
    */
   authenticate(c: Context, presented: string | undefined): Promise<LiveApiToken | null>
+  /**
+   * Writes the audit row of a request refused for `reason`, for the owner of token `tokenId`,
+   * unless the budget for that token and reason is spent. Never throws: the refusal is answered
+   * either way.
+   */
+  auditRefusal(c: Context, tokenId: string, reason: ApiTokenRefusalReason): Promise<void>
 }
 
 /** Builds the token operations over `options.db`. */
 export function createApiTokens(
-  { db, key, logError, now = () => new Date() }: ApiTokensOptions,
+  { db, key, checkPassword, mayAuditRefusal, logError, now = () => new Date() }: ApiTokensOptions,
 ): ApiTokens {
+  async function auditRefusal(
+    c: Context,
+    tokenId: string,
+    reason: ApiTokenRefusalReason,
+  ): Promise<void> {
+    try {
+      if (!(await mayAuditRefusal(`${tokenId}:${reason}`))) return
+      await db.apiTokens.audit(tokenId, AuthAuditEventType.API_TOKEN_REFUSED, reason, requestOf(c))
+    } catch (error) {
+      // An audit row is a record, never a reason to answer the refusal differently.
+      logError("error: cannot record that an API token was refused", error)
+    }
+  }
+
   return {
     list: (userId) => db.apiTokens.listLive(userId),
 
-    async create(c, userId, request) {
+    async create(c, userId, { password, ...request }) {
+      if (!(await checkPassword(userId, password))) {
+        throw new ApiTokenError("PASSWORD_INVALID", "The password is incorrect")
+      }
       const { secret, hash } = await mintApiToken(key)
       const outcome = await db.begin(async (tx) => {
         const result = await tx.apiTokens.create({
@@ -73,9 +113,9 @@ export function createApiTokens(
           expiresAt: apiTokenExpiresAt(now(), request.expiresInDays),
         })
         if ("created" in result) {
-          await tx.authAudit.insert(
-            auditRow(c, userId, AuthAuditEventType.API_TOKEN_CREATED, result.created.id),
-          )
+          const { id } = result.created
+          await tx.apiTokens.audit(id, AuthAuditEventType.API_TOKEN_CREATED, null, requestOf(c))
+          await tx.apiTokenMail.queue(id)
         }
         return result
       })
@@ -89,26 +129,28 @@ export function createApiTokens(
     },
 
     async revoke(c, userId, tokenId) {
-      return await db.begin(async (tx) => {
-        if (!(await tx.apiTokens.deleteOwn(userId, tokenId))) return false
-        await tx.authAudit.insert(
-          auditRow(c, userId, AuthAuditEventType.API_TOKEN_REVOKED, tokenId),
-        )
-        return true
-      })
+      return await db.apiTokens.revoke({ userId, tokenId }, "owner", requestOf(c)) > 0
     },
 
     async authenticate(c, presented) {
       if (presented === undefined) return null
       const hash = await hashApiToken(presented, key)
       if (hash === null) return null
-      const token = await db.apiTokens.findLive(hash)
-      if (!token) return null
+      const found = await db.apiTokens.find(hash)
+      if (!found) return null
+      const { token } = found
+      if (found.refused) {
+        await auditRefusal(c, token.id, found.refused)
+        return null
+      }
       try {
         await db.begin(async (tx) => {
           if (await tx.apiTokens.touch(token.id, now())) {
-            await tx.authAudit.insert(
-              auditRow(c, token.userId, AuthAuditEventType.API_TOKEN_USED, token.id),
+            await tx.apiTokens.audit(
+              token.id,
+              AuthAuditEventType.API_TOKEN_USED,
+              null,
+              requestOf(c),
             )
           }
         })
@@ -118,25 +160,16 @@ export function createApiTokens(
       }
       return token
     },
+
+    auditRefusal,
   }
 }
 
 /**
- * The `auth_audits` row of a token action. The address is read as the sign-in's rows read it,
- * trusting `X-Forwarded-For` and `X-Real-IP` from the proxy in front of the API.
+ * Where a token action came from, for its `auth_audits` row. The address is read as the sign-in's
+ * rows read it, trusting `X-Forwarded-For` and `X-Real-IP` from the proxy in front of the API.
  */
-function auditRow(
-  c: Context,
-  userId: number,
-  eventType: AuthAuditEventType,
-  tokenId: string,
-): AuthAuditBase {
+export function requestOf(c: Context): ApiTokenAuditRequest {
   const request = requestInfoFromContext(c, { trustedProxy: true })
-  return {
-    userId,
-    eventType,
-    identifier: tokenId,
-    ip: request.ip || null,
-    userAgent: request.userAgent || null,
-  }
+  return { ip: request.ip || null, userAgent: request.userAgent || null }
 }

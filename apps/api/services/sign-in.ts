@@ -211,8 +211,11 @@ export interface SignIn {
   disconnectTotp(state: AppAuthState): Promise<boolean>
   /**
    * Replaces the password. With `signOutOthers` (the default) it also signs out every other session
-   * and gives this one a new session and cookie; without it every session stays as it is. `false`
-   * when the current password is wrong or the new one is refused.
+   * and gives this one a new session and cookie; without it every session stays as it is. Either
+   * way it then revokes every personal API token of the user, each with its audit row, and answers
+   * how many: a token is what a stolen session leaves behind, and a person who changes the
+   * password after a break-in expects it gone (#293). `null` when the current password is wrong or
+   * the new one is refused.
    */
   changePassword(
     c: Context,
@@ -220,11 +223,11 @@ export interface SignIn {
     password: string,
     newPassword: string,
     signOutOthers?: boolean,
-  ): Promise<boolean>
+  ): Promise<{ revokedTokens: number } | null>
   /**
    * Spends the reset code for `email` and, when it was the live one, proves the address, replaces
-   * the password, signs out every session of the user and deletes every API token, with one audit
-   * row. `false`, and the password unchanged, when the code is wrong, expired, already used or
+   * the password, signs out every session of the user and revokes every API token, with an audit
+   * row each. `false`, and the password unchanged, when the code is wrong, expired, already used or
    * replaced, the new password is refused, or no live account signs in with the address.
    */
   resetPassword(email: string, code: string, newPassword: string): Promise<boolean>
@@ -692,15 +695,23 @@ export function createSignIn(options: SignInOptions): SignIn {
           // The person chose to stay signed in elsewhere: the password is replaced after the same
           // checks, and no session is touched or created, so this device keeps its cookie.
           await changePasswords.changePassword({ ...change, keepSessions: true })
-          return true
+        } else {
+          const result = await changePasswords.changePassword({ ...change, device: deviceOf(c) })
+          await cookie.set(c, result.session.session, result.session.cookieValue)
         }
-        const result = await changePasswords.changePassword({ ...change, device: deviceOf(c) })
-        await cookie.set(c, result.session.session, result.session.cookieValue)
-        return true
       } catch (error) {
-        if (error instanceof PasswordSignInError) return false
+        if (error instanceof PasswordSignInError) return null
         throw error
       }
+      // After the change, in a statement of its own: the package commits the password itself. A
+      // failure here fails the request, and asking again with the new password revokes them.
+      const request = requestInfoFromContext(c, { trustedProxy: true })
+      const revokedTokens = await db.apiTokens.revoke(
+        { userId: user.id },
+        "password-change",
+        { ip: request.ip || null, userAgent: request.userAgent || null },
+      )
+      return { revokedTokens }
     },
 
     async resetPassword(rawEmail, code, newPassword) {
@@ -742,17 +753,9 @@ export function createSignIn(options: SignInOptions): SignIn {
         // The mailbox owner is back in control: an address change someone else asked for goes.
         await tx.emailChange.remove(user.id)
         await sessionsOver(tx.sessionStore).signOutUser(user.id)
-        // A reset is account recovery: a token minted with a stolen session goes too (#167). A
-        // voluntary password change keeps them.
-        if (await tx.apiTokens.deleteAllOf(user.id) > 0) {
-          await tx.authAudit.insert({
-            userId: user.id,
-            eventType: AuthAuditEventType.API_TOKEN_REVOKED,
-            identifier: `password-reset`,
-            ip: null,
-            userAgent: null,
-          })
-        }
+        // A reset is account recovery: a token minted with a stolen session goes too (#167), as
+        // it does on a password change.
+        await tx.apiTokens.revoke({ userId: user.id }, "password-reset")
         return true
       })
     },

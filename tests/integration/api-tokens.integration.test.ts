@@ -3,6 +3,11 @@ import { expect } from "@std/expect"
 import { Hono, type MiddlewareHandler } from "hono"
 import postgres from "postgres"
 import { CommandBus, QueryBus } from "@spy4x/platform/cqrs"
+import { createKvStore } from "@spy4x/platform/rate-limit"
+import type { EmailMessage } from "@spy4x/email/message"
+import type { EmailSender } from "@spy4x/email/sender"
+import type { OutboxEvent } from "@spy4x/server/outbox"
+import { GroupRole } from "@domain/groups"
 import { API_TOKENS_MAX, ApiTokenAccess } from "@domain/api-tokens"
 import { AuthAuditEventType } from "@domain/identity"
 import { NoteCreateCommand, NoteGetQuery, NoteListQuery } from "@domain/notes"
@@ -10,6 +15,8 @@ import { PostgresGroupRepository } from "@server/groups/postgres-group-repositor
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { createNoteListCursor } from "@server/notes/note-list-cursor.ts"
 import { API_TOKEN_USE_RESOLUTION_MS } from "@server/api-tokens/api-tokens.ts"
+import { purgeExpiredApiTokens } from "@server/api-tokens/purge-expired-api-tokens.ts"
+import { API_TOKEN_CREATED_MAIL_JOB, apiTokenCreatedMailJob } from "@server/jobs/api-token-mail.ts"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn } from "../../apps/api/services/sign-in.ts"
 import { createApiTokens } from "../../apps/api/services/api-tokens.ts"
@@ -25,6 +32,10 @@ import {
 import { createApiTokensRoute } from "../../apps/api/routes/api-tokens.ts"
 import { createAuthRoute } from "../../apps/api/routes/auth.ts"
 import type { AuthRateLimits } from "../../apps/api/middlewares/auth-rate-limits.ts"
+import {
+  createTokenRateLimits,
+  REFUSAL_AUDIT_WINDOW_MS,
+} from "../../apps/api/middlewares/token-rate-limits.ts"
 import { issuePasswordReset } from "../../libs/server/auth/password-reset.ts"
 import { createTokenApiRoute } from "../../apps/api/routes/token-api.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
@@ -98,7 +109,7 @@ const openLockout = {
 /** The API as `index.ts` mounts the parts this feature touches, with a clock the test moves. */
 async function buildApp(sql: postgres.Sql) {
   const db = new AppDbBase({ sql })
-  const clock = { now: new Date() }
+  const clock = { now: new Date(), storeDown: false }
   const signIn = createSignIn({
     db,
     pepper: PEPPER,
@@ -107,11 +118,36 @@ async function buildApp(sql: postgres.Sql) {
     sessionMinutes: 60,
     totpIssuer: "example.test",
   })
+  // The refusal audit's budget in memory, on the test's clock; `storeDown` fails every read.
+  const entries = new Map<string, unknown>()
+  const limits = createTokenRateLimits({
+    windowMs: 60_000,
+    limit: 1_000,
+    clock: () => clock.now.getTime(),
+    store: () =>
+      createKvStore({
+        backend: {
+          get: (key) =>
+            clock.storeDown
+              ? Promise.reject(new Error("store down"))
+              : Promise.resolve(entries.get(key)),
+          set: (key, value) => Promise.resolve(void entries.set(key, value)),
+          delete: (key) => Promise.resolve(void entries.delete(key)),
+        },
+      }),
+    onStoreError: (error) => {
+      throw error
+    },
+  })
+  const logged: string[] = []
   const tokens = createApiTokens({
     db,
     key: TOKEN_KEY,
+    checkPassword: (userId, password) => signIn.checkPassword(userId, password),
+    mayAuditRefusal: limits.refusalAudit,
     logError: (message, error) => {
-      throw new Error(`${message}: ${error}`)
+      if (!clock.storeDown) throw new Error(`${message}: ${error}`)
+      logged.push(message)
     },
     now: () => clock.now,
   })
@@ -170,6 +206,7 @@ async function buildApp(sql: postgres.Sql) {
       auth: signIn.auth,
       mutationGuards: createMutationGuards(WEB_APP_URL),
       limit: passThrough,
+      passwordLimit: passThrough,
       tokens,
     }),
   )
@@ -183,9 +220,10 @@ async function buildApp(sql: postgres.Sql) {
       cursor: await createNoteListCursor(COOKIE_SECRET),
       limitByIp: passThrough,
       limitByToken: passThrough,
+      auditRefusal: (c, tokenId, reason) => tokens.auditRefusal(c, tokenId, reason),
     }),
   )
-  return { app, clock, groups, sql, db, signIn }
+  return { app, clock, groups, sql, db, signIn, logged }
 }
 
 type App = Awaited<ReturnType<typeof buildApp>>
@@ -240,6 +278,7 @@ async function createToken(
       groupId: person.groupId,
       access: ApiTokenAccess.WRITE,
       expiresInDays: 90,
+      password: PASSWORD,
       ...overrides,
     }),
   })
@@ -251,6 +290,48 @@ async function createToken(
 
 function listNotes(app: App, groupId: string, secret: string) {
   return app.app.request(`${API}/v1/groups/${groupId}/notes`, { headers: bearer(secret) })
+}
+
+/** The token audit rows of one kind for `userId`, oldest first: what each names and from where. */
+async function auditRows(
+  sql: postgres.Sql,
+  userId: number,
+  eventType: AuthAuditEventType,
+): Promise<{ identifier: string; ip: string | null }[]> {
+  return [
+    ...await sql<{ identifier: string; ip: string | null }[]>`
+      SELECT identifier, ip FROM auth_audits
+      WHERE user_id = ${userId} AND event_type = ${eventType}
+      ORDER BY id
+    `,
+  ].map(({ identifier, ip }) => ({ identifier, ip }))
+}
+
+/** What an audit row says of a token: its id, group, access, the reason if any, then its name. */
+function named(
+  token: { id: string },
+  groupId: string,
+  access: "read" | "write",
+  reason: string | null,
+  name = "Script",
+): string {
+  return `${token.id} group=${groupId} access=${access}${
+    reason ? ` reason=${reason}` : ""
+  } name=${name}`
+}
+
+/** Adds `userId` to `groupId` as an editor, as an accepted invitation does. */
+async function addMember(app: App, groupId: string, userId: number, by: number): Promise<void> {
+  await app.sql`
+    INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
+    VALUES (${groupId}, ${userId}, ${GroupRole.EDITOR}, ${by})
+  `
+}
+
+/** How many tokens the person's list shows. */
+async function listed(app: App, person: Person): Promise<number> {
+  const response = await app.app.request(`${API}/tokens`, { headers: browser(person.cookie) })
+  return ((await response.json()) as { tokens: unknown[] }).tokens.length
 }
 
 async function audits(sql: postgres.Sql, userId: number): Promise<number[]> {
@@ -330,9 +411,181 @@ Deno.test("a revoked token and an expired token are refused on the very next req
 
     await sql`UPDATE api_tokens SET expires_at = now() - interval '1 second' WHERE id = ${expiring.id}`
     expect((await listNotes(app, ada.groupId, expiring.secret)).status).toBe(401)
-    // The expired one is gone from the owner's list too.
-    const listed = await app.app.request(`${API}/tokens`, { headers: browser(ada.cookie) })
-    expect(((await listed.json()) as { tokens: unknown[] }).tokens).toEqual([])
+    // Neither is in the owner's list any more.
+    expect(await listed(app, ada)).toBe(0)
+  })
+})
+
+Deno.test("a request with a revoked or an expired token is audited for its owner, naming the token", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const revoked = await createToken(app, ada, { name: "Old laptop" })
+    const expired = await createToken(app, ada, { name: "Cron", access: ApiTokenAccess.READ })
+    await app.app.request(`${API}/tokens/${revoked.id}`, {
+      method: "DELETE",
+      headers: browser(ada.cookie),
+    })
+    await sql`UPDATE api_tokens SET expires_at = now() - interval '1 second' WHERE id = ${expired.id}`
+
+    expect((await listNotes(app, ada.groupId, revoked.secret)).status).toBe(401)
+    expect((await listNotes(app, ada.groupId, expired.secret)).status).toBe(401)
+    // A token nobody has names no owner: it leaves no row.
+    expect((await listNotes(app, ada.groupId, "tpl_unknown000000000000000")).status).toBe(401)
+
+    expect(await auditRows(sql, ada.userId, AuthAuditEventType.API_TOKEN_REFUSED)).toEqual([
+      {
+        identifier: named(revoked, ada.groupId, "write", "revoked", "Old laptop"),
+        ip: "198.51.100.7",
+      },
+      { identifier: named(expired, ada.groupId, "read", "expired", "Cron"), ip: "198.51.100.7" },
+    ])
+    const [{ count }] = await sql<{ count: number }[]>`
+      SELECT count(*)::int AS count FROM auth_audits
+      WHERE event_type = ${AuthAuditEventType.API_TOKEN_REFUSED}
+    `
+    expect(count).toBe(2)
+  })
+})
+
+Deno.test("a request refused for scope is audited once per token in five minutes, however many are sent", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const otherGroup = uuidV7()
+    await app.groups.create({ id: otherGroup, name: "Side project" }, ada.userId)
+    const reader = await createToken(app, ada, { access: ApiTokenAccess.READ })
+    const writer = await createToken(app, ada, { name: "Writer" })
+    const write = () =>
+      app.app.request(`${API}/v1/groups/${ada.groupId}/notes`, {
+        method: "POST",
+        headers: bearer(reader.secret),
+        body: JSON.stringify({ id: uuidV7(), title: "Not allowed", body: "" }),
+      })
+    const refused = () => auditRows(sql, ada.userId, AuthAuditEventType.API_TOKEN_REFUSED)
+
+    for (let i = 0; i < 20; i++) expect((await write()).status).toBe(403)
+    expect(await refused()).toEqual([
+      { identifier: named(reader, ada.groupId, "read", "scope"), ip: "198.51.100.7" },
+    ])
+
+    // Another token has a budget of its own, and a request that is served leaves no refusal.
+    expect((await listNotes(app, otherGroup, writer.secret)).status).toBe(403)
+    expect((await listNotes(app, ada.groupId, writer.secret)).status).toBe(200)
+    expect((await refused()).map((row) => row.identifier)).toEqual([
+      named(reader, ada.groupId, "read", "scope"),
+      named(writer, ada.groupId, "write", "scope", "Writer"),
+    ])
+
+    app.clock.now = new Date(app.clock.now.getTime() + REFUSAL_AUDIT_WINDOW_MS - 1_000)
+    await write()
+    expect(await refused()).toHaveLength(2)
+    app.clock.now = new Date(app.clock.now.getTime() + 2_000)
+    await write()
+    await write()
+    expect(await refused()).toHaveLength(3)
+  })
+})
+
+Deno.test("a refusal is still answered, and leaves no audit row, while the limit's store is down", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const reader = await createToken(app, ada, { access: ApiTokenAccess.READ })
+    app.clock.storeDown = true
+
+    const response = await app.app.request(`${API}/v1/groups/${ada.groupId}/notes`, {
+      method: "POST",
+      headers: bearer(reader.secret),
+      body: JSON.stringify({ id: uuidV7(), title: "Not allowed", body: "" }),
+    })
+
+    expect(response.status).toBe(403)
+    expect(await auditRows(sql, ada.userId, AuthAuditEventType.API_TOKEN_REFUSED)).toEqual([])
+    expect(app.logged).toEqual(["error: cannot record that an API token was refused"])
+  })
+})
+
+Deno.test("creating a token needs the account's password: none, a wrong one and another person's are refused", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const bob = await signUp(app, "bob@example.com")
+    await sql`UPDATE auth_keys SET secret = NULL WHERE user_id = ${bob.userId}`
+    const create = async (person: Person, password?: string) => {
+      const response = await app.app.request(`${API}/tokens`, {
+        method: "POST",
+        headers: browser(person.cookie),
+        body: JSON.stringify({
+          name: "Script",
+          groupId: person.groupId,
+          access: ApiTokenAccess.READ,
+          expiresInDays: 30,
+          ...(password === undefined ? {} : { password }),
+        }),
+      })
+      return { status: response.status, code: ((await response.json()) as { code?: string }).code }
+    }
+
+    expect(await create(ada)).toEqual({ status: 400, code: "INVALID_REQUEST" })
+    expect(await create(ada, "")).toEqual({ status: 400, code: "INVALID_REQUEST" })
+    expect(await create(ada, "Not-the-Passw0rd")).toEqual({ status: 400, code: "PASSWORD_INVALID" })
+    // An account with no password has nothing to prove with: it cannot make a token.
+    expect(await create(bob, PASSWORD)).toEqual({ status: 400, code: "PASSWORD_INVALID" })
+
+    const [{ count }] = await sql<{ count: number }[]>`
+      SELECT (SELECT count(*) FROM api_tokens)::int + (
+        SELECT count(*) FROM auth_audits
+        WHERE event_type = ${AuthAuditEventType.API_TOKEN_CREATED}
+      )::int + (
+        SELECT count(*) FROM outbox_events WHERE event_kind = ${API_TOKEN_CREATED_MAIL_JOB}
+      )::int AS count
+    `
+    expect(count).toBe(0)
+    expect((await create(ada, PASSWORD)).status).toBe(201)
+  })
+})
+
+Deno.test("creating a token queues one mail to its owner, which names the token and not its secret", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const token = await createToken(app, ada, { name: "Zapier", expiresInDays: null })
+
+    const queued = await sql<{ aggregateId: string }[]>`
+      SELECT aggregate_id FROM outbox_events WHERE event_kind = ${API_TOKEN_CREATED_MAIL_JOB}
+    `
+    expect(queued.map((row) => row.aggregateId)).toEqual([token.id])
+
+    const sent: EmailMessage[] = []
+    const logged: string[] = []
+    const job = apiTokenCreatedMailJob({
+      sql,
+      sender: {
+        send: (message: EmailMessage) => (
+          sent.push(message), Promise.resolve({ ok: true, accepted: [message.to], duplicates: [] })
+        ),
+      } as unknown as EmailSender,
+      brand: { webAppUrl: WEB_APP_URL },
+      log: (line) => void logged.push(line),
+    })
+    const event = { aggregateId: token.id } as OutboxEvent
+
+    // Nobody proved the address yet: nothing is sent to it.
+    await job(event)
+    expect(sent).toEqual([])
+    expect(logged).toEqual([
+      "warn: an API token mail was not sent: the account has no proven address",
+    ])
+
+    await sql`INSERT INTO auth_email_owners (email, user_id) VALUES ('ada@example.com', ${ada.userId})`
+    await sql`UPDATE auth_keys SET proven_at = now() WHERE user_id = ${ada.userId}`
+    await job(event)
+    expect(sent.map((mail) => mail.to)).toEqual(["ada@example.com"])
+    expect(sent[0].text).toContain(`An API token named "Zapier" was created`)
+    expect(sent[0].text).toContain(`It can read and write the group "Personal" and never expires.`)
+    expect(JSON.stringify(sent)).not.toContain(token.secret)
+    expect(JSON.stringify(sent)).not.toContain(token.secret.slice(4))
   })
 })
 
@@ -363,6 +616,7 @@ Deno.test("a token cannot reach account actions: token management, password, ses
         groupId: ada.groupId,
         access: ApiTokenAccess.WRITE,
         expiresInDays: null,
+        password: PASSWORD,
       }),
     })
     expect(create.status).toBe(401)
@@ -409,6 +663,7 @@ Deno.test("nobody can make a token for a group they are not in, or revoke anothe
         groupId: ada.groupId,
         access: ApiTokenAccess.READ,
         expiresInDays: 30,
+        password: PASSWORD,
       }),
     })
     expect(intoAda.status).toBe(404)
@@ -443,11 +698,72 @@ Deno.test("create and revoke are audited, and use at most once per few minutes",
       AuthAuditEventType.API_TOKEN_USED,
       AuthAuditEventType.API_TOKEN_REVOKED,
     ])
-    const [row] = await sql<{ identifier: string; ip: string }[]>`
-      SELECT identifier, ip FROM auth_audits
-      WHERE event_type = ${AuthAuditEventType.API_TOKEN_USED} LIMIT 1
+    const token = { id }
+    expect(await auditRows(sql, ada.userId, AuthAuditEventType.API_TOKEN_USED)).toEqual([
+      { identifier: named(token, ada.groupId, "write", null), ip: "198.51.100.7" },
+      { identifier: named(token, ada.groupId, "write", null), ip: "198.51.100.7" },
+    ])
+    expect(await auditRows(sql, ada.userId, AuthAuditEventType.API_TOKEN_CREATED)).toEqual([
+      { identifier: named(token, ada.groupId, "write", null), ip: "203.0.113.42" },
+    ])
+  })
+})
+
+Deno.test("the audit rows still name a token after it is revoked and after its row is purged", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const revoked = await createToken(app, ada, { name: "Old laptop" })
+    const expired = await createToken(app, ada, { name: "Cron", access: ApiTokenAccess.READ })
+    await listNotes(app, ada.groupId, revoked.secret)
+    await app.app.request(`${API}/tokens/${revoked.id}`, {
+      method: "DELETE",
+      headers: browser(ada.cookie),
+    })
+    const rows = (type: AuthAuditEventType) => auditRows(sql, ada.userId, type)
+
+    // Revoked: gone from the list, and the row that says so names it.
+    expect(await listed(app, ada)).toBe(1)
+    expect(await rows(AuthAuditEventType.API_TOKEN_REVOKED)).toEqual([
+      {
+        identifier: named(revoked, ada.groupId, "write", "owner", "Old laptop"),
+        ip: "203.0.113.42",
+      },
+    ])
+
+    await sql`
+      UPDATE api_tokens SET revoked_at = now() - interval '40 days' WHERE id = ${revoked.id}
     `
-    expect(row).toEqual({ identifier: id, ip: "198.51.100.7" })
+    await sql`
+      UPDATE api_tokens SET expires_at = now() - interval '40 days' WHERE id = ${expired.id}
+    `
+    expect(await purgeExpiredApiTokens(sql)).toBe(2)
+    const [{ count }] = await sql<
+      { count: number }[]
+    >`SELECT count(*)::int AS count FROM api_tokens`
+    expect(count).toBe(0)
+
+    // Purged: every row written about either token still says which token it was.
+    expect(await rows(AuthAuditEventType.API_TOKENS_PURGED)).toEqual([
+      { identifier: named(expired, ada.groupId, "read", null, "Cron"), ip: null },
+    ])
+    const all = await sql<{ identifier: string }[]>`
+      SELECT identifier FROM auth_audits
+      WHERE user_id = ${ada.userId} AND event_type BETWEEN ${AuthAuditEventType.API_TOKEN_CREATED}
+        AND ${AuthAuditEventType.API_TOKEN_REFUSED}
+      ORDER BY id
+    `
+    expect(all.map((row) => row.identifier)).toEqual([
+      named(revoked, ada.groupId, "write", null, "Old laptop"),
+      named(expired, ada.groupId, "read", null, "Cron"),
+      named(revoked, ada.groupId, "write", null, "Old laptop"),
+      named(revoked, ada.groupId, "write", "owner", "Old laptop"),
+      named(expired, ada.groupId, "read", null, "Cron"),
+    ])
+    // No row carries a secret or its hash.
+    const dump = JSON.stringify(await sql`SELECT * FROM auth_audits`)
+    expect(dump).not.toContain(revoked.secret.slice(4))
+    expect(dump).not.toMatch(/[0-9a-f]{64}/)
   })
 })
 
@@ -461,6 +777,7 @@ async function createStatus(app: App, person: Person, groupId: string): Promise<
       groupId,
       access: ApiTokenAccess.READ,
       expiresInDays: 30,
+      password: PASSWORD,
     }),
   })
   await response.body?.cancel()
@@ -484,64 +801,175 @@ Deno.test("a person holds at most the cap of live tokens, even when creates race
   })
 })
 
-Deno.test("tokens of a deleted group are neither listed nor counted, and come back with it", async () => {
+Deno.test("deleting a group revokes its tokens for good: restoring the group does not bring them back", async () => {
   await withSchema(async (sql) => {
     const app = await buildApp(sql)
     const ada = await signUp(app, "ada@example.com")
+    const bob = await signUp(app, "bob@example.com")
     const side = uuidV7()
     await app.groups.create({ id: side, name: "Side project" }, ada.userId)
-    for (let i = 0; i < API_TOKENS_MAX; i++) await createToken(app, ada, { groupId: side })
+    await addMember(app, side, bob.userId, ada.userId)
+    const adas = await createToken(app, ada, { groupId: side, name: "Ada's" })
+    const bobs = await createToken(app, bob, { groupId: side, name: "Bob's" })
+    const elsewhere = await createToken(app, ada)
+    for (let i = 2; i < API_TOKENS_MAX; i++) await createToken(app, ada, { groupId: side })
     expect(await createStatus(app, ada, ada.groupId)).toBe(409)
 
-    await sql`UPDATE groups SET deleted_at = now() WHERE id = ${side}`
-    const listed = async () => {
-      const response = await app.app.request(`${API}/tokens`, { headers: browser(ada.cookie) })
-      return ((await response.json()) as { tokens: unknown[] }).tokens.length
-    }
-    expect(await listed()).toBe(0)
+    expect(await app.groups.softDelete(side, ada.userId)).not.toBe(null)
+    // The group's tokens no longer count against the cap, and the other group's token works.
+    expect(await listed(app, ada)).toBe(1)
+    expect(await listed(app, bob)).toBe(0)
+    expect((await listNotes(app, ada.groupId, elsewhere.secret)).status).toBe(200)
     expect(await createStatus(app, ada, ada.groupId)).toBe(201)
 
-    // Restoring the group brings its tokens back, so the list and the cap still agree.
-    await sql`UPDATE groups SET deleted_at = NULL WHERE id = ${side}`
-    expect(await listed()).toBe(API_TOKENS_MAX + 1)
-    expect(await createStatus(app, ada, ada.groupId)).toBe(409)
+    expect(await app.groups.restore(side, ada.userId)).not.toBe(null)
+    expect((await listNotes(app, side, adas.secret)).status).toBe(401)
+    expect((await listNotes(app, side, bobs.secret)).status).toBe(401)
+    expect(await listed(app, ada)).toBe(2)
+    expect(await listed(app, bob)).toBe(0)
+    expect(await auditRows(sql, bob.userId, AuthAuditEventType.API_TOKEN_REVOKED)).toEqual([
+      { identifier: named(bobs, side, "write", "group-deleted", "Bob's"), ip: null },
+    ])
+    expect(
+      (await auditRows(sql, ada.userId, AuthAuditEventType.API_TOKEN_REVOKED))
+        .map((row) => row.identifier),
+    ).toContain(named(adas, side, "write", "group-deleted", "Ada's"))
   })
 })
 
-Deno.test("a password reset revokes every token, and a password change keeps them", async () => {
+Deno.test("a member removed from a group loses their tokens for it, and being added back does not wake them", async () => {
   await withSchema(async (sql) => {
     const app = await buildApp(sql)
     const ada = await signUp(app, "ada@example.com")
-    const kept = await createToken(app, ada)
+    const bob = await signUp(app, "bob@example.com")
+    await addMember(app, ada.groupId, bob.userId, ada.userId)
+    const inAdas = await createToken(app, bob, { groupId: ada.groupId, name: "In Ada's" })
+    const own = await createToken(app, bob, { name: "Own" })
+    const adas = await createToken(app, ada)
+    expect((await listNotes(app, ada.groupId, inAdas.secret)).status).toBe(200)
 
+    expect(await app.groups.removeMember(ada.groupId, bob.userId, ada.userId)).toBe(true)
+    expect((await listNotes(app, ada.groupId, inAdas.secret)).status).toBe(401)
+
+    await addMember(app, ada.groupId, bob.userId, ada.userId)
+    expect((await listNotes(app, ada.groupId, inAdas.secret)).status).toBe(401)
+    expect(await listed(app, bob)).toBe(1)
+    // Their token for another group, and the other members' tokens, are untouched.
+    expect((await listNotes(app, bob.groupId, own.secret)).status).toBe(200)
+    expect((await listNotes(app, ada.groupId, adas.secret)).status).toBe(200)
+    expect(await auditRows(sql, bob.userId, AuthAuditEventType.API_TOKEN_REVOKED)).toEqual([
+      { identifier: named(inAdas, ada.groupId, "write", "membership-ended", "In Ada's"), ip: null },
+    ])
+    expect(await auditRows(sql, ada.userId, AuthAuditEventType.API_TOKEN_REVOKED)).toEqual([])
+  })
+})
+
+Deno.test("a member who leaves a group loses their tokens for it, and rejoining does not wake them", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const bob = await signUp(app, "bob@example.com")
+    await addMember(app, ada.groupId, bob.userId, ada.userId)
+    const inAdas = await createToken(app, bob, { groupId: ada.groupId, name: "In Ada's" })
+    const own = await createToken(app, bob, { name: "Own" })
+
+    expect(await app.groups.leave(ada.groupId, bob.userId)).toBe(true)
+    expect((await listNotes(app, ada.groupId, inAdas.secret)).status).toBe(401)
+
+    await addMember(app, ada.groupId, bob.userId, ada.userId)
+    expect((await listNotes(app, ada.groupId, inAdas.secret)).status).toBe(401)
+    expect((await listNotes(app, bob.groupId, own.secret)).status).toBe(200)
+    expect(await auditRows(sql, bob.userId, AuthAuditEventType.API_TOKEN_REVOKED)).toEqual([
+      { identifier: named(inAdas, ada.groupId, "write", "membership-ended", "In Ada's"), ip: null },
+    ])
+  })
+})
+
+Deno.test("a group or an account deleted for good takes its tokens' rows with it", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const bob = await signUp(app, "bob@example.com")
+    const side = uuidV7()
+    await app.groups.create({ id: side, name: "Side project" }, ada.userId)
+    await createToken(app, ada, { groupId: side })
+    await createToken(app, bob)
+    const count = async () =>
+      (await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM api_tokens`)[0].count
+    expect(await count()).toBe(2)
+
+    await sql`DELETE FROM groups WHERE id = ${side}`
+    expect(await count()).toBe(1)
+    await sql`DELETE FROM groups WHERE owner_user_id = ${bob.userId}`
+    await sql`DELETE FROM auth_users WHERE id = ${bob.userId}`
+    expect(await count()).toBe(0)
+  })
+})
+
+Deno.test("a password change and a password reset each revoke every token of the person, and say which", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const bob = await signUp(app, "bob@example.com")
+    const first = await createToken(app, ada, { name: "First" })
+    const other = await createToken(app, ada, { name: "Other", access: ApiTokenAccess.READ })
+    const bobs = await createToken(app, bob)
+
+    const refusedChange = await app.app.request(`${API}/auth/password/change`, {
+      method: "POST",
+      headers: browser(ada.cookie),
+      body: JSON.stringify({ password: "Not-the-Passw0rd", newPassword: "Changed-Passw0rd" }),
+    })
+    expect(refusedChange.status).not.toBe(200)
+    expect((await listNotes(app, ada.groupId, first.secret)).status).toBe(200)
+
+    // Keeping the other devices signed in does not keep the tokens.
     const change = await app.app.request(`${API}/auth/password/change`, {
       method: "POST",
       headers: browser(ada.cookie),
-      body: JSON.stringify({ password: PASSWORD, newPassword: "Changed-Passw0rd" }),
+      body: JSON.stringify({
+        password: PASSWORD,
+        newPassword: "Changed-Passw0rd",
+        signOutOthers: false,
+      }),
     })
     expect(change.status).toBe(200)
-    expect((await listNotes(app, ada.groupId, kept.secret)).status).toBe(200)
+    expect(await change.json()).toEqual({ success: true, revokedTokens: 2 })
+    expect((await listNotes(app, ada.groupId, first.secret)).status).toBe(401)
+    expect((await listNotes(app, ada.groupId, other.secret)).status).toBe(401)
+    expect((await listNotes(app, bob.groupId, bobs.secret)).status).toBe(200)
+    // One statement writes both rows, in no promised order; token ids sort by when they were made.
+    const byChange = await auditRows(sql, ada.userId, AuthAuditEventType.API_TOKEN_REVOKED)
+    expect(byChange.toSorted((a, b) => a.identifier.localeCompare(b.identifier))).toEqual([
+      {
+        identifier: named(first, ada.groupId, "write", "password-change", "First"),
+        ip: "203.0.113.42",
+      },
+      {
+        identifier: named(other, ada.groupId, "read", "password-change", "Other"),
+        ip: "203.0.113.42",
+      },
+    ])
 
-    // The change gives this session a new cookie.
-    const renewed = change.headers.get("set-cookie")?.split(";")[0] ?? ada.cookie
-    const second = await createToken(app, { ...ada, cookie: renewed }, {
-      access: ApiTokenAccess.READ,
-    })
+    // The change gives this session a new cookie; a token now needs the new password.
+    const renewed = {
+      ...ada,
+      cookie: change.headers.get("set-cookie")?.split(";")[0] ?? ada.cookie,
+    }
+    expect(await listed(app, renewed)).toBe(0)
+    const second = await createToken(app, renewed, { name: "Second", password: "Changed-Passw0rd" })
     const issued = (await issuePasswordReset(app.db.authStore, "ada@example.com", new Date()))!
     expect(await app.signIn.resetPassword("ada@example.com", issued.code, "Reset-Passw0rd")).toBe(
       true,
     )
 
-    expect((await listNotes(app, ada.groupId, kept.secret)).status).toBe(401)
     expect((await listNotes(app, ada.groupId, second.secret)).status).toBe(401)
-    const [{ count }] = await sql<
-      { count: number }[]
-    >`SELECT count(*)::int AS count FROM api_tokens`
-    expect(count).toBe(0)
-    const rows = await sql<{ identifier: string }[]>`
-      SELECT identifier FROM auth_audits
-      WHERE user_id = ${ada.userId} AND event_type = ${AuthAuditEventType.API_TOKEN_REVOKED}
-    `
-    expect(rows).toEqual([{ identifier: "password-reset" }])
+    expect((await listNotes(app, bob.groupId, bobs.secret)).status).toBe(200)
+    expect(
+      (await auditRows(sql, ada.userId, AuthAuditEventType.API_TOKEN_REVOKED))
+        .filter((row) => !byChange.some((earlier) => earlier.identifier === row.identifier)),
+    ).toEqual([
+      { identifier: named(second, ada.groupId, "write", "password-reset", "Second"), ip: null },
+    ])
   })
 })

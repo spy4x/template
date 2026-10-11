@@ -79,8 +79,9 @@ export interface ApiTokenCreateResponse {
 const LONE_SURROGATE = /\p{Cs}/u
 
 /**
- * `POST /api/tokens`: the token's name, its group, what it may do and how many days it lives
- * (`null` for never). The field names are the form's.
+ * `POST /api/tokens`: the token's name, its group, what it may do, how many days it lives (`null`
+ * for never) and the person's current password, which a stolen session does not have (#293). The
+ * field names are the form's.
  */
 export const apiTokenCreateRequestSchema = type({
   // The length is checked in characters by `parseApiTokenCreateRequest`: arktype counts UTF-16
@@ -89,6 +90,8 @@ export const apiTokenCreateRequestSchema = type({
   groupId: type("string").narrow((value, ctx) => isUuid(value) || ctx.mustBe("a UUID")),
   access: type.enumerated(ApiTokenAccess.READ, ApiTokenAccess.WRITE),
   expiresInDays: type.enumerated(...API_TOKEN_EXPIRY_DAYS, null),
+  // No longer than a password can be; whether it is the right one is the API's to say.
+  password: "1 <= string <= 50",
   "+": "reject",
 })
 export type ApiTokenCreateRequest = typeof apiTokenCreateRequestSchema.infer
@@ -96,6 +99,8 @@ export type ApiTokenCreateRequest = typeof apiTokenCreateRequestSchema.infer
 export type ApiTokenErrorCode =
   /** The request body is not a valid token request. */
   | "INVALID_REQUEST"
+  /** The password sent with a create is not the person's current one. */
+  | "PASSWORD_INVALID"
   /** The person is not a member of the group, or it is gone. */
   | "GROUP_NOT_FOUND"
   /** The person has no such live token: another person's token gets the same answer. */
