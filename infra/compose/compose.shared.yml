@@ -195,8 +195,14 @@ services:
         max-size: '10m'
         max-file: '3'
 
-  # Ships the logs of this project's containers (names starting with `${PROJECT}-`), and no other
-  # container's, to VictoriaLogs. It also counts the API's error lines as a metric for vmagent.
+  # Ships the logs of this Compose project's containers, and no other container's, to
+  # VictoriaLogs. It also counts the API's answers by status class as a metric for vmagent.
+  #
+  # It reads the logs through the Docker socket, and that socket is the whole Docker API: `:ro`
+  # only stops the socket file being replaced, it does not stop any call. Whoever controls this
+  # container can start a container that mounts the host's disk. So it gets nothing else: no
+  # Linux capability, no way to gain one, a read-only file system, no published port
+  # (docs/stack.md, "The Docker socket").
   vector:
     container_name: ${PROJECT}-vector
     image: timberio/vector:0.59.0-alpine
@@ -204,13 +210,30 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ../../infra/configs/vector.yml:/etc/vector/vector.yaml:ro,Z
-    # The Docker socket is not labelled for containers on an SELinux host.
     security_opt:
+      # The Docker socket is not labelled for containers on an SELinux host.
       - label=disable
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      # Vector's data directory. The Docker source keeps no position in it.
+      - /var/lib/vector
+    # Vector pastes environment values into its config as text. A password may hold any
+    # character, so it goes in as base64, together with the user name, and never as itself.
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        VLOGS_AUTH=$$(printf '%s:%s' "$$VLOGS_USERNAME" "$$VLOGS_PASSWORD" | base64 | tr -d '\n')
+        export VLOGS_AUTH
+        exec "$$@"
+      - sh
+    command: [/usr/local/bin/vector]
     environment:
-      # Lets infra/configs/vector.yml read the four values below. Vector calls it dangerous because
-      # a config from someone else could read any variable; this config is ours, and these four
-      # are all the container is given.
+      # Lets infra/configs/vector.yml read PROJECT, VLOGS_URL and the VLOGS_AUTH made above. Vector
+      # calls it dangerous because a config from someone else could read any variable; this config
+      # is ours, and the four values below are all the container is given.
       - VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION=true
       - PROJECT=${PROJECT}
       - VLOGS_URL=${VLOGS_URL:-http://victorialogs:9428}
@@ -252,8 +275,6 @@ services:
       - '-storageDataPath=/storage'
       - '-retentionPeriod=14d'
       - '-httpListenAddr=:8428'
-      # Its own metrics, among them the free space of the disk it stores on (infra/configs/alerts.yml).
-      - '-selfScrapeInterval=30s'
     deploy:
       resources:
         limits:
@@ -381,7 +402,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASS}
       - GF_SERVER_ROOT_URL=https://grafana.${DOMAIN}
       # Grafana has no built-in VictoriaLogs data source; it downloads this plugin at first start.
-      - GF_PLUGINS_PREINSTALL_SYNC=victoriametrics-logs-datasource
+      - GF_PLUGINS_PREINSTALL_SYNC=victoriametrics-logs-datasource@0.32.0
     deploy:
       resources:
         limits:

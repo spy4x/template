@@ -1,11 +1,14 @@
 # Vector ships this project's container logs to VictoriaLogs: to VLOGS_URL, or to the bundled
 # VictoriaLogs when that is unset (infra/compose/compose.shared.yml). A dollar sign with a name in
-# braces is filled from the container's environment when Vector starts, in comments too.
+# braces is pasted in from the container's environment as text, before the file is parsed, in
+# comments too. So only values that cannot break the file come in that way: the project name, the
+# address and the credentials in base64. The user name and the password themselves never do.
 sources:
   containers:
     type: docker_logs
-    # A name prefix: this project's containers only, never the rest of the host.
-    include_containers: ['${PROJECT}-']
+    # The label Compose puts on every container of this project. It is an exact match; a name
+    # prefix would also take the containers of a project called `<this one>-staging`.
+    include_labels: ['com.docker.compose.project=${PROJECT}']
     # Its own log would otherwise report every failed send as a new line to send.
     exclude_containers: ['${PROJECT}-vector']
 
@@ -20,14 +23,15 @@ transforms:
 
   # The API has no metrics endpoint yet, so its requests are counted from its request log, whose
   # lines end like `--> GET /api/groups 200 3ms` (@spy4x/server/request-log; the status is wrapped
-  # in a colour code). One counter per status class: api_requests_total{status="2xx"}, "4xx", "5xx".
-  # A change of that log format stops the counter, and with it the ApiErrors alert.
+  # in a colour code). One counter per status class, api_requests_total{status="2xx"} to "5xx".
+  # A change of that log format stops the counter, and with it the ApiErrors alert:
+  # tests/monitoring-alerts.test.ts runs this pattern over the lines the API's logger writes.
   api_requests:
     type: remap
     inputs: [containers]
     source: |
       if .container_name != "${PROJECT}-api" { abort }
-      parsed, err = parse_regex(string!(.message), r'--> [A-Z]+ \S+ (?:\x1b\[\d+m)?(?P<class>\d)\d\d')
+      parsed, err = parse_regex(string!(.message), r'--> [A-Z]+ \S+ (?:\x1b\[\d+m)?(?<class>\d)\d\d')
       if err != null { abort }
       . = { "status": string!(parsed.class) + "xx" }
   api_request_metrics:
@@ -53,10 +57,11 @@ sinks:
       _msg_field: message
       _time_field: timestamp
       _stream_fields: project,container_name,stream
-    auth:
-      strategy: basic
-      user: '${VLOGS_USERNAME}'
-      password: '${VLOGS_PASSWORD}'
+    # HTTP basic auth. The container's entrypoint encodes VLOGS_USERNAME and VLOGS_PASSWORD into
+    # VLOGS_AUTH, so a quote or a hash sign in the password cannot change this file.
+    request:
+      headers:
+        Authorization: 'Basic ${VLOGS_AUTH}'
   # Scraped by vmagent (infra/configs/vmagent.yml).
   metrics:
     type: prometheus_exporter

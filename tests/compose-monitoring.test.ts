@@ -23,7 +23,9 @@ interface ComposeService {
   image?: string
   profiles?: string[]
   command?: string[]
+  entrypoint?: string[]
   environment?: string[]
+  ports?: unknown[]
   volumes?: (string | { source?: string })[]
 }
 
@@ -111,4 +113,62 @@ Deno.test("every config file a service mounts from infra/configs is in the repos
     const stat = await Deno.stat(fromFileUrl(new URL(source, COMPOSE_DIR)))
     expect(stat.isFile, source).toBe(true)
   }
+})
+
+const VECTOR_CONFIG = new URL("../infra/configs/vector.yml", import.meta.url)
+
+Deno.test("Vector takes containers by the exact Compose project label, not by a name prefix", async () => {
+  const config = parse(await Deno.readTextFile(VECTOR_CONFIG)) as {
+    sources: { containers: { include_labels?: string[]; include_containers?: string[] } }
+  }
+  const { containers } = config.sources
+  expect(containers.include_labels).toEqual(["com.docker.compose.project=${PROJECT}"])
+  // A name is matched as a prefix, so `app-` would also take the project `app-staging`.
+  expect(containers.include_containers).toBeUndefined()
+})
+
+Deno.test("a Vector password with a quote reaches the config only inside base64", async () => {
+  const { vector } = await services()
+  // Compose turns `$$` into `$` before the container's shell reads the script.
+  const [shell, flags, script, name] = vector.entrypoint!
+  const { success, stdout, stderr } = await new Deno.Command(shell, {
+    args: [flags, script.replaceAll(`$$`, `$`), name, `printenv`, `VLOGS_AUTH`],
+    env: { VLOGS_USERNAME: `shipper`, VLOGS_PASSWORD: `ab'cd #x` },
+  }).output()
+  expect(new TextDecoder().decode(stderr)).toBe(``)
+  expect(success).toBe(true)
+  expect(atob(new TextDecoder().decode(stdout).trim())).toBe(`shipper:ab'cd #x`)
+
+  const text = await Deno.readTextFile(VECTOR_CONFIG)
+  expect(text).not.toContain("${VLOGS_PASSWORD")
+  expect(text).not.toContain("${VLOGS_USERNAME")
+  const config = parse(text) as {
+    sinks: { victorialogs: { auth?: unknown; request?: { headers?: Record<string, string> } } }
+  }
+  expect(config.sinks.victorialogs.auth).toBeUndefined()
+  expect(config.sinks.victorialogs.request?.headers?.Authorization).toBe("Basic ${VLOGS_AUTH}")
+})
+
+Deno.test("no monitoring service publishes a port on the host", async () => {
+  const monitoring = [
+    `vmagent`,
+    `vector`,
+    `postgres-prometheus-exporter`,
+    `victoriametrics`,
+    `victorialogs`,
+    `vmalert`,
+    `alertmanager`,
+    `grafana`,
+    `nodeexporter`,
+    `cadvisor`,
+  ]
+  let checked = 0
+  for (const file of COMPOSE_FILES) {
+    for (const [name, service] of Object.entries(await services(file))) {
+      if (!monitoring.includes(name)) continue
+      expect(service.ports, `${file}: ${name}`).toBeUndefined()
+      checked++
+    }
+  }
+  expect(checked).toBeGreaterThanOrEqual(monitoring.length)
 })
