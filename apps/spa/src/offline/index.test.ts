@@ -393,6 +393,8 @@ describe("what the device keeps", () => {
     expect([...device.reads.keys()]).toEqual([])
     expect(await device.notes.readNotes("g-1")).toEqual([])
     expect((await device.queue.readOutbox()).map((entry) => entry.entityId)).toEqual(["n-1"])
+    expect(await device.tags.readTags("g-1")).toEqual([])
+    expect((await device.tagsQueue.readOutbox()).map((entry) => entry.entityId)).toEqual(["t-1"])
   })
 
   it("remembers the signed-in user under the key a device already holds, and nobody when what is stored there is not a user", () => {
@@ -491,6 +493,7 @@ describe("what the device keeps", () => {
 
     expect([...device.reads.keys()]).toEqual([])
     expect(await device.notes.readNotes("g-1")).toEqual([])
+    expect(await device.tags.readTags("g-1")).toEqual([])
     expect(kept.getItem(OWED)).toBeNull()
   })
 
@@ -585,6 +588,7 @@ describe("what the device keeps", () => {
 
     expect(currentLayer()).toBeNull()
     expect([...device.reads.keys()]).toEqual([])
+    expect(await device.tags.readTags("g-1")).toEqual([])
   })
 
   it("deletes what the module kept for the remembered person once it is switched off", async () => {
