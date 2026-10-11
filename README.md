@@ -162,7 +162,8 @@ from its own pages, presents its posts to the API with `DOMAIN`'s origin. `MPA_D
 record pointing at the server; Traefik gets its certificate as for `DOMAIN`. The API and the worker
 read `MPA_DOMAIN` too: when it is set, the newsletter's mailed confirm and unsubscribe links open
 the website's pages, which work without JavaScript, so set it only together with the profile.
-Without it the links open the SPA. Without the profile nothing about the deploy changes. The MPA's end-to-end test runs in CI on every pull
+Without it the links open the SPA. Without the profile nothing about the deploy changes. The MPA's
+end-to-end test runs in CI on every pull
 request, and locally with `e2e/mpa/run.sh` against a running Postgres and Valkey (see the header
 of that script).
 

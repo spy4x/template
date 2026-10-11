@@ -34,6 +34,11 @@ export default define.page(function Privacy({ state }) {
           and lets you sign the others out.
         </li>
         <li>
+          What the people in your groups see of you: everyone in a group sees your name, your role
+          there and the group's notes. The group's owner and its admins also see the address you
+          sign in with and when you were last active.
+        </li>
+        <li>
           A group's activity log: who did what in the group and when. The group's owner and its
           admins can read it.
         </li>
@@ -83,7 +88,10 @@ export default define.page(function Privacy({ state }) {
         the app.
       </p>
       <h2>What it does not do</h2>
-      <p>It does not sell or share your data, and shows no ads.</p>
+      <p>
+        It does not sell your data and shows no ads. Outside the app, your data goes only to the
+        providers named above. Inside it, the people in your groups see what is listed above.
+      </p>
       <h2>Deleting your data</h2>
       <p>
         You can delete your account from your profile in the app. It asks for your password, and for

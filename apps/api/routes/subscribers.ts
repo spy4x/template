@@ -42,7 +42,10 @@ export const SUBSCRIBE_UNKNOWN_LIST = `There is no such mailing list`
 export const SUBSCRIBERS_OFF = `Mail subscriptions are off`
 
 export interface SubscribersRouteDependencies {
-  /** `null` when `SUBSCRIBERS_SECRET` is not set in production: every route but `GET /` answers 503. */
+  /**
+   * `null` when `SUBSCRIBERS_SECRET` is not set in production: every route but `GET /` answers
+   * 503.
+   */
   setup: SubscribersSetup | null
   /** The store of one list. */
   store: (list: SubscriberList) => SubscriberStore
