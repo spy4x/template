@@ -3,7 +3,7 @@ import postgres from "postgres"
 import { createSqlFromEnv } from "@spy4x/server/db"
 import { createOutboxProcessor, scheduleNightlyJobs } from "@server/jobs/wiring.ts"
 import { PostgresIdempotencyStore } from "@spy4x/server/idempotency"
-import { startIntervalRunner } from "@spy4x/platform/server/interval-runner"
+import { startIdempotencySweep } from "./idempotency-sweep.ts"
 import { shutdownSignal, ShutdownSignalError } from "@spy4x/platform/server/shutdown-signal"
 import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
 import { createMailSender, mailOffWarning, readMailSetup } from "@server/mail/mail.ts"
@@ -91,19 +91,15 @@ function reportSweepFailure(error: unknown): void {
   console.error("Idempotency sweep failed, retrying next interval", error)
 }
 
-// Hourly, and once at start: the library's first tick comes after a full interval, and a worker
-// restarted more often than that would never sweep. A failed sweep is tried again later.
-const stopSweeping = startIntervalRunner({
-  task: sweepIdempotencyKeys,
-  intervalMs: SWEEP_INTERVAL_MS,
-  onError: reportSweepFailure,
-})
-signal.addEventListener("abort", stopSweeping, { once: true })
-
 try {
   await Promise.all([
     processor.run(signal, OUTBOX_IDLE_MS),
-    sweepIdempotencyKeys().catch(reportSweepFailure),
+    startIdempotencySweep({
+      signal,
+      sweep: sweepIdempotencyKeys,
+      onError: reportSweepFailure,
+      intervalMs: SWEEP_INTERVAL_MS,
+    }),
   ])
 } finally {
   await sql.end({ timeout: 5 })
