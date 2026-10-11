@@ -247,6 +247,70 @@ Deno.test("tags against Postgres", async (t) => {
     })
 
     await t.step(
+      "a member of another group cannot rename, delete or read a tag by naming their own group",
+      async () => {
+        const { owner, groupId } = await seed()
+        const stranger = await insertUser(sql)
+        const strangerGroupId = crypto.randomUUID()
+        await groups.create({ id: strangerGroupId, name: "Theirs" }, stranger)
+        const { tag } = await createTag(owner, groupId, "Work")
+
+        const rename = await refusal(commands.execute(
+          new TagUpdateCommand({
+            actor: actor(stranger),
+            groupId: strangerGroupId,
+            id: tag.id,
+            name: "Mine",
+            color: "red",
+            version: 1,
+          }),
+        ))
+        const remove = await refusal(commands.execute(
+          new TagDeleteCommand({
+            actor: actor(stranger),
+            groupId: strangerGroupId,
+            id: tag.id,
+            version: 1,
+          }),
+        ))
+
+        expect(rename).toMatchObject({ code: "TAG_NOT_FOUND" })
+        expect(remove).toMatchObject({ code: "TAG_NOT_FOUND" })
+        const [row] = await sql<{ name: string; version: number }[]>`
+          SELECT name, version FROM tags WHERE id = ${tag.id}
+        `
+        expect(row).toEqual({ name: "Work", version: 1 })
+      },
+    )
+
+    await t.step(
+      "the repository refuses a viewer on every tag write, whatever the handler checked",
+      async () => {
+        const { owner, viewer, groupId } = await seed()
+        const { tag } = await createTag(owner, groupId, "Work")
+        const repository = new PostgresTagRepository(sql)
+
+        const create = await refusal(repository.create(
+          { groupId, id: crypto.randomUUID(), name: "New", color: "blue" },
+          viewer,
+        ))
+        const update = await refusal(repository.update(
+          { groupId, id: tag.id, name: "Job", color: "red", expectedVersion: 1 },
+          viewer,
+        ))
+        const remove = await refusal(
+          repository.delete({ groupId, id: tag.id, expectedVersion: 1 }, viewer),
+        )
+
+        expect(create).toMatchObject({ code: "ROLE_INSUFFICIENT" })
+        expect(update).toMatchObject({ code: "ROLE_INSUFFICIENT" })
+        expect(remove).toMatchObject({ code: "ROLE_INSUFFICIENT" })
+        const [row] = await sql<{ name: string }[]>`SELECT name FROM tags WHERE id = ${tag.id}`
+        expect(row.name).toBe("Work")
+      },
+    )
+
+    await t.step(
       "a note write naming an unknown tag id succeeds and keeps only real tags",
       async () => {
         const { owner, groupId, otherGroupId } = await seed()

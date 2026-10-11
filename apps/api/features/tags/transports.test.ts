@@ -461,11 +461,13 @@ for (const [via, open] of TRANSPORTS) {
 }
 
 describe("tags over the REST list", () => {
-  function rest(s: Stack, userId: number) {
+  function rest(s: Stack, userId: number | null) {
     const app = new Hono<APIContext>()
     app.use("*", async (c, next) => {
       c.set("requestId", "req-tags")
-      c.set("auth", buildAuthData({ user: { id: userId }, session: { userId } }))
+      if (userId !== null) {
+        c.set("auth", buildAuthData({ user: { id: userId }, session: { userId } }))
+      }
       await next()
     })
     app.route(
@@ -492,6 +494,16 @@ describe("tags over the REST list", () => {
     const response = await rest(s, STRANGER)(groupId)
 
     expect(response.status).toBe(404)
+    expect(JSON.stringify(await response.json())).not.toContain("Work")
+  })
+
+  it("answers 401 and lists nothing when there is no session", async () => {
+    const s = stack()
+    await s.tags.create({ groupId, id: tagId, name: "Work", color: "blue" }, OWNER)
+
+    const response = await rest(s, null)(groupId)
+
+    expect(response.status).toBe(401)
     expect(JSON.stringify(await response.json())).not.toContain("Work")
   })
 
