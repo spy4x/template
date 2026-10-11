@@ -260,8 +260,10 @@ export function forgetModules(): void {
   stopChanges()
   disconnectRealtime({ forget: true })
   const running = offlineLayer()
-  // `forgetUser` got here first and has this person's deletion queued: one deletion is enough.
-  if (!running || settling.has(running.userId)) return void stopOfflineLayer()
+  if (!running) return void stopOfflineLayer()
+  // `forgetUser` got here first and owes this person's deletion. The layer still clears its own
+  // copy, so an answer that arrives after the sign-out is not saved; `forgetUser` reports a refusal.
+  if (settling.has(running.userId)) return void stopOfflineLayer({ forget: true }).catch(() => {})
   const { userId } = running
   // Owed until the device has deleted them: a page closed before that leaves the next start to it.
   owe(userId)

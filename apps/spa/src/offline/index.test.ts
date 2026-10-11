@@ -279,6 +279,33 @@ describe("what the device keeps", () => {
     expect([...device.reads.keys()]).toEqual([])
   })
 
+  it("saves no answer that arrives after a sign-out made in the app's order", async () => {
+    const { storage, device } = await deviceInUse()
+    server()
+    startPage(7, storage)
+    rememberUser(user(7))
+    await settle()
+    let answer!: (members: string[]) => void
+    const reading = localReads.through(
+      "members:g-1",
+      () => new Promise<string[]>((resolve) => answer = resolve),
+    )
+
+    // The app's order on sign-out: the effect that forgets the user runs before the one that
+    // stops the modules (apps/spa/src/app.tsx).
+    sessionState.value = signedOut
+    void forgetUser(storage)
+    forgetModules()
+    await settle()
+    expect([...device.reads.keys()]).toEqual([])
+    answer(["Ann"])
+    await reading
+    await settle()
+
+    expect([...device.reads.keys()]).toEqual([])
+    expect(kept.getItem("offline:owed-deletion")).toBeNull()
+  })
+
   it("deletes the remembered user's copies at a start that finds no session, and keeps their queue", async () => {
     const { storage, device } = await deviceInUse()
     configureModules({ realtime: false, offline: true })
@@ -622,7 +649,7 @@ describe("two people on one device", () => {
     expect(currentLayer()).toBeNull()
   })
 
-  it("deletes a person's copies once on sign-out, and warns once when the device refuses", async () => {
+  it("warns once on sign-out when the device refuses to delete a person's copies", async () => {
     const storage = createMemoryStorage()
     await used(storage, 7)
     server()
@@ -645,7 +672,8 @@ describe("two people on one device", () => {
       await settle()
     })
 
-    expect(tried).toBe(1)
+    // The layer clears its own copy and the owed deletion clears the stored one: one report.
+    expect(tried).toBe(2)
     expect(warned.length).toBe(1)
     expect(kept.getItem(OWED)).toBe("[7]")
   })
