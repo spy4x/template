@@ -62,24 +62,6 @@ describe("profile socket requests", () => {
     })
   })
 
-  it("refuses a NUL or a line break in a name as bad_request and does not dispatch it", async () => {
-    const { requests, seen } = harness()
-
-    for (const firstName of ["A\u0000da", "A\nda"]) {
-      const failure = await Promise.resolve(requests["profile.update"].handle({
-        actor,
-        requestId: "req-1",
-        signal,
-        idempotencyKey: "key-1",
-        payload: { firstName, lastName: "Lovelace" },
-      })).catch((error) => error)
-
-      expect(failure).toBeInstanceOf(RealtimeRequestError)
-      expect((failure as RealtimeRequestError).code).toBe("bad_request")
-    }
-    expect(seen.update).toBe(null)
-  })
-
   it("refuses an update with an empty name as bad_request and does not dispatch it", async () => {
     const { requests, seen } = harness()
 

@@ -221,8 +221,13 @@ export class PostgresTagRepository implements TagRepository {
       await assertWriterNow(transaction, input.groupId, actorId)
       // Counted before the delete: the foreign key takes the links with the tag, and no note
       // records that it lost one, so the audit event is the only place that says how many did.
+      // A note in the trash keeps its links, and is not counted: the activity log speaks of the
+      // notes a member can see.
       const [{ notes }] = await transaction<{ notes: number }[]>`
-        SELECT count(*)::int AS notes FROM note_tags WHERE tag_id = ${input.id}
+        SELECT count(*)::int AS notes
+        FROM note_tags
+        INNER JOIN notes ON notes.id = note_tags.note_id
+        WHERE note_tags.tag_id = ${input.id} AND notes.deleted_at IS NULL
       `
       const deleted = (
         await transaction<{ id: string; groupId: string; version: number; name: string }[]>`

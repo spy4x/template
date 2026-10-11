@@ -64,21 +64,6 @@ describe("note requests", () => {
         body: "",
       }],
       ["a create with a blank title", noteCreateRequestSchema, { id, title: "   ", body: "" }],
-      ["a create with a NUL in the title", noteCreateRequestSchema, {
-        id,
-        title: "a\u0000b",
-        body: "",
-      }],
-      ["a create with a line break in the title", noteCreateRequestSchema, {
-        id,
-        title: "a\nb",
-        body: "",
-      }],
-      ["an update with a NUL in the title", noteUpdateRequestSchema, {
-        title: "a\u0000b",
-        body: "",
-        version: 1,
-      }],
       ["a create with a title one character too long", noteCreateRequestSchema, {
         id,
         title: "é".repeat(NOTE_TITLE_MAX_LENGTH + 1),

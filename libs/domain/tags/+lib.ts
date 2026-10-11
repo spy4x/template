@@ -300,8 +300,8 @@ export interface TagDeleteInput {
 
 /**
  * Where tags are kept. Every write records a change on the group in its own transaction (the
- * group's sequence, an outbox row and an audit event). The handlers check who may write before they call it; a
- * write checks again inside its transaction, as a role can change in between.
+ * group's sequence, an outbox row and an audit event). The handlers check who may write before
+ * they call it; a write checks again inside its transaction, as a role can change in between.
  */
 export interface TagRepository {
   /** The group's tags, by name. */

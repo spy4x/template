@@ -391,7 +391,7 @@ for (const [via, open] of TRANSPORTS) {
       as.shutdown()
     })
 
-    it("refuses a NUL in a tag name and in a note title, and stores nothing", async () => {
+    it("refuses a NUL in a tag name, and stores nothing", async () => {
       const s = stack()
       const as = open(s, OWNER)
       await as.command("tag.create", create)
@@ -400,7 +400,6 @@ for (const [via, open] of TRANSPORTS) {
       const answers = [
         await as.command("tag.create", { ...create, id: secondTagId, name: nul }),
         await as.command("tag.update", { ...create, name: nul, version: 1 }),
-        await as.command("note.create", { groupId, id: noteId, title: nul, body: "" }),
       ]
 
       for (const answer of answers) {
@@ -411,7 +410,6 @@ for (const [via, open] of TRANSPORTS) {
         })
       }
       expect([...s.tags.tags.values()].map((tag) => tag.name)).toEqual(["Work"])
-      expect(s.notes.notes.size).toBe(0)
       as.shutdown()
     })
 

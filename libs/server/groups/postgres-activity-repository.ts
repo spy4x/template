@@ -72,12 +72,6 @@ export class PostgresGroupActivityRepository implements GroupActivityRepository 
               AND notes.group_id = audit_events.group_id
               AND notes.deleted_at IS NULL
           )
-        ) OR (
-          audit_events.entity_type = 'tag'
-          AND EXISTS (
-            SELECT 1 FROM tags
-            WHERE tags.id = audit_events.entity_id AND tags.group_id = audit_events.group_id
-          )
         ) AS entity_exists,
         audit_events.details
       FROM audit_events

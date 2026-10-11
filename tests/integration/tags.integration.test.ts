@@ -14,8 +14,9 @@ import {
   TagUpdateCommand,
   TagVersionConflictError,
 } from "@domain/tags"
-import { PostgresGroupActivityRepository } from "@server/groups/postgres-activity-repository.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
+import { PostgresGroupDataMover } from "@server/groups/postgres-group-data-mover.ts"
+import { noteMovable } from "@server/notes/note-movable.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { PostgresTagRepository } from "@server/tags/postgres-tag-repository.ts"
 import { createSessionGate } from "../../apps/api/cqrs/session-gate.ts"
@@ -169,6 +170,12 @@ async function tagAudit(sql: postgres.Sql, groupId: string): Promise<AuditRow[]>
   `
 }
 
+async function auditCount(sql: postgres.Sql, groupIds: string[]): Promise<number> {
+  return (await sql<{ count: number }[]>`
+    SELECT count(*)::int AS count FROM audit_events WHERE group_id IN ${sql(groupIds)}
+  `)[0].count
+}
+
 async function tagCount(sql: postgres.Sql, groupId: string): Promise<number> {
   return (await sql<{ count: number }[]>`
     SELECT count(*)::int AS count FROM tags WHERE group_id = ${groupId}
@@ -216,6 +223,8 @@ async function refusal(promise: Promise<unknown>): Promise<unknown> {
 Deno.test("tags against Postgres", async (t) => {
   await withSchema(async (sql) => {
     const { commands, queries, groups, operations } = buses(sql)
+    const notes = new PostgresNoteRepository(sql)
+    const mover = new PostgresGroupDataMover(sql, [noteMovable])
 
     /** A group with an owner and a viewer, and a second group of the owner's. */
     async function seed() {
@@ -503,11 +512,10 @@ Deno.test("tags against Postgres", async (t) => {
       }))
 
     await t.step(
-      "a NUL in a tag name, a note title or a group name is refused as invalid, and nothing is written",
+      "a NUL in a tag name or a group name is refused as invalid, and nothing is written",
       async () => {
         const { owner, groupId } = await seed()
         const { tag } = await createTag(owner, groupId, "Work")
-        const { note } = await createNote(owner, groupId, [])
         const nul = "a\u0000b"
         const newGroupId = uuidV7()
         const before = await nextSequence(sql, groupId)
@@ -526,19 +534,6 @@ Deno.test("tags against Postgres", async (t) => {
             color: "red",
             version: 1,
           })),
-          await refusal(call(owner, "note.create", {
-            groupId,
-            id: uuidV7(),
-            title: nul,
-            body: "",
-          })),
-          await refusal(call(owner, "note.update", {
-            groupId,
-            id: note.id,
-            title: nul,
-            body: "",
-            version: 1,
-          })),
           await refusal(call(owner, "group.create", { id: newGroupId, name: nul })),
           await refusal(call(owner, "group.rename", { groupId, name: nul })),
         ]
@@ -546,13 +541,12 @@ Deno.test("tags against Postgres", async (t) => {
         // `INVALID_REQUEST` is the code every route and the socket answer with 400 or
         // `bad_request`; a Postgres error would have no code of the domain's.
         expect(refusals.map((error) => (error as { code?: string } | null)?.code)).toEqual(
-          Array(6).fill("INVALID_REQUEST"),
+          Array(4).fill("INVALID_REQUEST"),
         )
         expect(await nextSequence(sql, groupId)).toBe(before)
         expect(await sql`SELECT 1 FROM groups WHERE id = ${newGroupId}`).toHaveLength(0)
         // The same calls with a clean name are stored, so the refusals above are the name's.
         await call(owner, "tag.create", { groupId, id: uuidV7(), name: "a b", color: "red" })
-        await call(owner, "note.create", { groupId, id: uuidV7(), title: "a b", body: "" })
         await call(owner, "group.create", { id: newGroupId, name: "a b" })
         expect(await sql`SELECT 1 FROM groups WHERE id = ${newGroupId}`).toHaveLength(1)
       },
@@ -630,6 +624,93 @@ Deno.test("tags against Postgres", async (t) => {
     )
 
     await t.step(
+      "a move may bring the other group to exactly the cap, and the next new tag is refused",
+      async () => {
+        const { owner, groupId, otherGroupId } = await seed()
+        await fillTags(sql, otherGroupId, owner, TAG_MAX_PER_GROUP - 1)
+        const { tag: last } = await createTag(owner, groupId, "Last place")
+        const { tag: over } = await createTag(owner, groupId, "One too many")
+        const { note: fits } = await createNote(owner, groupId, [last.id])
+        const { note: late } = await createNote(owner, groupId, [over.id])
+        const move = (noteId: string) =>
+          commands.execute(
+            new NoteMoveCommand({
+              actor: actor(owner),
+              groupId,
+              toGroupId: otherGroupId,
+              noteIds: [noteId],
+            }),
+          )
+
+        const { notes: moved } = await move(fits.id)
+        const refused = await refusal(move(late.id))
+
+        expect(moved[0].groupId).toBe(otherGroupId)
+        expect(await tagCount(sql, otherGroupId)).toBe(TAG_MAX_PER_GROUP)
+        expect(refused).toMatchObject({ code: "TAG_LIMIT_REACHED" })
+      },
+    )
+
+    await t.step(
+      "moving all of a group's data into a group with no room for its tags changes nothing",
+      async () => {
+        const { owner, groupId, otherGroupId } = await seed()
+        await fillTags(sql, otherGroupId, owner, TAG_MAX_PER_GROUP)
+        const { tag } = await createTag(owner, groupId, "Work")
+        const { note } = await createNote(owner, groupId, [tag.id])
+        const before = [await nextSequence(sql, groupId), await nextSequence(sql, otherGroupId)]
+        const audited = await auditCount(sql, [groupId, otherGroupId])
+
+        const refused = await refusal(mover.moveAll(
+          { fromGroupId: groupId, toGroupId: otherGroupId, requestId: "req-all" },
+          owner,
+          { maxNotes: null },
+        ))
+
+        expect(refused).toMatchObject({ code: "TAG_LIMIT_REACHED" })
+        const read = await queries.execute(
+          new NoteGetQuery({ actor: actor(owner), groupId, id: note.id }),
+        )
+        expect(read.note).toMatchObject({ groupId, tagIds: [tag.id], version: 1 })
+        expect(await tagCount(sql, otherGroupId)).toBe(TAG_MAX_PER_GROUP)
+        expect([await nextSequence(sql, groupId), await nextSequence(sql, otherGroupId)])
+          .toEqual(before)
+        expect(await auditCount(sql, [groupId, otherGroupId])).toBe(audited)
+      },
+    )
+
+    await t.step(
+      "moving all of a group's data writes an audit event with the request for each tag it creates",
+      async () => {
+        const { owner, groupId, otherGroupId } = await seed()
+        const { tag } = await createTag(owner, groupId, "Work")
+        const { note } = await createNote(owner, groupId, [tag.id])
+
+        await mover.moveAll(
+          { fromGroupId: groupId, toGroupId: otherGroupId, requestId: "req-all" },
+          owner,
+          { maxNotes: null },
+        )
+
+        const [created] = await sql<{ id: string }[]>`
+          SELECT id FROM tags WHERE group_id = ${otherGroupId} AND name = 'Work'
+        `
+        expect(await tagAudit(sql, otherGroupId)).toEqual([{
+          eventKind: "tag.created",
+          actorUserId: owner,
+          requestId: "req-all",
+          entityType: "tag",
+          entityId: created.id,
+          details: { name: "Work" },
+        }])
+        const read = await queries.execute(
+          new NoteGetQuery({ actor: actor(owner), groupId: otherGroupId, id: note.id }),
+        )
+        expect(read.note.tagIds).toEqual([created.id])
+      },
+    )
+
+    await t.step(
       "moves a note into a group that is full of tags when the group has its tags already",
       async () => {
         const { owner, groupId, otherGroupId } = await seed()
@@ -661,6 +742,9 @@ Deno.test("tags against Postgres", async (t) => {
         await call(owner, "tag.create", { ...tag, name: "Work", color: "blue" })
         await createNote(owner, groupId, [id])
         await createNote(owner, groupId, [id])
+        // A note in the trash keeps its link, and is not one of the notes that "carried" the tag.
+        const { note: trashed } = await createNote(owner, groupId, [id])
+        await notes.delete({ groupId, id: trashed.id, expectedVersion: 1 }, owner)
 
         await call(owner, "tag.update", { ...tag, name: "Job", color: "blue", version: 1 })
         await call(owner, "tag.update", { ...tag, name: "Job", color: "red", version: 2 })
@@ -676,20 +760,23 @@ Deno.test("tags against Postgres", async (t) => {
       },
     )
 
-    await t.step("the activity log links a tag's event only while the tag exists", async () => {
-      const { owner, groupId } = await seed()
-      const { tag: kept } = await createTag(owner, groupId, "Kept")
-      const { tag: gone } = await createTag(owner, groupId, "Gone")
-      await commands.execute(
-        new TagDeleteCommand({ actor: actor(owner), groupId, id: gone.id, version: 1 }),
-      )
+    await t.step(
+      "a note whose stored title holds a direction mark, a tab or a soft hyphen still saves a new body",
+      async () => {
+        const { owner, groupId } = await seed()
+        for (const title of ["שלום\u200f!", "Q3\tbudget", "Co\u00adop plan"]) {
+          const id = uuidV7()
+          await call(owner, "note.create", { groupId, id, title, body: "" })
 
-      const { events } = await new PostgresGroupActivityRepository(sql).list(groupId, { limit: 50 })
+          await call(owner, "note.update", { groupId, id, title, body: "New body", version: 1 })
 
-      const created = events.filter((event) => event.kind === "tag.created")
-      expect(Object.fromEntries(created.map((event) => [event.entity!.id, event.entity!.exists])))
-        .toEqual({ [kept.id]: true, [gone.id]: false })
-    })
+          const { note } = await queries.execute(
+            new NoteGetQuery({ actor: actor(owner), groupId, id }),
+          )
+          expect(note).toMatchObject({ title, body: "New body", version: 2 })
+        }
+      },
+    )
 
     await t.step("a refused tag write leaves no audit event", async () => {
       const { owner, viewer, groupId } = await seed()

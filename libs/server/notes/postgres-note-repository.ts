@@ -112,7 +112,7 @@ async function mapTagsOnMove(
       if (count > TAG_MAX_PER_GROUP) {
         throw new TagError(
           "TAG_LIMIT_REACHED",
-          `The other group has no room for these notes' tags: a group can hold at most ${TAG_MAX_PER_GROUP}`,
+          `The other group has no room for these notes' tags: it can hold ${TAG_MAX_PER_GROUP}`,
         )
       }
     }
@@ -210,9 +210,10 @@ export interface MoveNoteRowsInput {
  * The part of a move that moving chosen notes and moving a whole group share, in the caller's
  * transaction (which has locked both groups and checked the roles): the notes change group, their
  * version grows by one so an edit made on the old version conflicts, and the target's cap is
- * counted after the update. The notes' tags follow by name (`mapTagsOnMove`). Throws `NOTE_NOT_FOUND` when a named note is not live in the source,
- * a `PlanError` when the target would pass its cap on notes, and `TagError("TAG_LIMIT_REACHED")`
- * when the notes' tags would pass its cap on tags; the caller's transaction takes the move back. Returns how many notes moved.
+ * counted after the update. The notes' tags follow by name (`mapTagsOnMove`). Throws
+ * `NOTE_NOT_FOUND` when a named note is not live in the source, a `PlanError` when the target
+ * would pass its cap on notes, and `TagError("TAG_LIMIT_REACHED")` when the notes' tags would pass
+ * its cap on tags; the caller's transaction takes the move back. Returns how many notes moved.
  */
 export async function moveNoteRows(
   transaction: postgres.TransactionSql,

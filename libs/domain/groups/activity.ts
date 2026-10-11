@@ -60,7 +60,7 @@ export interface ActivityPerson {
 export interface ActivityEntity {
   type: AuditEntityType
   id: string
-  /** The note or tag is still in the group; it is gone after a delete, and a note after a move. */
+  /** The note is still in the group; it is gone after a delete or a move. */
   exists: boolean
 }
 

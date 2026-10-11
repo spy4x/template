@@ -14,8 +14,9 @@ import type { MemoryNoteRepository } from "./memory-notes.ts"
 
 /**
  * Tags in memory, with the Postgres repository's rules: names are unique in a group without regard
- * to case, a group holds at most `TAG_MAX_PER_GROUP`, a write at another version is refused with the current one, and deleting a tag removes
- * it from the notes that carried it without moving their version.
+ * to case, a group holds at most `TAG_MAX_PER_GROUP`, a write at another version is refused with
+ * the current one, and deleting a tag removes it from the notes that carried it without moving
+ * their version.
  */
 export class MemoryTagRepository implements TagRepository {
   readonly tags = new Map<string, Tag>()
