@@ -1080,6 +1080,21 @@ describe("PendingInvitations", () => {
     expect(focused()).toBe("invite-open")
   })
 
+  it("leaves focus alone when an invitation whose revoke ended earlier is gone later", async () => {
+    const page = (props: Partial<PendingInvitationsProps>) => (
+      <div>
+        <PendingInvitations actorRole={GroupRole.OWNER} invitations={rows} {...props} />
+        <input data-e2e="elsewhere" />
+      </div>
+    )
+    await mount(page({}))
+    await rerender(page({ revokingId: "i-1" }))
+    await rerender(page({}))
+    find<HTMLInputElement>("[data-e2e=elsewhere]").focus()
+    await rerender(page({ invitations: [rows[1]] }))
+    expect(focused()).toBe("elsewhere")
+  })
+
   it("gives no revoke for an invitation with a role above the person's", async () => {
     await mount(<PendingInvitations actorRole={GroupRole.ADMIN} invitations={rows} />)
     expect(has('[data-invitation-id="i-1"] [data-e2e=invitation-menu]')).toBe(true)
