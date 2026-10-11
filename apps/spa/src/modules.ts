@@ -1,9 +1,4 @@
-import {
-  ConnectionLostError,
-  type GapReport,
-  isForeignAnswer,
-  RealtimeRequestError,
-} from "@spy4x/realtime"
+import { ConnectionLostError, type GapReport } from "@spy4x/realtime"
 import { type CallPort, type RetryOptions, sendCommand, sendQuery } from "@spy4x/realtime/calls"
 import { signal } from "@preact/signals"
 import { createSignedInHint } from "@spy4x/platform/browser/signed-in-hint"
@@ -32,7 +27,7 @@ import { offlineTags as tagsOverLayer } from "./offline/tags-collection.ts"
 import { OfflineStatus as OfflineStatusLine } from "./offline/OfflineStatus.tsx"
 import type { RuntimeConfig } from "./runtime-config.ts"
 import { canCallAs, createAppCallPort } from "./state/realtime-call.ts"
-import { ReadRefused } from "./state/read-keys.ts"
+import { isProxyAnswer, isRefusal } from "./state/read-keys.ts"
 import type { SessionState, SessionUser } from "./state/session.ts"
 
 /**
@@ -337,30 +332,6 @@ export interface LocalReads {
   ): Promise<ReadResult<T>>
   /** The copy under `key`, or `undefined`. Never rejects. */
   copy<T>(key: string): Promise<ReadResult<T> | undefined>
-}
-
-/**
- * Whether the server answered that this person may not read the list (or that it is gone): a
- * socket read refused with `unauthorized`, `forbidden` or `not_found`, or a REST read answered
- * 401, 403 or 404. Any other failure, such as a 500 or a timeout, says nothing about access, and
- * neither does a 404 without an error code, which is taken for a proxy's.
- */
-function isRefusal(error: unknown): boolean {
-  if (error instanceof ReadRefused) {
-    return REFUSING_STATUSES.includes(error.status) && !isProxyAnswer(error)
-  }
-  return error instanceof RealtimeRequestError &&
-    (error.code === "unauthorized" || error.code === "forbidden" || error.code === "not_found")
-}
-
-const REFUSING_STATUSES = [401, 403, 404]
-
-/**
- * Whether a REST read's answer is taken for a proxy's, such as a 502 during a deploy. The API's own
- * answers without an error code (a rate limit's 429, an unhandled error's 500) count too.
- */
-function isProxyAnswer(error: unknown): boolean {
-  return error instanceof ReadRefused && isForeignAnswer(error.status, error.code)
 }
 
 /** Deletes the saved copy of a list the server refused, so it is not shown again offline. */
