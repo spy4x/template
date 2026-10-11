@@ -32,8 +32,6 @@ export const TAG_EVENTS = {
   created: "tag.created",
   updated: "tag.updated",
   deleted: "tag.deleted",
-  /** Written on the target group of a note move that had to create a tag there. */
-  createdByMove: "tag.created_by_move",
 } as const
 
 export type TagErrorCode =

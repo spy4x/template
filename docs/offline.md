@@ -214,7 +214,7 @@ sign-out, its session stays valid.
 
 ## What is not offline
 
-Every write except a note's needs the server: creating a group, saving the profile, inviting,
+Every write except a note's or a tag's needs the server: creating a group, saving the profile, inviting,
 revoking a token, signing a device out, two-factor set-up and sign-in. Deleted notes and deleted
 groups are read from the server only. The selected group is switched offline only among groups
 already on the device.
@@ -313,9 +313,12 @@ layer is missing from this list.
 5. In `apps/spa/src/state/notes.ts`, delete the `currentLayer` and `offlineNotes` imports and
    export the store built from `onlineNotes` directly: `createNotesStore(onlineNotes)`. The
    optional `readLocal` dependency and its `showLocal` call can go with them.
-6. In `apps/spa/src/views/NotesView.tsx` and `apps/spa/src/views/NoteEditorView.tsx`, delete the
-   `OfflineStatus` import and element.
-7. Delete the specs `e2e/offline.e2e.ts` and `e2e/local-data.e2e.ts`, and this guard test with its
+6. In `apps/spa/src/state/tags.ts`, delete the `currentLayer` and `offlineTags` imports and export
+   the store built from `onlineTags` directly: `createTagsStore(onlineTags)`.
+7. In `apps/spa/src/views/NotesView.tsx`, `apps/spa/src/views/NoteEditorView.tsx` and
+   `apps/spa/src/views/TagsView.tsx`, delete the `OfflineStatus` import and element.
+8. Delete the specs `e2e/offline.e2e.ts` and `e2e/local-data.e2e.ts`, the offline test in
+   `e2e/tags.e2e.ts` (the one named "a tag made and renamed with no network..."), and this guard test with its
    clause in the `test` task in `deno.jsonc`: `tests/offline-removal.test.ts`. The unit tests of
    the layer lived in the folder and went with it.
 

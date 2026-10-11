@@ -83,8 +83,8 @@ export class TagsPage {
   }
 
   row(name: string): Locator {
-    return this.page.locator("[data-e2e^=tag-]:has([data-e2e=tag-edit])")
-      .filter({ has: this.page.getByRole("button", { name: `Edit ${name}`, exact: true }) })
+    return this.page.locator("[data-e2e=tag-list] > li")
+      .filter({ has: this.page.locator(`[data-e2e=tag-edit][aria-label="Edit ${name}"]`) })
   }
 
   /** Opens the page from the notes list's menu, as a person does. */
@@ -106,15 +106,15 @@ export class TagsPage {
   }
 
   async rename(from: string, to: string, color?: string): Promise<void> {
-    await this.page.getByRole("button", { name: `Edit ${from}`, exact: true }).click()
+    await this.row(from).locator("[data-e2e=tag-edit]").click()
     await this.fillAndSave(to, color)
   }
 
   async remove(name: string): Promise<void> {
-    await this.page.getByRole("button", { name: `Actions for ${name}`, exact: true }).click()
+    await this.row(name).locator("[data-e2e=tag-menu]").click()
     await this.page.locator("[data-e2e=tag-delete]:visible").click()
-    await this.page.locator("[data-e2e=tag-delete-dialog]")
-      .getByRole("button", { name: "Delete", exact: true }).click()
+    await this.page.locator("[data-e2e=tag-delete-dialog] [data-e2e=confirm-dialog-confirm]")
+      .click()
   }
 
   private async fillAndSave(name: string, color?: string): Promise<void> {

@@ -69,12 +69,14 @@ test.describe("tags", () => {
       await expect(notes.titles).toHaveCount(3)
       await expect(page).not.toHaveURL(/tags=/)
 
-      // Deleting a tag takes it off the notes and leaves the notes, at the same version.
+      // Deleting a tag takes it off the notes and leaves the notes (the integration test proves
+      // their versions stay); focus moves to the next tag's menu, not to the page's body.
       const before = await serverNotes(page, groupId)
       await notes.page.locator("[data-e2e=notes-menu]").click()
       await notes.page.locator("[data-e2e=notes-tags]").click()
       await tags.remove("Urgent")
       await expect(tags.names).toHaveText(["Home"])
+      await expect(tags.row("Home").locator("[data-e2e=tag-menu]")).toBeFocused()
       await expect.poll(async () => (await serverTags(page, groupId)).map((t) => t.name))
         .toEqual(["Home"])
       await tags.back()
