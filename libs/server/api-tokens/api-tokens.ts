@@ -194,8 +194,8 @@ export function apiTokenRows(sql: postgres.Sql): ApiTokenRows {
         WHERE group_members.group_id = ${input.groupId} AND group_members.user_id = ${input.userId}
       `
       if (!member) return { refused: "GROUP_NOT_FOUND" }
-      // The same set `listLive` shows: a token of a deleted group is neither listed nor counted.
-      // Restoring the group brings its tokens back, listed, counted and working.
+      // The same set `listLive` shows: a revoked or expired token, or one of a deleted group, is
+      // neither listed nor counted.
       const [{ count }] = await sql<{ count: number }[]>`
         SELECT count(*)::int AS count FROM api_tokens
         INNER JOIN groups ON groups.id = api_tokens.group_id AND groups.deleted_at IS NULL
