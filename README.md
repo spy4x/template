@@ -187,6 +187,13 @@ the server already uses one of them, the deploy fails with "port is already allo
 `GRAFANA_HOST_PORT` or `MINIO_CONSOLE_HOST_PORT` in the env file to a free `127.0.0.1:<port>`
 first ([Admin consoles](#admin-consoles)).
 
+`deno task deploy [env file]` reads the server from the env file (`infra/envs/.env.prod` unless you
+name another): `SSH_TO_SERVER`, `PATH_ON_SERVER` and, when Deno is not on the server's `PATH`,
+`DENO_ON_SERVER`. `infra/envs/.env.example` lists them with every other name. The copy replaces
+every server file that differs from your checkout, one edited on the server or newer there too, and
+deletes the ones your checkout no longer has; env files and the web push keys are never touched. So
+deploying an older commit is a full rollback of the code. It does not roll back the database.
+
 `deno task deploy` needs no manual step on a new server: it creates `infra/configs/vapid.json`
 (the web push keys) there when the file is missing, readable by its owner only. It never sends the
 key from your machine and never replaces one that exists. It stops before sending anything when a
@@ -212,9 +219,25 @@ Grafana on `127.0.0.1:3000` (`admin` and `GRAFANA_PASS`). On your own machine op
 ssh -L 9001:127.0.0.1:9001 -L 3000:127.0.0.1:3000 <SSH_TO_SERVER>
 ```
 
-When a port is taken, or two projects share a machine, set `MINIO_CONSOLE_HOST_PORT` or
-`GRAFANA_HOST_PORT` in the env file to another `127.0.0.1:<port>`. Never publish either on
-`0.0.0.0`.
+When a port is taken, set `MINIO_CONSOLE_HOST_PORT` or `GRAFANA_HOST_PORT` in the env file to
+another `127.0.0.1:<port>`. Never publish either on `0.0.0.0`.
+
+## Several projects on one server
+
+Products made from this template can share a server and its Traefik. Each lives in its own
+directory, so each has its own data under `.volumes/`. In the env file of every project after the
+first, change:
+
+- `PROJECT`: containers, the project's network, its base image and its Traefik routers are named
+  after it. Lowercase letters, digits and dashes.
+- `DOMAIN`, and `MPA_DOMAIN` with the `mpa` profile.
+- the four ports published on `127.0.0.1`: `DB_HOST_PORT`, `KV_HOST_PORT`,
+  `MINIO_CONSOLE_HOST_PORT` and `GRAFANA_HOST_PORT`. A port another project holds stops
+  `compose up` with "port is already allocated".
+
+Nothing else is shared: the engine gives every project's network a free subnet. Start the proxy
+once per server, not per project. With the `host-monitoring` profile, turn it on in one project
+only: its containers watch the whole host.
 
 ## Tasks
 
