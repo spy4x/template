@@ -517,6 +517,8 @@ const SNAPSHOT_TABLES = [
   "auth_challenges",
   "idempotency_keys",
   "notes",
+  "tags",
+  "note_tags",
   "user_settings",
   "password_reset_requests",
   "dev_mail",
