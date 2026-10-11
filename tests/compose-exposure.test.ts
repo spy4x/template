@@ -73,6 +73,12 @@ Deno.test("the MinIO console and Grafana are published on this machine only by d
   const { minio, grafana } = await services("shared")
   expect(minio.ports).toEqual(["${MINIO_CONSOLE_HOST_PORT:-127.0.0.1:9001}:9001"])
   expect(grafana.ports).toEqual(["${GRAFANA_HOST_PORT:-127.0.0.1:3000}:3000"])
+  for (const file of ["dev", "prod"]) {
+    const all = await services(file)
+    for (const name of ["minio", "grafana"]) {
+      expect(all[name]?.ports, `compose.${file}.yml publishes ${name} nowhere else`).toBeUndefined()
+    }
+  }
 })
 
 Deno.test("Postgres and Valkey are published on this machine only by default", async () => {
@@ -104,10 +110,11 @@ Deno.test("the API's router drops a client's CF-Connecting-IP header, in product
   }
 })
 
-Deno.test("in production plain HTTP for the SPA's and the MPA's hosts redirects to HTTPS", async () => {
+Deno.test("in production plain HTTP for the SPA's and the MPA's hosts redirects to HTTPS for good", async () => {
   const { spa, mpa } = await services("prod")
   const middleware = "https-redirect-${PROJECT}"
   expect(label(spa, `traefik.http.middlewares.${middleware}.redirectscheme.scheme`)).toBe("https")
+  expect(label(spa, `traefik.http.middlewares.${middleware}.redirectscheme.permanent`)).toBe("true")
   const hosts: [ComposeService, string, string][] = [
     [spa, "http-${PROJECT}", "Host(`${DOMAIN}`)"],
     [mpa, "http-mpa-${PROJECT}", "Host(`${MPA_DOMAIN:-}`)"],
