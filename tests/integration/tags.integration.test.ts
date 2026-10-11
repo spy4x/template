@@ -14,6 +14,7 @@ import {
   TagUpdateCommand,
   TagVersionConflictError,
 } from "@domain/tags"
+import { PostgresGroupActivityRepository } from "@server/groups/postgres-activity-repository.ts"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { PostgresTagRepository } from "@server/tags/postgres-tag-repository.ts"
@@ -674,6 +675,21 @@ Deno.test("tags against Postgres", async (t) => {
         ])
       },
     )
+
+    await t.step("the activity log links a tag's event only while the tag exists", async () => {
+      const { owner, groupId } = await seed()
+      const { tag: kept } = await createTag(owner, groupId, "Kept")
+      const { tag: gone } = await createTag(owner, groupId, "Gone")
+      await commands.execute(
+        new TagDeleteCommand({ actor: actor(owner), groupId, id: gone.id, version: 1 }),
+      )
+
+      const { events } = await new PostgresGroupActivityRepository(sql).list(groupId, { limit: 50 })
+
+      const created = events.filter((event) => event.kind === "tag.created")
+      expect(Object.fromEntries(created.map((event) => [event.entity!.id, event.entity!.exists])))
+        .toEqual({ [kept.id]: true, [gone.id]: false })
+    })
 
     await t.step("a refused tag write leaves no audit event", async () => {
       const { owner, viewer, groupId } = await seed()
