@@ -117,17 +117,14 @@ services:
 
   minio:
     container_name: ${PROJECT}-minio
-    # `pgsty/minio` and `pgsty/mc` are the community fork that keeps building MinIO: upstream's
-    # `minio/minio` and `minio/mc` refuse anonymous pulls. Same binaries, commands and env names.
+    # `pgsty/minio` is the community fork that keeps building MinIO: upstream's `minio/minio`
+    # refuses anonymous pulls. Same binary, commands and env names.
     image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     restart: unless-stopped
     entrypoint:
       - sh
       - -euc
-      - |
-        mkdir -p /data/loki-data && \
-        mkdir -p /data/loki-ruler && \
-        minio server --console-address ":9001" /data
+      - minio server --console-address ":9001" /data
     environment:
       - MINIO_ROOT_USER=${MINIO_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_PASS}
@@ -154,102 +151,76 @@ services:
       - 'traefik.http.routers.minio-${PROJECT}.rule=Host(`minio.${DOMAIN}`)'
       - 'traefik.http.routers.minio-${PROJECT}.entrypoints=web'
       - 'traefik.http.services.minio-${PROJECT}.loadbalancer.server.port=9001'
-
-  minio-configure:
-    container_name: ${PROJECT}-minio-configure
-    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
-    depends_on:
-      - minio
-    volumes:
-      - ../../infra:/infra:z
-    entrypoint: >
-      /bin/sh -c "
-      until (/usr/bin/mc alias set myminio http://minio:9000 ${MINIO_USER} ${MINIO_PASS}); do
-        echo 'Waiting for MinIO...'; sleep 3;
-      done;
-      /usr/bin/mc ilm import myminio/loki-data < /infra/configs/loki-data-minio-lifecycle.json;
-      "
   # endregion Storages
 
   # region Monitoring
-  loki:
-    container_name: ${PROJECT}-loki
-    image: grafana/loki:3.7.8
+  # Two modes, chosen in the env file (docs/stack.md, "Monitoring"):
+  # - Bundled: COMPOSE_PROFILES=monitoring starts VictoriaMetrics, VictoriaLogs, Grafana, vmalert
+  #   and Alertmanager here, and vmagent and Vector send to them.
+  # - External: leave that profile off and set VM_REMOTE_WRITE_URL and VLOGS_URL (and their
+  #   credentials); vmagent and Vector send to that server instead.
+  # vmagent, Vector and the Postgres exporter run in both modes. The API and the worker are told
+  # nothing about either.
+
+  # Scrapes the targets in infra/configs/vmagent.yml and pushes them on.
+  vmagent:
+    container_name: ${PROJECT}-vmagent
+    image: victoriametrics/vmagent:v1.146.0
     restart: unless-stopped
     volumes:
-      - ../../infra/configs/loki.yml:/etc/loki/config.yaml:ro,Z
+      - ../../infra/configs/vmagent.yml:/etc/vmagent/scrape.yml:ro,Z
+      # What could not be sent yet waits here, up to 1GiB, and survives a
+      # restart.
+      - ../../.volumes/vmagent:/vmagent-data:Z
     environment:
-      - S3_ACCESS_KEY_ID=${MINIO_USER}
-      - S3_SECRET_ACCESS_KEY=${MINIO_PASS}
-    depends_on:
-      - minio
+      # Read by vmagent itself, so the password is not in the command line.
+      - VM_REMOTE_WRITE_PASSWORD=${VM_REMOTE_WRITE_PASSWORD:-}
     command:
-      - '-config.file=/etc/loki/config.yaml'
-      - '-config.expand-env=true'
-    # No healthcheck: the Loki 3 image has no shell, wget or health subcommand, so any check
-    # reports unhealthy forever. No service waits on Loki being healthy.
+      - '-promscrape.config=/etc/vmagent/scrape.yml'
+      - '-remoteWrite.tmpDataPath=/vmagent-data'
+      - '-remoteWrite.maxDiskUsagePerURL=1GiB'
+      - '-remoteWrite.url=${VM_REMOTE_WRITE_URL:-http://victoriametrics:8428/api/v1/write}'
+      - '-remoteWrite.basicAuth.username=${VM_REMOTE_WRITE_USERNAME:-}'
+      - '-remoteWrite.basicAuth.password=%{VM_REMOTE_WRITE_PASSWORD}'
+      # Every series says which project it is from, so a shared server can tell projects apart.
+      - '-remoteWrite.label=project=${PROJECT}'
     deploy:
       resources:
         limits:
-          cpus: ${LOKI_CPU_LIMIT}
-          memory: '${LOKI_MEM_LIMIT}'
+          cpus: '${VMAGENT_CPU_LIMIT:-0.2}'
+          memory: '${VMAGENT_MEM_LIMIT:-128M}'
     logging:
       driver: json-file
       options:
         max-size: '10m'
         max-file: '3'
 
-  # promtail, nodeexporter and cadvisor watch the whole host (every container's logs, the host's
-  # CPU, disk and network). On a shared server that duplicates the host's own monitoring, so they
-  # start only with the `host-monitoring` profile: set COMPOSE_PROFILES=host-monitoring in the env
-  # file. Prometheus still lists their scrape jobs and shows them as down while they are off.
-  promtail:
-    container_name: ${PROJECT}-promtail
-    profiles: [host-monitoring]
+  # Ships the logs of this project's containers (names starting with `${PROJECT}-`), and no other
+  # container's, to VictoriaLogs. It also counts the API's error lines as a metric for vmagent.
+  vector:
+    container_name: ${PROJECT}-vector
+    image: timberio/vector:0.59.0-alpine
     restart: unless-stopped
-    image: grafana/promtail:2.9.2
     volumes:
-      - /var/log:/var/log
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ../../infra/configs/promtail.yml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ../../infra/configs/vector.yml:/etc/vector/vector.yaml:ro,Z
+    # The Docker socket is not labelled for containers on an SELinux host.
     security_opt:
       - label=disable
-    command: -config.file=/etc/promtail/config.yaml
-    depends_on:
-      - loki
+    environment:
+      # Lets infra/configs/vector.yml read the four values below. Vector calls it dangerous because
+      # a config from someone else could read any variable; this config is ours, and these four
+      # are all the container is given.
+      - VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION=true
+      - PROJECT=${PROJECT}
+      - VLOGS_URL=${VLOGS_URL:-http://victorialogs:9428}
+      - VLOGS_USERNAME=${VLOGS_USERNAME:-}
+      - VLOGS_PASSWORD=${VLOGS_PASSWORD:-}
     deploy:
       resources:
         limits:
-          cpus: ${PROMTAIL_CPU_LIMIT}
-          memory: '${PROMTAIL_MEM_LIMIT}'
-    logging:
-      driver: json-file
-      options:
-        max-size: '10m'
-        max-file: '3'
-
-  prometheus:
-    container_name: ${PROJECT}-prometheus
-    image: prom/prometheus:v3.15.0
-    user: root
-    restart: unless-stopped
-    volumes:
-      - ../../infra/configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
-      - ../../.volumes/prometheus:/prometheus:Z
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--web.enable-lifecycle'
-      - '--web.enable-admin-api'
-      - '--web.external-url=https://prometheus.${DOMAIN}'
-      - '--web.route-prefix=/'
-    deploy:
-      resources:
-        limits:
-          cpus: ${PROMETHEUS_CPU_LIMIT}
-          memory: '${PROMETHEUS_MEM_LIMIT}'
+          cpus: '${VECTOR_CPU_LIMIT:-0.2}'
+          memory: '${VECTOR_MEM_LIMIT:-128M}'
     logging:
       driver: json-file
       options:
@@ -269,16 +240,148 @@ services:
     depends_on:
       - db
 
+  # The bundled metrics database. Prometheus-compatible: it takes remote write and answers PromQL.
+  victoriametrics:
+    container_name: ${PROJECT}-victoriametrics
+    profiles: [monitoring]
+    image: victoriametrics/victoria-metrics:v1.146.0
+    restart: unless-stopped
+    volumes:
+      - ../../.volumes/victoriametrics:/storage:Z
+    command:
+      - '-storageDataPath=/storage'
+      - '-retentionPeriod=14d'
+      - '-httpListenAddr=:8428'
+      # Its own metrics, among them the free space of the disk it stores on (infra/configs/alerts.yml).
+      - '-selfScrapeInterval=30s'
+    deploy:
+      resources:
+        limits:
+          cpus: '${VICTORIAMETRICS_CPU_LIMIT:-0.5}'
+          memory: '${VICTORIAMETRICS_MEM_LIMIT:-256M}'
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  # The bundled log database. Answers LogsQL.
+  victorialogs:
+    container_name: ${PROJECT}-victorialogs
+    profiles: [monitoring]
+    image: victoriametrics/victoria-logs:v1.51.0
+    restart: unless-stopped
+    volumes:
+      - ../../.volumes/victorialogs:/storage:Z
+    command:
+      - '-storageDataPath=/storage'
+      - '-retentionPeriod=14d'
+      - '-httpListenAddr=:9428'
+    deploy:
+      resources:
+        limits:
+          cpus: '${VICTORIALOGS_CPU_LIMIT:-0.5}'
+          memory: '${VICTORIALOGS_MEM_LIMIT:-256M}'
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  # Evaluates infra/configs/alerts.yml against the bundled VictoriaMetrics.
+  vmalert:
+    container_name: ${PROJECT}-vmalert
+    profiles: [monitoring]
+    image: victoriametrics/vmalert:v1.146.0
+    restart: unless-stopped
+    volumes:
+      - ../../infra/configs/alerts.yml:/etc/vmalert/alerts.yml:ro,Z
+    command:
+      - '-rule=/etc/vmalert/alerts.yml'
+      - '-datasource.url=http://victoriametrics:8428'
+      # Alert state is kept in VictoriaMetrics, so a restart does not reset a pending alert.
+      - '-remoteWrite.url=http://victoriametrics:8428'
+      - '-remoteRead.url=http://victoriametrics:8428'
+      - '-notifier.url=http://alertmanager:9093'
+      - '-external.label=project=${PROJECT}'
+    deploy:
+      resources:
+        limits:
+          cpus: '${VMALERT_CPU_LIMIT:-0.2}'
+          memory: '${VMALERT_MEM_LIMIT:-128M}'
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  # Sends vmalert's alerts to ntfy. vmalert speaks only Alertmanager's API, and ntfy formats
+  # Alertmanager's webhook itself (`?template=alertmanager`). With ALERT_NTFY_URL empty the alerts
+  # are kept here and sent nowhere, so a project without ntfy still starts.
+  alertmanager:
+    container_name: ${PROJECT}-alertmanager
+    profiles: [monitoring]
+    image: prom/alertmanager:v0.34.1
+    restart: unless-stopped
+    environment:
+      - ALERT_NTFY_URL=${ALERT_NTFY_URL:-}
+      - ALERT_NTFY_TOPIC=${ALERT_NTFY_TOPIC:-alerts}
+      - ALERT_NTFY_TOKEN=${ALERT_NTFY_TOKEN:-}
+    # Alertmanager reads no environment variables, so the config is written from them at start.
+    # The files are private to the container's user: one of them holds the token.
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        umask 077
+        cd /alertmanager
+        {
+          echo 'route:'
+          echo '  receiver: ntfy'
+          echo '  group_by: [alertname]'
+          echo '  repeat_interval: 4h'
+          echo 'receivers:'
+          echo '  - name: ntfy'
+          if [ -n "$$ALERT_NTFY_URL" ]; then
+            printf '%s' "$${ALERT_NTFY_URL%/}/$$ALERT_NTFY_TOPIC?template=alertmanager" > ntfy-url
+            echo '    webhook_configs:'
+            echo '      - url_file: /alertmanager/ntfy-url'
+            echo '        send_resolved: true'
+            if [ -n "$$ALERT_NTFY_TOKEN" ]; then
+              printf '%s' "$$ALERT_NTFY_TOKEN" > ntfy-token
+              echo '        http_config:'
+              echo '          authorization:'
+              echo '            credentials_file: /alertmanager/ntfy-token'
+            fi
+          fi
+        } > config.yml
+        exec /bin/alertmanager --config.file=/alertmanager/config.yml --storage.path=/alertmanager --cluster.listen-address=
+    deploy:
+      resources:
+        limits:
+          cpus: '${ALERTMANAGER_CPU_LIMIT:-0.1}'
+          memory: '${ALERTMANAGER_MEM_LIMIT:-64M}'
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
   grafana:
     container_name: ${PROJECT}-grafana
+    profiles: [monitoring]
     image: grafana/grafana:13.2.3
     restart: unless-stopped
     user: '0'
     volumes:
       - ../../.volumes/grafana:/var/lib/grafana:Z
+      # The VictoriaMetrics and VictoriaLogs data sources.
+      - ../../infra/configs/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro,Z
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASS}
       - GF_SERVER_ROOT_URL=https://grafana.${DOMAIN}
+      # Grafana has no built-in VictoriaLogs data source; it downloads this plugin at first start.
+      - GF_PLUGINS_PREINSTALL_SYNC=victoriametrics-logs-datasource
     deploy:
       resources:
         limits:
@@ -304,6 +407,10 @@ services:
       - 'traefik.http.routers.grafana-${PROJECT}.entrypoints=web'
       - 'traefik.http.services.grafana-${PROJECT}.loadbalancer.server.port=3000'
 
+  # nodeexporter and cadvisor watch the whole host (its CPU, disk and network, and every
+  # container's resources). On a shared server that duplicates the host's own monitoring, so they
+  # start only with the `host-monitoring` profile: add it to COMPOSE_PROFILES in the env file.
+  # vmagent still lists their scrape jobs and shows them as down while they are off.
   nodeexporter:
     container_name: ${PROJECT}-nodeexporter
     profiles: [host-monitoring]

@@ -1,0 +1,66 @@
+# Vector ships this project's container logs to VictoriaLogs: to VLOGS_URL, or to the bundled
+# VictoriaLogs when that is unset (infra/compose/compose.shared.yml). A dollar sign with a name in
+# braces is filled from the container's environment when Vector starts, in comments too.
+sources:
+  containers:
+    type: docker_logs
+    # A name prefix: this project's containers only, never the rest of the host.
+    include_containers: ['${PROJECT}-']
+    # Its own log would otherwise report every failed send as a new line to send.
+    exclude_containers: ['${PROJECT}-vector']
+
+transforms:
+  logs:
+    type: remap
+    inputs: [containers]
+    source: |
+      .project = "${PROJECT}"
+      # Compose puts a dozen labels on every container; none helps to read a log line.
+      del(.label)
+
+  # The API has no metrics endpoint yet, so its requests are counted from its request log, whose
+  # lines end like `--> GET /api/groups 200 3ms` (@spy4x/server/request-log; the status is wrapped
+  # in a colour code). One counter per status class: api_requests_total{status="2xx"}, "4xx", "5xx".
+  # A change of that log format stops the counter, and with it the ApiErrors alert.
+  api_requests:
+    type: remap
+    inputs: [containers]
+    source: |
+      if .container_name != "${PROJECT}-api" { abort }
+      parsed, err = parse_regex(string!(.message), r'--> [A-Z]+ \S+ (?:\x1b\[\d+m)?(?P<class>\d)\d\d')
+      if err != null { abort }
+      . = { "status": string!(parsed.class) + "xx" }
+  api_request_metrics:
+    type: log_to_metric
+    inputs: [api_requests]
+    metrics:
+      - type: counter
+        field: status
+        name: api_requests_total
+        tags:
+          status: '{{status}}'
+
+sinks:
+  victorialogs:
+    type: elasticsearch
+    inputs: [logs]
+    endpoints: ['${VLOGS_URL}/insert/elasticsearch/']
+    api_version: v8
+    compression: gzip
+    healthcheck:
+      enabled: false
+    query:
+      _msg_field: message
+      _time_field: timestamp
+      _stream_fields: project,container_name,stream
+    auth:
+      strategy: basic
+      user: '${VLOGS_USERNAME}'
+      password: '${VLOGS_PASSWORD}'
+  # Scraped by vmagent (infra/configs/vmagent.yml).
+  metrics:
+    type: prometheus_exporter
+    inputs: [api_request_metrics]
+    address: 0.0.0.0:9598
+    # Keep a counter that no request has moved for a day, so a quiet API does not lose its series.
+    flush_period_secs: 86400
