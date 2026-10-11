@@ -140,7 +140,6 @@
     "@server/tags/": "./libs/server/tags/",
     "@server/notifications/": "./libs/server/notifications/",
     "@server/subscribers/": "./libs/server/subscribers/",
-    "@client/vite/": "./libs/client/vite/",
     "@platform/": "./libs/platform/",
     // #endregion Aliases
 
