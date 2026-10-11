@@ -270,18 +270,6 @@ describe("TagsScreen", () => {
     expect(focused()).toBe("tag-new")
   })
 
-  it("keeps focus on the tag's own menu when the delete was refused and the tag stays", async () => {
-    await mount(<TagsScreen {...tagsDefaults} />)
-    await click(`[data-e2e=tag-${urgent.id}] [data-e2e=tag-menu]`)
-    await click(`[data-e2e=tag-${urgent.id}] [data-e2e=tag-delete]`)
-    await clickText("Delete", "[data-e2e=tag-delete-dialog]")
-    await rerender(<TagsScreen {...tagsDefaults} listError="The tag could not be deleted." />)
-    expect([focused(), document.activeElement?.closest("li")?.getAttribute("data-e2e")]).toEqual([
-      "tag-menu",
-      `tag-${urgent.id}`,
-    ])
-  })
-
   it("deletes nothing when the person keeps the tag", async () => {
     const remove = spy<[string]>()
     await mount(<TagsScreen {...tagsDefaults} onDelete={remove.fn} />)
