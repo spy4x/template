@@ -17,7 +17,9 @@ import { sessionState } from "./session.ts"
  * What a list does with its saved copy when the server answers it with an error (ADR 003). The
  * stores are the production ones, over their own readers; only the network is replaced, by a
  * `fetch` that answers with a real `Response`. A refusal (401, 403, 404) deletes the copy, so it is
- * not shown offline later; a struggling server (500) keeps it.
+ * not shown offline later; a struggling server (500) keeps it. Those carry the API's error body. An
+ * answer without it was written by the proxy in front of the API (a 502, a bare 404): the copy
+ * answers it, as it does with no network.
  */
 
 const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
@@ -155,7 +157,8 @@ const CASES: Case[] = [
   },
 ]
 
-type Answer = number | "offline"
+/** A status with the API's error body, a proxy's page with that status, or no network. */
+type Answer = number | { proxy: number } | "offline"
 
 describe("a saved copy and the answer of the server", () => {
   const realFetch = globalThis.fetch
@@ -165,10 +168,13 @@ describe("a saved copy and the answer of the server", () => {
   beforeEach(() => {
     globalThis.fetch = (() => {
       if (answer === "offline") return Promise.reject(new TypeError("Failed to fetch"))
+      if (typeof answer === "object") {
+        return Promise.resolve(new Response("<h1>Bad Gateway</h1>", { status: answer.proxy }))
+      }
       return Promise.resolve(
         answer === 200
           ? Response.json(body)
-          : Response.json({ error: { message: "No" } }, { status: answer }),
+          : Response.json({ error: { code: "NO", message: "No" } }, { status: answer }),
       )
     }) as typeof fetch
   })
@@ -180,7 +186,7 @@ describe("a saved copy and the answer of the server", () => {
   for (const list of CASES) {
     describe(list.name, () => {
       /** One visit that worked, then one that got `status`, then the network goes. */
-      async function afterAnswer(status: number) {
+      async function afterAnswer(status: Exclude<Answer, "offline">) {
         // A store may let a failed read throw; the screen shows what the store holds either way.
         const quietly = async (open: ReturnType<Case["open"]>) => {
           await open.load().catch(() => {})
@@ -192,11 +198,13 @@ describe("a saved copy and the answer of the server", () => {
         await quietly(first)
         const shownOnline = await first.shown()
         answer = status
-        await quietly(list.open(device))
+        const second = list.open(device)
+        await quietly(second)
+        const shownThen = await second.shown()
         answer = "offline"
         const offline = list.open(device)
         await quietly(offline)
-        return { shownOnline, shownOffline: await offline.shown() }
+        return { shownOnline, shownThen, shownOffline: await offline.shown() }
       }
 
       for (const status of [401, 403, 404]) {
@@ -212,6 +220,39 @@ describe("a saved copy and the answer of the server", () => {
         expect(shownOnline).not.toEqual(list.empty)
         expect(shownOffline).toEqual(shownOnline)
       })
+
+      for (const status of [502, 404]) {
+        it(`are shown, and kept, when the proxy answers ${status} without the API's error body`, async () => {
+          const { shownOnline, shownThen, shownOffline } = await afterAnswer({ proxy: status })
+          expect(shownOnline).not.toEqual(list.empty)
+          expect(shownThen).toEqual(shownOnline)
+          expect(shownOffline).toEqual(shownOnline)
+        })
+      }
     })
   }
+
+  it("answer a proxy's 502 with the time they were saved at, and no error", async () => {
+    body = { tokens: [{ id: "t-1" }] }
+    const device = memoryReads(() => 1234)
+    answer = 200
+    await createApiTokensStore(apiTokensHttp, device).load()
+
+    answer = { proxy: 502 }
+    const store = createApiTokensStore(apiTokensHttp, device)
+    await store.load()
+
+    expect(store.tokens.value).toEqual([{ id: "t-1" }])
+    expect(store.savedAt.value).toBe(1234)
+    expect(store.errors.value.list).toBeNull()
+  })
+
+  it("show the error of a proxy's 502 when the device holds nothing", async () => {
+    answer = { proxy: 502 }
+    const store = createApiTokensStore(apiTokensHttp, memoryReads())
+    await store.load()
+
+    expect(store.tokens.value).toBeNull()
+    expect(store.errors.value.list).toBe("Request failed")
+  })
 })

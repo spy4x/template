@@ -184,14 +184,33 @@ registration was added. The same worker answers its `skipWaiting` message when a
 the "New version available" prompt. A person's first visit is online by definition; the app can go
 offline after the worker installed, which is after that first load.
 
+### Which answers count as "unreachable"
+
+A list read is answered by its saved copy, with the time it was saved at, when the server is
+unreachable. That is:
+
+- no answer at all: no network, a connection that fails, a socket that is not open;
+- an answer that the API did not write: a 502, 503, 504 or any other 5xx, a 404 or a 429, each
+  without the API's error body. The proxy in front of the API answers these for a few seconds while
+  the API's container is replaced by a deploy.
+
+The errors the API writes for these lists carry `{ error: { code, message } }`, and `error.code` is
+how the SPA tells the two apart (`isForeignAnswer` in `apps/spa/src/state/read-keys.ts`). So a 404
+with a code is the API saying the thing is gone, and deletes the copy; a 404 without one is the
+proxy, and the copy both answers and stays. A 401 or a 403 is a refusal with or without a code. A
+5xx with a code, such as the API's `INTERNAL_ERROR`, is the server struggling: the screen shows the
+error and the copy stays. When the device holds no copy, a proxy's answer shows as the error it is.
+The calls port has the same rule for calls (`createHttpCallPort` in `@spy4x/realtime/calls`).
+
 ### Signing out
 
 Signing out deletes every read copy (the `reads:<id>` database's entries and the notes) and the
 remembered user. While signed in, a list's copy is also deleted when the server refuses that read
-with 401, 403 or 404: the person lost access, or the thing is gone, and the copy must not come back
-offline later. An answer that says nothing about access keeps the copy: a 500, a timeout, or no
-network at all, since the server may well accept the same read a moment later. A start that finds no session, because it ended elsewhere or expired, does the
-same for the person the device remembered, before the sign-in page shows.
+with 401, 403 or its own 404 (see above): the person lost access, or the thing is gone, and the copy
+must not come back offline later. An answer that says nothing about access keeps the copy: a 500, a
+timeout, or no network at all, since the server may well accept the same read a moment later. A
+start that finds no session, because it ended elsewhere or expired, does the same for the person the
+device remembered, before the sign-in page shows.
 
 The person is forgotten at once; their copies take IndexedDB a moment. So before a deletion starts,
 the user's id is written to a second `localStorage` key, `offline:owed-deletion`, and removed only

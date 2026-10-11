@@ -27,7 +27,7 @@ import { offlineTags as tagsOverLayer } from "./offline/tags-collection.ts"
 import { OfflineStatus as OfflineStatusLine } from "./offline/OfflineStatus.tsx"
 import type { RuntimeConfig } from "./runtime-config.ts"
 import { canCallAs, createAppCallPort } from "./state/realtime-call.ts"
-import { ReadRefused } from "./state/read-keys.ts"
+import { isForeignAnswer, ReadRefused } from "./state/read-keys.ts"
 import type { SessionState, SessionUser } from "./state/session.ts"
 
 /**
@@ -315,7 +315,9 @@ export function flushOutbox(): Promise<void> {
  */
 export interface LocalReads {
   /**
-   * Rejects as `read` does, except when the server is unreachable and a copy exists. `early` is
+   * Rejects as `read` does, except when the server is unreachable and a copy exists. Unreachable
+   * is no connection, and also an answer that is not the API's ({@link isForeignAnswer}): a
+   * proxy's 502 or bare 404 while the API is replaced. `early` is
    * given the copy when the device has one before the server has answered, so a screen with
    * nothing to show paints it first; it is never given a copy after the answer. When the server
    * then refuses the read, `early` is called once more with `undefined`: the screen takes back
@@ -335,15 +337,23 @@ export interface LocalReads {
 /**
  * Whether the server answered that this person may not read the list (or that it is gone): a
  * socket read refused with `unauthorized`, `forbidden` or `not_found`, or a REST read answered
- * 401, 403 or 404. Any other failure, such as a 500 or a timeout, says nothing about access.
+ * 401, 403 or 404. Any other failure, such as a 500 or a timeout, says nothing about access, and
+ * neither does a 404 without the API's error code, which a proxy wrote.
  */
 function isRefusal(error: unknown): boolean {
-  if (error instanceof ReadRefused) return REFUSING_STATUSES.includes(error.status)
+  if (error instanceof ReadRefused) {
+    return REFUSING_STATUSES.includes(error.status) && !isProxyAnswer(error)
+  }
   return error instanceof RealtimeRequestError &&
     (error.code === "unauthorized" || error.code === "forbidden" || error.code === "not_found")
 }
 
 const REFUSING_STATUSES = [401, 403, 404]
+
+/** Whether a REST read was answered by something in front of the API, such as a proxy's 502. */
+function isProxyAnswer(error: unknown): boolean {
+  return error instanceof ReadRefused && isForeignAnswer(error.status, error.code)
+}
 
 /** Deletes the saved copy of a list the server refused, so it is not shown again offline. */
 async function dropCopy(cache: ReadCache, key: string): Promise<void> {
@@ -374,7 +384,12 @@ export function createLocalReads(current: () => ReadCache | undefined): LocalRea
       try {
         return await cachedRead(cache, key, read)
       } catch (refusal) {
-        // An unreachable server is answered by the copy above, so this is the server saying no.
+        // A proxy's answer is an unreachable server too: the copy answers it, when there is one.
+        if (cache && isProxyAnswer(refusal)) {
+          const copy = await readCopy<T>(cache, key)
+          if (copy) return copy
+        }
+        // An unreachable server is answered by the copy, so this is the server saying no.
         if (painted) early?.(undefined)
         if (cache && isRefusal(refusal)) await dropCopy(cache, key)
         throw refusal
