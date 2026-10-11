@@ -99,6 +99,17 @@ describe("API tokens store", () => {
     })
   })
 
+  it("names an empty name and a missing password together, on the first try", async () => {
+    const calls: unknown[][] = []
+    const tokens = store({}, calls)
+    tokens.startCreate(groupId)
+    await tokens.create()
+
+    expect(calls).toEqual([])
+    expect(tokens.errors.value.name).toContain("Name must be")
+    expect(tokens.errors.value.password).toBe(PASSWORD_MISSING)
+  })
+
   it("shows a wrong password on its field, keeps what was typed and clears it on the next try", async () => {
     let wrong = true
     const tokens = store({

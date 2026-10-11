@@ -161,16 +161,21 @@ export function createApiTokensStore(
      */
     async create(): Promise<void> {
       if (pending.value.create) return
-      if (values.value.password === "") {
-        errors.value = { ...errors.value, name: null, password: PASSWORD_MISSING, form: null }
-        return
-      }
-      let request: ApiTokenCreateRequest
+      // Both fields are checked before anything shows, so an empty form names both at once.
+      const password = values.value.password === "" ? PASSWORD_MISSING : null
+      let request: ApiTokenCreateRequest | null = null
+      let name: string | null = null
       try {
-        request = parseApiTokenCreateRequest(values.value)
+        // The parser wants a password; a stand-in lets it judge the name of a form without one.
+        request = parseApiTokenCreateRequest(
+          password === null ? values.value : { ...values.value, password: "-" },
+        )
       } catch (error) {
         if (!(error instanceof ApiTokenError)) throw error
-        errors.value = { ...errors.value, name: error.message, password: null, form: null }
+        name = error.message
+      }
+      if (request === null || password !== null) {
+        errors.value = { ...errors.value, name, password, form: null }
         return
       }
       errors.value = { ...errors.value, name: null, password: null, form: null }
