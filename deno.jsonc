@@ -240,7 +240,7 @@
 
   // #region Preact Configs
   "compilerOptions": {
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "jsxImportSource": "preact"
   }
