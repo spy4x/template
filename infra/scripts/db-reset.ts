@@ -12,6 +12,8 @@
  * It refuses, before it touches anything, unless all of these hold:
  *
  * - `ENV` is `dev`;
+ * - `AUTH_PEPPER` and `SEED_PASSWORD` pass the seed's own check (`readSeedOptions`), so a reset
+ *   never drops a database it cannot seed afterwards;
  * - `DB_HOST` is `localhost`, `127.0.0.1` or `db`, the Compose service name of the development
  *   database;
  * - `DB_NAME` is not the `DB_NAME` in `infra/envs/.env.prod`. This guard fails closed: a missing
@@ -26,6 +28,7 @@
 
 import postgres from "postgres"
 import { parseEnvValues } from "./env-file.ts"
+import { readSeedOptions } from "./seed-data.ts"
 
 /** Where the production values live. Only `DB_NAME` is read, only inside this script. */
 export const PROD_ENV_PATH = "./infra/envs/.env.prod"
@@ -95,10 +98,12 @@ export interface ResetSteps {
 }
 
 /**
- * Runs the guards, asks for confirmation unless `yes`, then recreates, migrates and seeds.
- * Returns false when the person declined; nothing has changed then.
+ * Runs the guards and the seed's own check of its variables, asks for confirmation unless `yes`,
+ * then recreates, migrates and seeds. Returns false when the person declined; nothing has changed
+ * then.
  *
  * @throws {ResetRefusedError} When a guard refuses; no step has run then.
+ * @throws {SeedConfigError} When the seed would refuse its variables; no step has run then.
  */
 export async function runReset(
   env: Record<string, string | undefined>,
@@ -108,6 +113,9 @@ export async function runReset(
 ): Promise<boolean> {
   const prodPath = options.prodPath ?? PROD_ENV_PATH
   checkGuards(env, options.skipProdCheck ? undefined : readProdDbName(prodEnvContent, prodPath))
+  // The seed runs last, in a process of its own with this same environment. What it would refuse
+  // is refused here, before the drop.
+  readSeedOptions(env)
   const target = `${env.DB_NAME} on ${env.DB_HOST}:${env.DB_PORT || "5432"}` +
     (options.skipProdCheck
       ? ` (${NO_PROD_FILE})`
