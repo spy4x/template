@@ -53,8 +53,9 @@ Add the table to `SNAPSHOT_TABLES` and apply the migration in
 `tests/integration/groups.integration.test.ts`, which compares the two. Compose applies migrations
 on every start; nothing else is needed to deploy one.
 
-**Naming a migration.** A file is named `YYYY_MM_DD_NNNN_words_in_snake_case.sql`, and a new one
-must sort after every migration already on `main`. The runner applies files in name order and
+**Naming a migration.** A file is named `YYYY_MM_DD_NNNN_words_in_snake_case.sql` (ending in
+`.no_transaction.sql` for a statement that cannot run in a transaction), and a new one must sort
+after every migration already on `main`. The runner applies files in name order and
 skips the ones a database has recorded, so a file that sorts earlier runs after them on your
 database and before them on an empty one, where the tables it changes do not exist yet. The date is
 a counter, not the calendar, and the names already run ahead of it: do not use today's date. Take

@@ -9,7 +9,10 @@
  * is a counter, not the calendar: the names already run ahead of it.
  *
  * `ON_MAIN` is how this test knows what is on `main` without the network. Each pull request that
- * adds a migration appends its file name as the last line, and changes no other line.
+ * adds a migration appends its file name as the last line, and changes no other line. The test
+ * cannot tell an appended line from an inserted one: a name put into the middle of the list, or a
+ * file renamed or deleted together with its line, stays green. A reviewer reads the diff of the
+ * list for that.
  */
 
 import { expect } from "@std/expect"
@@ -62,7 +65,8 @@ const ON_MAIN: readonly string[] = [
   "2026_10_29_0001_idempotency_claim_token_no_default.sql",
 ]
 
-const NAME = /^\d{4}_\d{2}_\d{2}_\d{4}_[a-z0-9]+(_[a-z0-9]+)*\.sql$/
+// `.no_transaction.sql` is the runner's ending for a statement that cannot run in a transaction.
+const NAME = /^\d{4}_\d{2}_\d{2}_\d{4}_[a-z0-9]+(_[a-z0-9]+)*(\.no_transaction)?\.sql$/
 
 /**
  * What is wrong with the migration files `inTree`, given the names `onMain` in the order they were
@@ -83,7 +87,9 @@ export function nameProblems(inTree: readonly string[], onMain: readonly string[
   }
   for (const name of [...inTree].sort()) {
     if (!NAME.test(name)) {
-      problems.push(`${name} is not named YYYY_MM_DD_NNNN_words_in_snake_case.sql.`)
+      problems.push(
+        `${name} is not named YYYY_MM_DD_NNNN_words_in_snake_case.sql or .no_transaction.sql.`,
+      )
     } else if (onMain.includes(name)) {
       continue
     } else if (name < newest) {
@@ -117,7 +123,7 @@ Deno.test("a new migration that sorts before the newest one on main is refused",
 
 Deno.test("a new migration that sorts after the newest one passes once it is appended", () => {
   const next = "2026_10_30_0001_api_token_hardening.sql"
-  const sameDay = "2026_10_28_0002_probe.sql"
+  const sameDay = "2026_10_28_0002_probe.no_transaction.sql"
   expect(nameProblems([A, B, next], [A, B])).toEqual([
     `${next} is new: append it as the last line of ON_MAIN in this test.`,
   ])
@@ -143,7 +149,7 @@ Deno.test("a name outside the pattern is refused", () => {
     ]
   ) {
     expect(nameProblems([A, name], [A])).toEqual([
-      `${name} is not named YYYY_MM_DD_NNNN_words_in_snake_case.sql.`,
+      `${name} is not named YYYY_MM_DD_NNNN_words_in_snake_case.sql or .no_transaction.sql.`,
     ])
   }
 })
