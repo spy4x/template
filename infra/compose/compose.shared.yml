@@ -438,7 +438,9 @@ services:
       # The port apps/healthcheck.ts probes.
       - HEALTHCHECK_PORT=${API_PORT}
       - DENO_LOG=${DENO_LOG}
-      - DB_HOST=db
+      # The API is on the shared `proxy` network too, where a plain service name such as `db` is
+      # answered by any project's container of that name. The container's own name is unique.
+      - DB_HOST=${PROJECT}-db
       - DB_PORT=5432
       - DB_USER=${DB_USER}
       - DB_PASS=${DB_PASS}
@@ -449,7 +451,7 @@ services:
       - DEV_EMAIL=${DEV_EMAIL}
       - DOMAIN=${DOMAIN}
       - TIMEZONE=${TIMEZONE}
-      - KV_HOSTNAME=kv
+      - KV_HOSTNAME=${PROJECT}-kv
       - KV_PORT=6379
       - KV_PASSWORD=${KV_PASSWORD:?KV_PASSWORD is required}
       - RATE_LIMITER_WINDOW_MS=${RATE_LIMITER_WINDOW_MS}
@@ -653,7 +655,8 @@ services:
       - ENV=${ENV}
       - DOMAIN=${DOMAIN}
       - MPA_DOMAIN=${MPA_DOMAIN:-}
-      - API_URL=http://api:${API_PORT}
+      # Not `http://api`: on the shared `proxy` network that name is any project's API.
+      - API_URL=http://${PROJECT}-api:${API_PORT}
       - DENO_LOG=${DENO_LOG}
       # The port apps/healthcheck.ts probes: the one the image's CMD serves.
       - HEALTHCHECK_PORT=8080
