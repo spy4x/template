@@ -247,7 +247,7 @@ Deno.test("tags against Postgres", async (t) => {
     })
 
     await t.step(
-      "a member of another group cannot rename, delete or read a tag by naming their own group",
+      "a member of another group cannot rename or delete a tag by naming their own group",
       async () => {
         const { owner, groupId } = await seed()
         const stranger = await insertUser(sql)
