@@ -6,6 +6,7 @@ import { SWUpdater } from "@spy4x/preact-system/sw-updater"
 import { LoadingSpinner } from "@spy4x/preact-ui/loading-spinner"
 import { Toastr } from "@spy4x/preact-ui/toastr"
 import { Route, type StringRouteParams, Switch, useLocation, useSearch } from "wouter-preact"
+import { useRouteAnnouncer } from "@spy4x/preact-system/route-announcer"
 import { canSignOut, sessionState } from "./state/session.ts"
 import { bootstrapSession, settleOwedSignOut } from "./state/auth.ts"
 import { groupsStore } from "./state/groups.ts"
@@ -137,6 +138,13 @@ function SignInGate() {
 /** A fully signed-in user gets the library `Shell`; everyone else the plain public frame. */
 function Frame() {
   const session = sessionState.value
+  // A route change swaps the page without a load: the hook moves focus to the `<h1>` the new page
+  // shows first, as a load would put the reader at its top. Focus still ends on the document body
+  // where that heading is replaced afterwards: opening a note and saving a new one (the loading
+  // heading goes when the note arrives), and signing out (the shell is swapped). The app has no
+  // page titles yet, so the tab's title stays.
+  const [path] = useLocation()
+  useRouteAnnouncer({ path })
   if (session.user && !session.isMfaRequired) {
     return (
       <AppShell user={session.user} wsStatus={connectionDisplay(session)}>
