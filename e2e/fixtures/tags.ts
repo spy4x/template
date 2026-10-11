@@ -1,10 +1,20 @@
-import { type APIRequestContext, expect, type Locator, type Page } from "@playwright/test"
+import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test"
 import { gotoApp } from "./app.ts"
 
 /** Page objects and API helpers for the tag specs. */
 
-export const apiBase = "http://app.localhost"
-export const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
+/**
+ * The app's origin as the running test sees it. The suite's harness rewrites the specs' own
+ * `apiBase`, not the fixtures, so a fixture asks the project instead of naming a port.
+ */
+function origin(): string {
+  return new URL(String(test.info().project.use.baseURL)).origin
+}
+
+function headers(): Record<string, string> {
+  return { origin: origin(), "sec-fetch-site": "same-origin" }
+}
+
 export const password = "Passw0rd!"
 
 /** A tag as the API lists it. */
@@ -22,15 +32,15 @@ export interface ServerNote {
 }
 
 export async function cleanup(request: APIRequestContext, email: string): Promise<void> {
-  const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
+  const response = await request.post(`${origin()}/api/test/cleanup-user`, {
     data: { login: email },
   })
   expect.soft(response.status(), await response.text()).toBe(200)
 }
 
 export async function signUp(request: APIRequestContext, email: string): Promise<void> {
-  const response = await request.post(`${apiBase}/api/auth/password/sign-up`, {
-    headers,
+  const response = await request.post(`${origin()}/api/auth/password/sign-up`, {
+    headers: headers(),
     data: { email, password },
   })
   expect(response.ok(), await response.text()).toBe(true)
@@ -39,13 +49,13 @@ export async function signUp(request: APIRequestContext, email: string): Promise
 /** Makes a group for the signed-in page's user and selects it. */
 export async function selectedGroup(page: Page, name: string): Promise<string> {
   const groupId = crypto.randomUUID()
-  const group = await page.request.post(`${apiBase}/api/groups`, {
-    headers,
+  const group = await page.request.post(`${origin()}/api/groups`, {
+    headers: headers(),
     data: { id: groupId, name },
   })
   expect(group.status(), await group.text()).toBe(201)
-  const selected = await page.request.put(`${apiBase}/api/groups/selected`, {
-    headers,
+  const selected = await page.request.put(`${origin()}/api/groups/selected`, {
+    headers: headers(),
     data: { groupId },
   })
   expect(selected.ok(), await selected.text()).toBe(true)
@@ -53,13 +63,13 @@ export async function selectedGroup(page: Page, name: string): Promise<string> {
 }
 
 export async function serverTags(page: Page, groupId: string): Promise<ServerTag[]> {
-  const response = await page.request.get(`${apiBase}/api/groups/${groupId}/tags`)
+  const response = await page.request.get(`${origin()}/api/groups/${groupId}/tags`)
   expect(response.ok(), await response.text()).toBe(true)
   return (await response.json()).tags
 }
 
 export async function serverNotes(page: Page, groupId: string): Promise<ServerNote[]> {
-  const response = await page.request.get(`${apiBase}/api/groups/${groupId}/notes`)
+  const response = await page.request.get(`${origin()}/api/groups/${groupId}/notes`)
   expect(response.ok(), await response.text()).toBe(true)
   return (await response.json()).notes
 }
