@@ -1,10 +1,10 @@
 /// <reference lib="deno.ns" />
 /**
- * Keeps every read of the SPA bound to the user the page was started for (ADR 003). The SPA has
- * one REST function, `apiFetch` in `apps/spa/src/state/api.ts`, and it sends every `GET` through
- * `apiAsUser`, which names the user and signs the page out on `unauthorized`. A store or view that
- * reads an `/api` route any other way (the library's `apiFetch`, or the browser's `fetch`) skips
- * both, so it fails this test.
+ * Keeps every REST request of the SPA, read or write, bound to the user the page was started for
+ * (ADR 003). The SPA has one REST function, `apiFetch` in `apps/spa/src/state/api.ts`, and it sends
+ * every request through `apiAsUser`, which names the user and signs the page out on
+ * `unauthorized`. A store or view that calls an `/api` route any other way (the library's
+ * `apiFetch`, or the browser's `fetch`) skips both, so it fails this test.
  */
 
 import { expect } from "@std/expect"
@@ -14,7 +14,7 @@ import { fromFileUrl, relative } from "@std/path"
 const ROOT = fromFileUrl(new URL("../", import.meta.url))
 const SPA_SOURCE = "apps/spa/src/"
 const LIBRARY = "@spy4x/platform/api"
-/** The two files that are the one way: the wrapper, and the read it sends a `GET` through. */
+/** The two files that are the one way: the wrapper, and the bound request it sends every call through. */
 const THE_ONE_WAY = ["apps/spa/src/state/api.ts", "apps/spa/src/state/realtime-call.ts"]
 /**
  * Files that may call the browser's `fetch`: the newsletter's routes are public and have no
@@ -77,27 +77,20 @@ Deno.test("the SPA's one REST function sends every request, read or write, throu
   expect(wrapper).not.toMatch(/\bsend\s*(<[^>]*>)?\s*\(/)
 })
 
-/** A call whose options name a method other than `GET` in so many words. */
-const LITERAL_WRITE = /\bmethod\s*:\s*["'`](?!GET["'`])[A-Z]+["'`]/
-
-/**
- * Files whose `fetch` is a parameter that defaults to the SPA's `apiFetch`, so a call of it is not
- * the browser's.
- */
-const INJECTED_APIFETCH = ["apps/spa/src/state/email.ts"]
-
 Deno.test("no SPA file reads or writes with the browser's fetch", async () => {
   const callers: string[] = []
-  let writers = 0
   for (const [file, source] of await spaSources()) {
     for (const call of browserFetchCalls(source)) {
       // `fetch()` with no arguments is a method of a store's own port, not the browser's.
       if (call.trim() === "") continue
-      if (LITERAL_WRITE.test(call)) writers++
-      if (!PUBLIC_REQUESTS.includes(file) && !INJECTED_APIFETCH.includes(file)) callers.push(file)
+      if (!PUBLIC_REQUESTS.includes(file)) callers.push(file)
     }
   }
-  // The email store's write is found: finding it proves the scan.
-  expect(writers).toBeGreaterThanOrEqual(1)
   expect(callers).toEqual([])
+})
+
+Deno.test("the scan finds a browser fetch that writes, and leaves a store's own request alone", () => {
+  const source = "await fetch(`/api/x`, { method: `POST` })\nawait request(`/api/y`, {})"
+  const calls = browserFetchCalls(source)
+  expect(calls).toEqual(["`/api/x`, { method: `POST` }"])
 })
