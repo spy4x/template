@@ -274,7 +274,7 @@ CREATE TABLE idempotency_keys (
     result JSONB,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    claim_token UUID NOT NULL DEFAULT gen_random_uuid(),
+    claim_token TEXT NOT NULL,
     PRIMARY KEY (user_id, key),
     CONSTRAINT idempotency_keys_key_check CHECK (length(key) BETWEEN 1 AND 128),
     CONSTRAINT idempotency_keys_status_check CHECK (status = ANY (ARRAY[1, 2])),

@@ -318,6 +318,27 @@ Compose, and so `deno task deploy`, applies migrations itself: the one-shot `mig
 There is no manual migration step in production. A failed migration fails `compose up` and leaves
 the new API and worker created but not started; fix the migration and deploy again.
 
+**The idempotency claim token is text from `@spy4x/*` 1.64.0** (migration
+`2026_10_29_0001_idempotency_claim_token_text.sql`). The migration and the API restart belong to one
+deploy, in that order, and `deno task deploy` does exactly that: `migrate` runs first, then compose
+replaces the API and the worker. Never run the migration alone and leave the old API up, and never
+start the new API before the migration. What a person would see when the order is wrong:
+
+- _Migrated, old API (1.63.0) still running._ Nothing looks wrong at first: a command sent with an
+  `Idempotency-Key` runs and answers. But the old process can no longer store the result or release
+  the claim (Postgres answers `operator does not exist: text = uuid`, and the middleware only logs a
+  store failure). A retry with the same key then waits out the 30-second lease and runs the command
+  a second time, so a retried create can make two records. During a normal deploy this window is
+  the few seconds between `migrate` exiting and the old API stopping.
+- _New API (1.64.0), not migrated._ Every command sent with an `Idempotency-Key` fails with a 500
+  (`invalid input syntax for type uuid`) until the migration has run. Compose cannot produce this
+  order; starting the API by hand against an old database can.
+
+Rolling back to 1.63.0 needs the column back first, with the API stopped:
+`DELETE FROM idempotency_keys;` (the new tokens are not UUIDs), then
+`ALTER TABLE idempotency_keys ALTER COLUMN claim_token TYPE uuid USING claim_token::uuid;` and the
+column default that migration `2026_10_03_0001_idempotency_claim_token.sql` gave it.
+
 To run the API for real outside compose you also need Valkey (`valkey-server --requirepass
 <KV_PASSWORD>`; the API refuses to start without `KV_PASSWORD` and sends it with `AUTH`),
 migrations applied (`deno task db:migrate`), and `infra/configs/vapid.json` present
