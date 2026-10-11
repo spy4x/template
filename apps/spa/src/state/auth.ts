@@ -61,7 +61,8 @@ export async function settleOwedSignOut(): Promise<boolean> {
 /**
  * Asks the server who is signed in. When the server cannot be reached at all, `recall` may name
  * the user this browser last saw signed in, so the app opens offline; without it, or with none
- * remembered, the person is signed out.
+ * remembered, the person is signed out. An error answer other than 401 is read the same way: a
+ * proxy's 502 during a deploy, a 500 or a 429 says nothing about the session.
  */
 export async function bootstrapSession(
   recall?: () => SessionUser | null,
@@ -94,7 +95,8 @@ export async function bootstrapSession(
     sessionState.value = {
       ...sessionState.value,
       isReady: true,
-      user: null,
+      // Only a 401 is the server saying that nobody is signed in.
+      user: me.status === 401 ? null : recall?.() ?? null,
       isMfaRequired: false,
     }
     return

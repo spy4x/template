@@ -96,6 +96,40 @@ describe("bootstrapSession", () => {
 
     expect(sessionState.value.user).toBeNull()
   })
+
+  // What a person meets while the API is replaced by a deploy, or struggles: none of these answers
+  // says that the session ended.
+  const errorAnswers = [
+    { name: "a proxy's 502", status: 502, body: "<html>Bad Gateway</html>", type: "text/html" },
+    { name: "a 500", status: 500, body: "Internal Server Error", type: "text/plain" },
+    {
+      name: "a 429",
+      status: 429,
+      body: JSON.stringify({ error: "Too many requests" }),
+      type: "application/json",
+    },
+  ]
+  for (const { name, status, body, type } of errorAnswers) {
+    it(`opens as the remembered user when /me answers ${name}`, async () => {
+      globalThis.fetch = () =>
+        Promise.resolve(new Response(body, { status, headers: { "content-type": type } }))
+
+      await bootstrapSession(() => ({ id: 5 } as User))
+
+      expect(sessionState.value.user?.id).toBe(5)
+      expect(sessionState.value.isMfaRequired).toBe(false)
+      expect(sessionState.value.isReady).toBe(true)
+    })
+  }
+
+  it("shows the sign-in page when /me answers 502 and nobody is remembered", async () => {
+    globalThis.fetch = () => Promise.resolve(new Response("Bad Gateway", { status: 502 }))
+
+    await bootstrapSession(() => null)
+
+    expect(sessionState.value.user).toBeNull()
+    expect(sessionState.value.isReady).toBe(true)
+  })
 })
 
 function memoryFlags() {
