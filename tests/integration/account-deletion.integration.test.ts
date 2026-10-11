@@ -28,6 +28,7 @@ import {
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 /**
  * Deleting one's own account (#144) against a real Postgres: the request, the refusal while a group
@@ -178,6 +179,7 @@ async function requestDeletion(
   const [row] = await sql<{ id: string }[]>`
     SELECT id FROM account_deletions WHERE user_id = ${user.id}
   `
+  expectVersion7Ids([row])
   return { id: row.id, deleteAfter: body.deleteAfter! }
 }
 
@@ -688,6 +690,7 @@ Deno.test("deleting one's own account", async (t) => {
       expect((await signIn(app, "sam")).status).toBe(200)
       const [raeRestore] = await restoresOf(rae.id)
       const [samRestore] = await restoresOf(sam.id)
+      expectVersion7Ids([raeRestore, samRestore])
       const [queued] = await sql<{ count: number }[]>`
         SELECT count(*)::int AS count FROM outbox_events
         WHERE event_kind = ${ACCOUNT_RESTORED_MAIL_JOB}

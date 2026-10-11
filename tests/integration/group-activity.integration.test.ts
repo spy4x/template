@@ -15,6 +15,7 @@ import { purgeOldAuditEvents } from "@server/groups/purge-audit-events.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { team, withSchema } from "./group-team.ts"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 /**
  * A group's activity log against a real Postgres built from schema.sql: every command of the group
@@ -48,6 +49,7 @@ async function invite(
     actorId,
     NO_LIMITS,
   )
+  expectVersion7Ids([created!.invitation])
   return { invitation: created!.invitation, lookup: await invitationLookup({ token }) }
 }
 

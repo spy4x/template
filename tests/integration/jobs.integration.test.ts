@@ -22,6 +22,7 @@ import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 const JOB = {
   eventKind: OUTBOX_CLEANUP_JOB,
@@ -105,6 +106,7 @@ Deno.test("password reset mails go through the worker's queue", async (t) => {
         const processor = createOutboxProcessor(sql, { store, sender, brand: BRAND, log: () => {} })
         await enqueuePasswordResetMail(sql, "ann@example.com")
         await enqueuePasswordResetMail(sql, "nobody@example.com")
+        expectVersion7Ids(await sql<{ id: string }[]>`SELECT id FROM password_reset_requests`)
 
         const result = await processor.drainOnce()
 
@@ -190,6 +192,7 @@ Deno.test("e-mail code mails go through the worker's queue", async (t) => {
       const sender = recordingSender()
       const processor = createOutboxProcessor(sql, { store, sender, brand: BRAND, log: () => {} })
       await enqueueEmailCodeMail(sql, user.id, "ann@example.com")
+      expectVersion7Ids(await sql<{ id: string }[]>`SELECT id FROM email_code_requests`)
 
       expect((await processor.drainOnce()).published).toBe(1)
 

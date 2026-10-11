@@ -31,6 +31,7 @@ import type { APIContext } from "../../apps/api/_types.ts"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 /**
  * Personal API tokens (#167) against a real Postgres, through the real sign-in, the real token
@@ -244,6 +245,7 @@ async function createToken(
   })
   expect(response.status).toBe(201)
   const body = await response.json() as { token: { id: string }; secret: string }
+  expectVersion7Ids([body.token])
   return { id: body.token.id, secret: body.secret }
 }
 

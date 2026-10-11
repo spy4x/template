@@ -15,6 +15,7 @@ import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 /** Runs `body` on a fresh schema built from schema.sql. */
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
@@ -75,6 +76,7 @@ Deno.test("a new account gets one welcome note from the worker, however often th
       "the sign-up's transaction writes no note, only the request and the job",
       async () => {
         expect(await notesOf(sql, groupId)).toEqual([])
+        expectVersion7Ids([request])
         const [job] = await sql<{ eventKind: string }[]>`SELECT event_kind FROM outbox_events
         WHERE aggregate_type = ${JOB_AGGREGATE} AND aggregate_id = ${request.id}`
         expect(job.eventKind).toBe("onboarding.starter-data")

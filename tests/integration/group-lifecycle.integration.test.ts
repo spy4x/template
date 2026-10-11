@@ -21,6 +21,7 @@ import {
   withSchema,
 } from "./group-team.ts"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 /**
  * Rename, delete and restore of a group against a real Postgres built from schema.sql: who may do
@@ -157,6 +158,7 @@ Deno.test("delete: a member whose only group it was gets a new one, others keep 
 
     const stranded = (await repository.listForUser(onlyHere, { limit: 10 })).groups
     expect(stranded.map((group) => group.name)).toEqual(["Personal"])
+    expectVersion7Ids(stranded)
     const own = (await repository.listForUser(editor, { limit: 10 })).groups
     expect(own.map((group) => group.name)).toEqual(["Own"])
   })

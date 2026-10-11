@@ -39,6 +39,7 @@ import {
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 /**
  * Notes against a real Postgres built from the migrations, through the same handlers, session gate
@@ -224,6 +225,11 @@ Deno.test("notes against Postgres", async (t) => {
         ])
           .toEqual([String(before), String(before + 1n), String(before + 2n)])
         expect(await nextSequence(sql, groupId)).toBe(String(before + 3n))
+        expectVersion7Ids(
+          await sql<{ id: string }[]>`
+            SELECT id FROM outbox_events WHERE group_id = ${groupId} AND event_kind LIKE 'note.%'
+          `,
+        )
         expect(await outbox(sql, groupId)).toEqual([
           ["note.created", before],
           ["note.updated", before + 1n],

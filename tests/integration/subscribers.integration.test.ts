@@ -26,6 +26,7 @@ import {
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 /** A throwaway secret for this test only. */
 const SETUP: SubscribersSetup = {
@@ -128,6 +129,7 @@ Deno.test(`mail subscriptions go through the worker's queue and Postgres`, async
     let welcome: EmailMessage
     await t.step(`the worker signs and mails a confirm link, then drops the request`, async () => {
       await enqueueSubscriberMail(sql, SUBSCRIBER_CONFIRM_MAIL_JOB, `news`, `ann@example.com`)
+      expectVersion7Ids(await sql<{ id: string }[]>`SELECT id FROM subscription_requests`)
 
       expect((await processor.drainOnce()).published).toBe(1)
 
@@ -187,6 +189,7 @@ Deno.test(`mail subscriptions go through the worker's queue and Postgres`, async
 
       const lines = await captureLines(async () => {
         await queueSubscriberIssue(sql, `news`, issue)
+        expectVersion7Ids(await sql<{ id: string }[]>`SELECT id FROM subscriber_issue_content`)
         expect((await processor.drainOnce()).failed).toBe(1)
         expect(sender.sent.map((mail) => mail.to)).toEqual([`a@example.com`, `c@example.com`])
 

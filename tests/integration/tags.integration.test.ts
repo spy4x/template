@@ -34,6 +34,7 @@ import {
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 /**
  * Tags and the notes that carry them against a real Postgres built from the migrations, through
@@ -405,6 +406,7 @@ Deno.test("tags against Postgres", async (t) => {
         const home2 = targetTags.tags.find((tag) => tag.name === "Home")!
         expect(targetTags.tags.map((tag) => tag.name)).toEqual(["Home", "work"])
         expect(home2.id).not.toBe(home.id)
+        expectVersion7Ids([home2])
         expect(home2.color).toBe("blue")
         expect([...notes[0].tagIds].sort()).toEqual([existing.id, home2.id].sort())
         const sourceTags = await queries.execute(new TagListQuery({ actor: actor(owner), groupId }))

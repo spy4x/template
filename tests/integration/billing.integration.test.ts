@@ -26,6 +26,7 @@ import { PostgresGroupRepository } from "@server/groups/postgres-group-repositor
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 /**
  * Webhook events applied to a real Postgres built from the migrations. Needs `DB_HOST`, `DB_USER`,
@@ -962,6 +963,12 @@ Deno.test("billing events against Postgres", async (t) => {
           WHERE aggregate_id = ${groupId} AND aggregate_type = ${JOB_AGGREGATE}
           ORDER BY available_at
         `
+        expectVersion7Ids(
+          await sql<{ id: string }[]>`
+            SELECT id FROM outbox_events
+            WHERE aggregate_id = ${groupId} AND aggregate_type = ${JOB_AGGREGATE}
+          `,
+        )
         expect(jobs).toEqual([
           {
             eventKind: BILLING_NOTICE_JOBS[BillingNoticeKind.PaymentFailed],
