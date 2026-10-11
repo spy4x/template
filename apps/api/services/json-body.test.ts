@@ -65,6 +65,12 @@ describe("readFeatureJson", () => {
     expect((await response.json()).body).toEqual({ a: 1 })
   })
 
+  it("accepts a JSON type written in upper case", async () => {
+    const response = await post(`{"a":1}`, "Application/JSON")
+
+    expect(response.status).toBe(200)
+  })
+
   it("refuses a body that is not declared as JSON in the feature's error", async () => {
     const response = await post(`{"a":1}`, "text/plain")
 
