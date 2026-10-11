@@ -1,4 +1,9 @@
-import { ConnectionLostError, type GapReport, RealtimeRequestError } from "@spy4x/realtime"
+import {
+  ConnectionLostError,
+  type GapReport,
+  isForeignAnswer,
+  RealtimeRequestError,
+} from "@spy4x/realtime"
 import { type CallPort, type RetryOptions, sendCommand, sendQuery } from "@spy4x/realtime/calls"
 import { signal } from "@preact/signals"
 import { createSignedInHint } from "@spy4x/platform/browser/signed-in-hint"
@@ -27,7 +32,7 @@ import { offlineTags as tagsOverLayer } from "./offline/tags-collection.ts"
 import { OfflineStatus as OfflineStatusLine } from "./offline/OfflineStatus.tsx"
 import type { RuntimeConfig } from "./runtime-config.ts"
 import { canCallAs, createAppCallPort } from "./state/realtime-call.ts"
-import { isForeignAnswer, ReadRefused } from "./state/read-keys.ts"
+import { ReadRefused } from "./state/read-keys.ts"
 import type { SessionState, SessionUser } from "./state/session.ts"
 
 /**
@@ -316,8 +321,8 @@ export function flushOutbox(): Promise<void> {
 export interface LocalReads {
   /**
    * Rejects as `read` does, except when the server is unreachable and a copy exists. Unreachable
-   * is no connection, and also an answer that is not the API's ({@link isForeignAnswer}): a
-   * proxy's 502 or bare 404 while the API is replaced. `early` is
+   * is no connection, and also an answer the library's `isForeignAnswer` takes for a proxy's: a
+   * 5xx, a 404 or a 429 without an error code, as while the API is replaced. `early` is
    * given the copy when the device has one before the server has answered, so a screen with
    * nothing to show paints it first; it is never given a copy after the answer. When the server
    * then refuses the read, `early` is called once more with `undefined`: the screen takes back
@@ -338,7 +343,7 @@ export interface LocalReads {
  * Whether the server answered that this person may not read the list (or that it is gone): a
  * socket read refused with `unauthorized`, `forbidden` or `not_found`, or a REST read answered
  * 401, 403 or 404. Any other failure, such as a 500 or a timeout, says nothing about access, and
- * neither does a 404 without the API's error code, which a proxy wrote.
+ * neither does a 404 without an error code, which is taken for a proxy's.
  */
 function isRefusal(error: unknown): boolean {
   if (error instanceof ReadRefused) {
@@ -350,7 +355,10 @@ function isRefusal(error: unknown): boolean {
 
 const REFUSING_STATUSES = [401, 403, 404]
 
-/** Whether a REST read was answered by something in front of the API, such as a proxy's 502. */
+/**
+ * Whether a REST read's answer is taken for a proxy's, such as a 502 during a deploy. The API's own
+ * answers without an error code (a rate limit's 429, an unhandled error's 500) count too.
+ */
 function isProxyAnswer(error: unknown): boolean {
   return error instanceof ReadRefused && isForeignAnswer(error.status, error.code)
 }

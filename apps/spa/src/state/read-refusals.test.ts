@@ -20,8 +20,9 @@ import { sessionState } from "./session.ts"
  * stores are the production ones, over their own readers; only the network is replaced, by a
  * `fetch` that answers with a real `Response`. A refusal (401, 403, 404) deletes the copy, so it is
  * not shown offline later; a struggling server (500) keeps it. Those carry the API's error body. An
- * answer without it was written by the proxy in front of the API (a 502, a bare 404): the copy
- * answers it, as it does with no network.
+ * answer without an error code is taken for the proxy's in front of the API (a 502, a bare 404, and
+ * also a 429 or a 500 without a code): the copy answers it, as it does with no network. A 401 or a
+ * 403 deletes the copy with or without a code.
  */
 
 const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
@@ -159,7 +160,7 @@ const CASES: Case[] = [
   },
 ]
 
-/** A status with the API's error body, a proxy's page with that status, or no network. */
+/** A status with the API's error body, a page with that status and no error code, or no network. */
 type Answer = number | { proxy: number } | "offline"
 
 describe("a saved copy and the answer of the server", () => {
@@ -223,8 +224,18 @@ describe("a saved copy and the answer of the server", () => {
         expect(shownOffline).toEqual(shownOnline)
       })
 
-      for (const status of [502, 404]) {
-        it(`are shown, and kept, when the proxy answers ${status} without the API's error body`, async () => {
+      for (const status of [401, 403]) {
+        it(`are deleted on a ${status} without an error code`, async () => {
+          const { shownOnline, shownOffline } = await afterAnswer({ proxy: status })
+          expect(shownOnline).not.toEqual(list.empty)
+          expect(shownOffline).toEqual(list.empty)
+        })
+      }
+
+      // 502 and a bare 404 are the proxy's during a deploy; the API's own rate limit (429) and
+      // unhandled error (500) carry no code either, and are answered the same way.
+      for (const status of [502, 404, 429, 500]) {
+        it(`are shown and kept on a ${status} without an error code`, async () => {
           const { shownOnline, shownThen, shownOffline } = await afterAnswer({ proxy: status })
           expect(shownOnline).not.toEqual(list.empty)
           expect(shownThen).toEqual(shownOnline)
