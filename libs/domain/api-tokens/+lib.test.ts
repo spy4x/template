@@ -67,6 +67,16 @@ describe("parseApiTokenCreateRequest", () => {
     expect(refusal(request({ name: "a\uD800b" }))).toBe("INVALID_REQUEST")
   })
 
+  it("refuses a name with a line break, a control character or a text-direction character", () => {
+    // The name goes into the owner's mail as plain text: a line break would let it fake a line.
+    for (const name of ["a\nb", "a\r\nb", "a\tb", "a\u001bb", "a\u2028b", "a\u202eb"]) {
+      expect(refusal(request({ name }))).toBe("INVALID_REQUEST")
+    }
+    expect(parseApiTokenCreateRequest(request({ name: "Zoë's 🔑 script" })).name).toBe(
+      "Zoë's 🔑 script",
+    )
+  })
+
   it("refuses a request without the password, with an empty one or one longer than a password", () => {
     const { password: _password, ...withoutPassword } = request()
     expect(refusal(withoutPassword)).toBe("INVALID_REQUEST")

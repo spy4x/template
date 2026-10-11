@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import { hasUnsafeTextCharacters } from "@spy4x/platform/universal/text"
 import { isUuid } from "@spy4x/platform/universal/uuid"
 
 /**
@@ -75,9 +76,6 @@ export interface ApiTokenCreateResponse {
   secret: string
 }
 
-/** A UTF-16 surrogate that is not half of a pair: text Postgres cannot store. */
-const LONE_SURROGATE = /\p{Cs}/u
-
 /**
  * `POST /api/tokens`: the token's name, its group, what it may do, how many days it lives (`null`
  * for never) and the person's current password, which a stolen session does not have (#293). The
@@ -125,8 +123,10 @@ export class ApiTokenError extends Error {
 
 /**
  * Reads a create request with its name trimmed, or throws `INVALID_REQUEST`: a name that is empty,
- * longer than {@link API_TOKEN_NAME_MAX_LENGTH} characters or holds text Postgres cannot store
- * (NUL, a lone surrogate) is refused.
+ * longer than {@link API_TOKEN_NAME_MAX_LENGTH} characters or holds a character a one-line name
+ * must not (`hasUnsafeTextCharacters`: a line break or another control character, NUL among them,
+ * an invisible or text-direction character, a lone surrogate) is refused. The name goes into the
+ * owner's mail and the audit trail as it is.
  */
 export function parseApiTokenCreateRequest(body: unknown): ApiTokenCreateRequest {
   const result = apiTokenCreateRequestSchema(body)
@@ -136,8 +136,7 @@ export function parseApiTokenCreateRequest(body: unknown): ApiTokenCreateRequest
   const name = result.name.trim()
   const length = Array.from(name).length
   if (
-    length < 1 || length > API_TOKEN_NAME_MAX_LENGTH || name.includes("\u0000") ||
-    LONE_SURROGATE.test(name)
+    length < 1 || length > API_TOKEN_NAME_MAX_LENGTH || hasUnsafeTextCharacters(name)
   ) {
     throw new ApiTokenError(
       "INVALID_REQUEST",
