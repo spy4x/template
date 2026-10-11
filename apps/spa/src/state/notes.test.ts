@@ -431,6 +431,21 @@ describe("notes store", () => {
     expect(store.unsaved.value).toBe(false)
   })
 
+  it("counts a changed tag choice as unsaved, on a new note and on an open one", async () => {
+    const { store } = harness({ pages: [{ notes: [item("a", 4)], nextCursor: null }] })
+    await store.open(groupId, null)
+    store.draft.value = { title: "", body: "", tagIds: ["t-1"] }
+    expect(store.unsaved.value).toBe(true)
+    store.discardDraft()
+
+    await store.open(groupId, "a")
+    expect(store.unsaved.value).toBe(false)
+    store.editing.value = { ...store.editing.value!, tagIds: ["t-1"] }
+    expect(store.unsaved.value).toBe(true)
+    store.editing.value = { ...store.editing.value!, tagIds: [] }
+    expect(store.unsaved.value).toBe(false)
+  })
+
   it("keeps the typed text unsaved while the note is flagged as changed by someone else", async () => {
     const { store } = harness({ pages: [{ notes: [item("a", 1)], nextCursor: null }] })
     await store.open(groupId, "a")
