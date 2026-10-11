@@ -66,7 +66,6 @@ export function openNotesCache(userId: number, indexedDB?: IDBFactory): NotesCac
     async removeNote(noteId) {
       // A note's group is not known here, so remove it from every scope that holds notes.
       const scopes = await notes.scopes()
-      if (cleared) return
       await notes.batch(scopes.map((scope) => ({ op: "delete" as const, scope, id: noteId })))
     },
     clear() {

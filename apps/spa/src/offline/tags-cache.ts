@@ -53,7 +53,6 @@ export function openTagsCache(userId: number, indexedDB?: IDBFactory): TagsCache
       cleared ? Promise.resolve() : tags.batch([{ op: "put", scope: tag.groupId, item: tag }]),
     async removeTag(tagId) {
       const scopes = await tags.scopes()
-      if (cleared) return
       await tags.batch(scopes.map((scope) => ({ op: "delete" as const, scope, id: tagId })))
     },
     clear() {

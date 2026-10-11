@@ -245,6 +245,32 @@ describe("an answer that arrives after the sign-out", () => {
     expect(await notesOf(7)).toEqual([])
   })
 
+  it("does not keep a note whose saving had started when the copy was cleared", async () => {
+    const { storage, notesOf } = browser()
+    const cache = storage.openNotes(7)
+    await cache.replaceNotes(groupId, [note("old")])
+
+    const saving = cache.putNote(note("late"))
+    await cache.clear()
+    await saving
+    await settle()
+
+    expect(await notesOf(7)).toEqual([])
+  })
+
+  it("does not keep a tag whose saving had started when the copy was cleared", async () => {
+    const { storage, tagsOf } = browser()
+    const cache = storage.openTags(7)
+    await cache.replaceTags(groupId, [tag("old")])
+
+    const saving = cache.putTag(tag("late"))
+    await cache.clear()
+    await saving
+    await settle()
+
+    expect(await tagsOf(7)).toEqual([])
+  })
+
   it("saves the answer for the same person after they sign in again", async () => {
     const { storage, notesOf } = browser()
     const server = pendingServer()

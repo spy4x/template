@@ -25,7 +25,7 @@ const RuntimeConfigSchema = type({
  */
 function moduleSwitch(key: string) {
   return type("unknown").pipe((value): boolean => {
-    const text = String(value).trim().toLowerCase()
+    const text = String(value).toLowerCase()
     if (text === "false" || text === "0") return false
     if (text !== "true" && text !== "1") {
       console.warn(
