@@ -330,6 +330,15 @@ the other tab without a reload or reconnect" fails. Compose runs it as `worker`;
 start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `DB_*`, `ENV` and
 `DOMAIN` values. It also sends the password reset mails (trap 8).
 
+**Personal API tokens: what is kept.** Revoking a token, and resetting the password, delete its row
+at once. An expired token is refused and hidden from the moment it expires, and the nightly
+`outbox.cleanup` job runs `purgeExpiredApiTokens`, which deletes its row
+`API_TOKEN_PURGE_GRACE_DAYS` (30) days after the expiry, by the database clock, so a row may live
+up to a day longer. A token that never expires stays until it is revoked. A run that deleted at
+least one token writes one `audit_events` row of kind `api_tokens.expired_purged` in the same
+statement, with no actor and no group: its details hold the count and the cutoff, never anything
+of a token. That row ages out with the other audit events, after a year.
+
 ## What is not built yet
 
 - The password and two-factor calls are still REST: they change the session the socket is bound
