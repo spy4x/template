@@ -168,9 +168,15 @@ resolver: Let's Encrypt, HTTP challenge on port 80, certificates stored in
 `.volumes/traefik/letsencrypt/acme.json`, expiry notices to `TRAEFIK_ACME_EMAIL`. Point `DOMAIN` at
 the server and run `deno task proxy:start` there.
 
+Plain `http://<DOMAIN>` (and `http://<MPA_DOMAIN>` with the `mpa` profile) answers a permanent
+redirect to HTTPS. The proxy serves nothing of its own but `/ping`: Traefik's dashboard and API are
+off, because they list every router and backend address of every project behind the proxy.
+
 `deno task deploy` needs no manual step on a new server: it creates `infra/configs/vapid.json`
 (the web push keys) there when the file is missing, readable by its owner only. It never sends the
-key from your machine and never replaces one that exists. Router, service and middleware names
+key from your machine and never replaces one that exists. It stops before sending anything when the
+env file still holds a password or secret from `infra/envs/.env.example`, and names each such
+variable: those values are public. Router, service and middleware names
 carry `${PROJECT}`, so projects with different `PROJECT` values can share one Traefik. Postgres and
 Valkey stay on `127.0.0.1`. Every image has a pinned version.
 
@@ -178,6 +184,21 @@ The template usually deploys behind a Traefik that several projects share. If th
 defines a resolver, do not start the proxy compose file: set `TRAEFIK_CERT_RESOLVER` to the name it
 defines. If that Traefik defines none, copy the three `--certificatesresolvers.*` flags from
 `compose.proxy.yml` into its command.
+
+## Admin consoles
+
+The MinIO console and Grafana have no public address. Each is published on the machine's own
+address only: the MinIO console on `127.0.0.1:9001` (sign in with `MINIO_USER` and `MINIO_PASS`),
+Grafana on `127.0.0.1:3000` (`admin` and `GRAFANA_PASS`). On your own machine open
+`http://localhost:9001` or `http://localhost:3000`. On a server, open a tunnel first:
+
+```sh
+ssh -L 9001:127.0.0.1:9001 -L 3000:127.0.0.1:3000 <SSH_TO_SERVER>
+```
+
+When a port is taken, or two projects share a machine, set `MINIO_CONSOLE_HOST_PORT` or
+`GRAFANA_HOST_PORT` in the env file to another `127.0.0.1:<port>`. Never publish either on
+`0.0.0.0`.
 
 ## Tasks
 
