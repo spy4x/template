@@ -29,9 +29,9 @@ recipe for each.
 
 | Level                | What works with no network                         | Which lists                                                                                                                              |
 | -------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Online only       | Nothing: the screen says the server is unreachable | Deleted notes and deleted groups, sign-in, two-factor set-up, every write except a note's                                                |
+| 1. Online only       | Nothing: the screen says the server is unreachable | Deleted notes and deleted groups, sign-in, two-factor set-up, every write except a note's or a tag's                                                |
 | 2. Offline-readable  | The last list the server sent                      | Groups, members, invitations, notifications and the bell's count, activity, the profile's push devices, billing, API tokens, signed-in devices |
-| 3. Offline-writable  | The last list, and create, edit and delete         | Notes                                                                                                                                    |
+| 3. Offline-writable  | The last list, and create, edit and delete         | Notes, tags                                                                                                                              |
 
 ### Reads: the device first
 
@@ -104,6 +104,28 @@ every reconnect and after every pushed hint.
 - **Keeping the data.** When the layer starts it asks the browser to keep the site's storage
   (`requestPersistentStorage`), so a browser short of space, or Safari after a week of no visits,
   does not drop the queue.
+
+### Tags: the second offline-writable aggregate, and what a parent means
+
+Tags (`offline/tags-collection.ts`) are offline-writable like notes: they have their own device
+copy (`offline:user:<id>:tags`) and their own queue (`offline:user:<id>:tags-outbox`), and signing
+out treats them exactly as it treats notes. A note can name tags, so a tag is the **parent** of the
+notes that name it and the tags collection is declared before the notes one. Four rules from
+[ADR 003](decisions/003-swappable-transport-and-local-data.md), section 5, keep that safe:
+
+1. **Parents go first.** One flush sends every waiting tag write before any waiting note write, so a
+   tag made offline reaches the server before the note that names it.
+2. **A child waits for its parent.** A note that names a tag still waiting in the queue is held
+   back until that tag is sent. If the tag is in conflict, the note waits for the person's choice,
+   and the sync line says so ("A note is waiting for your choice about a tag below"). Nothing is
+   lost.
+3. **A parent that will never exist loses its reference.** If the person withdraws a tag that was
+   never sent, or the server refuses it for good, the tag's id is taken off the queued notes that
+   name it, the notes are sent without it, and the sync line tells the person how many notes it
+   happened to.
+4. **The server ignores ids it does not know.** A note write that names a tag the server has not
+   got (or no longer has) succeeds, and the answer lists the tags the note really has. So an
+   old id in a queued note can never block it.
 
 ### Conflicts
 
