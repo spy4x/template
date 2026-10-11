@@ -8,7 +8,8 @@
  *
  * It also holds what lets two projects share one host (spy4x/template#354): every published port
  * can be moved through a variable, every container and built image is named after the project,
- * and no network claims a fixed subnet.
+ * no network claims a fixed subnet, and a container on the shared `proxy` network reaches its own
+ * project's services by their container names.
  */
 
 import { expect } from "@std/expect"
@@ -22,6 +23,7 @@ interface ComposeService {
   command?: string[]
   environment?: string[]
   labels?: string[]
+  networks?: string[]
   ports?: string[]
 }
 
@@ -194,4 +196,47 @@ Deno.test("every container and every image a project builds is named after the p
         .toEqual({ file, name, container: undefined, image: undefined })
     }
   }
+})
+
+/**
+ * The hosts a value names: what stands where a URL or a `host:port` pair has its host. A variable
+ * (`${PROJECT}-api`) is kept whole, so a per-project name never reads as a plain one.
+ */
+function hostsIn(value: string): string[] {
+  return value.replace(/\$\{[^}]*\}/g, "VARIABLE").split(/[^A-Za-z0-9._-]+/)
+}
+
+Deno.test("a container on the shared proxy network reaches no service by a name another project also has", async () => {
+  const files = await Promise.all(["shared", "dev", "prod"].map(services))
+  const names = new Set(files.flatMap((file) => Object.keys(file)))
+  const onProxy = [...names].filter((name) =>
+    files.some((file) => file[name]?.networks?.includes("proxy"))
+  )
+  expect(onProxy).toEqual(expect.arrayContaining(["api", "mpa", "spa"]))
+
+  // Docker answers a plain service name from every network a container is on, so on `proxy` the
+  // name `api` is the API of whichever project answers first. `${PROJECT}-api` is one container.
+  const plain: string[] = []
+  for (const name of onProxy) {
+    for (const file of files) {
+      for (const entry of file[name]?.environment ?? []) {
+        const value = entry.slice(entry.indexOf("=") + 1)
+        if (hostsIn(value).some((host) => names.has(host))) plain.push(`${name}: ${entry}`)
+      }
+    }
+  }
+  expect(plain).toEqual([])
+
+  const shared = files[0]
+  expect(shared.mpa?.environment).toContain("API_URL=http://${PROJECT}-api:${API_PORT}")
+  expect(shared.api?.environment).toContain("DB_HOST=${PROJECT}-db")
+  expect(shared.api?.environment).toContain("KV_HOSTNAME=${PROJECT}-kv")
+  for (const service of ["api", "db", "kv"]) {
+    expect(shared[service]?.container_name).toBe(`\${PROJECT}-${service}`)
+  }
+})
+
+Deno.test("the proxy logs at info unless the env file asks for another level", async () => {
+  const { traefik } = await services("proxy")
+  expect(traefik?.command).toContain("--log.level=${PROXY_LOG_LEVEL:-info}")
 })

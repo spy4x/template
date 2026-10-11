@@ -298,6 +298,9 @@ Deno.test("the exemption for key descriptions and passkeys lets no secret throug
       "S3_KEY",
       "KEY_PREFIX_SECRET",
       "API_KEY_IDENTITY_TOKEN",
+      // A key description counts only at the end of a name: anything after it is not described.
+      "SIGNING_KEY_IDS",
+      "S3_KEY_PREFIXES",
       "DB_PASS",
       "KV_PASSWORD",
       "STRIPE_SECRET_KEY",
@@ -362,4 +365,10 @@ Deno.test("the example file names the host port of every service the stack publi
       value: expect.stringMatching(/^127\.0\.0\.1:\d+$/),
     })
   }
+})
+
+Deno.test("the example file does not turn on the proxy's per-request debug log", async () => {
+  const example = await readEnvFile(EXAMPLE_ENV_FILE)
+  // The same level infra/compose/compose.proxy.yml falls back to (tests/compose-exposure.test.ts).
+  expect(example["PROXY_LOG_LEVEL"]).toBe("info")
 })
