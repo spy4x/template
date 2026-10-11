@@ -10,12 +10,28 @@
 # What it starts, each on a spare loopback port, and removes again when it ends or is stopped:
 #   - Postgres and Valkey containers named `template-e2e-…`, with `CONTAINER_PROVIDER` (`podman`
 #     by default, as `deno task compose`);
-#   - the API, the worker and the Vite dev server of this checkout;
+#   - the API, the worker and the Vite dev server of this checkout (`E2E_SPA=built` puts the
+#     built SPA there instead, see below);
 #   - a proxy that serves them at one origin, `http://app.localhost:<port>`, and sets the client
 #     address headers itself, as Traefik does (`e2e-local-proxy.ts`).
 #
 # The specs name `http://app.localhost` without a port, so they run from a copy that names the
 # port, under `e2e/results/` (ignored by git). Line numbers in a report match the tracked specs.
+#
+# `E2E_SPA` says what serves the SPA:
+#   - `dev`: the Vite dev server, which compiles each module when a page asks for it;
+#   - `built`: the SPA as a deploy serves it. The script builds the image of
+#     `apps/spa/dockerfile.prod` (the base image first) and runs it, so the page is the hashed
+#     bundle behind nginx with `apps/spa/nginx.conf`. The two images it tags are removed at the
+#     end; the first build takes a few minutes.
+# Left unset, the specs that start the app with no network (`OFFLINE_SPECS` below) get the built
+# SPA and every other spec the dev server (docs/offline.md, "The app shell", says why):
+#   deno task e2e:local e2e/offline.e2e.ts e2e/local-data.e2e.ts   built SPA
+#   deno task e2e:local e2e/notes.e2e.ts                           dev server
+#   deno task e2e:local                                            dev server, without the offline
+#                                                                  specs: the last line names them
+# One run has one server, so a run that names both kinds stops and asks for two runs. With
+# `E2E_SPA` set, every spec asked for runs against that server.
 #
 # Needs: Deno, a container tool, `curl`, `openssl`, and the Chromium of the pinned Playwright
 # (`deno run -A npm:playwright@1.57.0 install chromium`). `E2E_CHROMIUM` names another Chromium
@@ -34,9 +50,47 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 CONTAINER=${CONTAINER_PROVIDER:-podman}
+# The specs that load a page with the network cut.
+OFFLINE_SPECS=(offline.e2e.ts local-data.e2e.ts)
+is_offline_spec() {
+  local spec
+  for spec in "${OFFLINE_SPECS[@]}"; do [ "$spec" = "$(basename "$1")" ] && return 0; done
+  return 1
+}
+# The offline specs a run on the dev server leaves out.
+LEFT_OUT=()
+if [ -z "${E2E_SPA:-}" ]; then
+  NAMED=0
+  NAMED_OFFLINE=0
+  for arg in "$@"; do
+    file=${arg%%:*}
+    [[ "$file" == *.e2e.ts && -f "$file" ]] || continue
+    NAMED=$((NAMED + 1))
+    ! is_offline_spec "$file" || NAMED_OFFLINE=$((NAMED_OFFLINE + 1))
+  done
+  if [ "$NAMED_OFFLINE" -gt 0 ] && [ "$NAMED_OFFLINE" -lt "$NAMED" ]; then
+    echo "${OFFLINE_SPECS[*]} run against the built SPA and the other specs against the dev server:"
+    echo "name them in two runs, or set E2E_SPA to dev or built to run all of these against one"
+    exit 1
+  elif [ "$NAMED_OFFLINE" -gt 0 ]; then
+    E2E_SPA=built
+  else
+    E2E_SPA=dev
+    # Only a run that names no spec would have run them.
+    [ "$NAMED" -gt 0 ] || LEFT_OUT=("${OFFLINE_SPECS[@]}")
+  fi
+fi
+case "$E2E_SPA" in
+  dev | built) ;;
+  *) echo "E2E_SPA is \"$E2E_SPA\"; it must be dev or built"; exit 1 ;;
+esac
 RUN_ID="$$-$RANDOM"
 PG_NAME="template-e2e-pg-$RUN_ID"
 KV_NAME="template-e2e-kv-$RUN_ID"
+SPA_NAME="template-e2e-spa-$RUN_ID"
+# Named after this run, so two runs at once never share an image.
+BASE_IMAGE="template-e2e-local-base:$RUN_ID"
+SPA_IMAGE="template-e2e-local-spa:$RUN_ID"
 COPY_DIR="$ROOT/e2e/results/.local-$RUN_ID"
 
 for tool in deno curl openssl "$CONTAINER"; do
@@ -52,6 +106,7 @@ log() { echo "[e2e:local] $*"; }
 SCRATCH=$(mktemp -d)
 PIDS=()
 CONTAINERS=()
+IMAGES=()
 
 # Stops a process this script started, with its children: each is started with `setsid`, so it
 # leads a process group. `deno serve` does not exit on SIGTERM while it has open connections, so
@@ -75,6 +130,7 @@ cleanup() {
   for name in "${CONTAINERS[@]}"; do
     timeout 60 "$CONTAINER" rm --force --volumes "$name" >/dev/null 2>&1
   done
+  for image in "${IMAGES[@]}"; do timeout 60 "$CONTAINER" rmi --force "$image" >/dev/null 2>&1; done
   find "$COPY_DIR" -delete 2>/dev/null
   find "$SCRATCH" -delete
   find vapid.json -delete 2>/dev/null
@@ -186,9 +242,31 @@ log "starting the worker"
 start worker deno run --allow-all apps/worker/+main.ts
 wait_for worker "${PIDS[-1]}" 60 grep -q "Worker started" "$SCRATCH/worker.log"
 
-log "starting the dev server on 127.0.0.1:$SPA_PORT"
-start spa env VITE_ENV=dev deno task spa:dev --port "$SPA_PORT" --strictPort --host 127.0.0.1
-wait_for spa "${PIDS[-1]}" 120 answers "http://127.0.0.1:$SPA_PORT/"
+if [ "$E2E_SPA" = built ]; then
+  # The image exactly as a deploy builds it, as `e2e/spa/run.sh` does: keep the two in step.
+  log "building the SPA image"
+  IMAGES+=("$BASE_IMAGE" "$SPA_IMAGE")
+  timeout 900 "$CONTAINER" build --quiet --tag "$BASE_IMAGE" --file Dockerfile.base . \
+    >"$SCRATCH/base-image.log" 2>&1 ||
+    { log "the base image did not build"; tail -n 40 "$SCRATCH/base-image.log"; exit 1; }
+  timeout 900 "$CONTAINER" build --quiet --build-arg "BASE_IMAGE=$BASE_IMAGE" --tag "$SPA_IMAGE" \
+    --file apps/spa/dockerfile.prod . >"$SCRATCH/spa-image.log" 2>&1 ||
+    { log "the SPA image did not build"; tail -n 40 "$SCRATCH/spa-image.log"; exit 1; }
+  log "starting the built SPA on 127.0.0.1:$SPA_PORT"
+  CONTAINERS+=("$SPA_NAME")
+  timeout 300 "$CONTAINER" run --detach --name "$SPA_NAME" --pids-limit=500 --memory=1g \
+    --env SPA_ENV=dev -p "127.0.0.1:$SPA_PORT:8080" "$SPA_IMAGE" >/dev/null
+  for _ in $(seq 1 120); do
+    answers "http://127.0.0.1:$SPA_PORT/" 2>/dev/null && break
+    sleep 0.5
+  done
+  answers "http://127.0.0.1:$SPA_PORT/" ||
+    { log "the built SPA did not answer within 60 s"; "$CONTAINER" logs "$SPA_NAME" 2>&1 | tail -n 40; exit 1; }
+else
+  log "starting the dev server on 127.0.0.1:$SPA_PORT"
+  start spa env VITE_ENV=dev deno task spa:dev --port "$SPA_PORT" --strictPort --host 127.0.0.1
+  wait_for spa "${PIDS[-1]}" 120 answers "http://127.0.0.1:$SPA_PORT/"
+fi
 
 log "starting the proxy on 127.0.0.1:$FRONT_PORT"
 start proxy env FRONT_PORT="$FRONT_PORT" API_PORT="$API_PORT" SPA_PORT="$SPA_PORT" \
@@ -205,6 +283,7 @@ getent hosts app.localhost >/dev/null 2>&1 ||
 mkdir -p "$COPY_DIR"
 cp -r e2e/fixtures "$COPY_DIR/fixtures"
 for spec in e2e/*.e2e.ts; do
+  [[ " ${LEFT_OUT[*]} " == *" $(basename "$spec") "* ]] && continue
   sed -e "s#http://app.localhost\"#http://app.localhost:$FRONT_PORT\"#g" "$spec" \
     >"$COPY_DIR/$(basename "$spec")"
 done
@@ -248,4 +327,6 @@ PIDS+=($!)
 STATUS=0
 wait "${PIDS[-1]}" || STATUS=$?
 [ "$STATUS" = 124 ] && log "Playwright did not finish within ${E2E_LOCAL_TIMEOUT:-1500} s"
+[ ${#LEFT_OUT[@]} = 0 ] ||
+  log "not run: ${LEFT_OUT[*]}. They need the built SPA: deno task e2e:local ${LEFT_OUT[*]/#/e2e/}"
 exit "$STATUS"

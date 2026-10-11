@@ -253,6 +253,13 @@ deno task e2e:local -g "signing another"   # any other argument goes to Playwrig
 deno task e2e:report                       # open the report of the last run
 ```
 
+The two specs that start the app with no network, `e2e/offline.e2e.ts` and
+`e2e/local-data.e2e.ts`, run against the built SPA, the image a deploy serves, and every other spec
+against the dev server ([docs/offline.md](docs/offline.md), "The app shell", says why). One run has
+one server: a run without file names leaves those two out and names them in its last line, and
+`deno task e2e:local e2e/offline.e2e.ts e2e/local-data.e2e.ts` runs them. `E2E_SPA=dev` or
+`E2E_SPA=built` puts every spec asked for on that server.
+
 It needs a container tool (`CONTAINER_PROVIDER`, `podman` by default) and the Chromium of the
 pinned Playwright. The header of [`infra/scripts/e2e-local.sh`](infra/scripts/e2e-local.sh) lists
 the rest: the environment variables it reads, and the process cap to allow when you run it under
