@@ -36,7 +36,10 @@ function server<T>(first: T) {
     answers: (next: T) => void (state.answer = next),
     /** The network is gone: `fetch` rejects with a `TypeError`. */
     goesDown: () => void (state.failure = new TypeError("Failed to fetch")),
-    /** The server answers, and says no. */
+    /**
+     * The server answers, and says no, as a socket read does. The REST readers throw `ReadRefused`
+     * with the status instead; `read-refusals.test.ts` drives each of them with a real `Response`.
+     */
     refuses: () => void (state.failure = new RealtimeRequestError("forbidden", "Forbidden")),
     /** The server answers with an error that says nothing about who may read: it is struggling. */
     struggles: () => void (state.failure = new RealtimeRequestError("internal", "Try again")),

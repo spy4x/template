@@ -27,6 +27,7 @@ import { offlineTags as tagsOverLayer } from "./offline/tags-collection.ts"
 import { OfflineStatus as OfflineStatusLine } from "./offline/OfflineStatus.tsx"
 import type { RuntimeConfig } from "./runtime-config.ts"
 import { canCallAs, createAppCallPort } from "./state/realtime-call.ts"
+import { ReadRefused } from "./state/read-keys.ts"
 import type { SessionState, SessionUser } from "./state/session.ts"
 
 /**
@@ -331,11 +332,18 @@ export interface LocalReads {
   copy<T>(key: string): Promise<ReadResult<T> | undefined>
 }
 
-/** Whether the server answered that this person may not read the list (or that it is gone). */
+/**
+ * Whether the server answered that this person may not read the list (or that it is gone): a
+ * socket read refused with `unauthorized`, `forbidden` or `not_found`, or a REST read answered
+ * 401, 403 or 404. Any other failure, such as a 500 or a timeout, says nothing about access.
+ */
 function isRefusal(error: unknown): boolean {
+  if (error instanceof ReadRefused) return REFUSING_STATUSES.includes(error.status)
   return error instanceof RealtimeRequestError &&
     (error.code === "unauthorized" || error.code === "forbidden" || error.code === "not_found")
 }
+
+const REFUSING_STATUSES = [401, 403, 404]
 
 /** Deletes the saved copy of a list the server refused, so it is not shown again offline. */
 async function dropCopy(cache: ReadCache, key: string): Promise<void> {
