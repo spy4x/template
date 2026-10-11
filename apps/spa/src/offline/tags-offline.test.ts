@@ -99,9 +99,20 @@ describe("tags with the offline layer", () => {
 
   it("goes to the server alone when no layer runs", async () => {
     const { online } = network([tag("a", "Alpha")])
-    const deps = offlineTags(online, () => null)
+    const sent: string[] = []
+    const recorded: TagsDependencies = {
+      ...online,
+      create: (input) => (sent.push(`create ${input.id}`), Promise.resolve({ tag: tag(input.id) })),
+      update: (input) => (sent.push(`update ${input.id}`), Promise.resolve({ tag: tag(input.id) })),
+      delete: (input) => (sent.push(`delete ${input.id}`), Promise.resolve({})),
+    }
+    const deps = offlineTags(recorded, () => null)
 
     expect((await deps.fetchList(groupId)).map((t) => t.id)).toEqual(["a"])
     expect(await deps.readLocal?.(groupId)).toEqual([])
+    await deps.create({ groupId, id: "n", name: "New", color: "red" })
+    await deps.update({ groupId, id: "a", name: "Alpha", color: "red", version: 1 })
+    await deps.delete({ groupId, id: "a", version: 1 })
+    expect(sent).toEqual(["create n", "update a", "delete a"])
   })
 })
