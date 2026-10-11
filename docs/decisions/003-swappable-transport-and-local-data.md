@@ -80,6 +80,12 @@ that both modules share; they are not part of the calls port. They carry the sam
 call and are refused the same way: a read whose session belongs to anyone else answers
 `unauthorized`, signs the page out, and writes nothing to the device copy.
 
+The REST writes that are not calls (API tokens, notifications, the profile, the session, a group's
+invitations and its transfer) carry the same user id and are refused the same way. Only the
+`unauthorized` answer signs the page out of a write, because a write is also answered 401 for a
+wrong password. A refused sign-out still clears the page and is not owed to the server: the session
+it would end is another person's.
+
 **Changes.** The pull stays the one path that makes a page correct (ADR 002). What varies is only
 what triggers it. Without the socket: the start, the browser coming back online, the tab becoming
 visible, the page's own write, and a timer while the tab is visible (30 s by default; the sync

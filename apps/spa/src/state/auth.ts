@@ -195,8 +195,10 @@ export async function resetPassword(
 export async function signOut(): Promise<void> {
   try {
     const result = await apiFetch<ApiSuccessResponse>("/api/auth/sign-out", { method: "POST" })
-    // An error answer (a proxy's 502 during a deploy) has not ended the session either.
-    setSignOutOwed(!result.ok)
+    // An error answer (a proxy's 502 during a deploy) has not ended the session either. A refusal
+    // as `unauthorized` is the exception: the cookie is now another user's, so this page's session
+    // is already gone and nothing is owed. An owed sign-out would later end that other session.
+    setSignOutOwed(!result.ok && result.error.code !== "unauthorized")
   } catch (_unreachable) {
     // Offline: the page still signs out, and the sign-out is owed to the server. It is sent at
     // the next start and when the browser comes back online; until then the server's session

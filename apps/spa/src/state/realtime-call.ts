@@ -112,6 +112,53 @@ export async function fetchRead(
   return response
 }
 
+/**
+ * What the server answers a request whose page names another user than the session's
+ * (`requireBoundUser` in `apps/api/middlewares/bound-user.ts`), and the call route for a session
+ * that ended.
+ */
+const UNAUTHORIZED = "unauthorized"
+
+/**
+ * A write (any method but `GET`) of a REST route. It names the user the page was started for, as a
+ * read does, so a page left open as one user cannot write as the user the cookie now belongs to.
+ * The server refuses that write with 401 `unauthorized`, and the page signs out.
+ *
+ * Only that code signs the page out, where a read is signed out by any 401: a write is also
+ * answered 401 for a wrong password or a wrong code, and the person must stay to try again.
+ *
+ * A page with nobody signed in names nobody: sign-in, sign-up and the second-factor step write as
+ * they always did.
+ */
+export async function apiWrite<T>(path: string, init?: RequestInit, fetcher: typeof send = send) {
+  const userId = sessionState.value.user?.id
+  if (userId === undefined) return await fetcher<T>(path, init)
+  const result = await fetcher<T>(path, { ...init, headers: asUser(userId, init?.headers) })
+  if (!result.ok && result.status === 401 && result.error.code === UNAUTHORIZED) signOutPage()
+  return result
+}
+
+/**
+ * {@link apiWrite} for a store that reads the answer itself: the invitations store, and the
+ * transfer of a group. Same rule: the write names the page's user, and a 401 `unauthorized` signs
+ * the page out. The caller gets the response unread.
+ */
+export async function fetchWrite(
+  url: string,
+  init?: RequestInit,
+  fetcher: (url: string, init?: RequestInit) => Promise<Response> = globalThis.fetch,
+): Promise<Response> {
+  const userId = sessionState.value.user?.id
+  if (userId === undefined) return await fetcher(url, init)
+  const response = await fetcher(url, { ...init, headers: asUser(userId, init?.headers) })
+  if (response.status === 401) {
+    const body: unknown = await response.clone().json().catch(() => null)
+    const error = (body as { error?: unknown } | null)?.error
+    if ((error as { code?: unknown } | null | undefined)?.code === UNAUTHORIZED) signOutPage()
+  }
+  return response
+}
+
 /** The caller's headers with the page's user named beside them. */
 function asUser(userId: number, given?: HeadersInit): Record<string, string> {
   return { ...Object.fromEntries(new Headers(given)), [REALTIME_USER_HEADER]: String(userId) }

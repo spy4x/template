@@ -1,13 +1,16 @@
 import { expect } from "@std/expect"
-import { describe, it } from "@std/testing/bdd"
+import { afterEach, describe, it } from "@std/testing/bdd"
 import { RealtimeRequestError } from "@spy4x/realtime"
 import { GroupRole } from "@domain/groups"
+import type { User } from "@domain/identity"
 import {
   createMembersStore,
   type MemberItem,
   type MembersDependencies,
+  membersHttp,
   TransferRefused,
 } from "./members.ts"
+import { sessionState } from "./session.ts"
 
 function member(userId: number, role = GroupRole.VIEWER): MemberItem {
   return {
@@ -248,5 +251,46 @@ describe("members store", () => {
     await store.open("b")
     expect(store.transferDraft.value).toEqual({ userId: null, name: "", password: "" })
     expect(store.transferError.value).toBe(null)
+  })
+})
+
+describe("the transfer of a group over REST", () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    sessionState.value = { ...sessionState.value, user: null, isMfaRequired: false }
+  })
+
+  /** Answers every request with `status` and `body`; records the user each one named. */
+  function serverAnswers(status: number, body: unknown) {
+    const pageUsers: (string | null)[] = []
+    globalThis.fetch = (_input, init) => {
+      pageUsers.push(new Headers(init?.headers).get("x-realtime-user"))
+      return Promise.resolve(Response.json(body, { status }))
+    }
+    return pageUsers
+  }
+
+  const input = { groupId: "g-1", userId: 2, name: "Team", password: "secret" }
+
+  it("names the page's user, and a wrong password keeps the page signed in", async () => {
+    sessionState.value = { ...sessionState.value, user: { id: 7 } as User, isMfaRequired: false }
+    const pageUsers = serverAnswers(401, { error: { code: "PASSWORD_INCORRECT", message: "No" } })
+
+    const refusal = await membersHttp.transfer(input).catch((error) => error)
+
+    expect(pageUsers).toEqual(["7"])
+    expect(refusal).toBeInstanceOf(TransferRefused)
+    expect(sessionState.value.user?.id).toBe(7)
+  })
+
+  it("signs the page out when the cookie is now another user's", async () => {
+    sessionState.value = { ...sessionState.value, user: { id: 7 } as User, isMfaRequired: false }
+    serverAnswers(401, { error: { code: "unauthorized", message: "Another user" } })
+
+    const refusal = await membersHttp.transfer(input).catch((error) => error)
+
+    expect(refusal.message).toBe("Another user")
+    expect(sessionState.value.user).toBeNull()
   })
 })

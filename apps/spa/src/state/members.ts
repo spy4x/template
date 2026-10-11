@@ -9,7 +9,7 @@ import {
   transferErrorField,
 } from "@ui/group-transfer.tsx"
 import { describeError } from "./describe-error.ts"
-import { apiRead } from "./realtime-call.ts"
+import { apiRead, fetchWrite } from "./realtime-call.ts"
 import { callCommand, type LocalReads, localReads, noLocalReads } from "../modules.ts"
 import { READ_KEYS, ReadRefused } from "./read-keys.ts"
 
@@ -263,7 +263,7 @@ export const membersHttp: MembersDependencies = {
   transfer: async ({ groupId, ...body }) => {
     let response: Response
     try {
-      response = await fetch(`/api/groups/${encodeURIComponent(groupId)}/transfer`, {
+      response = await fetchWrite(`/api/groups/${encodeURIComponent(groupId)}/transfer`, {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },

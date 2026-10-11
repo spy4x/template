@@ -198,4 +198,25 @@ describe("invitations store on a signed-in page", () => {
     expect(pageUsers).toEqual(["7", "7"])
     expect([stillSignedIn, sessionState.value.user]).toEqual([7, null])
   })
+
+  it("writes as the page's user, and is signed out when the cookie is now another user's", async () => {
+    sessionState.value = { ...sessionState.value, user: { id: 7 } as User, isMfaRequired: false }
+    const { store, pageUsers } = harness({
+      "GET /api/groups/g-1/invitations": [200, { invitations: [row, { ...row, id: "i-2" }] }],
+      "DELETE /api/groups/g-1/invitations/i-1": [403, { error: { message: "Only the owner" } }],
+      "DELETE /api/groups/g-1/invitations/i-2": [
+        401,
+        { error: { code: "unauthorized", message: "The session belongs to another user" } },
+      ],
+    })
+    await store.open("g-1")
+
+    await store.revoke("i-1")
+    const stillSignedIn = sessionState.value.user?.id
+    expect(await store.revoke("i-2")).toBe(false)
+
+    expect(pageUsers).toEqual(["7", "7", "7"])
+    expect([stillSignedIn, sessionState.value.user]).toEqual([7, null])
+    expect(store.revokeError.value?.message).toBe("The session belongs to another user")
+  })
 })

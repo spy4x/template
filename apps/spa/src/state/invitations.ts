@@ -8,7 +8,7 @@ import {
   type InvitationPreviewRow,
   type InvitationRow,
 } from "@ui/group-invitations.tsx"
-import { fetchRead } from "./realtime-call.ts"
+import { fetchRead, fetchWrite } from "./realtime-call.ts"
 import { type LocalReads, localReads, noLocalReads } from "../modules.ts"
 import { READ_KEYS, ReadRefused } from "./read-keys.ts"
 
@@ -64,8 +64,11 @@ export function createInvitationsStore(
       headers: { "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     }
-    // A read names the page's user, and a 401 signs the page out, as every read does.
-    const response = method === "GET" ? await fetchRead(url, init, fetch) : await fetch(url, init)
+    // Every request names the page's user. Any 401 signs the page out of a read, and a 401
+    // `unauthorized` out of a write.
+    const response = method === "GET"
+      ? await fetchRead(url, init, fetch)
+      : await fetchWrite(url, init, fetch)
     const json: unknown = await response.json().catch(() => null)
     if (response.ok) return { ok: true, data: json as T }
     const error = (json as { error?: unknown } | null)?.error

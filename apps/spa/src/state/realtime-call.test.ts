@@ -4,7 +4,7 @@ import { ConnectionLostError, RealtimeRequestError } from "@spy4x/realtime"
 import type { AvailableCallPort } from "@spy4x/realtime/calls"
 import type { User } from "@domain/identity"
 import { apiFetch } from "./api.ts"
-import { apiRead, canCallAs, createAppCallPort } from "./realtime-call.ts"
+import { apiRead, canCallAs, createAppCallPort, fetchWrite } from "./realtime-call.ts"
 import { sessionState } from "./session.ts"
 
 interface Sent {
@@ -227,14 +227,90 @@ describe("the SPA's one REST function", () => {
     expect(sessionState.value.user).toBeNull()
   })
 
-  it("sends a write as it is, and a refused write does not sign the page out", async () => {
+  it("sends every write as the page's user, whatever its method", async () => {
     signedInAs(7)
-    const { fetch, sent } = server([[401, { error: { code: "WRONG_PASSWORD", message: "no" } }]])
+    const { fetch, sent } = server([[200, {}], [200, {}], [200, {}], [200, {}]])
     globalThis.fetch = fetch
+
+    await apiFetch("/api/tokens", { method: "POST", body: "{}" })
+    await apiFetch("/api/tokens/t-1", { method: "DELETE" })
+    await apiFetch("/api/notifications/n-1/read", { method: "patch" })
+    await apiFetch("/api/users/me", { method: "PUT", body: "{}" })
+
+    expect(sent.map((request) => request.headers["x-realtime-user"])).toEqual(["7", "7", "7", "7"])
+  })
+
+  it("signs the page out when a write is refused because the cookie is now another user's", async () => {
+    signedInAs(7)
+    globalThis.fetch = server([[401, UNAUTHORIZED]]).fetch
+
+    const refused = await apiFetch("/api/notifications/read-all", { method: "POST" })
+
+    expect(refused.ok).toBe(false)
+    expect(sessionState.value.user).toBeNull()
+  })
+
+  it("keeps the page signed in when a write is answered 401 for a wrong password", async () => {
+    signedInAs(7)
+    globalThis.fetch = server([[401, { error: { code: "WRONG_PASSWORD", message: "no" } }]]).fetch
 
     await apiFetch("/api/auth/password/change", { method: "POST", body: "{}" })
 
-    expect(sent[0].headers["x-realtime-user"]).toBeUndefined()
     expect(sessionState.value.user?.id).toBe(7)
+  })
+
+  it("sends a write that names nobody while nobody is signed in", async () => {
+    const { fetch, sent } = server([[200, {}]])
+    globalThis.fetch = fetch
+
+    await apiFetch("/api/auth/password/check", { method: "POST", body: "{}" })
+
+    expect(sent[0].headers["x-realtime-user"]).toBeUndefined()
+  })
+})
+
+describe("a write a store sends and reads itself", () => {
+  it("names the user the page was started for, beside the caller's headers", async () => {
+    signedInAs(7)
+    const { fetch, sent } = server([[200, {}]])
+    const init = { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }
+
+    await fetchWrite("/api/groups/g-1/transfer", init, fetch)
+
+    expect(sent[0].headers).toEqual({ "content-type": "application/json", "x-realtime-user": "7" })
+  })
+
+  it("signs the page out when the cookie is now another user's, and the caller still reads the answer", async () => {
+    signedInAs(7)
+
+    const response = await fetchWrite(
+      "/api/groups/g-1/transfer",
+      { method: "POST" },
+      server([[401, UNAUTHORIZED]]).fetch,
+    )
+
+    expect(sessionState.value.user).toBeNull()
+    expect(await response.json()).toEqual(UNAUTHORIZED)
+  })
+
+  it("keeps the page signed in when the write is answered 401 for a wrong password", async () => {
+    signedInAs(7)
+    const wrongPassword = { error: { code: "PASSWORD_INCORRECT", message: "no" } }
+
+    await fetchWrite(
+      "/api/groups/g-1/transfer",
+      { method: "POST" },
+      server([[401, wrongPassword]]).fetch,
+    )
+
+    expect(sessionState.value.user?.id).toBe(7)
+  })
+
+  it("names nobody while nobody is signed in", async () => {
+    const { fetch, sent } = server([[200, {}]])
+
+    await fetchWrite("/api/invitations/accept", { method: "POST" }, fetch)
+
+    expect(sent[0].headers["x-realtime-user"]).toBeUndefined()
   })
 })

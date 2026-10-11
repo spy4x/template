@@ -208,6 +208,26 @@ describe("signOut", () => {
 
     expect(sessionState.value.user).toBeNull()
   })
+
+  it("names the page's user, and when the cookie is now another user's it clears the page and owes nothing", async () => {
+    const flags = memoryFlags()
+    useFlagStorage(flags)
+    sessionState.value = { ...sessionState.value, user: { id: 1 } as User }
+    const pageUsers: (string | null)[] = []
+    globalThis.fetch = (_input, init) => {
+      pageUsers.push(new Headers(init?.headers).get("x-realtime-user"))
+      return Promise.resolve(Response.json(
+        { error: { code: "unauthorized", message: "The session belongs to another user" } },
+        { status: 401 },
+      ))
+    }
+
+    await signOut()
+
+    expect(pageUsers).toEqual(["1"])
+    expect(sessionState.value.user).toBeNull()
+    expect(flags.getItem("auth:sign-out-owed")).toBeNull()
+  })
 })
 
 /** Makes every request answer 200 with `{ success: true }`. */
