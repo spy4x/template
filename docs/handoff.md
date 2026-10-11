@@ -334,10 +334,12 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 at once. An expired token is refused and hidden from the moment it expires, and the nightly
 `outbox.cleanup` job runs `purgeExpiredApiTokens`, which deletes its row
 `API_TOKEN_PURGE_GRACE_DAYS` (30) days after the expiry, by the database clock, so a row may live
-up to a day longer. A token that never expires stays until it is revoked. A run that deleted at
-least one token writes one `audit_events` row of kind `api_tokens.expired_purged` in the same
-statement, with no actor and no group: its details hold the count and the cutoff, never anything
-of a token. That row ages out with the other audit events, after a year.
+up to a day longer. Only the expiry decides: a token that never expires stays until it is revoked,
+and a token of a soft-deleted group or account is not purged early, because
+it works again after a restore. In the same statement each owner gets an `auth_audits` row of type
+`API_TOKENS_PURGED` (11) whose identifier is the count and the ids of the tokens deleted, eight to
+a row, so the ids in older audit rows can still be matched. No name, hash or part of a token is
+written.
 
 ## What is not built yet
 
