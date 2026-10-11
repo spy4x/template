@@ -25,6 +25,7 @@ import {
 } from "@server/subscribers/subscribers.ts"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
+import { uuidV7 } from "@spy4x/platform/universal/uuid"
 
 /** A throwaway secret for this test only. */
 const SETUP: SubscribersSetup = {
@@ -38,7 +39,7 @@ const BRAND = { webAppUrl: `https://app.example.com` }
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
   const connection = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...connection, max: 1 })
-  const schema = `subscribers_test_${crypto.randomUUID().replaceAll(`-`, ``)}`
+  const schema = `subscribers_test_${uuidV7().replaceAll(`-`, ``)}`
   const sql = postgres({
     ...connection,
     // The send log holds a session lock on one connection while it writes on another.
@@ -212,9 +213,9 @@ Deno.test(`mail subscriptions go through the worker's queue and Postgres`, async
     await t.step(`a request older than a day is removed by the cleanup`, async () => {
       await sql`
         INSERT INTO subscription_requests (id, list_id, email, created_at) VALUES
-          (${globalThis.crypto.randomUUID()}, 'news', 'old@example.com',
+          (${uuidV7()}, 'news', 'old@example.com',
             now() - interval '25 hours'),
-          (${globalThis.crypto.randomUUID()}, 'news', 'new@example.com', now() - interval '23 hours')
+          (${uuidV7()}, 'news', 'new@example.com', now() - interval '23 hours')
       `
 
       expect(await removeStaleSubscriptionRequests(sql)).toBe(1)

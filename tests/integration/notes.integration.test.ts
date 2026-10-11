@@ -38,6 +38,7 @@ import {
 } from "../../apps/api/features/notes/handlers.ts"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
+import { uuidV7 } from "@spy4x/platform/universal/uuid"
 
 /**
  * Notes against a real Postgres built from the migrations, through the same handlers, session gate
@@ -61,7 +62,7 @@ interface OutboxRow extends postgres.Row {
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
   const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1, onnotice: () => {} })
-  const schema = `notes_test_${crypto.randomUUID().replaceAll("-", "")}`
+  const schema = `notes_test_${uuidV7().replaceAll("-", "")}`
   const sql = postgres({
     ...settings,
     max: 10,
@@ -142,7 +143,7 @@ async function seedGroup(sql: postgres.Sql) {
   const editor = await insertUser(sql)
   const viewer = await insertUser(sql)
   const stranger = await insertUser(sql)
-  const groupId = crypto.randomUUID()
+  const groupId = uuidV7()
   await groups.create({ id: groupId, name: "Team" }, owner)
   await sql`
     INSERT INTO group_members (group_id, user_id, role, added_by_user_id) VALUES
@@ -192,7 +193,7 @@ Deno.test("notes against Postgres", async (t) => {
       async () => {
         const { groupId, editor } = await seedGroup(sql)
         const before = BigInt(await nextSequence(sql, groupId))
-        const id = crypto.randomUUID()
+        const id = uuidV7()
 
         const created = await commands.execute(
           new NoteCreateCommand({ actor: actor(editor), groupId, id, title: "Plan", body: "a" }),
@@ -241,7 +242,7 @@ Deno.test("notes against Postgres", async (t) => {
       "an update or delete with a stale version is refused with the current version",
       async () => {
         const { groupId, owner, editor } = await seedGroup(sql)
-        const id = crypto.randomUUID()
+        const id = uuidV7()
         await commands.execute(
           new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Draft", body: "" }),
         )
@@ -288,7 +289,7 @@ Deno.test("notes against Postgres", async (t) => {
       async () => {
         const x = await seedGroup(sql)
         const y = await seedGroup(sql)
-        const id = crypto.randomUUID()
+        const id = uuidV7()
         await commands.execute(
           new NoteCreateCommand({
             actor: actor(x.owner),
@@ -328,7 +329,7 @@ Deno.test("notes against Postgres", async (t) => {
       "of four concurrent updates at the same version, one wins and the others conflict",
       async () => {
         const { groupId, owner } = await seedGroup(sql)
-        const id = crypto.randomUUID()
+        const id = uuidV7()
         await commands.execute(
           new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Start", body: "" }),
         )
@@ -384,7 +385,7 @@ Deno.test("notes against Postgres", async (t) => {
       "a failed outbox insert rolls back the note write and the sequence change",
       async () => {
         const { groupId, owner } = await seedGroup(sql)
-        const id = crypto.randomUUID()
+        const id = uuidV7()
         await commands.execute(
           new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Kept", body: "" }),
         )
@@ -424,7 +425,7 @@ Deno.test("notes against Postgres", async (t) => {
 
     await t.step("a viewer reads the notes but cannot create, update or delete one", async () => {
       const { groupId, owner, viewer } = await seedGroup(sql)
-      const id = crypto.randomUUID()
+      const id = uuidV7()
       await commands.execute(
         new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Read me", body: "" }),
       )
@@ -439,7 +440,7 @@ Deno.test("notes against Postgres", async (t) => {
           new NoteCreateCommand({
             actor: actor(viewer),
             groupId,
-            id: crypto.randomUUID(),
+            id: uuidV7(),
             title: "Mine",
             body: "",
           }),
@@ -481,7 +482,7 @@ Deno.test("notes against Postgres", async (t) => {
         new NoteCreateCommand({
           actor: actor(stranger),
           groupId,
-          id: crypto.randomUUID(),
+          id: uuidV7(),
           title: "x",
           body: "",
         }),
@@ -497,7 +498,7 @@ Deno.test("notes against Postgres", async (t) => {
       "a note is located for a member of its group, and for no one else or once deleted",
       async () => {
         const { groupId, owner, viewer, stranger } = await seedGroup(sql)
-        const id = crypto.randomUUID()
+        const id = uuidV7()
         await commands.execute(
           new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Plan", body: "" }),
         )
@@ -506,7 +507,7 @@ Deno.test("notes against Postgres", async (t) => {
 
         expect(await locate(viewer, id)).toEqual({ groupId })
         const foreign = await refusal(locate(stranger, id))
-        const unknown = await refusal(locate(owner, crypto.randomUUID()))
+        const unknown = await refusal(locate(owner, uuidV7()))
         expect([(foreign as NoteError).code, (foreign as NoteError).message]).toEqual([
           "NOTE_NOT_FOUND",
           "Note not found",
@@ -527,7 +528,7 @@ Deno.test("notes against Postgres", async (t) => {
         const command = new NoteCreateCommand({
           actor: actor(editor),
           groupId,
-          id: crypto.randomUUID(),
+          id: uuidV7(),
           title: "Once",
           body: "",
           idempotencyKey: "note-create-1",
@@ -570,7 +571,7 @@ Deno.test("notes against Postgres", async (t) => {
       const ids: string[] = []
       for (const title of ["one", "two", "three"]) {
         const { note } = await notes.create(
-          { groupId, id: crypto.randomUUID(), title, body: "" },
+          { groupId, id: uuidV7(), title, body: "" },
           owner,
           null,
         )
@@ -596,7 +597,7 @@ Deno.test("notes against Postgres", async (t) => {
         const ids: string[] = []
         for (const title of ["a", "b", "c"]) {
           const { note } = await notes.create(
-            { groupId, id: crypto.randomUUID(), title, body: "" },
+            { groupId, id: uuidV7(), title, body: "" },
             owner,
             null,
           )
@@ -629,7 +630,7 @@ Deno.test("notes against Postgres", async (t) => {
     /** Two groups the editor writes in, and the notes made in the first. */
     async function twoGroups(titles: string[]) {
       const first = await seedGroup(sql)
-      const second = crypto.randomUUID()
+      const second = uuidV7()
       await new PostgresGroupRepository(sql).create({ id: second, name: "Elsewhere" }, first.owner)
       await sql`
         INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
@@ -637,7 +638,7 @@ Deno.test("notes against Postgres", async (t) => {
       `
       const ids: string[] = []
       for (const title of titles) {
-        const id = crypto.randomUUID()
+        const id = uuidV7()
         await commands.execute(
           new NoteCreateCommand({
             actor: actor(first.editor),
@@ -713,7 +714,7 @@ Deno.test("notes against Postgres", async (t) => {
       const { groupId, toGroupId, editor, ids } = await twoGroups(["a", "b"])
       const [from, to] = [await nextSequence(sql, groupId), await nextSequence(sql, toGroupId)]
 
-      const error = await refusal(move(editor, groupId, toGroupId, [ids[0], crypto.randomUUID()]))
+      const error = await refusal(move(editor, groupId, toGroupId, [ids[0], uuidV7()]))
 
       expect(error).toMatchObject({ code: "NOTE_NOT_FOUND" })
       expect(await nextSequence(sql, groupId)).toBe(from)
@@ -766,7 +767,7 @@ Deno.test("notes against Postgres", async (t) => {
           await refusal(move(readsThere, groupId, toGroupId, ids)),
           // No member of the source, or of the target.
           await refusal(move(stranger, groupId, toGroupId, ids)),
-          await refusal(move(owner, groupId, crypto.randomUUID(), ids)),
+          await refusal(move(owner, groupId, uuidV7(), ids)),
         ]
 
         expect(errors.map((error) => (error as NoteError).code)).toEqual([
@@ -806,7 +807,7 @@ Deno.test("notes against Postgres", async (t) => {
       const { groupId, toGroupId, owner, editor, ids } = await twoGroups(["a", "b"])
       const notes = new PostgresNoteRepository(sql)
       await notes.create(
-        { groupId: toGroupId, id: crypto.randomUUID(), title: "x", body: "" },
+        { groupId: toGroupId, id: uuidV7(), title: "x", body: "" },
         owner,
         null,
       )
@@ -824,7 +825,7 @@ Deno.test("notes against Postgres", async (t) => {
 
     await t.step("two moves in opposite directions both finish, none deadlocks", async () => {
       const { groupId, toGroupId, editor, ids } = await twoGroups(["a"])
-      const back = crypto.randomUUID()
+      const back = uuidV7()
       await commands.execute(
         new NoteCreateCommand({
           actor: actor(editor),
@@ -847,7 +848,7 @@ Deno.test("notes against Postgres", async (t) => {
       "a deleted note is restored by an editor, with a new version, sequence and audit row",
       async () => {
         const { groupId, owner, editor } = await seedGroup(sql)
-        const id = crypto.randomUUID()
+        const id = uuidV7()
         await commands.execute(
           new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Plan", body: "x" }),
         )
@@ -882,7 +883,7 @@ Deno.test("notes against Postgres", async (t) => {
 
     await t.step("a viewer or a stranger cannot restore a note and nothing changes", async () => {
       const { groupId, owner, viewer, stranger } = await seedGroup(sql)
-      const id = crypto.randomUUID()
+      const id = uuidV7()
       await commands.execute(
         new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Gone", body: "" }),
       )
@@ -909,7 +910,7 @@ Deno.test("notes against Postgres", async (t) => {
 
     await t.step("restoring a note that is not deleted is refused as not found", async () => {
       const { groupId, owner } = await seedGroup(sql)
-      const id = crypto.randomUUID()
+      const id = uuidV7()
       await commands.execute(
         new NoteCreateCommand({ actor: actor(owner), groupId, id, title: "Live", body: "" }),
       )
@@ -927,7 +928,7 @@ Deno.test("notes against Postgres", async (t) => {
       const ids: string[] = []
       for (const title of ["one", "two", "three"]) {
         const { note } = await notes.create(
-          { groupId, id: crypto.randomUUID(), title, body: "" },
+          { groupId, id: uuidV7(), title, body: "" },
           owner,
           null,
         )
