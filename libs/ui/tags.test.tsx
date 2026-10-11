@@ -246,6 +246,42 @@ describe("TagsScreen", () => {
     expect(count("[data-e2e=tag-delete-dialog]")).toBe(0)
   })
 
+  it("moves focus to the next row's menu, else the previous row's, else the New tag action, once a tag is deleted", async () => {
+    const row = () => document.activeElement?.closest("li")?.getAttribute("data-e2e")
+    const third = { ...home, id: "7b6d8d6c-1af5-4f04-8ae4-b1ee5d112003", name: "Work" }
+    const three = [urgent, home, third]
+    const remove = async (id: string) => {
+      await click(`[data-e2e=tag-${id}] [data-e2e=tag-menu]`)
+      await click(`[data-e2e=tag-${id}] [data-e2e=tag-delete]`)
+      await clickText("Delete", "[data-e2e=tag-delete-dialog]")
+    }
+
+    await mount(<TagsScreen {...tagsDefaults} tags={three} />)
+    await remove(home.id)
+    await rerender(<TagsScreen {...tagsDefaults} tags={[urgent, third]} />)
+    expect([focused(), row()]).toEqual(["tag-menu", `tag-${third.id}`])
+
+    await remove(third.id)
+    await rerender(<TagsScreen {...tagsDefaults} tags={[urgent]} />)
+    expect([focused(), row()]).toEqual(["tag-menu", `tag-${urgent.id}`])
+
+    await remove(urgent.id)
+    await rerender(<TagsScreen {...tagsDefaults} tags={[]} />)
+    expect(focused()).toBe("tag-new")
+  })
+
+  it("keeps focus on the tag's own menu when the delete was refused and the tag stays", async () => {
+    await mount(<TagsScreen {...tagsDefaults} />)
+    await click(`[data-e2e=tag-${urgent.id}] [data-e2e=tag-menu]`)
+    await click(`[data-e2e=tag-${urgent.id}] [data-e2e=tag-delete]`)
+    await clickText("Delete", "[data-e2e=tag-delete-dialog]")
+    await rerender(<TagsScreen {...tagsDefaults} listError="The tag could not be deleted." />)
+    expect([focused(), document.activeElement?.closest("li")?.getAttribute("data-e2e")]).toEqual([
+      "tag-menu",
+      `tag-${urgent.id}`,
+    ])
+  })
+
   it("deletes nothing when the person keeps the tag", async () => {
     const remove = spy<[string]>()
     await mount(<TagsScreen {...tagsDefaults} onDelete={remove.fn} />)
@@ -265,6 +301,13 @@ describe("TagsScreen", () => {
     expect(focused()).toBe("tag-name")
     expect(find("[data-e2e=tag-name]").getAttribute("aria-describedby")).toBeTruthy()
     expect(find("[data-e2e=tag-dialog]").textContent).toContain("Taken.")
+  })
+
+  it("shows the list's message above the tags when no dialog is open", async () => {
+    const message = "Someone changed this tag. Their version is shown."
+    await mount(<TagsScreen {...tagsDefaults} listError={message} />)
+    expect(count("[data-e2e=tag-dialog]")).toBe(0)
+    expect(document.body.textContent).toContain(message)
   })
 
   it("refuses a second submit while the tag is saving", async () => {

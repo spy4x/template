@@ -1,4 +1,4 @@
-import type { ComponentChildren, JSX } from "preact"
+import type { ComponentChildren, JSX, RefObject } from "preact"
 import { useEffect, useRef, useState } from "preact/hooks"
 import { Button } from "@spy4x/preact-ui/button"
 import { ConfirmDialog } from "@spy4x/preact-ui/confirm-dialog"
@@ -75,6 +75,22 @@ const BACK = { href: NOTE_PATHS.list, label: "Back to notes" }
 export function TagsScreen(props: TagsScreenProps): JSX.Element {
   const { group, tags, navigate } = props
   const [deleting, setDeleting] = useState<TagRow | null>(null)
+  const [focusAfter, setFocusAfter] = useState<{ id: string; index: number } | null>(null)
+  const page = useRef<HTMLDivElement>(null)
+  // A deleted row would leave focus on the page's body. It goes to the next row's menu, else the
+  // previous row's, else the page's primary action.
+  useEffect(() => {
+    if (!focusAfter) return
+    // A refused delete keeps the tag; a later live change must not pull focus to it.
+    if (props.listError) return setFocusAfter(null)
+    if (tags.some((tag) => tag.id === focusAfter.id)) return
+    const root = page.current
+    const menus = root?.querySelectorAll<HTMLElement>("[data-e2e=tag-menu]")
+    const row = menus?.[focusAfter.index] ?? menus?.[focusAfter.index - 1]
+    ;(row ?? root?.querySelector<HTMLElement>("[data-e2e=tag-new], [data-e2e=tag-new-empty]"))
+      ?.focus()
+    setFocusAfter(null)
+  }, [focusAfter, tags, props.listError])
   if (!group) {
     return (
       <TagsPage>
@@ -93,7 +109,7 @@ export function TagsScreen(props: TagsScreenProps): JSX.Element {
   }
   const canWrite = group.canWrite
   return (
-    <TagsPage>
+    <TagsPage page={page}>
       <PageHeader
         back={BACK}
         navigate={navigate}
@@ -189,6 +205,7 @@ export function TagsScreen(props: TagsScreenProps): JSX.Element {
           onCancel={() => setDeleting(null)}
           onConfirm={() => {
             setDeleting(null)
+            setFocusAfter({ id: deleting.id, index: tags.findIndex((t) => t.id === deleting.id) })
             props.onDelete?.(deleting.id)
           }}
         />
@@ -197,9 +214,11 @@ export function TagsScreen(props: TagsScreenProps): JSX.Element {
   )
 }
 
-function TagsPage({ children }: { children?: ComponentChildren }): JSX.Element {
+function TagsPage(
+  { children, page }: { children?: ComponentChildren; page?: RefObject<HTMLDivElement> },
+): JSX.Element {
   return (
-    <div class="mx-auto w-full max-w-2xl">
+    <div ref={page} class="mx-auto w-full max-w-2xl">
       <Stack gap="lg">{children}</Stack>
     </div>
   )
