@@ -153,7 +153,7 @@ The template ships two web apps over the same API, with different jobs.
 The MPA calls the API over HTTP from the server, only for the newsletter, and never touches the
 database itself. It needs `ENV` and `DOMAIN` (the same values as the API), its own host
 `MPA_DOMAIN`, and `API_URL`, the address the MPA's server reaches the API at, such as
-`http://api:8000`; it refuses to start without any of them. To deploy it, set
+`http://<PROJECT>-api:8000` (Compose sets it); it refuses to start without any of them. To deploy it, set
 `COMPOSE_PROFILES=mpa` in the env file (join it with other profiles by commas) and `MPA_DOMAIN` to
 the website's own host, then run `deno task deploy` as usual: Compose builds the `mpa` service from
 `apps/mpa/dockerfile.prod` and serves it at `MPA_DOMAIN`, next to the SPA at `DOMAIN`. The API
@@ -179,13 +179,24 @@ Plain `http://<DOMAIN>` (and `http://<MPA_DOMAIN>` with the `mpa` profile) answe
 redirect to HTTPS. The proxy serves nothing of its own but `/ping`: Traefik's dashboard and API are
 off, because they list every router and backend address of every project behind the proxy.
 
-**A server deployed before these changes needs two things once.** Run `deno task proxy:start` on
-it: `deno task deploy` restarts the app's containers but never the proxy, so the proxy that is
-already running keeps serving its dashboard at `proxy.<DOMAIN>` until then. And the next deploy
-publishes Grafana on `127.0.0.1:3000` and the MinIO console on `127.0.0.1:9001`; when something on
-the server already uses one of them, the deploy fails with "port is already allocated". Set
-`GRAFANA_HOST_PORT` or `MINIO_CONSOLE_HOST_PORT` in the env file to a free `127.0.0.1:<port>`
-first ([Admin consoles](#admin-consoles)).
+**A server deployed before these changes needs three things once**, and its next deploy does
+more than usual:
+
+1. A server that runs Podman needs `CONTAINER_PROVIDER=podman` in its env file. Without that line
+   the deploy used to run Podman and now runs Docker: it fails at "Starting the app" and the old
+   containers stay up. Any other value than `docker` or `podman` is refused.
+2. Run `deno task proxy:start` on it: `deno task deploy` restarts the app's containers but never
+   the proxy, so the proxy that is already running keeps serving its dashboard at
+   `proxy.<DOMAIN>` until then.
+3. The next deploy publishes Grafana on `127.0.0.1:3000` and the MinIO console on
+   `127.0.0.1:9001`; when something on the server already uses one of them, the deploy fails with
+   "port is already allocated". Set `GRAFANA_HOST_PORT` or `MINIO_CONSOLE_HOST_PORT` in the env
+   file to a free `127.0.0.1:<port>` first ([Admin consoles](#admin-consoles)).
+
+That deploy also recreates the project's network, which no longer has a fixed subnet, so every
+container restarts once, the database included: expect a short outage, not the usual restart of
+the app alone. The base image is now named `<PROJECT>/deno-base`; the old `app/deno-base` image
+stays on the server until you remove it (`docker image rm app/deno-base:<version>`).
 
 `deno task deploy [env file]` reads the server from the env file (`infra/envs/.env.prod` unless you
 name another): `SSH_TO_SERVER`, `PATH_ON_SERVER` and, when Deno is not on the server's `PATH`,
@@ -235,9 +246,16 @@ first, change:
   `MINIO_CONSOLE_HOST_PORT` and `GRAFANA_HOST_PORT`. A port another project holds stops
   `compose up` with "port is already allocated".
 
-Nothing else is shared: the engine gives every project's network a free subnet. Start the proxy
-once per server, not per project. With the `host-monitoring` profile, turn it on in one project
-only: its containers watch the whole host.
+The engine gives every project's network a free subnet, and each project's database, Valkey,
+MinIO and monitoring are on that network only. Two things are shared. The proxy: start it once per
+server, not per project. And the `proxy` network, which the API, the SPA and the website of every
+project join so that Traefik can reach them: a container on it can open any project's API
+directly, without passing the proxy. So share a server only between projects you trust alike. On
+that network a project addresses its own services by container name (`<PROJECT>-api`,
+`<PROJECT>-db`), never by a plain service name such as `api`, which any project would answer.
+
+With the `host-monitoring` profile, turn it on in one project only: its containers watch the whole
+host.
 
 ## Tasks
 
