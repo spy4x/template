@@ -1,6 +1,7 @@
 import type { MpaConfig } from "./config.ts"
 import { createApi } from "./api.ts"
 import { renderErrorPage } from "./error-page.tsx"
+import { createNewsletterStatus } from "./newsletter.ts"
 import { define } from "./utils.ts"
 import { HttpError } from "fresh"
 import { HTTPException } from "hono/http-exception"
@@ -126,4 +127,18 @@ function withPageHeaders(response: Response): Response {
     statusText: response.statusText,
     headers,
   })
+}
+
+/**
+ * `pageMiddleware` wired to the API's own word on the newsletter, as the website runs it. The API
+ * is asked once here, before the first page, so that page already knows; after that, see
+ * `NewsletterStatus.isOn`.
+ */
+export async function newsletterPageMiddleware(
+  config: MpaConfig,
+  fetch: typeof globalThis.fetch = globalThis.fetch,
+) {
+  const newsletter = createNewsletterStatus({ apiUrl: config.apiUrl, fetch })
+  await newsletter.refresh()
+  return pageMiddleware(config, fetch, newsletter.isOn)
 }

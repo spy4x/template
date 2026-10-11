@@ -79,6 +79,24 @@ describe("createNewsletterStatus", () => {
     }
   })
 
+  it("stops waiting for an API that never answers once the time limit is over, and keeps the last answer", async () => {
+    // Never answers by itself: it ends only when the caller aborts the request.
+    const silent =
+      ((_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal!.reason))
+        })) as typeof globalThis.fetch
+    const status = createNewsletterStatus({
+      apiUrl: "http://api:8000",
+      fetch: silent,
+      timeoutMs: 1,
+    })
+
+    await status.refresh()
+
+    expect(status.isOn()).toBe(true)
+  })
+
   it("counts the newsletter as on when the API was never reached", async () => {
     const { fetch } = fakeApi(down)
     const status = createNewsletterStatus({ apiUrl: "http://api:8000", fetch })

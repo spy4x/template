@@ -4,7 +4,11 @@ import { App } from "fresh"
 import { handler as subscribe } from "./routes/subscribe/index.ts"
 import { handler as subscriptionConfirm } from "./routes/subscribe/confirm.ts"
 import { handler as unsubscribe } from "./routes/unsubscribe.ts"
-import { pageMiddleware, securityHeadersMiddleware } from "./middleware.ts"
+import {
+  newsletterPageMiddleware,
+  pageMiddleware,
+  securityHeadersMiddleware,
+} from "./middleware.ts"
 import type { State } from "./utils.ts"
 
 const config = {
@@ -464,6 +468,26 @@ describe("the subscription pages while subscriptions are off", () => {
       expect(calls).toEqual([])
     })
   }
+
+  it("takes the API's word that subscriptions are off before the first page, wired as the website starts", async () => {
+    const asked: string[] = []
+    const api = ((input: string | URL | Request) => {
+      asked.push(new URL(new Request(input).url).pathname)
+      return Promise.resolve(Response.json({ enabled: false }))
+    }) as typeof globalThis.fetch
+
+    const handler = new App<State>()
+      .use(await newsletterPageMiddleware(config, api))
+      .get("/subscribe", subscribe.GET!)
+      .handler()
+    const response = await handler(new Request(`${config.webAppOrigin}/subscribe`), info)
+
+    expect(response.status).toBe(503)
+    const page = await response.text()
+    expect(page).toContain("The newsletter is off")
+    expect(page).not.toContain("<form")
+    expect(asked).toEqual(["/api/subscribers"])
+  })
 })
 
 describe("an MPA on its own domain", () => {

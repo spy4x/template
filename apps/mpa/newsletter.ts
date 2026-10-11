@@ -10,7 +10,9 @@ export const NEWSLETTER_STATUS_TIMEOUT_MS = 2_000
 export interface NewsletterStatus {
   /**
    * The API's last answer, at once: no page waits for the API. An answer older than the ttl starts
-   * a new question in the background.
+   * a new question in the background, and the page that started it still gets the old answer. So
+   * after a change the old state is shown until the first page view after the ttl, however long
+   * the website stood idle.
    */
   isOn(): boolean
   /** Asks the API now and resolves when its answer is in. The website does this once at start. */
