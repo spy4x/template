@@ -49,11 +49,28 @@ async function buildApp(auth: Auth = buildAuthData({ user: { id: 7 } })) {
       throw new Error("a route failed")
     }),
   )
+  app.route(
+    "/tokens",
+    new Hono<APIContext>()
+      .post("/", (c) => {
+        reads.push("token created")
+        return c.json({ token: {} }, 201)
+      })
+      .delete("/:id", (c) => {
+        reads.push("token revoked")
+        return c.json({ success: true })
+      }),
+  )
   const get = (path: string, pageUser?: string) =>
     app.request(`http://local/api${path}`, {
       headers: pageUser === undefined ? {} : { "x-realtime-user": pageUser },
     })
-  return { get, reads }
+  const write = (method: string, path: string, pageUser?: string) =>
+    app.request(`http://local/api${path}`, {
+      method,
+      headers: pageUser === undefined ? {} : { "x-realtime-user": pageUser },
+    })
+  return { get, write, reads }
 }
 
 const READS = [
@@ -76,6 +93,26 @@ describe("the API's app", () => {
     expect(responses.map((response) => response.status)).toEqual([401, 401, 401])
     expect((await responses[1].json()).error.code).toBe("unauthorized")
     expect(reads).toEqual([])
+  })
+
+  it("refuses every write whose page names another user than the session's, and writes nothing", async () => {
+    const { write, reads } = await buildApp()
+
+    const responses = [await write("POST", "/tokens", "8"), await write("DELETE", "/tokens/1", "8")]
+
+    expect(responses.map((response) => response.status)).toEqual([401, 401])
+    expect((await responses[0].json()).error.code).toBe("unauthorized")
+    expect(reads).toEqual([])
+  })
+
+  it("accepts a write from a page that names the session's user, and from a caller that names nobody", async () => {
+    const { write, reads } = await buildApp()
+
+    const named = await write("POST", "/tokens", "7")
+    const unnamed = await write("DELETE", "/tokens/1")
+
+    expect([named.status, unnamed.status]).toEqual([201, 200])
+    expect(reads).toEqual(["token created", "token revoked"])
   })
 
   it("serves a page that names the session's user, and a caller that names nobody", async () => {
