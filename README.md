@@ -172,11 +172,20 @@ Plain `http://<DOMAIN>` (and `http://<MPA_DOMAIN>` with the `mpa` profile) answe
 redirect to HTTPS. The proxy serves nothing of its own but `/ping`: Traefik's dashboard and API are
 off, because they list every router and backend address of every project behind the proxy.
 
+**A server deployed before these changes needs two things once.** Run `deno task proxy:start` on
+it: `deno task deploy` restarts the app's containers but never the proxy, so the proxy that is
+already running keeps serving its dashboard at `proxy.<DOMAIN>` until then. And the next deploy
+publishes Grafana on `127.0.0.1:3000` and the MinIO console on `127.0.0.1:9001`; when something on
+the server already uses one of them, the deploy fails with "port is already allocated". Set
+`GRAFANA_HOST_PORT` or `MINIO_CONSOLE_HOST_PORT` in the env file to a free `127.0.0.1:<port>`
+first ([Admin consoles](#admin-consoles)).
+
 `deno task deploy` needs no manual step on a new server: it creates `infra/configs/vapid.json`
 (the web push keys) there when the file is missing, readable by its owner only. It never sends the
-key from your machine and never replaces one that exists. It stops before sending anything when the
-env file still holds a password or secret from `infra/envs/.env.example`, and names each such
-variable: those values are public. Router, service and middleware names
+key from your machine and never replaces one that exists. It stops before sending anything when a
+password or secret in the env file equals one that `infra/envs/.env.example` prints (those values
+are public), or when one that the example file sets is empty or missing, and names each such
+variable. It reads the example file for that, so keep the file. Router, service and middleware names
 carry `${PROJECT}`, so projects with different `PROJECT` values can share one Traefik. Postgres and
 Valkey stay on `127.0.0.1`. Every image has a pinned version.
 
