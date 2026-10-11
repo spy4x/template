@@ -197,13 +197,11 @@ export function createTagsStore(dependencies: TagsDependencies) {
       if (code === "TAG_NAME_TAKEN") {
         formErrors.value = { name: TAG_MESSAGES.nameTaken, form: null }
       } else if (code === "VERSION_CONFLICT" || code === "TAG_NOT_FOUND") {
-        formErrors.value = {
-          name: null,
-          form: code === "TAG_NOT_FOUND" ? TAG_MESSAGES.gone : TAG_MESSAGES.conflict,
-        }
-        // The form would save over the other change: read the latest and close it.
+        // The form would save over the other change: read the latest and close it. The message
+        // goes above the list, because the form that would show it is closed.
         form.value = null
         await refresh().catch(() => {})
+        listError.value = code === "TAG_NOT_FOUND" ? TAG_MESSAGES.gone : TAG_MESSAGES.conflict
       } else {
         formErrors.value = {
           name: null,

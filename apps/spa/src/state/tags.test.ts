@@ -122,9 +122,18 @@ describe("tags store", () => {
     await store.open(groupId)
     store.startEdit("a")
     await store.save()
-    expect(store.formErrors.value.form).toBe(TAG_MESSAGES.conflict)
+    expect(store.listError.value).toBe(TAG_MESSAGES.conflict)
     expect(store.form.value).toBeNull()
     expect(reads).toBe(2)
+  })
+
+  it("says above the list that the tag was deleted when a rename finds it gone", async () => {
+    const { store } = harness({ update: () => Promise.reject(refused("TAG_NOT_FOUND")) })
+    await store.open(groupId)
+    store.startEdit("a")
+    expect(await store.save()).toBe(false)
+    expect(store.listError.value).toBe(TAG_MESSAGES.gone)
+    expect(store.form.value).toBeNull()
   })
 
   it("deletes a tag at its version and drops it from the list", async () => {
