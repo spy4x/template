@@ -11,7 +11,8 @@ import {
   SubscriptionConfirmScreen,
   UnsubscribeScreen,
 } from "@ui/subscribe-screen.tsx"
-import { type ApiAnswer, errorMessage, isRecord } from "./api.ts"
+import { isRecord } from "@spy4x/platform/universal/is-record"
+import { type ApiAnswer, errorMessage } from "./api.ts"
 import { API_BODIES, readForm } from "./forms.ts"
 import { SiteFrame } from "./site.tsx"
 import { define, type State } from "./utils.ts"
