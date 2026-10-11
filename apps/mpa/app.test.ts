@@ -149,7 +149,7 @@ describe("securityHeadersMiddleware", () => {
     const { fetch } = fakeApi(() => Response.json({}))
     return new App<State>()
       .use(await securityHeadersMiddleware(appConfig))
-      .use(pageMiddleware(appConfig, fetch))
+      .use(pageMiddleware(appConfig, fetch, () => true))
       .get("/page", (ctx) => ctx.html("<p>page</p>"))
       .get("/broken", () => {
         throw new Error("a route failed")
@@ -501,7 +501,7 @@ describe("an MPA on its own domain", () => {
       return Promise.resolve(Response.json({}))
     }
     const handler = new App<State>()
-      .use(pageMiddleware(ownDomain, fetch as typeof globalThis.fetch))
+      .use(pageMiddleware(ownDomain, fetch as typeof globalThis.fetch, () => true))
       .post("/act", async (ctx) => {
         await ctx.state.api.call("POST", "/api/subscribers")
         return new Response(null, { status: 204 })
@@ -533,7 +533,7 @@ describe("an MPA on its own domain", () => {
 
   it(`links "Try the demo" to the SPA's sign-up at DOMAIN, not to the website's own host`, async () => {
     const response = await new App<State>()
-      .use(pageMiddleware(ownDomain, fakeApi(() => Response.json({})).fetch))
+      .use(pageMiddleware(ownDomain, fakeApi(() => Response.json({})).fetch, () => true))
       .get("/subscribe", subscribe.GET!)
       .handler()(new Request(`${ownDomain.webAppOrigin}/subscribe`), info)
 

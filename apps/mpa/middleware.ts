@@ -52,7 +52,9 @@ export async function securityHeadersMiddleware(config: MpaConfig) {
  *    session cookie check, since the MPA has no session;
  * 2. gives the route an API client bound to this request, which presents an MPA on its own domain
  *    to the API as the API's origin once step 1 has passed;
- * 3. tells the route whether the newsletter is on, as `newsletter()` says; without one it is on;
+ * 3. tells the route whether the newsletter is on, as `newsletter()` says. It is required, so a
+ *    caller cannot leave the status out by accident: the website starts through
+ *    {@link newsletterPageMiddleware};
  * 4. answers a form it cannot read with the status `readFormBody` names (413, 408 or 400);
  * 5. answers any other error, the 404 of an unknown address included, with the error page inside
  *    the site's frame (`error-page.tsx`);
@@ -62,8 +64,8 @@ export async function securityHeadersMiddleware(config: MpaConfig) {
  */
 export function pageMiddleware(
   config: MpaConfig,
-  fetch: typeof globalThis.fetch = globalThis.fetch,
-  newsletter: () => boolean = () => true,
+  fetch: typeof globalThis.fetch,
+  newsletter: () => boolean,
 ) {
   const crossSiteRefusal = createSameOriginCheck({
     expectedOrigin: config.webAppOrigin,
