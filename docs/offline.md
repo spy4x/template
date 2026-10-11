@@ -224,10 +224,11 @@ device holds no copy, every answer on this page shows as the error it is.
 
 The app asks `/api/auth/me` who is signed in before it renders. Only a 401 means nobody is: the app
 shows the sign-in page and deletes what the device kept for the remembered person. Every other
-error answer (a proxy's 502 or bare 404 during a deploy, a 500, a 429) says nothing about the
-session, and neither does no answer at all: the app opens as the remembered person on their saved
-copy, and the first call the server answers with `unauthorized` or 401 signs the page out. With
-nobody remembered (a first visit, or the local-data module switched off) the sign-in page shows.
+error answer (a proxy's 502 or bare 404 during a deploy, a 403, a 500, a 429) says nothing about
+the session. Neither does a 2xx without a profile, such as a maintenance page or an empty body, nor
+no answer at all: the app opens as the remembered person on their saved copy, and the first call
+the server answers with `unauthorized` or 401 signs the page out. With nobody remembered (a first
+visit, or the local-data module switched off) the sign-in page shows.
 
 ### Signing out
 
@@ -239,7 +240,7 @@ timeout, or no network at all, since the server may well accept the same read a 
 start that finds no session (the server answers 401, because the session ended elsewhere or
 expired) does the same for the person the device remembered, before the sign-in page shows.
 
-An answer still on its way at sign-out is not saved. Each copy is finished by its deletion: the
+An answer still on its way at sign-out is not saved in this tab. Each copy is finished by its deletion: the
 read cache (`ReadCache.clear`), the notes copy and the tags copy (`clear` in
 `offline/notes-cache.ts` and `offline/tags-cache.ts`) store nothing afterwards, whether the late
 write is a list read, a note being opened, or the server's answer to a queued write that was being

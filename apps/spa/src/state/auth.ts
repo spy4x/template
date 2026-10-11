@@ -103,9 +103,13 @@ export async function bootstrapSession(
   }
   // 202 carries no profile: the session owes its one-time code, so there is no user yet.
   const isMfaRequired = me.status === 202
+  // A 2xx without a profile (a maintenance page, a captive portal, an empty body) is not the API's
+  // answer and says nothing about the session either.
+  const profile = me.data as Partial<User> | null
+  const user = typeof profile?.id === "number" ? profile as User : recall?.() ?? null
   sessionState.value = {
     ...sessionState.value,
-    user: isMfaRequired ? null : me.data as User,
+    user: isMfaRequired ? null : user,
     isMfaRequired,
     isReady: true,
   }
