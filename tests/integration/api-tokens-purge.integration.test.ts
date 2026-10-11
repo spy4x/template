@@ -17,8 +17,8 @@ import { team } from "./group-team.ts"
 
 /**
  * The worker's purge of expired personal API tokens (#293) against a real Postgres, on a schema
- * built from the migrations: `schema.sql` has no `auth_audits`. Needs the `DB_*` values (recipe in
- * docs/handoff.md); it fails when they are missing rather than skipping.
+ * built from the migrations, so the audit row's event type meets the migrated check. Needs the
+ * `DB_*` values (recipe in docs/handoff.md); it fails when they are missing rather than skipping.
  */
 
 const MIGRATIONS_DIR = "libs/server/db/migrations"
