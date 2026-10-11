@@ -49,11 +49,26 @@ async function buildApp(auth: Auth = buildAuthData({ user: { id: 7 } })) {
       throw new Error("a route failed")
     }),
   )
-  const get = (path: string, pageUser?: string) =>
+  const writes: string[] = []
+  const written = (c: { req: { method: string } }) => {
+    writes.push(c.req.method)
+    return Response.json({ success: true })
+  }
+  app.route(
+    "/tokens",
+    new Hono<APIContext>()
+      .post("/", written)
+      .put("/:id", written)
+      .patch("/:id", written)
+      .delete("/:id", written),
+  )
+  const request = (method: string, path: string, pageUser?: string) =>
     app.request(`http://local/api${path}`, {
+      method,
       headers: pageUser === undefined ? {} : { "x-realtime-user": pageUser },
     })
-  return { get, reads }
+  const get = (path: string, pageUser?: string) => request("GET", path, pageUser)
+  return { get, request, reads, writes }
 }
 
 const READS = [
@@ -61,6 +76,12 @@ const READS = [
   "/groups/7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002/notes/7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001",
   "/notifications",
 ]
+
+/** One write of each method a route can take. */
+const WRITES = [["POST", "/tokens"], ["PUT", "/tokens/t-1"], ["PATCH", "/tokens/t-1"], [
+  "DELETE",
+  "/tokens/t-1",
+]]
 
 /** The library's policy with nothing added: the API answers JSON and loads nothing. */
 const POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
@@ -76,6 +97,34 @@ describe("the API's app", () => {
     expect(responses.map((response) => response.status)).toEqual([401, 401, 401])
     expect((await responses[1].json()).error.code).toBe("unauthorized")
     expect(reads).toEqual([])
+  })
+
+  it("refuses every write whose page names another user than the session's, and writes nothing", async () => {
+    const { request, writes } = await buildApp()
+
+    const responses = await Promise.all(
+      WRITES.map(([method, path]) => request(method, path, "8")),
+    )
+
+    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401])
+    expect((await responses[0].json()).error.code).toBe("unauthorized")
+    expect(writes).toEqual([])
+  })
+
+  it("lets a write through from a page that names the session's user, and from a caller that names nobody", async () => {
+    const { request, writes } = await buildApp()
+
+    const named = await Promise.all(WRITES.map(([method, path]) => request(method, path, "7")))
+    const unnamed = await request("POST", "/tokens")
+
+    expect([...named, unnamed].map((response) => response.status)).toEqual([
+      200,
+      200,
+      200,
+      200,
+      200,
+    ])
+    expect(writes).toEqual(["POST", "PUT", "PATCH", "DELETE", "POST"])
   })
 
   it("serves a page that names the session's user, and a caller that names nobody", async () => {
