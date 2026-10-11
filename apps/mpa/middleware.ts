@@ -1,5 +1,6 @@
 import type { MpaConfig } from "./config.ts"
 import { createApi } from "./api.ts"
+import { renderErrorPage } from "./error-page.tsx"
 import { define } from "./utils.ts"
 import { HttpError } from "fresh"
 import { HTTPException } from "hono/http-exception"
@@ -50,14 +51,18 @@ export async function securityHeadersMiddleware(config: MpaConfig) {
  *    session cookie check, since the MPA has no session;
  * 2. gives the route an API client bound to this request, which presents an MPA on its own domain
  *    to the API as the API's origin once step 1 has passed;
- * 3. answers a form it cannot read with the status `readFormBody` names (413, 408 or 400);
- * 4. keeps pages out of shared caches, since the newsletter pages carry a token in their address.
+ * 3. tells the route whether the newsletter is on, as `newsletter()` says; without one it is on;
+ * 4. answers a form it cannot read with the status `readFormBody` names (413, 408 or 400);
+ * 5. answers any other error, the 404 of an unknown address included, with the error page inside
+ *    the site's frame (`error-page.tsx`);
+ * 6. keeps pages out of shared caches, since the newsletter pages carry a token in their address.
  *
  * Framing is forbidden by {@link securityHeadersMiddleware}, which runs before this one.
  */
 export function pageMiddleware(
   config: MpaConfig,
   fetch: typeof globalThis.fetch = globalThis.fetch,
+  newsletter: () => boolean = () => true,
 ) {
   const crossSiteRefusal = createSameOriginCheck({
     expectedOrigin: config.webAppOrigin,
@@ -78,21 +83,24 @@ export function pageMiddleware(
         : { page: config.webAppOrigin, api: config.apiOrigin },
       fetch,
     })
+    ctx.state.newsletter = newsletter()
     let response: Response
     try {
       response = await ctx.next()
     } catch (error) {
-      if (!(error instanceof HTTPException)) throw error
-      response = new Response(error.message, { status: error.status })
+      response = error instanceof HTTPException
+        ? new Response(error.message, { status: error.status })
+        : await renderErrorPage(ctx, error)
     }
     return withPageHeaders(response)
   })
 }
 
 /**
- * The answer to an error no route caught, such as the 404 of an unknown address: what Fresh's
- * default handler answers. Fresh makes that answer outside every middleware, so it would leave
- * without the security headers; an error page (`routes/_error.tsx`) catches the error earlier.
+ * The last resort, in plain text: the answer to an error {@link pageMiddleware} did not turn into
+ * the error page, because it came from a static file or from rendering that page. It is what
+ * Fresh's default handler answers; Fresh makes that answer outside every middleware, so it would
+ * leave without the security headers.
  */
 function errorResponse(error: unknown): Response {
   if (error instanceof HttpError && error.status < 500) {
