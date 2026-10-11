@@ -44,6 +44,9 @@ export function readSubscribersSetup(
     .map((value) => value.trim())
     .filter((value) => value !== ``)
   const site = env.get(`MPA_DOMAIN`)?.trim() ?? ``
+  if (site.includes(`://`)) {
+    throw new Error(`MPA_DOMAIN must be a host such as www.example.com, without a scheme`)
+  }
   const pages = site === ``
     ? {}
     : { siteUrl: new URL(`http${mode === `dev` ? `` : `s`}://${site}`).origin }

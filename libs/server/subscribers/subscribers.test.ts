@@ -41,6 +41,15 @@ describe("subscriber setup", () => {
     expect(dev?.siteUrl).toBe(`http://www.localhost:8001`)
   })
 
+  it("refuses an MPA_DOMAIN that carries a scheme instead of mailing links to the host `https`", () => {
+    expect(() =>
+      readSubscribersSetup(
+        env({ SUBSCRIBERS_SECRET: SECRET, MPA_DOMAIN: `https://www.example.com` }),
+        `prod`,
+      )
+    ).toThrow(`MPA_DOMAIN must be a host`)
+  })
+
   it("keeps the mailed links on the app when the website is not deployed", () => {
     for (const MPA_DOMAIN of [undefined, ``, ` `]) {
       const values: Record<string, string> = { SUBSCRIBERS_SECRET: SECRET }
