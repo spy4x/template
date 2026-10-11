@@ -57,6 +57,8 @@ function harness() {
   const removed: ReferenceRemoved[] = []
   const state = {
     online: true,
+    /** The server no longer has the tag when it is asked for it. */
+    tagGone: false,
     /** Throws to simulate the server; returns the answer otherwise. */
     server: (call: Sent): unknown => {
       const id = String(call.payload.id)
@@ -71,7 +73,9 @@ function harness() {
       return await state.server(call)
     },
     query: (name, payload) =>
-      name === "tag.get"
+      name === "tag.get" && state.tagGone
+        ? Promise.reject(refused("TAG_NOT_FOUND"))
+        : name === "tag.get"
         ? Promise.resolve({ tag: tag(String((payload as { id: string }).id), 2, "Theirs") })
         : Promise.reject(new Error(`unexpected query ${name}`)),
   }
@@ -237,6 +241,29 @@ describe("tag failures", () => {
     const [entry] = tags.outbox.entries()
     expect(entry.status).toBe("conflict")
     expect(entry.conflict?.message).toBe("Someone changed this tag while you were offline.")
+  })
+
+  it("say the tag was deleted when someone deleted it meanwhile", async () => {
+    const { tags, collections, state } = harness()
+    state.online = false
+    await tags.outbox.submit({
+      kind: "update",
+      entityId: "t-0",
+      payload: { groupId, name: "Mine", color: "red" },
+      version: 1,
+    })
+    state.online = true
+    state.tagGone = true
+    state.server = () => {
+      throw refused("TAG_NOT_FOUND")
+    }
+
+    await collections.flush()
+
+    const [entry] = tags.outbox.entries()
+    expect(entry.status).toBe("conflict")
+    expect(entry.conflict?.reason).toBe("gone")
+    expect(entry.conflict?.message).toBe("This tag was deleted while you were offline.")
   })
 
   it("keep a tag queued while the server says the session ended", async () => {
