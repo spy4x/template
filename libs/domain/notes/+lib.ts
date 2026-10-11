@@ -1,6 +1,7 @@
 import { type Type, type } from "arktype"
 import type { Command, Query } from "@spy4x/platform/cqrs"
 import type { Actor } from "@domain/identity"
+import { hasUnsafeTextCharacters } from "@spy4x/platform/universal/text"
 import { UUID_PATTERN } from "@spy4x/platform/universal/uuid"
 import { canMutateNotes, canRead, GroupRole } from "@domain/groups"
 
@@ -196,7 +197,11 @@ export const noteListPayloadSchema = type({
 
 /**
  * Validates `value` against `schema`, then trims the title and checks both lengths in characters,
- * so an emoji counts as one. Throws `NoteError("INVALID_REQUEST")`.
+ * so an emoji counts as one. A title that holds a control character (NUL, a tab, a line break) or
+ * an invisible or text-direction character is refused: Postgres cannot store the first, and a
+ * title is one visible line. The body is not checked this way (see the pull request of #330): the
+ * library's check also refuses characters that pasted and right-to-left prose holds.
+ * Throws `NoteError("INVALID_REQUEST")`.
  */
 export function parseNoteRequest<S extends Type<object>>(schema: S, value: unknown): S["infer"] {
   const result = schema(value)
@@ -214,6 +219,12 @@ export function parseNoteRequest<S extends Type<object>>(schema: S, value: unkno
     throw new NoteError(
       "INVALID_REQUEST",
       `Note title must contain 1 to ${NOTE_TITLE_MAX_LENGTH} characters`,
+    )
+  }
+  if (hasUnsafeTextCharacters(title)) {
+    throw new NoteError(
+      "INVALID_REQUEST",
+      "Note title must not contain control or invisible characters",
     )
   }
   if (Array.from(parsed.body ?? "").length > NOTE_BODY_MAX_LENGTH) {

@@ -1,6 +1,7 @@
 import { type } from "arktype"
 import { BaseModelSchema, dateSchema } from "@spy4x/platform/model"
 import type { SecondFactorStatus } from "@spy4x/server/sign-in"
+import { hasUnsafeTextCharacters } from "@spy4x/platform/universal/text"
 
 // Not in @spy4x/platform/model: too template-specific (a user's name length limit) to belong in a
 // general-purpose package. Moved here from the deleted libs/platform/types/+index.ts.
@@ -40,9 +41,18 @@ export type User = typeof userSchema.infer
 export const userUpdateSchema = userBaseSchema.pick("firstName", "lastName")
 export type UserUpdate = typeof userUpdateSchema.infer
 
+/**
+ * A person's first or last name as they type it: 1 to {@link NAME_MAX_LENGTH} characters, none of
+ * them a control character (NUL, a tab, a line break), which Postgres may refuse, or an invisible
+ * or text-direction one.
+ */
+const personNameField = type(`1 <= string <= ${NAME_MAX_LENGTH}`).narrow((value, context) =>
+  !hasUnsafeTextCharacters(value) || context.mustBe("free of control and invisible characters")
+)
+
 export const userProfileBaseSchema = type({
-  firstName: `1 <= string <= ${NAME_MAX_LENGTH}`,
-  lastName: `1 <= string <= ${NAME_MAX_LENGTH}`,
+  firstName: personNameField,
+  lastName: personNameField,
 })
 export type UserProfileBase = typeof userProfileBaseSchema.infer
 
