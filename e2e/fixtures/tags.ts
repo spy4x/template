@@ -112,7 +112,7 @@ export class TagsPage {
 
   async remove(name: string): Promise<void> {
     await this.page.getByRole("button", { name: `Actions for ${name}`, exact: true }).click()
-    await this.page.locator("[data-e2e=tag-delete]").click()
+    await this.page.locator("[data-e2e=tag-delete]:visible").click()
     await this.page.locator("[data-e2e=tag-delete-dialog]")
       .getByRole("button", { name: "Delete", exact: true }).click()
   }
