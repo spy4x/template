@@ -14,7 +14,10 @@ export interface GroupChange {
 }
 
 /** What a payload on {@link GROUP_CHANGE_CHANNEL} must look like; anything else is dropped. */
-export const groupChangeSchema = type({ groupId: "string.uuid", sequence: "number.safe >= 1" })
+export const groupChangeSchema = type({
+  groupId: "string.uuid",
+  sequence: "number.integer & number.safe >= 1",
+})
 
 /**
  * Turns one committed outbox row into a Postgres notification, which is how a change reaches the
@@ -70,8 +73,8 @@ export interface GroupAccessLoss {
 /** What a payload on {@link GROUP_ACCESS_LOST_CHANNEL} must look like; anything else is dropped. */
 export const groupAccessLossSchema = type({
   groupId: "string.uuid",
-  sequence: "number.safe >= 1",
-  userIds: "(number.safe >= 1)[] > 0",
+  sequence: "number.integer & number.safe >= 1",
+  userIds: "(number.integer & number.safe >= 1)[] > 0",
 })
 
 /**

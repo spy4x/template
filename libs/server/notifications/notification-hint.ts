@@ -24,7 +24,7 @@ export async function announceNotificationChange(
 }
 
 /** What a payload on {@link USER_NOTIFICATION_CHANNEL} must look like; anything else is dropped. */
-export const notificationChangeSchema = type({ userId: "number.safe >= 1" })
+export const notificationChangeSchema = type({ userId: "number.integer & number.safe >= 1" })
 
 /**
  * Calls `onChange` for every inbox change announced on {@link USER_NOTIFICATION_CHANNEL}. Returns a
