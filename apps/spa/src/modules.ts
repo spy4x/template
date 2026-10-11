@@ -51,15 +51,13 @@ export interface ModuleSwitches {
 
 const switches: ModuleSwitches = { realtime: true, offline: true }
 
-/** A switch is off only when the configuration says `false`; the container writes it as text. */
-function isOn(value: boolean | "true" | "false" | undefined): boolean {
-  return value !== false && value !== "false"
-}
-
-/** Reads the switches from the runtime configuration. Called once, before the first render. */
+/**
+ * Reads the switches from the runtime configuration. Called once, before the first render. A
+ * switch is off only when the configuration says so (`runtime-config.ts` reads the file's text).
+ */
 export function configureModules(config: Pick<RuntimeConfig, "realtime" | "offline">): void {
-  switches.realtime = isOn(config.realtime)
-  switches.offline = isOn(config.offline)
+  switches.realtime = config.realtime !== false
+  switches.offline = config.offline !== false
 }
 
 /** The switches as they are now. */
