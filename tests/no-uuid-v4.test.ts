@@ -4,26 +4,27 @@
  * `@spy4x/platform/universal/uuid`, whatever it names. A secret, a value that alone lets its holder
  * in, is not converted by whoever finds it: the owner decides what it becomes.
  *
- * This test reads every text file of the repository (code, SQL, shell, HTML, configuration and
- * documents) and fails on a call that makes a version 4 id, on a pattern that accepts only version
- * 4, and on a document that shows either. The CI image has no git, so the files are found by
- * walking the tree and leaving out what `.gitignore` leaves out.
+ * This test reads every text file of the repository, whatever its extension (code, SQL, shell,
+ * HTML, configuration and documents), and fails on a call that makes a version 4 id, on a pattern
+ * that accepts only version 4, and on a document that shows either. The CI image has no git, so
+ * the files are found by walking the tree and leaving out what `.gitignore` leaves out, each
+ * directory by its exact path from the root.
  */
 
 import { expect } from "@std/expect"
-import { walk } from "@std/fs/walk"
-import { fromFileUrl, relative } from "@std/path"
+import { fromFileUrl } from "@std/path"
 
 const ROOT = fromFileUrl(new URL("../", import.meta.url))
 
 /**
  * What makes a version 4 id: the Web Crypto call, the two Postgres functions, and the npm and
  * `@std/uuid` helpers under their usual names (`uuidv4()`, `v4()`, `v4 as name`, a `uuid/v4`
- * path). And what accepts only version 4: this repository's former `UUID_V4` and `isUuidV4`, and
+ * path), any import that names `v4`, and any import of the npm `uuid` package, whose default is
+ * version 4. And what accepts only version 4: this repository's former `UUID_V4` and `isUuidV4`, and
  * a hand-written pattern whose third group must start with `4`.
  */
 const FORBIDDEN =
-  /randomUUID|gen_random_uuid|uuid_generate_v4|uuidv4\s*\(|uuid\/v4|\bv4\s*\(|\bv4\s+as\b|UUID_V4|isUuidV4|-4\[[^\]\n]+\]\{3\}/gi
+  /randomUUID|gen_random_uuid|uuid_generate_v4|uuidv4\s*\(|uuid\/v4|\bv4\s*\(|\bv4\s+as\b|\{[^}\n]*\bv4\b[^}\n]*\}\s*from|["'](?:npm:)?uuid(?:@[^"'/\n]*)?["']|UUID_V4|isUuidV4|-4\[[^\]\n]+\]\{3\}/gi
 
 /**
  * The only files that may hold them, each by its exact path: a new migration is checked like any
@@ -47,13 +48,54 @@ export const PENDING: ReadonlyMap<string, string> = new Map([
   ["libs/server/billing/setup.ts", ": `whsec_unused_${crypto.randomUUID()}`,"],
 ])
 
-/** File types that hold code, SQL, scripts, configuration or documents a reader could copy from. */
-const SCANNED =
-  /(\.(ts|tsx|js|mjs|sql|md|json|jsonc|ya?ml|sh|html|css|txt|conf|example|dev|prod|base)|[\\/]dockerfile)$/i
+/**
+ * Directories git does not track here (dependencies, build output, reports, local data and git's
+ * own), each by its exact path from the root. A tracked folder that only shares a name with one
+ * of them, such as `libs/server/report`, is read.
+ */
+const SKIPPED_DIRECTORIES: readonly string[] = [
+  ".git",
+  ".age",
+  ".idea",
+  ".vs",
+  ".volumes",
+  "node_modules",
+  "apps/api/node_modules",
+  "apps/mpa/node_modules",
+  "apps/spa/node_modules",
+  "apps/worker/node_modules",
+  "apps/mpa/.vite",
+  "apps/mpa/_fresh",
+  "apps/spa/.vite",
+  "apps/spa/dist",
+  "e2e/report",
+  "e2e/results",
+  "playwright-report",
+]
 
-/** Directories git does not track here: dependencies, build output, reports and git's own. */
-const SKIPPED =
-  /[\\/](\.git|node_modules|build|dist|\.vite|_fresh|package|\.volumes|results|report|playwright-report|\.age|\.vs|\.idea)[\\/]/
+/** Single files git does not track here: generated ones, logs, and env files, which hold secrets. */
+const SKIPPED_FILES =
+  /^(apps\/spa\/security-headers\.conf|infra\/configs\/vapid\.json|tests\/\.scratch-.*|(.*\/)?(\.DS_Store|[^/]*\.log|vite\.config\.[jt]s\.timestamp-[^/]*|\.env(?![^/]*\.example$)[^/]*))$/
+
+/**
+ * Whether the guard leaves out `path` (a file or a directory, relative to the root, with `/`).
+ * Nothing is left out for its extension: any file that is not skipped here is read.
+ */
+export function isSkipped(path: string): boolean {
+  return SKIPPED_DIRECTORIES.some((directory) =>
+    path === directory || path.startsWith(`${directory}/`)
+  ) || SKIPPED_FILES.test(path)
+}
+
+/** Every file under `directory` that is not skipped, as its path from the root. */
+async function* repositoryFiles(directory = ""): AsyncGenerator<string> {
+  for await (const entry of Deno.readDir(`${ROOT}${directory}`)) {
+    const path = `${directory}${entry.name}`
+    if (isSkipped(path)) continue
+    if (entry.isDirectory) yield* repositoryFiles(`${path}/`)
+    else if (entry.isFile) yield path
+  }
+}
 
 /** `path:line: match` for every forbidden name in `text`, leaving out the file's pending line. */
 export function findUuidV4(path: string, text: string): string[] {
@@ -79,18 +121,16 @@ export function offendersIn(files: Iterable<readonly [path: string, text: string
 
 Deno.test("no file of the repository creates, accepts only or documents a UUID version 4", async () => {
   const files: [string, string][] = []
-  const entries = walk(ROOT, { includeDirs: false, match: [SCANNED], skip: [SKIPPED] })
-  for await (const entry of entries) {
-    // An env file can hold secrets and is not tracked; its example is.
-    if (/[\\/]\.env/.test(entry.path) && !entry.path.endsWith(".example")) continue
-    const path = relative(ROOT, entry.path).replaceAll("\\", "/")
-    files.push([path, await Deno.readTextFile(entry.path)])
+  for await (const path of repositoryFiles()) {
+    const bytes = await Deno.readFile(`${ROOT}${path}`)
+    // A file with a zero byte is an image or another binary, not text.
+    if (!bytes.includes(0)) files.push([path, new TextDecoder().decode(bytes)])
   }
   const seen = new Set(files.map(([path]) => path))
-  // A wrong root or a too-greedy skip must not pass by reading less: about 670 text files are
+  // A wrong root or a too-greedy skip must not pass by reading less: more than 690 text files are
   // tracked today, among them SQL, Markdown, shell and HTML, and every allowed file was walked.
-  expect(files.length).toBeGreaterThan(600)
-  for (const kind of [".sql", ".md", ".sh", ".html", ".tsx", ".yml"]) {
+  expect(files.length).toBeGreaterThan(690)
+  for (const kind of [".sql", ".md", ".sh", ".html", ".tsx", ".yml", ".lock", "dockerfile"]) {
     expect(files.some(([path]) => path.endsWith(kind))).toBe(true)
   }
   for (const path of ALLOWED) {
@@ -127,9 +167,74 @@ Deno.test("the UUID version 4 guard sees each way of making one", () => {
     `import { v4 as makeId } from "npm:uuid"`,
   ]
   for (const sample of samples) {
-    expect([sample, findUuidV4("sample.ts", sample).length]).toEqual([sample, 1])
+    expect([sample, findUuidV4("sample.ts", sample).length > 0]).toEqual([sample, true])
   }
   expect(findUuidV4("a.ts", "one\ntwo crypto.randomUUID()")).toEqual(["a.ts:2: randomUUID"])
+})
+
+Deno.test("the UUID version 4 guard sees a version 4 helper imported under any name", () => {
+  const samples = [
+    `import { v4 } from "npm:uuid"`,
+    // One line of an import written over several lines.
+    `  v4 as makeId,`,
+    `import { v4 } from "@std/uuid"`,
+    `import { validate, v4 } from "./vendor/uuid.ts"`,
+    `import * as uuid from "npm:uuid@11.0.3"`,
+    `import { stringify } from 'uuid'`,
+    `const { v4: make } = await import("npm:uuid")`,
+    `"uuid": "npm:uuid@^11.0.0",`,
+  ]
+  for (const sample of samples) {
+    expect([sample, findUuidV4("sample.ts", sample).length > 0]).toEqual([sample, true])
+  }
+})
+
+Deno.test("the UUID version 4 guard reads a file whatever its extension", () => {
+  for (
+    const path of [
+      "apps/api/zz.mts",
+      "apps/api/zz.cjs",
+      "libs/ui/zz.jsx",
+      "apps/api/dockerfile",
+      "infra/scripts/make-id",
+      "apps/spa/public-env.allow",
+      ".env.example",
+      "deno.lock",
+    ]
+  ) {
+    expect([path, isSkipped(path)]).toEqual([path, false])
+  }
+})
+
+Deno.test("the UUID version 4 guard skips a directory only at its exact path from the root", () => {
+  for (
+    const path of [
+      "libs/server/report/zz-g.ts",
+      "libs/server/results/zz.ts",
+      "apps/api/dist/zz.ts",
+      "libs/build/zz.ts",
+      "libs/package/zz.ts",
+      "docs/node_modules/zz.js",
+      "e2e/reporter.ts",
+      "apps/spa/distribution.ts",
+    ]
+  ) {
+    expect([path, isSkipped(path)]).toEqual([path, false])
+  }
+  for (
+    const path of [
+      "e2e/report",
+      "e2e/report/index.html",
+      "node_modules/uuid/dist/v4.js",
+      "apps/spa/dist/sw.js",
+      ".git",
+      ".env",
+      "apps/spa/.env.dev",
+      "e2e/results/run.log",
+    ]
+  ) {
+    expect([path, isSkipped(path)]).toEqual([path, true])
+  }
 })
 
 Deno.test("the UUID version 4 guard sees a validator that accepts only version 4", () => {
