@@ -243,8 +243,8 @@ deno task hooks:install   # runs the checks before every commit
 
 `deno task e2e` runs the Playwright specs in `e2e/` against the stack `deno task dev` started, at
 `http://app.localhost`. `deno task e2e:local` runs the same specs without that stack: it starts
-its own Postgres and Valkey containers, the API, the worker, the dev server and a proxy on spare
-ports, and removes all of them when it ends or is stopped.
+its own Postgres and Valkey containers, the API, the worker, the SPA and a proxy on spare ports,
+and removes all of them when it ends or is stopped.
 
 ```sh
 deno task e2e:local                        # every spec
@@ -255,10 +255,11 @@ deno task e2e:report                       # open the report of the last run
 
 The two specs that start the app with no network, `e2e/offline.e2e.ts` and
 `e2e/local-data.e2e.ts`, run against the built SPA, the image a deploy serves, and every other spec
-against the dev server ([docs/offline.md](docs/offline.md), "The app shell", says why). One run has
-one server: a run without file names leaves those two out and names them in its last line, and
-`deno task e2e:local e2e/offline.e2e.ts e2e/local-data.e2e.ts` runs them. `E2E_SPA=dev` or
-`E2E_SPA=built` puts every spec asked for on that server.
+against the dev server ([docs/offline.md](docs/offline.md), "The app shell", says why). A run that
+needs both makes two Playwright passes, the dev server first and then the built SPA in its place,
+so `deno task e2e:local` alone still runs every spec. It fails when either pass fails, and its last
+lines give the counts of each pass. An argument that is not a spec path goes to both passes.
+`E2E_SPA=dev` or `E2E_SPA=built` puts every spec asked for on that one server.
 
 It needs a container tool (`CONTAINER_PROVIDER`, `podman` by default) and the Chromium of the
 pinned Playwright. The header of [`infra/scripts/e2e-local.sh`](infra/scripts/e2e-local.sh) lists

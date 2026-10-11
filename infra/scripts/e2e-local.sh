@@ -24,18 +24,22 @@
 #     `apps/spa/dockerfile.prod` (the base image first) and runs it, so the page is the hashed
 #     bundle behind nginx with `apps/spa/nginx.conf`. The two images it tags are removed at the
 #     end; the first build takes a few minutes.
-# Left unset, the specs that start the app with no network (`OFFLINE_SPECS` below) get the built
-# SPA and every other spec the dev server (docs/offline.md, "The app shell", says why):
-#   deno task e2e:local e2e/offline.e2e.ts e2e/local-data.e2e.ts   built SPA
-#   deno task e2e:local e2e/notes.e2e.ts                           dev server
-#   deno task e2e:local                                            dev server, without the offline
-#                                                                  specs: the last line names them
-# One run has one server, so a run that names both kinds stops and asks for two runs. With
-# `E2E_SPA` set, every spec asked for runs against that server.
+# Left unset, the specs that start the app with no network (`OFFLINE_SPECS` of
+# `e2e-local-plan.ts`) get the built SPA and every other spec the dev server (docs/offline.md,
+# "The app shell", says why). One Playwright pass has one server, so a run makes two passes when
+# it needs both: the dev server first, then the built SPA in its place.
+#   deno task e2e:local                                            two passes: every spec
+#   deno task e2e:local e2e/notes.e2e.ts                           one pass, dev server
+#   deno task e2e:local e2e/offline.e2e.ts e2e/local-data.e2e.ts   one pass, built SPA
+#   deno task e2e:local e2e/notes.e2e.ts e2e/offline.e2e.ts        two passes, one spec each
+# An argument that is not a spec path goes to both passes. The run fails when either pass fails,
+# or when no test matched in any pass, and its last lines give the counts of each pass. The
+# report of the second of two passes is in `e2e/report/offline`. With `E2E_SPA` set, every spec
+# asked for runs in one pass against that server.
 #
 # Needs: Deno, a container tool, `curl`, `openssl`, and the Chromium of the pinned Playwright
 # (`deno run -A npm:playwright@1.57.0 install chromium`). `E2E_CHROMIUM` names another Chromium
-# binary to use instead. `E2E_LOCAL_TIMEOUT` is the deadline of the Playwright run in seconds
+# binary to use instead. `E2E_LOCAL_TIMEOUT` is the deadline of one Playwright pass in seconds
 # (1500 by default).
 #
 # Under a process cap, allow 3000 tasks: the cap counts threads, and Chromium with several
@@ -50,40 +54,24 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 CONTAINER=${CONTAINER_PROVIDER:-podman}
-# The specs that load a page with the network cut.
-OFFLINE_SPECS=(offline.e2e.ts local-data.e2e.ts)
-is_offline_spec() {
-  local spec
-  for spec in "${OFFLINE_SPECS[@]}"; do [ "$spec" = "$(basename "$1")" ] && return 0; done
-  return 1
-}
-# The offline specs a run on the dev server leaves out.
-LEFT_OUT=()
-if [ -z "${E2E_SPA:-}" ]; then
-  NAMED=0
-  NAMED_OFFLINE=0
-  for arg in "$@"; do
-    file=${arg%%:*}
-    [[ "$file" == *.e2e.ts && -f "$file" ]] || continue
-    NAMED=$((NAMED + 1))
-    ! is_offline_spec "$file" || NAMED_OFFLINE=$((NAMED_OFFLINE + 1))
-  done
-  if [ "$NAMED_OFFLINE" -gt 0 ] && [ "$NAMED_OFFLINE" -lt "$NAMED" ]; then
-    echo "${OFFLINE_SPECS[*]} run against the built SPA and the other specs against the dev server:"
-    echo "name them in two runs, or set E2E_SPA to dev or built to run all of these against one"
-    exit 1
-  elif [ "$NAMED_OFFLINE" -gt 0 ]; then
-    E2E_SPA=built
-  else
-    E2E_SPA=dev
-    # Only a run that names no spec would have run them.
-    [ "$NAMED" -gt 0 ] || LEFT_OUT=("${OFFLINE_SPECS[@]}")
-  fi
-fi
-case "$E2E_SPA" in
-  dev | built) ;;
-  *) echo "E2E_SPA is \"$E2E_SPA\"; it must be dev or built"; exit 1 ;;
-esac
+command -v deno >/dev/null || { echo "e2e:local needs deno"; exit 1; }
+# The passes of this run: what serves the SPA, which specs it may see, and its arguments.
+PASS_SERVER=()
+PASS_SPECS=()
+PASS_ARGS=() # the arguments of a pass, one per line
+PLAN=$(deno run --allow-read infra/scripts/e2e-local-plan.ts "${E2E_SPA:-}" "$@")
+while IFS= read -r line; do
+  case "$line" in
+    "pass "*)
+      read -r _ server specs <<<"$line"
+      PASS_SERVER+=("$server")
+      PASS_SPECS+=("$specs")
+      PASS_ARGS+=("")
+      ;;
+    "arg "*) PASS_ARGS[-1]+="${line#arg }"$'\n' ;;
+  esac
+done <<<"$PLAN"
+[ ${#PASS_SERVER[@]} -gt 0 ] || { echo "e2e-local-plan.ts gave no pass"; exit 1; }
 RUN_ID="$$-$RANDOM"
 PG_NAME="template-e2e-pg-$RUN_ID"
 KV_NAME="template-e2e-kv-$RUN_ID"
@@ -242,31 +230,49 @@ log "starting the worker"
 start worker deno run --allow-all apps/worker/+main.ts
 wait_for worker "${PIDS[-1]}" 60 grep -q "Worker started" "$SCRATCH/worker.log"
 
-if [ "$E2E_SPA" = built ]; then
-  # The image exactly as a deploy builds it, as `e2e/spa/run.sh` does: keep the two in step.
-  log "building the SPA image"
-  IMAGES+=("$BASE_IMAGE" "$SPA_IMAGE")
-  timeout 900 "$CONTAINER" build --quiet --tag "$BASE_IMAGE" --file Dockerfile.base . \
-    >"$SCRATCH/base-image.log" 2>&1 ||
-    { log "the base image did not build"; tail -n 40 "$SCRATCH/base-image.log"; exit 1; }
-  timeout 900 "$CONTAINER" build --quiet --build-arg "BASE_IMAGE=$BASE_IMAGE" --tag "$SPA_IMAGE" \
-    --file apps/spa/dockerfile.prod . >"$SCRATCH/spa-image.log" 2>&1 ||
-    { log "the SPA image did not build"; tail -n 40 "$SCRATCH/spa-image.log"; exit 1; }
-  log "starting the built SPA on 127.0.0.1:$SPA_PORT"
-  CONTAINERS+=("$SPA_NAME")
-  timeout 300 "$CONTAINER" run --detach --name "$SPA_NAME" --pids-limit=500 --memory=1g \
-    --env SPA_ENV=dev -p "127.0.0.1:$SPA_PORT:8080" "$SPA_IMAGE" >/dev/null
-  for _ in $(seq 1 120); do
-    answers "http://127.0.0.1:$SPA_PORT/" 2>/dev/null && break
-    sleep 0.5
-  done
-  answers "http://127.0.0.1:$SPA_PORT/" ||
-    { log "the built SPA did not answer within 60 s"; "$CONTAINER" logs "$SPA_NAME" 2>&1 | tail -n 40; exit 1; }
-else
-  log "starting the dev server on 127.0.0.1:$SPA_PORT"
-  start spa env VITE_ENV=dev deno task spa:dev --port "$SPA_PORT" --strictPort --host 127.0.0.1
-  wait_for spa "${PIDS[-1]}" 120 answers "http://127.0.0.1:$SPA_PORT/"
-fi
+# Puts <server> at $SPA_PORT, in place of the dev server when that is there. A run starts the dev
+# server first, so the built SPA never has to make way.
+SPA_SERVER=""
+SPA_PID=""
+start_spa() { # <dev|built>
+  [ "$SPA_SERVER" = "$1" ] && return 0
+  if [ -n "$SPA_PID" ]; then
+    log "stopping the dev server"
+    stop_group "$SPA_PID"
+    SPA_PID=""
+  fi
+  SPA_SERVER=$1
+  if [ "$1" = built ]; then
+    # The image exactly as a deploy builds it, as `e2e/spa/run.sh` does: keep the two in step.
+    log "building the SPA image"
+    IMAGES+=("$BASE_IMAGE" "$SPA_IMAGE")
+    timeout 900 "$CONTAINER" build --quiet --tag "$BASE_IMAGE" --file Dockerfile.base . \
+      >"$SCRATCH/base-image.log" 2>&1 ||
+      { log "the base image did not build"; tail -n 40 "$SCRATCH/base-image.log"; exit 1; }
+    timeout 900 "$CONTAINER" build --quiet --build-arg "BASE_IMAGE=$BASE_IMAGE" \
+      --tag "$SPA_IMAGE" --file apps/spa/dockerfile.prod . >"$SCRATCH/spa-image.log" 2>&1 ||
+      { log "the SPA image did not build"; tail -n 40 "$SCRATCH/spa-image.log"; exit 1; }
+    log "starting the built SPA on 127.0.0.1:$SPA_PORT"
+    CONTAINERS+=("$SPA_NAME")
+    timeout 300 "$CONTAINER" run --detach --name "$SPA_NAME" --pids-limit=500 --memory=1g \
+      --env SPA_ENV=dev -p "127.0.0.1:$SPA_PORT:8080" "$SPA_IMAGE" >/dev/null
+    for _ in $(seq 1 120); do
+      answers "http://127.0.0.1:$SPA_PORT/" 2>/dev/null && break
+      sleep 0.5
+    done
+    answers "http://127.0.0.1:$SPA_PORT/" || {
+      log "the built SPA did not answer within 60 s"
+      "$CONTAINER" logs "$SPA_NAME" 2>&1 | tail -n 40
+      exit 1
+    }
+  else
+    log "starting the dev server on 127.0.0.1:$SPA_PORT"
+    start spa env VITE_ENV=dev deno task spa:dev --port "$SPA_PORT" --strictPort --host 127.0.0.1
+    SPA_PID=${PIDS[-1]}
+    wait_for spa "$SPA_PID" 120 answers "http://127.0.0.1:$SPA_PORT/"
+  fi
+}
+start_spa "${PASS_SERVER[0]}"
 
 log "starting the proxy on 127.0.0.1:$FRONT_PORT"
 start proxy env FRONT_PORT="$FRONT_PORT" API_PORT="$API_PORT" SPA_PORT="$SPA_PORT" \
@@ -278,15 +284,10 @@ wait_for proxy "${PIDS[-1]}" 30 answers "http://127.0.0.1:$FRONT_PORT/api/health
 getent hosts app.localhost >/dev/null 2>&1 ||
   log "warning: app.localhost does not resolve here; requests the specs make outside the browser will fail"
 
-# The copy of the specs and their fixtures that names the port, and a config that points at it.
-# It lives inside the checkout so `@playwright/test` resolves through this node_modules.
+# The copy of the fixtures, and a config that points at it. Each pass adds its specs, with the port
+# named. It lives inside the checkout so `@playwright/test` resolves through this node_modules.
 mkdir -p "$COPY_DIR"
 cp -r e2e/fixtures "$COPY_DIR/fixtures"
-for spec in e2e/*.e2e.ts; do
-  [[ " ${LEFT_OUT[*]} " == *" $(basename "$spec") "* ]] && continue
-  sed -e "s#http://app.localhost\"#http://app.localhost:$FRONT_PORT\"#g" "$spec" \
-    >"$COPY_DIR/$(basename "$spec")"
-done
 LAUNCH=""
 [ -n "${E2E_CHROMIUM:-}" ] && LAUNCH="use: { launchOptions: { executablePath: \"$E2E_CHROMIUM\" } },"
 cat >"$COPY_DIR/playwright.config.ts" <<CONFIG
@@ -305,28 +306,66 @@ export default defineConfig({
 })
 CONFIG
 
-# Playwright matches a file argument against the path of the copy, so `e2e/notes.e2e.ts:42`
-# becomes `notes.e2e.ts:42`. Everything else is passed on as it is.
-ARGS=()
-for arg in "$@"; do
-  file=${arg%%:*}
-  if [[ "$file" == *.e2e.ts && -f "$file" ]]; then
-    ARGS+=("$(basename "$file")${arg#"$file"}")
-  else
-    ARGS+=("$arg")
-  fi
-done
+OFFLINE_SPECS=" $(deno eval 'import { OFFLINE_SPECS } from "./infra/scripts/e2e-local-plan.ts"; console.log(OFFLINE_SPECS.join(" "))') "
 
-# In the background, so a signal reaches the traps above while Playwright runs.
-log "running Playwright at http://app.localhost:$FRONT_PORT"
-PLAYWRIGHT_HTML_OUTPUT_DIR="$ROOT/e2e/report" setsid \
-  timeout --kill-after=10 "${E2E_LOCAL_TIMEOUT:-1500}" \
-  deno run -A --node-modules-dir npm:playwright@1.57.0 test \
-  --config="$COPY_DIR/playwright.config.ts" "${ARGS[@]}" &
-PIDS+=($!)
+# Leaves in the copy the specs pass <specs> may see: `all`, `offline`, or `other` (the rest).
+copy_specs() { # <all|offline|other>
+  local spec name kind
+  find "$COPY_DIR" -maxdepth 1 -name '*.e2e.ts' -delete
+  for spec in e2e/*.e2e.ts; do
+    name=$(basename "$spec")
+    kind=other
+    [[ "$OFFLINE_SPECS" == *" $name "* ]] && kind=offline
+    [ "$1" = all ] || [ "$1" = "$kind" ] || continue
+    sed -e "s#http://app.localhost\"#http://app.localhost:$FRONT_PORT\"#g" "$spec" \
+      >"$COPY_DIR/$name"
+  done
+}
+
+# What Playwright printed last in <log>: "12 passed (1.2m)", "1 failed", "2 flaky" and the like.
+counts() { # <log>
+  sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g' "$1" | tr '\r' '\n' |
+    grep -E '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' |
+    sed -e 's/^ *//' | paste -sd, - | sed -e 's/,/, /g'
+}
+
 STATUS=0
-wait "${PIDS[-1]}" || STATUS=$?
-[ "$STATUS" = 124 ] && log "Playwright did not finish within ${E2E_LOCAL_TIMEOUT:-1500} s"
-[ ${#LEFT_OUT[@]} = 0 ] ||
-  log "not run: ${LEFT_OUT[*]}. They need the built SPA: deno task e2e:local ${LEFT_OUT[*]/#/e2e/}"
+SUMMARY=()
+MATCHED=0
+for i in "${!PASS_SERVER[@]}"; do
+  server=${PASS_SERVER[i]}
+  start_spa "$server"
+  copy_specs "${PASS_SPECS[i]}"
+  ARGS=()
+  [ -z "${PASS_ARGS[i]}" ] || mapfile -t ARGS <<<"${PASS_ARGS[i]%$'\n'}"
+  REPORT="$ROOT/e2e/report"
+  if [ ${#PASS_SERVER[@]} -gt 1 ]; then
+    # A filter such as `-g` may match in one pass only; the check after the loop catches none.
+    ARGS+=(--pass-with-no-tests)
+    [ "$i" = 0 ] || REPORT="$ROOT/e2e/report/offline"
+  fi
+  # In the background, so a signal reaches the traps above while Playwright runs.
+  log "pass $((i + 1)) of ${#PASS_SERVER[@]}: running Playwright at http://app.localhost:$FRONT_PORT ($server)"
+  PLAYWRIGHT_HTML_OUTPUT_DIR="$REPORT" setsid \
+    timeout --kill-after=10 "${E2E_LOCAL_TIMEOUT:-1500}" \
+    deno run -A --node-modules-dir npm:playwright@1.57.0 test \
+    --config="$COPY_DIR/playwright.config.ts" "${ARGS[@]}" > >(tee "$SCRATCH/pass-$i.log") 2>&1 &
+  PIDS+=($!)
+  PASS_STATUS=0
+  wait "${PIDS[-1]}" || PASS_STATUS=$?
+  # `tee` may still be writing the last lines.
+  sleep 1
+  COUNTS=$(counts "$SCRATCH/pass-$i.log" || true)
+  [ -z "$COUNTS" ] || MATCHED=1
+  if [ "$PASS_STATUS" = 124 ]; then
+    COUNTS="did not finish within ${E2E_LOCAL_TIMEOUT:-1500} s${COUNTS:+, $COUNTS}"
+  fi
+  SUMMARY+=("pass $((i + 1)), $server: ${COUNTS:-no test matched} (exit $PASS_STATUS)")
+  [ "$STATUS" != 0 ] || STATUS=$PASS_STATUS
+done
+for line in "${SUMMARY[@]}"; do log "$line"; done
+if [ "$MATCHED" = 0 ] && [ "$STATUS" = 0 ]; then
+  log "no test matched in any pass"
+  STATUS=1
+fi
 exit "$STATUS"

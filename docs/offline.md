@@ -182,8 +182,9 @@ update.
 
 **The specs that start the app with no network run against the built SPA.** These are
 `e2e/offline.e2e.ts` and `e2e/local-data.e2e.ts`; `deno task e2e:local` gives them the image of
-`apps/spa/dockerfile.prod` behind the harness's proxy instead of the dev server
-(`infra/scripts/e2e-local.sh`, `E2E_SPA`). What a person runs offline is that build: a few files
+`apps/spa/dockerfile.prod` behind the harness's proxy instead of the dev server, in a Playwright
+pass of their own after the other specs' (`infra/scripts/e2e-local.sh`; `e2e-local-plan.ts` next
+to it decides the passes). What a person runs offline is that build: a few files
 named by hash, stored by the worker when it installs. The dev server serves a different page,
 several hundred modules fetched one by one (`/src/…`, `/@fs/…`, `/@id/…`,
 `/node_modules/.vite/deps/…`) and stored one by one as each is first fetched, so a pass or a
