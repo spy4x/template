@@ -140,7 +140,10 @@ const tokenRateLimits = createTokenRateLimits({
 const apiTokens = createApiTokens({
   db,
   key: await deriveSecret(config.authPepper, "api-tokens"),
-  checkPassword: (userId, password) => signIn.checkPassword(userId, password),
+  checkPassword: async (tx, userId, password) =>
+    (await signIn.hasPassword(userId, tx))
+      ? await signIn.checkPassword(userId, password, tx)
+      : null,
   mayAuditRefusal: tokenRateLimits.refusalAudit,
   logError: (message, error) => log(message, error),
 })

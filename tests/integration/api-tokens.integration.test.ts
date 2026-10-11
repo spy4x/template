@@ -19,7 +19,7 @@ import { purgeExpiredApiTokens } from "@server/api-tokens/purge-expired-api-toke
 import { API_TOKEN_CREATED_MAIL_JOB, apiTokenCreatedMailJob } from "@server/jobs/api-token-mail.ts"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn } from "../../apps/api/services/sign-in.ts"
-import { createApiTokens } from "../../apps/api/services/api-tokens.ts"
+import { createApiTokens, PASSWORD_NOT_SET_MESSAGE } from "../../apps/api/services/api-tokens.ts"
 import { createMutationGuards } from "../../apps/api/middlewares/mutation-guards.ts"
 import { createSessionGate } from "../../apps/api/cqrs/session-gate.ts"
 import { createEntitlementGate } from "../../apps/api/cqrs/entitlement-gate.ts"
@@ -140,10 +140,18 @@ async function buildApp(sql: postgres.Sql) {
     },
   })
   const logged: string[] = []
+  const hooks: { passwordChecked: (() => Promise<void>) | null } = { passwordChecked: null }
   const tokens = createApiTokens({
     db,
     key: TOKEN_KEY,
-    checkPassword: (userId, password) => signIn.checkPassword(userId, password),
+    checkPassword: async (tx, userId, password) => {
+      const valid = (await signIn.hasPassword(userId, tx))
+        ? await signIn.checkPassword(userId, password, tx)
+        : null
+      // Where a test puts another request between a create's password check and its insert.
+      await hooks.passwordChecked?.()
+      return valid
+    },
     mayAuditRefusal: limits.refusalAudit,
     logError: (message, error) => {
       if (!clock.storeDown) throw new Error(`${message}: ${error}`)
@@ -223,7 +231,7 @@ async function buildApp(sql: postgres.Sql) {
       auditRefusal: (c, tokenId, reason) => tokens.auditRefusal(c, tokenId, reason),
     }),
   )
-  return { app, clock, groups, sql, db, signIn, logged }
+  return { app, clock, groups, sql, db, signIn, logged, hooks }
 }
 
 type App = Awaited<ReturnType<typeof buildApp>>
@@ -512,7 +520,7 @@ Deno.test("creating a token needs the account's password: none, a wrong one and 
     const ada = await signUp(app, "ada@example.com")
     const bob = await signUp(app, "bob@example.com")
     await sql`UPDATE auth_keys SET secret = NULL WHERE user_id = ${bob.userId}`
-    const create = async (person: Person, password?: string) => {
+    const create = async (person: Person, password?: string, says = false) => {
       const response = await app.app.request(`${API}/tokens`, {
         method: "POST",
         headers: browser(person.cookie),
@@ -524,14 +532,21 @@ Deno.test("creating a token needs the account's password: none, a wrong one and 
           ...(password === undefined ? {} : { password }),
         }),
       })
-      return { status: response.status, code: ((await response.json()) as { code?: string }).code }
+      const body = (await response.json()) as { code?: string; error?: string }
+      return { status: response.status, code: body.code, ...(says ? { error: body.error } : {}) }
     }
 
     expect(await create(ada)).toEqual({ status: 400, code: "INVALID_REQUEST" })
     expect(await create(ada, "")).toEqual({ status: 400, code: "INVALID_REQUEST" })
     expect(await create(ada, "Not-the-Passw0rd")).toEqual({ status: 400, code: "PASSWORD_INVALID" })
-    // An account with no password has nothing to prove with: it cannot make a token.
-    expect(await create(bob, PASSWORD)).toEqual({ status: 400, code: "PASSWORD_INVALID" })
+    // An account with no password has nothing to prove with: it cannot make a token, and is told
+    // so instead of being told that a password it never had is wrong.
+    expect(await create(bob, PASSWORD, true)).toEqual({
+      status: 400,
+      code: "PASSWORD_INVALID",
+      error: PASSWORD_NOT_SET_MESSAGE,
+    })
+    expect((await create(ada, "Not-the-Passw0rd", true)).error).toBe("The password is incorrect")
 
     const [{ count }] = await sql<{ count: number }[]>`
       SELECT (SELECT count(*) FROM api_tokens)::int + (
@@ -970,6 +985,225 @@ Deno.test("a password change and a password reset each revoke every token of the
         .filter((row) => !byChange.some((earlier) => earlier.identifier === row.identifier)),
     ).toEqual([
       { identifier: named(second, ada.groupId, "write", "password-reset", "Second"), ip: null },
+    ])
+  })
+})
+
+/** Changes the person's password on the profile page's route. */
+function changePassword(app: App, person: Person, body: Record<string, unknown>) {
+  return app.app.request(`${API}/auth/password/change`, {
+    method: "POST",
+    headers: browser(person.cookie),
+    body: JSON.stringify({ password: PASSWORD, newPassword: "Changed-Passw0rd", ...body }),
+  })
+}
+
+Deno.test("a password change that signs the other devices out, the page's default, revokes every token", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const { secret } = await createToken(app, ada)
+
+    // No `signOutOthers`: what the page sends unless the person unticks the box.
+    const change = await changePassword(app, ada, {})
+    expect(change.status).toBe(200)
+    expect(await change.json()).toEqual({ success: true, revokedTokens: 1 })
+    expect((await listNotes(app, ada.groupId, secret)).status).toBe(401)
+  })
+})
+
+Deno.test("a password change or reset whose token revoke fails changes nothing: the old password still works", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const { secret } = await createToken(app, ada)
+    // The revoke writes an audit row of type 10 in the same statement: this makes it fail.
+    await sql`
+      ALTER TABLE auth_audits ADD CONSTRAINT no_revoke_row
+      CHECK (event_type <> ${sql.unsafe(String(AuthAuditEventType.API_TOKEN_REVOKED))}) NOT VALID
+    `
+    const unchanged = async () => {
+      expect(await app.signIn.checkPassword(ada.userId, PASSWORD)).toBe(true)
+      expect(await app.signIn.checkPassword(ada.userId, "Changed-Passw0rd")).toBe(false)
+      expect((await listNotes(app, ada.groupId, secret)).status).toBe(200)
+      // The session the change would have replaced is still the person's.
+      expect(await listed(app, ada)).toBe(1)
+    }
+
+    for (const body of [{}, { signOutOthers: false }]) {
+      const change = await changePassword(app, ada, body)
+      await change.body?.cancel()
+      expect(change.status).toBe(500)
+      expect(change.headers.get("set-cookie")).toBe(null)
+      await unchanged()
+    }
+
+    const issued = (await issuePasswordReset(app.db.authStore, "ada@example.com", new Date()))!
+    await expect(app.signIn.resetPassword("ada@example.com", issued.code, "Changed-Passw0rd"))
+      .rejects.toThrow("no_revoke_row")
+    await unchanged()
+
+    // With the revoke working again, the same change goes through and ends the token.
+    await sql`ALTER TABLE auth_audits DROP CONSTRAINT no_revoke_row`
+    expect((await changePassword(app, ada, {})).status).toBe(200)
+    expect((await listNotes(app, ada.groupId, secret)).status).toBe(401)
+  })
+})
+
+/**
+ * Runs `other` between a token create's password check and its insert, waits for both and
+ * answers the create's status and the new token's secret. `other` gets a moment to finish first:
+ * when nothing makes it wait for the create, it does.
+ */
+async function createDuring(
+  app: App,
+  person: Person,
+  other: () => Promise<unknown>,
+): Promise<{ status: number; secret: string | null }> {
+  let running: Promise<unknown> = Promise.resolve()
+  app.hooks.passwordChecked = async () => {
+    app.hooks.passwordChecked = null
+    running = other()
+    let timer = 0
+    const moment = new Promise((resolve) => (timer = setTimeout(resolve, 1_000)))
+    await Promise.race([running, moment])
+    clearTimeout(timer)
+  }
+  const response = await app.app.request(`${API}/tokens`, {
+    method: "POST",
+    headers: browser(person.cookie),
+    body: JSON.stringify({
+      name: "Raced",
+      groupId: person.groupId,
+      access: ApiTokenAccess.READ,
+      expiresInDays: 30,
+      password: PASSWORD,
+    }),
+  })
+  await running
+  const body = (await response.json()) as { secret?: string }
+  return { status: response.status, secret: body.secret ?? null }
+}
+
+/** How many of the person's tokens could still act. */
+async function liveTokens(sql: postgres.Sql, userId: number): Promise<number> {
+  const [{ count }] = await sql<{ count: number }[]>`
+    SELECT count(*)::int AS count FROM api_tokens
+    WHERE user_id = ${userId} AND revoked_at IS NULL
+  `
+  return count
+}
+
+Deno.test("a token created with the old password while the password changes does not outlive the change", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+
+    let change: Response | undefined
+    const raced = await createDuring(app, ada, async () => {
+      change = await changePassword(app, ada, {})
+    })
+
+    // The create held the person's row, so the change waited for it and revoked its token.
+    expect(raced.status).toBe(201)
+    expect(change?.status).toBe(200)
+    expect(await change?.json()).toEqual({ success: true, revokedTokens: 1 })
+    expect((await listNotes(app, ada.groupId, raced.secret!)).status).toBe(401)
+    expect(await liveTokens(sql, ada.userId)).toBe(0)
+  })
+})
+
+Deno.test("a token created with the old password while the password is reset does not outlive the reset", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const issued = (await issuePasswordReset(app.db.authStore, "ada@example.com", new Date()))!
+
+    let reset: boolean | undefined
+    const raced = await createDuring(app, ada, async () => {
+      reset = await app.signIn.resetPassword("ada@example.com", issued.code, "Reset-Passw0rd")
+    })
+
+    expect(raced.status).toBe(201)
+    expect(reset).toBe(true)
+    expect((await listNotes(app, ada.groupId, raced.secret!)).status).toBe(401)
+    expect(await liveTokens(sql, ada.userId)).toBe(0)
+  })
+})
+
+Deno.test("a create that starts after a password change has the old password refused", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const change = await changePassword(app, ada, { signOutOthers: false })
+    await change.body?.cancel()
+
+    expect(await createStatus(app, ada, ada.groupId)).toBe(400)
+    expect(await liveTokens(sql, ada.userId)).toBe(0)
+  })
+})
+
+Deno.test("a revoked token no longer counts against the cap: the person can create another", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const tokens = []
+    for (let index = 0; index < API_TOKENS_MAX; index += 1) {
+      tokens.push(await createToken(app, ada, { name: `Script ${index}` }))
+    }
+    expect(await createStatus(app, ada, ada.groupId)).toBe(409)
+
+    const revoke = await app.app.request(`${API}/tokens/${tokens[0].id}`, {
+      method: "DELETE",
+      headers: browser(ada.cookie),
+    })
+    await revoke.body?.cancel()
+    expect(revoke.status).toBe(200)
+
+    expect(await createStatus(app, ada, ada.groupId)).toBe(201)
+    expect(await createStatus(app, ada, ada.groupId)).toBe(409)
+  })
+})
+
+Deno.test("the migration ends the tokens the old code left asleep: a removed member's and a trashed group's, each with its audit row", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const bob = await signUp(app, "bob@example.com")
+    const side = uuidV7()
+    await app.groups.create({ id: side, name: "Side project" }, ada.userId)
+    await addMember(app, ada.groupId, bob.userId, ada.userId)
+    const kept = await createToken(app, ada)
+    const trashed = await createToken(app, ada, { name: "Trashed", groupId: side })
+    const removed = await createToken(app, bob, {
+      name: "Removed",
+      groupId: ada.groupId,
+      access: ApiTokenAccess.READ,
+    })
+    const bobsOwn = await createToken(app, bob)
+
+    // The state the old code left: the membership row gone and the group in the trash, with both
+    // token rows untouched, in a table that has no `revoked_at` yet.
+    await sql`DELETE FROM group_members WHERE group_id = ${ada.groupId} AND user_id = ${bob.userId}`
+    await sql`UPDATE groups SET deleted_at = now() WHERE id = ${side}`
+    await sql`ALTER TABLE api_tokens DROP COLUMN revoked_at`
+    await sql.unsafe(
+      await Deno.readTextFile(`${MIGRATIONS_DIR}/2026_10_30_0001_api_token_hardening.sql`),
+    )
+
+    // What used to wake them: the person is added back and the group is restored.
+    await addMember(app, ada.groupId, bob.userId, ada.userId)
+    await sql`UPDATE groups SET deleted_at = NULL WHERE id = ${side}`
+    expect((await listNotes(app, ada.groupId, removed.secret)).status).toBe(401)
+    expect((await listNotes(app, side, trashed.secret)).status).toBe(401)
+    expect((await listNotes(app, ada.groupId, kept.secret)).status).toBe(200)
+    expect((await listNotes(app, bob.groupId, bobsOwn.secret)).status).toBe(200)
+
+    expect(await auditRows(sql, bob.userId, AuthAuditEventType.API_TOKEN_REVOKED)).toEqual([
+      { identifier: named(removed, ada.groupId, "read", "membership-ended", "Removed"), ip: null },
+    ])
+    expect(await auditRows(sql, ada.userId, AuthAuditEventType.API_TOKEN_REVOKED)).toEqual([
+      { identifier: named(trashed, side, "write", "group-deleted", "Trashed"), ip: null },
     ])
   })
 })

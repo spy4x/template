@@ -120,6 +120,7 @@ function fakeSignIn(
     ),
     resetPassword: () => (calls.push("resetPassword"), Promise.resolve(succeed)),
     checkPassword: () => (calls.push("checkPassword"), Promise.resolve(succeed)),
+    hasPassword: () => Promise.resolve(true),
     verifyTotpCode: () => (calls.push("verifyTotpCode"), Promise.resolve(succeed)),
     accountDeletionBlockers: () => (calls.push("accountDeletionBlockers"), Promise.resolve([])),
     deleteAccount: () => (

@@ -12,3 +12,32 @@ ALTER TABLE auth_audits
     ADD CONSTRAINT auth_audits_event_type_check
         CHECK (event_type = ANY (ARRAY[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])) NOT VALID;
 ALTER TABLE auth_audits VALIDATE CONSTRAINT auth_audits_event_type_check;
+
+-- Tokens the old code left asleep: before this migration a token outlived its owner's membership
+-- and its group's move to the trash, and worked again once the person was added back or the group
+-- was restored. They end here, each with its `API_TOKEN_REVOKED` row (10) in the format above, so
+-- none of them wakes up. A group in the trash is named first: its members are still its members.
+WITH revoked AS (
+    UPDATE api_tokens
+    SET revoked_at = now()
+    FROM groups
+    WHERE groups.id = api_tokens.group_id
+        AND api_tokens.revoked_at IS NULL
+        AND (
+            groups.deleted_at IS NOT NULL
+            OR NOT EXISTS (
+                SELECT 1 FROM group_members
+                WHERE group_members.group_id = api_tokens.group_id
+                    AND group_members.user_id = api_tokens.user_id
+            )
+        )
+    RETURNING api_tokens.id, api_tokens.user_id, api_tokens.group_id, api_tokens.access,
+        api_tokens.name, groups.deleted_at IS NOT NULL AS group_deleted
+)
+INSERT INTO auth_audits (user_id, event_type, identifier)
+SELECT user_id, 10,
+    id::text || ' group=' || group_id::text
+        || ' access=' || CASE access WHEN 2 THEN 'write' ELSE 'read' END
+        || ' reason=' || CASE WHEN group_deleted THEN 'group-deleted' ELSE 'membership-ended' END
+        || ' name=' || name
+FROM revoked;

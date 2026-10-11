@@ -175,6 +175,15 @@ export class AppDbBase extends DbServiceBase {
   }
 
   /**
+   * Locks the user's row until the transaction ends. A token create, a password change and a
+   * password reset all take it (#293), so a create cannot commit a token made with the old
+   * password after the change revoked the others. Inside `begin()` only.
+   */
+  async lockUser(userId: number): Promise<void> {
+    await this.sql`SELECT 1 FROM users WHERE id = ${userId} FOR UPDATE`
+  }
+
+  /**
    * Locks a password key until the transaction ends: the user's, or the one whose subject is the
    * address. A password reset and an address move both take this lock first, so one waits for the
    * other and neither copies a password hash the other is replacing (#140). Inside `begin()` only.

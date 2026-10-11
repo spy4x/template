@@ -26,8 +26,11 @@ export interface ApiTokensOptions {
    * the auth pepper; changing it makes every token stop working.
    */
   key: string
-  /** Whether `password` is the current password of user `userId`: the sign-in's own check. */
-  checkPassword: (userId: number, password: string) => Promise<boolean>
+  /**
+   * Whether `password` is the current password of user `userId`, read inside transaction `tx`:
+   * the sign-in's own check. `null` when the account has no password.
+   */
+  checkPassword: (tx: AppDbBase, userId: number, password: string) => Promise<boolean | null>
   /**
    * Whether one more refusal may be audited under `key`, a token's id and the reason. It spends
    * the budget that keeps a flood of refused requests from filling `auth_audits`
@@ -76,6 +79,18 @@ export interface ApiTokens {
   auditRefusal(c: Context, tokenId: string, reason: ApiTokenRefusalReason): Promise<void>
 }
 
+/**
+ * What the form shows under the password field of an account that has none, instead of calling a
+ * password wrong that does not exist. No sign-up path makes such an account today.
+ */
+export const PASSWORD_NOT_SET_MESSAGE = "This account has no password, so it cannot create a token"
+
+const REFUSAL_MESSAGES = {
+  PASSWORD_INVALID: "The password is incorrect",
+  GROUP_NOT_FOUND: "Group not found",
+  TOO_MANY_TOKENS: "Too many tokens",
+} as const
+
 /** Builds the token operations over `options.db`. */
 export function createApiTokens(
   { db, key, checkPassword, mayAuditRefusal, logError, now = () => new Date() }: ApiTokensOptions,
@@ -98,11 +113,15 @@ export function createApiTokens(
     list: (userId) => db.apiTokens.listLive(userId),
 
     async create(c, userId, { password, ...request }) {
-      if (!(await checkPassword(userId, password))) {
-        throw new ApiTokenError("PASSWORD_INVALID", "The password is incorrect")
-      }
       const { secret, hash } = await mintApiToken(key)
       const outcome = await db.begin(async (tx) => {
+        // The password is checked under the lock a password change and a reset take (#293): this
+        // create either commits before their revoke runs, or reads the new password and is
+        // refused. The connection is held for one verify.
+        await tx.lockUser(userId)
+        const valid = await checkPassword(tx, userId, password)
+        if (valid === null) return { refused: "PASSWORD_NOT_SET" as const }
+        if (!valid) return { refused: "PASSWORD_INVALID" as const }
         const result = await tx.apiTokens.create({
           id: uuidV7(),
           userId,
@@ -120,10 +139,10 @@ export function createApiTokens(
         return result
       })
       if ("refused" in outcome) {
-        throw new ApiTokenError(
-          outcome.refused,
-          outcome.refused === "GROUP_NOT_FOUND" ? "Group not found" : "Too many tokens",
-        )
+        if (outcome.refused === "PASSWORD_NOT_SET") {
+          throw new ApiTokenError("PASSWORD_INVALID", PASSWORD_NOT_SET_MESSAGE)
+        }
+        throw new ApiTokenError(outcome.refused, REFUSAL_MESSAGES[outcome.refused])
       }
       return { token: outcome.created, secret }
     },
