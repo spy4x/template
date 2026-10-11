@@ -1064,7 +1064,7 @@ async function createDuring(
   app.hooks.passwordChecked = async () => {
     app.hooks.passwordChecked = null
     running = other()
-    let timer = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
     const moment = new Promise((resolve) => (timer = setTimeout(resolve, 1_000)))
     await Promise.race([running, moment])
     clearTimeout(timer)
@@ -1099,15 +1099,28 @@ Deno.test("a token created with the old password while the password changes does
     const app = await buildApp(sql)
     const ada = await signUp(app, "ada@example.com")
 
+    // The change is called past the session middleware, which locks the person's row for a moment
+    // on every signed-in request, and keeps the other devices signed in, so it writes no session
+    // row either: both would wait for the create anyway, and this test is about the lock the
+    // change takes on purpose.
+    const direct = new Hono().post("/", async (c) =>
+      c.json(
+        await app.signIn.changePassword(
+          c,
+          { user: { id: ada.userId } } as never,
+          PASSWORD,
+          "Changed-Passw0rd",
+          false,
+        ),
+      ))
     let change: Response | undefined
     const raced = await createDuring(app, ada, async () => {
-      change = await changePassword(app, ada, {})
+      change = await direct.request("/", { method: "POST" })
     })
 
     // The create held the person's row, so the change waited for it and revoked its token.
     expect(raced.status).toBe(201)
-    expect(change?.status).toBe(200)
-    expect(await change?.json()).toEqual({ success: true, revokedTokens: 1 })
+    expect(await change?.json()).toEqual({ revokedTokens: 1 })
     expect((await listNotes(app, ada.groupId, raced.secret!)).status).toBe(401)
     expect(await liveTokens(sql, ada.userId)).toBe(0)
   })
@@ -1117,6 +1130,10 @@ Deno.test("a token created with the old password while the password is reset doe
   await withSchema(async (sql) => {
     const app = await buildApp(sql)
     const ada = await signUp(app, "ada@example.com")
+    // A proven address, so the reset writes nothing to the person's row: such a write would wait
+    // for the create anyway, and this test is about the lock the reset takes on purpose.
+    await sql`INSERT INTO auth_email_owners (email, user_id) VALUES ('ada@example.com', ${ada.userId})`
+    await sql`UPDATE auth_keys SET proven_at = now() WHERE user_id = ${ada.userId}`
     const issued = (await issuePasswordReset(app.db.authStore, "ada@example.com", new Date()))!
 
     let reset: boolean | undefined
