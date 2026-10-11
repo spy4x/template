@@ -1,7 +1,15 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
 import { basename, globToRegExp } from "@std/path"
-import { planDeploy, shellQuote, VAPID_PATH } from "./deploy.ts"
+import {
+  EXAMPLE_ENV_FILE,
+  exampleSecretsIn,
+  planDeploy,
+  refuseExampleSecrets,
+  shellQuote,
+  VAPID_PATH,
+} from "./deploy.ts"
+import { readEnvFile } from "./env-file.ts"
 import { MissingEnvError } from "@spy4x/server/config"
 
 const ENV_FILE = "infra/envs/.env.home"
@@ -127,4 +135,50 @@ Deno.test("planDeploy runs the key step with the configured Deno", () => {
     ENV_FILE,
   )
   expect(steps[2].args[1]).toContain(`/opt/deno/deno task vapid-key:create`)
+})
+
+/** Every secret the shipped example file gives a value: all of them are public. */
+const EXAMPLE_SECRETS = [
+  "DB_PASS",
+  "KV_PASSWORD",
+  "MINIO_PASS",
+  "GRAFANA_PASS",
+  "AUTH_COOKIE_SECRET",
+  "AUTH_PEPPER",
+  "AUTH_TOTP",
+]
+
+Deno.test("an env file copied from the shipped example is refused for each of its secrets", async () => {
+  const example = await readEnvFile(EXAMPLE_ENV_FILE)
+  expect(exampleSecretsIn({ ...example }, example)).toEqual(EXAMPLE_SECRETS)
+})
+
+Deno.test("a deploy with one example password left stops and names that variable, not its value", async () => {
+  const example = await readEnvFile(EXAMPLE_ENV_FILE)
+  const values: Record<string, string> = { ...example }
+  for (const name of EXAMPLE_SECRETS) values[name] = `real-${name}`
+  values.GRAFANA_PASS = example.GRAFANA_PASS
+
+  let message = ""
+  try {
+    refuseExampleSecrets(values, example, ENV_FILE)
+  } catch (err) {
+    message = (err as Error).message
+  }
+  expect(message).toContain(ENV_FILE)
+  expect(message).toContain("GRAFANA_PASS")
+  expect(message).not.toContain("MINIO_PASS")
+  expect(message).not.toContain(example.GRAFANA_PASS)
+})
+
+Deno.test("a deploy whose secrets all differ from the example goes ahead, example limits and all", async () => {
+  const example = await readEnvFile(EXAMPLE_ENV_FILE)
+  const values: Record<string, string> = { ...example }
+  for (const name of EXAMPLE_SECRETS) values[name] = `real-${name}`
+
+  expect(() => refuseExampleSecrets(values, example, ENV_FILE)).not.toThrow()
+})
+
+Deno.test("a secret the example leaves empty is not refused when the env file leaves it empty too", () => {
+  expect(exampleSecretsIn({ SMTP_PASS: "" }, { SMTP_PASS: "" })).toEqual([])
 })

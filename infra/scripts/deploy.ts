@@ -16,6 +16,10 @@
  * rsync as a destination, the second runs unquoted in the remote shell (so `~/bin/deno` works).
  * `PATH_ON_SERVER` is quoted.
  *
+ * Before anything is sent, the deploy stops when the env file still holds an example secret: a
+ * variable that `infra/envs/.env.example` gives a password or secret value, left at that value.
+ * The message names each such variable and never prints a value.
+ *
  * Four steps, each stopping the deploy when it fails: rsync the files that
  * `infra/deploy/include.txt` names, leaving out every env file (any `.env*` or `*.env`, anywhere,
  * and the chosen env file itself) and the web push keys, and deleting server files under those
@@ -38,6 +42,44 @@ export const DEFAULT_ENV_FILE = "infra/envs/.env.prod"
 
 /** Where the API's web push keys live, relative to the app's directory. */
 export const VAPID_PATH = "infra/configs/vapid.json"
+
+/** The file whose secret values are public, so none of them may reach a server. */
+export const EXAMPLE_ENV_FILE = "infra/envs/.env.example"
+
+/** Names of variables that hold a password, secret or key. */
+const SECRET_NAME = /PASS|SECRET|PEPPER|TOTP|KEY|TOKEN/
+
+/**
+ * The secrets of `values` that still equal their value in `example`, by variable name. A variable
+ * counts when its name says it is a secret and the example gives it a value, so the list follows
+ * `.env.example` and needs no copy here. An empty example value is no secret to leave in place.
+ */
+export function exampleSecretsIn(
+  values: Record<string, string>,
+  example: Record<string, string>,
+): string[] {
+  return Object.keys(example).filter((name) =>
+    SECRET_NAME.test(name) && example[name] !== "" && values[name] === example[name]
+  )
+}
+
+/**
+ * Stops a deploy whose env file still holds an example secret.
+ *
+ * @throws {Error} Naming the env file and each variable left at its example value.
+ */
+export function refuseExampleSecrets(
+  values: Record<string, string>,
+  example: Record<string, string>,
+  envFilePath: string,
+): void {
+  const names = exampleSecretsIn(values, example)
+  if (names.length === 0) return
+  throw new Error(
+    `${envFilePath} still holds the example value of ${names.join(", ")} ` +
+      `(${EXAMPLE_ENV_FILE} is public). Set a real value for each before deploying.`,
+  )
+}
 
 /** One program to run, with its arguments, and what to call it in the log. */
 export interface DeployStep {
@@ -130,7 +172,9 @@ async function main(): Promise<void> {
   const envFilePath = Deno.args[0] ?? DEFAULT_ENV_FILE
   let steps: DeployStep[]
   try {
-    steps = planDeploy(await readEnvFile(envFilePath), envFilePath)
+    const values = await readEnvFile(envFilePath)
+    refuseExampleSecrets(values, await readEnvFile(EXAMPLE_ENV_FILE), envFilePath)
+    steps = planDeploy(values, envFilePath)
   } catch (err) {
     error(describeEnvFileError(err, envFilePath))
     Deno.exit(1)
