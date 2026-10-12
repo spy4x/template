@@ -555,6 +555,42 @@ describe("ProfileScreen for an account without a password", () => {
     expect(document.querySelectorAll("[data-e2e=password-none]").length).toBe(0)
   })
 
+  const deletion = {
+    blockers: [],
+    values: { password: "", otp: "" },
+    onValueChange: () => {},
+    errors: { form: null },
+    pending: false,
+  }
+
+  it("offers no delete dialog, which would ask for a password, and says why", async () => {
+    await mount(
+      <ProfileScreen
+        {...profile}
+        methods={methodsProps([], { methods: [onlyGoogle] })}
+        accountDeletion={deletion}
+      />,
+    )
+
+    expect(document.querySelectorAll("[data-e2e=account-delete-open]").length).toBe(0)
+    expect(find("[data-e2e=account-delete-unavailable]").textContent).toBe(
+      "This account cannot be deleted here yet: it has no password to confirm the deletion with.",
+    )
+  })
+
+  it("keeps the delete action for an account that has a password", async () => {
+    await mount(
+      <ProfileScreen
+        {...profile}
+        methods={methodsProps([], { methods: [password, google] })}
+        accountDeletion={deletion}
+      />,
+    )
+
+    expect(find("[data-e2e=account-delete-open]").textContent).toBe("Delete my account")
+    expect(document.querySelectorAll("[data-e2e=account-delete-unavailable]").length).toBe(0)
+  })
+
   it("names every provider of an account that has two and no password", () => {
     const github = { ...google, id: 9, kind: "github" as const }
     expect(providerOnlyNames([onlyGoogle, github])).toBe("Google and GitHub")

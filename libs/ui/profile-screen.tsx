@@ -137,7 +137,7 @@ export interface ProfileScreenProps {
    * The "Danger zone" with "Delete my account", at the bottom. Without it the page has none.
    * `twoFactor` and `navigate` come from this screen's own props.
    */
-  accountDeletion?: Omit<AccountDeleteProps, "twoFactor" | "navigate">
+  accountDeletion?: Omit<AccountDeleteProps, "twoFactor" | "navigate" | "unavailable">
   navigate?: Navigate
 }
 
@@ -454,6 +454,9 @@ export function ProfileScreen(
         <AccountDelete
           {...accountDeletion}
           twoFactor={user.mfa === UserMFAStatus.CONFIGURED}
+          unavailable={providerOnly === null
+            ? null
+            : "This account cannot be deleted here yet: it has no password to confirm the deletion with."}
           navigate={navigate}
         />
       )}
@@ -681,7 +684,8 @@ export function ProfileScreen(
 /**
  * The names of the providers of an account that has no password ("Google", "Google and GitHub"),
  * or `null` for an account with one, or while the sign-in methods are not known. Changing the
- * e-mail address or the password asks for the current password, so such an account can do neither.
+ * e-mail address or the password and deleting the account each ask for the current password, so
+ * such an account can do none of them.
  */
 export function providerOnlyNames(
   methods: readonly SignInMethod[] | null | undefined,
