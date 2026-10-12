@@ -67,6 +67,13 @@ Deno.test("a path that names no existing spec file is passed on as it is, to bot
   ])
 })
 
+Deno.test("an existing file that is no spec is passed on as it is and starts no pass of its own", () => {
+  const exists = (path: string): boolean => path === `e2e/fixtures/app.ts` || isSpecFile(path)
+  expect(planPasses([`e2e/fixtures/app.ts`, `e2e/offline.e2e.ts`], undefined, exists)).toEqual([
+    { server: `built`, specs: `offline`, args: [`offline.e2e.ts`, `e2e/fixtures/app.ts`] },
+  ])
+})
+
 Deno.test("the plan is printed as one pass line followed by one line for each argument", () => {
   expect(planLines(planPasses([`-g`, `two words`], undefined, isSpecFile))).toEqual([
     `pass dev other`,
