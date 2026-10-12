@@ -232,10 +232,10 @@ Both are off until you set their credentials: the sign-in and sign-up pages then
 with …" link for each provider that is on, and the profile gets a "Sign-in methods" card. A
 provider is on only when both of its variables are set in the env file.
 
-| Provider | Where to register                                                         | Variables                                              | Callback URL to register                    |
-| -------- | ------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------- |
-| Google   | Google Cloud console, "APIs & Services", "Credentials", "OAuth client ID" | `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET` | `https://<DOMAIN>/api/auth/google/callback` |
-| GitHub   | GitHub, "Settings", "Developer settings", "OAuth Apps", "New OAuth App"   | `OAUTH_GITHUB_CLIENT_ID`, `OAUTH_GITHUB_CLIENT_SECRET` | `https://<DOMAIN>/api/auth/github/callback` |
+| Provider | Where to register                                                         | Variables                                  | Callback URL to register                    |
+| -------- | ------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------- |
+| Google   | Google Cloud console, "APIs & Services", "Credentials", "OAuth client ID" | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | `https://<DOMAIN>/api/auth/google/callback` |
+| GitHub   | GitHub, "Settings", "Developer settings", "OAuth Apps", "New OAuth App"   | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | `https://<DOMAIN>/api/auth/github/callback` |
 
 For Google choose the application type "Web application"; the scopes asked for are `openid` and
 `email`. GitHub is asked for `read:user` and `user:email`. On your own machine the callback is
