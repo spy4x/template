@@ -1,11 +1,19 @@
 /// <reference lib="deno.ns" />
 import { planCompose } from "./compose-plan.ts";
 import { readEnvFile } from "./env-file.ts";
+import { postgresUpgradeRefusal, readPostgresDataFacts } from "./postgres-data.ts";
 import { ensureProxyNetwork, runContainerCli } from "./proxy-network.ts";
 
 const envFilePath = `./infra/envs/.env`;
 // What to run, and on which engine, is decided in compose-plan.ts, where it is tested.
 const plan = planCompose(await readEnvFile(envFilePath), Deno.args, envFilePath);
+
+// Postgres 18 has a data directory of its own; never start it empty beside unmoved 16 data.
+const refusal = postgresUpgradeRefusal(Deno.args, await readPostgresDataFacts());
+if (refusal) {
+  console.error(refusal);
+  Deno.exit(1);
+}
 
 // Every compose file joins the external "proxy" network; create it on a fresh machine.
 if (plan.ensureProxyNetwork && await ensureProxyNetwork(plan.engine, runContainerCli)) {
