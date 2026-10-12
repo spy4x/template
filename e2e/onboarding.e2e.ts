@@ -87,8 +87,11 @@ test.describe("first steps", () => {
       await expect.poll(() => answers.count).toBeGreaterThan(before)
       await expect(step(page, "Write your first note")).toContainText("To do:")
 
-      // The person writes a note of their own.
+      // The person writes a note of their own. The card belongs to the home page only.
       await nav(page).getByRole("link", { name: "Notes" }).click()
+      await expect(page.getByRole("heading", { level: 1, name: "Notes", exact: true }))
+        .toBeVisible()
+      await expect(card(page)).toHaveCount(0)
       await page.locator("[data-e2e=note-new]").click()
       await page.locator("[data-e2e=note-title]").fill("My first note")
       await page.locator("[data-e2e=note-save]").click()
@@ -167,7 +170,7 @@ test.describe("first steps", () => {
 
       await expect(tour).toBeHidden()
       await expect(offer).toHaveCount(0)
-      await expect(card(page)).toBeVisible()
+      await expect(card(page).getByRole("heading", { name: "Get started" })).toBeFocused()
 
       const answers = onboardingAnswers(page)
       await gotoApp(page, "/", card(page))
@@ -193,6 +196,7 @@ test.describe("first steps", () => {
 
       await expect(tour).toBeHidden()
       await expect(offer).toHaveCount(0)
+      await expect(card(page).getByRole("heading", { name: "Get started" })).toBeFocused()
       const answers = onboardingAnswers(page)
       await gotoApp(page, "/", card(page))
       await expect.poll(() => answers.count).toBeGreaterThan(0)
@@ -201,4 +205,38 @@ test.describe("first steps", () => {
       await cleanup(request, email)
     }
   })
+
+  for (const way of ["Escape", "Done"] as const) {
+    test(`on a phone, focus is on the card's heading after the tour ends by ${way}`, async ({ page, request }) => {
+      const email = `e2e_onboarding_phone_${way.toLowerCase()}@example.com`
+      await cleanup(request, email)
+      try {
+        await signUpInBrowser(page, email)
+        // The side navigation, which the tour points at, is not drawn at this width.
+        await page.setViewportSize({ width: 375, height: 800 })
+        await expect(page.locator("[data-e2e=rail-shell-rail]")).toBeHidden()
+        const tour = page.getByRole("dialog").filter({ hasText: "Step" })
+        await tabTo(page, "Take the tour")
+        await page.keyboard.press("Enter")
+        await expect(tour).toBeVisible()
+
+        if (way === "Done") {
+          for (const place of [2, 3, 4]) {
+            await tabTo(page, "Next")
+            await page.keyboard.press("Enter")
+            await expect(tour).toContainText(`Step ${place} of 4`)
+          }
+          await tabTo(page, "Done")
+          await page.keyboard.press("Enter")
+        } else await page.keyboard.press("Escape")
+
+        await expect(tour).toBeHidden()
+        const heading = card(page).getByRole("heading", { name: "Get started" })
+        await expect(heading).toBeFocused()
+        await expect(heading).toBeInViewport()
+      } finally {
+        await cleanup(request, email)
+      }
+    })
+  }
 })
