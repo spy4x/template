@@ -7,18 +7,17 @@ import { selectionStore } from "../state/selection.ts"
 
 /**
  * The first-steps card above the home page. It reads the steps each time the home page opens, so a
- * step the person did on another page is ticked when they come back. After Dismiss the card leaves
+ * step the person did on another page is ticked when they come back, and follows hints only while
+ * it is on the page. After Dismiss the card leaves
  * and focus moves to the page's `<h1>`, the element a route change moves focus to.
  */
 export function OnboardingView({ store = onboardingStore }: { store?: typeof onboardingStore }) {
   const [, navigate] = useLocation()
   useEffect(() => {
     // Without an answer there is no card; the next visit to the home page asks again.
-    void store.refresh().catch(() => {})
+    void store.open().catch(() => {})
     // A tour left by following one of its links is closed, and still offered on the next visit.
-    return () => {
-      store.tourOpen.value = false
-    }
+    return store.close
   }, [])
   const status = store.status.value
   if (!status || !store.visible.value) return null

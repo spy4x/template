@@ -10,6 +10,7 @@ import { render } from "preact"
 import { act } from "preact/test-utils"
 import type { OnboardingStatus } from "@domain/identity"
 import { createOnboardingStore } from "../state/onboarding.ts"
+import { selectionStore } from "../state/selection.ts"
 import { OnboardingView } from "./OnboardingView.tsx"
 
 const window = new Window({ url: "http://app.localhost/" })
@@ -71,8 +72,12 @@ const fresh: OnboardingStatus = {
 function storeOver(start: OnboardingStatus, { refuse = false } = {}) {
   let server = start
   const commands: string[] = []
+  const reads = { count: 0 }
   const store = createOnboardingStore({
-    query: () => Promise.resolve(server) as Promise<never>,
+    query: () => {
+      reads.count++
+      return Promise.resolve(server) as Promise<never>
+    },
     command: (name) => {
       commands.push(name)
       if (refuse) return Promise.reject(new Error("offline"))
@@ -82,7 +87,7 @@ function storeOver(start: OnboardingStatus, { refuse = false } = {}) {
       return Promise.resolve(server) as Promise<never>
     },
   })
-  return { store, commands }
+  return { store, commands, reads }
 }
 
 /** The card above the home page's heading, as the app's frame draws it; waits for the first read. */
@@ -175,5 +180,53 @@ describe("OnboardingView", () => {
     expect(store.tourOpen.value).toBe(false)
     expect(offerShown()).toBe(false)
     expect(commands).toEqual(["onboarding.tour-seen"])
+    expect(focused().textContent).toBe("Get started")
+  })
+
+  it("moves the tour to the next step and back", async () => {
+    const { store } = storeOver(fresh)
+    await mount(store)
+    await press("Take the tour")
+
+    await press("Next")
+    expect(store.tourIndex.value).toBe(1)
+    expect(focused().textContent).toBe("Groups")
+
+    await press("Back")
+    expect(store.tourIndex.value).toBe(0)
+  })
+
+  it("reads again on a hint while the page is open, and neither reads nor keeps the tour open after it is left", async () => {
+    const { store, reads } = storeOver(fresh)
+    await mount(store)
+    await press("Take the tour")
+    await act(() => store.hint())
+    expect(reads.count).toBe(2)
+
+    await act(() => render(null, root!))
+    await store.hint()
+
+    expect(reads.count).toBe(2)
+    expect(store.tourOpen.value).toBe(false)
+    expect(store.tourOffered.value).toBe(true)
+  })
+
+  it("links the invitation step to the selected group and opens a step through the router", async () => {
+    selectionStore.groupId.value = "g-9"
+    try {
+      const steps = { ...fresh.steps, emailVerified: true, noteCreated: true }
+      await mount(storeOver({ ...fresh, steps }).store)
+      const link = root!.querySelector(`a[href="/groups/g-9"]`)
+      expect(link).not.toBe(null)
+
+      const click = new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })
+      await act(() => void link!.dispatchEvent(click as never))
+
+      expect(click.defaultPrevented).toBe(true)
+      expect(window.location.pathname).toBe("/groups/g-9")
+    } finally {
+      selectionStore.groupId.value = null
+      window.history.replaceState(null, "", "/")
+    }
   })
 })

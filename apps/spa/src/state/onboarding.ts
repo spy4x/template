@@ -18,8 +18,8 @@ function messageOf(cause: unknown): string {
 /**
  * The first-steps checklist and the tour: what the server says the person has done, and the two
  * answers it keeps for them, so both follow the person to every device. The steps are never ticked
- * here: {@link refresh} reads them again, when the home page opens and when a hint says the person
- * changed something in another tab.
+ * here: the server is asked again when the home page opens and, while it is open, when a hint says
+ * the person changed something in another tab.
  *
  * Whether the checklist shows is preact-components' `createOnboardingState`, with the server as
  * its port: Dismiss hides the card at once and brings it back if the server refused.
@@ -42,39 +42,92 @@ export function createOnboardingStore(dependencies: OnboardingDependencies) {
   /** Whether the tour is still offered: the person has neither finished nor skipped it. */
   const tourOffered = computed(() => status.value !== null && !status.value.tourSeen)
 
+  /** Counts the reads, so one that a later read or a save overtook is dropped. */
   let reads = 0
+  /** Counts the sign-outs, so an answer for the person who left never reaches the next one. */
+  let person = 0
+  /** The saves still on their way. A read answered meanwhile is older than what the page shows. */
+  let saving = 0
+  /** Whether the page that draws the card is open. */
+  let watching = false
 
-  /** Reads the steps and the two answers again. A read that a later one overtook is dropped. */
+  /** Takes the server's answer. The library reads its port once, so a flag that changed elsewhere
+   * (another tab dismissed) needs a new library store. */
+  function apply(answer: OnboardingStatus): void {
+    status.value = answer
+    if (shown.value !== null && shown.value.visible.value !== answer.dismissed) return
+    const signedIn = person
+    shown.value = createOnboardingState({
+      steps: facts,
+      dismissed: {
+        read: () => answer.dismissed,
+        write: async (value) => {
+          // Nothing shows the checklist again, so only "dismissed" is ever written.
+          if (!value) return
+          const saved = await dependencies.command<OnboardingStatus>("onboarding.dismiss")
+          if (signedIn === person) status.value = saved
+        },
+      },
+    })
+  }
+
+  /**
+   * Reads the steps and the two answers again. A read that a later read or a save overtook is
+   * dropped. Once the checklist is dismissed nothing can show (the tour is offered on the card
+   * only, and nothing brings the card back), so the server is not asked again.
+   */
   async function refresh(): Promise<void> {
+    if (status.value?.dismissed) return
     const read = ++reads
     const answer = await dependencies.query<OnboardingStatus>("onboarding.get")
-    if (read !== reads) return
-    status.value = answer
-    // The library reads its port once, so a flag that changed elsewhere (another tab dismissed)
-    // needs a new store.
-    if (shown.value === null || shown.value.visible.value === answer.dismissed) {
-      shown.value = createOnboardingState({
-        steps: facts,
-        dismissed: {
-          read: () => answer.dismissed,
-          write: async (value) => {
-            // Nothing shows the checklist again, so only "dismissed" is ever written.
-            if (value) status.value = await dependencies.command("onboarding.dismiss")
-          },
-        },
-      })
+    if (read !== reads || saving > 0) return
+    apply(answer)
+  }
+
+  /** The page that draws the card opened: read, and follow hints until {@link close}. */
+  function open(): Promise<void> {
+    watching = true
+    return refresh()
+  }
+
+  /** The page that draws the card closed. A tour left open is closed, and still offered. */
+  function close(): void {
+    watching = false
+    tourOpen.value = false
+  }
+
+  /** A hint that the person changed something elsewhere: read again, if the card's page is open. */
+  function hint(): Promise<void> {
+    return watching ? refresh() : Promise.resolve()
+  }
+
+  /**
+   * Runs one save. Reads already sent are dropped, and so is its own outcome when the person
+   * signed out meanwhile: `failed` then never runs.
+   */
+  async function save(
+    run: () => Promise<void>,
+    failed: (cause: unknown) => void,
+  ): Promise<void> {
+    const signedIn = person
+    reads++
+    saving++
+    try {
+      await run()
+    } catch (cause) {
+      if (signedIn === person) failed(cause)
+    } finally {
+      if (signedIn === person) saving--
     }
   }
 
   /** Closes the checklist for good, on every device. It comes back if the server refuses. */
   async function dismiss(): Promise<void> {
+    const state = shown.value
+    if (state === null) return
     error.value = null
     tourOpen.value = false
-    try {
-      await shown.value?.dismiss()
-    } catch (cause) {
-      error.value = messageOf(cause)
-    }
+    await save(async () => void await state.dismiss(), (cause) => error.value = messageOf(cause))
   }
 
   function startTour(): void {
@@ -87,20 +140,24 @@ export function createOnboardingStore(dependencies: OnboardingDependencies) {
   async function endTour(): Promise<void> {
     const before = status.value
     if (before === null) return
+    const signedIn = person
     error.value = null
     tourOpen.value = false
     status.value = { ...before, tourSeen: true }
-    reads++
-    try {
-      status.value = await dependencies.command<OnboardingStatus>("onboarding.tour-seen")
-    } catch (cause) {
+    await save(async () => {
+      const saved = await dependencies.command<OnboardingStatus>("onboarding.tour-seen")
+      if (signedIn === person) apply(saved)
+    }, (cause) => {
       status.value = before
       error.value = messageOf(cause)
-    }
+    })
   }
 
+  /** Sign-out: forgets the person, and drops every read and save still on its way. */
   function reset(): void {
     reads++
+    person++
+    saving = 0
     status.value = null
     shown.value = null
     error.value = null
@@ -116,6 +173,9 @@ export function createOnboardingStore(dependencies: OnboardingDependencies) {
     tourOpen,
     tourIndex,
     refresh,
+    open,
+    close,
+    hint,
     dismiss,
     startTour,
     endTour,

@@ -39,7 +39,7 @@ function harness(
       refresh: () => Promise.resolve(void calls.push("members")),
     },
     notifications: { refresh: () => Promise.resolve(void inbox.push("notifications")) },
-    onboarding: { refresh: () => Promise.resolve(void onboarding.push("onboarding")) },
+    onboarding: { hint: () => Promise.resolve(void onboarding.push("onboarding")) },
   })
   return { pull, calls, inbox, onboarding }
 }

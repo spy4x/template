@@ -15,8 +15,9 @@ export interface PullDependencies {
   members: { refresh(): Promise<void>; groupId: ReadonlySignal<string | null> }
   /** The inbox: its unread count, and its list while the page is open. */
   notifications: { refresh(): Promise<void> }
-  /** The first-steps checklist and the tour, which the person may have closed in another tab. */
-  onboarding?: { refresh(): Promise<void> }
+  /** The first-steps checklist and the tour, which the person may have closed in another tab.
+   * Its `hint` reads only while the page that draws the card is open. */
+  onboarding?: { hint(): Promise<void> }
 }
 
 /**
@@ -46,7 +47,7 @@ export function createPull(dependencies: PullDependencies) {
         profile.refresh(),
         selection.refresh(),
         notifications.refresh(),
-        onboarding?.refresh(),
+        onboarding?.hint(),
       ])
       return
     }
