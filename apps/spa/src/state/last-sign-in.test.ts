@@ -20,7 +20,7 @@ function store() {
 }
 
 describe("the last sign-in of this browser", () => {
-  it("remembers the method the session signed in with, and its address only masked", async () => {
+  it("remembers the method the session signed in with", async () => {
     const { kept, raw } = store()
     const methods = [
       method("password", false, "ada@example.com"),

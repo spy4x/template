@@ -898,7 +898,8 @@ Deno.test("linking the same provider account a second time records nothing new",
 Deno.test("linking that takes an unconfirmed account's address records it on that account", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql, {
-      mine: { sub: "5005", email: "ada@work.example", verified: true },
+      // Google spells the address its own way; it is the same address.
+      mine: { sub: "5005", email: "Ada@Work.example", verified: true },
     })
     // Someone signed up with the address and never confirmed it.
     const squatter = await (await browser(app).post("/password/sign-up", {
