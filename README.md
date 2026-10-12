@@ -249,7 +249,8 @@ What a person gets:
 - Someone new is asked "Create a new account?" first, and nothing is created until they answer.
   The question waits 10 minutes; "I already have an account" creates nothing.
 - A provider account joins an existing account by its e-mail address only when both sides have
-  verified that address. An address the provider has not verified never links and never signs in.
+  verified that address. An address the provider has not verified never links: that person is
+  asked whether to create a new account, like anyone unknown.
 - On the profile, a person links and unlinks providers. The last way into an account cannot be
   unlinked, and unlinking a method signs out the devices that signed in with it.
 
