@@ -239,8 +239,9 @@ log "starting the worker"
 start worker deno run --allow-all apps/worker/+main.ts
 wait_for worker "${PIDS[-1]}" 60 grep -q "Worker started" "$SCRATCH/worker.log"
 
-# Builds an image with this run's label. In the background, as its own process group, so a signal
-# stops the run at once and cleanup stops the build.
+# Builds an image with this run's label. In the foreground: a signal is acted on when the build
+# ends, because a build that is killed leaves its working containers behind, which carry no name
+# of the run to find them by.
 build_image() { # <name> <arguments for `build`…>
   local name=$1 options=(--label "$IMAGE_LABEL")
   shift
@@ -252,9 +253,9 @@ build_image() { # <name> <arguments for `build`…>
     options+=(--layers=false)
   fi
   BUILT=1
-  setsid timeout 900 "$CONTAINER" build --quiet "${options[@]}" "$@" >"$SCRATCH/$name.log" 2>&1 &
-  PIDS+=($!)
-  wait "${PIDS[-1]}" || { log "the $name did not build"; tail -n 40 "$SCRATCH/$name.log"; exit 1; }
+  setsid --wait timeout 900 "$CONTAINER" build --quiet "${options[@]}" "$@" \
+    >"$SCRATCH/$name.log" 2>&1 ||
+    { log "the $name did not build"; tail -n 40 "$SCRATCH/$name.log"; exit 1; }
 }
 
 # Puts <server> at $SPA_PORT, in place of the dev server when that is there. A run starts the dev
