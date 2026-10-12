@@ -651,7 +651,7 @@ Deno.test("the last sign-in method cannot be unlinked", async () => {
   })
 })
 
-Deno.test("the password and another person's method cannot be unlinked", async () => {
+Deno.test("the password, another person's method and a misspelt id cannot be unlinked", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql, {
       ada: ADA,
@@ -668,7 +668,9 @@ Deno.test("the password and another person's method cannot be unlinked", async (
 
     expect((await ada.delete(`/auth/methods/${password.id}`)).status).toBe(404)
     expect((await ada.delete(`/auth/methods/${bobKey.id}`)).status).toBe(404)
-    expect((await ada.delete(`/auth/methods/not-a-number`)).status).toBe(404)
+    // Her own Google method, but its id written as no page writes it.
+    const google = (await methodsOf(ada)).methods.find((method) => method.kind === "google")!
+    expect((await ada.delete(`/auth/methods/0x${google.id.toString(16)}`)).status).toBe(404)
 
     expect((await app.db.authStore.listKeys(adaId)).map((key) => key.method)).toEqual([
       "password",

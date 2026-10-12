@@ -40,9 +40,8 @@ export const METHOD_NOT_FOUND = "This sign-in method is already unlinked."
 /** The answer when the method to unlink is the only way into the account. */
 export const METHOD_IS_LAST = "This is your only way to sign in. Add another one first."
 
-/** A key id as the methods card sends it: a positive integer that fits Postgres `integer`. */
+/** A key id as the methods card sends it: decimal digits and nothing else. */
 const KEY_ID = /^[1-9][0-9]{0,9}$/
-const MAX_KEY_ID = 2_147_483_647
 
 /** The page parameter `/:provider/start` reads the return page from, as the sign-in pages do. */
 const NEXT_PARAM = "next"
@@ -152,10 +151,9 @@ export function createOAuthRoute(
       rateLimits.normal,
       async (c) => {
         const raw = c.req.param("id")
-        const keyId = KEY_ID.test(raw) ? Number(raw) : 0
-        if (keyId < 1 || keyId > MAX_KEY_ID) return c.json({ error: METHOD_NOT_FOUND }, 404)
+        if (!KEY_ID.test(raw)) return c.json({ error: METHOD_NOT_FOUND }, 404)
         const state = c.get("auth")!
-        const outcome = await oauth.unlink(c, state, keyId)
+        const outcome = await oauth.unlink(c, state, Number(raw))
         if (outcome === UnlinkOutcome.NotFound) return c.json({ error: METHOD_NOT_FOUND }, 404)
         if (outcome === UnlinkOutcome.LastMethod) return c.json({ error: METHOD_IS_LAST }, 409)
         // The method's sessions ended with it: their sockets close. The sockets of the person's
