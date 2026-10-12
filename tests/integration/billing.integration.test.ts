@@ -1186,6 +1186,45 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
         expect(textTo("cardless@example.com")).not.toContain("To stop it, cancel it")
       },
     )
+
+    await t.step(
+      "a failed payment on a cancelled plan names the end of the paid period when it comes before the grace ends",
+      async () => {
+        await sql`DELETE FROM outbox_events WHERE aggregate_type = ${JOB_AGGREGATE}`
+        const leaving = await seedOwnerWithAddress(sql, "leaving@example.com")
+        const periodEnd = new Date(start.getTime() + 3 * DAY)
+        await apply(leaving.groupId, { status: SubscriptionStatus.Active })
+        await apply(leaving.groupId, {
+          status: SubscriptionStatus.PastDue,
+          cancelAtPeriodEnd: true,
+          currentPeriodEnd: periodEnd,
+        })
+        await sql`
+          UPDATE outbox_events SET available_at = now() WHERE aggregate_type = ${JOB_AGGREGATE}
+        `
+        const sender = recordingSender()
+        const processor = createOutboxProcessor(
+          sql,
+          {
+            store: createPostgresAuthStore(sql),
+            sender,
+            brand: { webAppUrl: "http://app.localhost" },
+            log: () => {},
+          },
+          null,
+          null,
+          7,
+        )
+
+        expect((await processor.drainOnce()).failed).toBe(0)
+
+        const failed = sender.sent.find((mail) => mail.subject === "A payment for Pro failed")
+        expect(failed?.to).toBe("leaving@example.com")
+        expect(failed?.text).toContain(
+          `The plan is kept until ${longDate(periodEnd.getTime())} while`,
+        )
+      },
+    )
   })
 })
 

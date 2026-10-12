@@ -638,45 +638,65 @@ Deno.test("the worker's processor when a job keeps failing", async (t) => {
     await sql`DELETE FROM outbox_events`
 
     await t.step(
-      "a cleanup row that used up its attempts is replaced at the next worker start",
+      "after the migration, a mail an older worker gave up is never sent, one still being retried is, and the cleanup starts again",
       async () => {
-        const stuck = uuidV7()
+        await store.createUserWithKey({
+          method: PASSWORD_METHOD,
+          subject: "bob@example.com",
+          email: "bob@example.com",
+          secret: "hash",
+          provenAt: null,
+        })
+        await sql`DELETE FROM password_reset_requests`
+        // What a worker with 10 attempts leaves: Ann's mail and the cleanup were given up and stay
+        // unprocessed; Bob's mail has one attempt left.
+        await enqueuePasswordResetMail(sql, "ann@example.com")
+        await sql`UPDATE outbox_events SET attempt_count = 10, last_error_code = 'Error'`
+        await enqueuePasswordResetMail(sql, "bob@example.com")
+        await sql`
+          UPDATE outbox_events SET attempt_count = 9, last_error_code = 'Error'
+          WHERE attempt_count = 0
+        `
         await sql`
           INSERT INTO outbox_events (
             id, event_kind, aggregate_type, aggregate_id, aggregate_version, attempt_count,
             last_error_code, available_at
           ) VALUES (
-            ${stuck}, ${OUTBOX_CLEANUP_JOB}, ${JOB_AGGREGATE}, ${JOB_AGGREGATE_ID}, 1,
-            ${JOB_RETRY.maxAttempts - 1}, 'PostgresError', now() - interval '3 days'
+            ${uuidV7()}, ${OUTBOX_CLEANUP_JOB}, ${JOB_AGGREGATE}, ${JOB_AGGREGATE_ID}, 1,
+            10, 'PostgresError', now() - interval '3 days'
           )
         `
-        const logged: string[] = []
-        const log = (line: string) => void logged.push(line)
 
-        // One attempt left: the row is still waiting, and the start leaves it alone.
-        await scheduleNightlyJobs(sql, new Date(), log)
-        expect((await cleanupRows()).map((row) => row.processed)).toEqual([false])
-        expect(logged).toEqual([])
-
-        await sql`UPDATE outbox_events SET attempt_count = ${JOB_RETRY.maxAttempts}`
-        await scheduleNightlyJobs(sql, new Date(), log)
-        await scheduleNightlyJobs(sql, new Date(), log)
+        await sql.unsafe(
+          await Deno.readTextFile(
+            "libs/server/db/migrations/2026_11_01_0001_close_given_up_outbox_rows.sql",
+          ),
+        )
+        // The worker starts: twice, as a restart would.
+        await scheduleNightlyJobs(sql, new Date())
+        await scheduleNightlyJobs(sql, new Date())
 
         const rows = await cleanupRows()
         expect(rows.map((row) => [row.attemptCount, row.processed])).toEqual([
-          [JOB_RETRY.maxAttempts, true],
+          [10, true],
           [0, false],
         ])
         expect(rows[1].hours).toBeGreaterThanOrEqual(0)
         expect(rows[1].hours).toBeLessThanOrEqual(24)
-        expect(logged).toEqual([
-          `warn: the nightly cleanup had stopped after ${JOB_RETRY.maxAttempts} attempts ` +
-          `(last error: PostgresError); starting it again`,
-        ])
-        // The new row runs: the chain is alive again.
+        expect(
+          await sql`
+            SELECT last_error_code FROM outbox_events
+            WHERE processed_at IS NOT NULL ORDER BY last_error_code
+          `,
+        ).toEqual([{ lastErrorCode: "Error" }, { lastErrorCode: "PostgresError" }])
+
         await skipWait(sql)
-        const processor = createOutboxProcessor(sql, mailOff(sql))
-        expect(await processor.drainOnce()).toEqual({ claimed: 1, published: 1, failed: 0 })
+        const sender = recordingSender()
+        const processor = createOutboxProcessor(sql, { store, sender, brand: BRAND, log: () => {} })
+
+        // Bob's mail and the fresh cleanup run; Ann's stays unsent.
+        expect(await processor.drainOnce()).toEqual({ claimed: 2, published: 2, failed: 0 })
+        expect(sender.sent.map((mail) => mail.to)).toEqual(["bob@example.com"])
       },
     )
   })

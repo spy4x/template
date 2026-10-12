@@ -1,4 +1,4 @@
-import type { JobHandler, OutboxAttemptFailure } from "@spy4x/server/outbox"
+import { errorCodeOf, type JobHandler, type OutboxAttemptFailure } from "@spy4x/server/outbox"
 
 /**
  * How the worker retries a failing outbox row: the waits double from one second up to fifteen
@@ -17,16 +17,11 @@ export function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** The name of whatever a job threw, such as `TypeError`: what the outbox row stores too. */
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : typeof error
-}
-
 /**
  * The worker's `onAttemptFailed`: one log line for every failed attempt of an outbox row, a job or
  * any other, and one for the attempt after which the processor gives the row up. A line names the
  * row's kind, its aggregate and id, the attempt, where it failed (`publish`, `markProcessed`, or
- * `lease` for a worker that died mid-run) and the error's name.
+ * `lease` for a worker that died mid-run) and the error's name, as the outbox row stores it.
  *
  * Never the error's message: a mail or billing error can quote an address or a provider's answer,
  * and the log is no place for either. A job that wants more in the log writes it itself.
@@ -36,7 +31,7 @@ export function logAttemptFailure(
 ): (failure: OutboxAttemptFailure) => void {
   return ({ event, error, attempt, maxAttempts, lastAttempt, stage, storedErrorCode }) => {
     const what = `outbox row ${event.eventKind} (${event.aggregateType} ${event.aggregateId})`
-    const name = storedErrorCode ?? errorName(error)
+    const name = storedErrorCode ?? errorCodeOf(error)
     log(
       lastAttempt
         ? `error: ${what} abandoned at ${stage} after ${attempt} attempts: ${name}`

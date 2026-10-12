@@ -238,27 +238,15 @@ function billingNoticeJobs(
 }
 
 /**
- * Starts the nightly cleanup chain at the next 03:00 UTC unless one is already waiting. A cleanup
- * row left unprocessed with its attempts used up, by a worker from before the processor closed
- * such rows, is closed first and told to `log`, so the chain starts again.
+ * Starts the nightly cleanup chain at the next 03:00 UTC unless a run is already waiting. The
+ * processor closes a cleanup row it gives up and writes the next run itself, so a chain never
+ * stays stopped; a row an older worker gave up was closed by migration
+ * `2026_11_01_0001_close_given_up_outbox_rows.sql`, and this then writes a fresh one.
  */
-export async function scheduleNightlyJobs(
-  sql: postgres.Sql,
-  now = new Date(),
-  log: (line: string) => void = console.warn,
-): Promise<void> {
+export async function scheduleNightlyJobs(sql: postgres.Sql, now = new Date()): Promise<void> {
   await ensureScheduledOutboxEvent(
     sql,
     { eventKind: OUTBOX_CLEANUP_JOB, aggregateType: JOB_AGGREGATE, aggregateId: JOB_AGGREGATE_ID },
     { at: nextUtcHour(now, NIGHTLY_HOUR_UTC) },
-    {
-      replaceGivenUpAfter: JOB_RETRY.maxAttempts,
-      onReplaced: ({ attemptCount, lastErrorCode }) =>
-        log(
-          `warn: the nightly cleanup had stopped after ${attemptCount} attempts (last error: ${
-            lastErrorCode ?? "none stored"
-          }); starting it again`,
-        ),
-    },
   )
 }
