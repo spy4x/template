@@ -233,6 +233,22 @@ These cost real time to find. Do not rediscover them.
    (`libs/server/auth/email-verification.ts`) is the one check invitations
    (#131) and OAuth linking (#141) must call before trusting an address.
 
+   **Google and GitHub (#141, #142).** `apps/api/services/oauth-sign-in.ts` wraps
+   `createOAuthSignIn` of `@spy4x/server/auth/oauth`, one per provider whose client id and secret
+   are both set (README, "Sign in with Google and GitHub"); `apps/api/routes/auth-oauth.ts` holds
+   the routes and is mounted before `createAuthRoute`. A provider method is a row of `auth_keys`
+   with the provider's name as `method` and the provider's user id as `subject`: there is no table
+   of its own. The state of a flow lives in Valkey for 10 minutes and in the HttpOnly cookie
+   `oauth_state_<provider>`. An unknown person gets no account: the callback stores a pending
+   sign-up, sets the cookie `oauth_sign_up` and redirects to `/sign-up/confirm`, where
+   `POST /api/auth/sign-up/confirm` creates the user, profile and first group. The library, not
+   `provenAddressOwner`, decides whether a provider account joins an existing one: only by an
+   address both sides have verified. Linking from the profile is a provider sign-in that must end
+   at the signed-in user; `DELETE /api/auth/methods/:id` refuses the last usable method and ends
+   the sessions that method started. Not built: adding a password to an account that has none,
+   and so such an account cannot change its address or delete itself, which both ask for the
+   password.
+
    **Changing the address.** `POST /api/auth/email/change` with `{ email,
    password }` stores the new address in `email_changes` and mails it a code;
    the account keeps signing in with the old address until that code is

@@ -226,6 +226,33 @@ defines a resolver, do not start the proxy compose file: set `TRAEFIK_CERT_RESOL
 defines. If that Traefik defines none, copy the three `--certificatesresolvers.*` flags from
 `compose.proxy.yml` into its command.
 
+## Sign in with Google and GitHub
+
+Both are off until you set their credentials: the sign-in and sign-up pages then show a "Continue
+with …" link for each provider that is on, and the profile gets a "Sign-in methods" card. A
+provider is on only when both of its variables are set in the env file.
+
+| Provider | Where to register                                                         | Variables                                              | Callback URL to register                    |
+| -------- | ------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------- |
+| Google   | Google Cloud console, "APIs & Services", "Credentials", "OAuth client ID" | `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET` | `https://<DOMAIN>/api/auth/google/callback` |
+| GitHub   | GitHub, "Settings", "Developer settings", "OAuth Apps", "New OAuth App"   | `OAUTH_GITHUB_CLIENT_ID`, `OAUTH_GITHUB_CLIENT_SECRET` | `https://<DOMAIN>/api/auth/github/callback` |
+
+For Google choose the application type "Web application"; the scopes asked for are `openid` and
+`email`. GitHub is asked for `read:user` and `user:email`. On your own machine the callback is
+`http://app.localhost/api/auth/<provider>/callback`; register it as a second callback URL (Google)
+or in a second OAuth App (GitHub allows one callback per app).
+
+What a person gets:
+
+- Someone the provider already signs in here is signed in. An account with an authenticator app is
+  still asked for its code.
+- Someone new is asked "Create a new account?" first, and nothing is created until they answer.
+  The question waits 10 minutes; "I already have an account" creates nothing.
+- A provider account joins an existing account by its e-mail address only when both sides have
+  verified that address. An address the provider has not verified never links and never signs in.
+- On the profile, a person links and unlinks providers. The last way into an account cannot be
+  unlinked, and unlinking a method signs out the devices that signed in with it.
+
 ## Admin consoles
 
 The MinIO console and Grafana have no public address. Each is published on the machine's own
