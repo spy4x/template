@@ -31,6 +31,6 @@ export async function rememberSignIn(
 ): Promise<void> {
   if (!session.user || session.isMfaRequired) return
   const answer = await list().catch(() => null)
-  const used = answer?.ok ? answer.methods?.find((method) => method.current) : undefined
+  const used = answer?.methods?.find((method) => method.current)
   if (used) store.remember(used.kind, used.email)
 }
