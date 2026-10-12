@@ -982,6 +982,31 @@ Deno.test("linking the same provider account a second time says so and records n
   })
 })
 
+Deno.test("a sign-in that comes back while an abandoned link's cookie waits is still a sign-in", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const owner = browser(app)
+    const ownerId = await provenPasswordAccount(app, owner, "ada@example.com")
+    // A link started on the profile and left at the provider: its cookie stays for ten minutes.
+    expect((await owner.post("/auth/methods/google/link")).status).toBe(200)
+    const abandoned = owner.cookies.get("oauth_connect_google")
+    expect(abandoned).toBeDefined()
+
+    // The same browser then signs in with Google: both cookies come back with the callback.
+    const answer = await owner.through("google", "ada")
+
+    expect(target(answer)).toBe("/")
+    expect((await methodsOf(owner)).methods.find((method) => method.current)?.kind).toBe("google")
+    expect((await audit(sql, ownerId)).at(-1)).toEqual([
+      AuthAuditEventType.SIGNED_IN,
+      "oauth:google",
+    ])
+    // Only the cookie whose `state` came back was used up.
+    expect(owner.cookies.get("oauth_connect_google")).toBe(abandoned)
+    expect(owner.cookies.has("oauth_state_google")).toBe(false)
+  })
+})
+
 Deno.test("linking that takes an unconfirmed account's address records it on that account", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql, {
@@ -1206,6 +1231,50 @@ Deno.test("the last sign-in method cannot be unlinked", async () => {
     ])
     expect((await methodsOf(visitor)).methods.map((method) => [method.kind, method.canUnlink]))
       .toEqual([["github", false]])
+  })
+})
+
+Deno.test("two unlinks sent at once leave one way in", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const visitor = browser(app)
+    await visitor.through("google", "ada")
+    const user = await (await visitor.post("/auth/sign-up/confirm")).json()
+    // GitHub vouches for the same address, so it links to the same account: two ways in, no password.
+    expect(target(await visitor.through("github", "ada"))).toBe("/")
+    const [google, github] = (await methodsOf(visitor)).methods
+    expect([google.canUnlink, github.canUnlink]).toEqual([true, true])
+
+    const answers = await Promise.all([
+      visitor.delete(`/auth/methods/${google.id}`),
+      visitor.delete(`/auth/methods/${github.id}`),
+    ])
+
+    // Each alone would be allowed; together, the second waits for the first and is refused.
+    expect(answers.map((answer) => answer.status).sort()).toEqual([200, 409])
+    expect(await app.db.authStore.listKeys(user.id)).toHaveLength(1)
+  })
+})
+
+Deno.test("a password key that holds no password does not count as a way in", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const ownerId = await provenPasswordAccount(app, browser(app), "ada@example.com")
+    const withGoogle = browser(app)
+    expect(target(await withGoogle.through("google", "ada"))).toBe("/")
+    expect((await methodsOf(withGoogle)).methods.map((method) => [method.kind, method.canUnlink]))
+      .toEqual([["password", false], ["google", true]])
+
+    // The key stays, without a password anybody could sign in with.
+    await sql`UPDATE auth_keys SET secret = NULL WHERE user_id = ${ownerId} AND method = 'password'`
+
+    const { methods } = await methodsOf(withGoogle)
+    expect(methods.map((method) => [method.kind, method.canUnlink])).toEqual([["google", false]])
+    expect((await withGoogle.delete(`/auth/methods/${methods[0].id}`)).status).toBe(409)
+    expect((await app.db.authStore.listKeys(ownerId)).map((key) => key.method)).toEqual([
+      "password",
+      "oauth:google",
+    ])
   })
 })
 
