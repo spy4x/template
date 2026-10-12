@@ -6,7 +6,10 @@
  * such as `denoland/deno` is looked up in whatever registries the builder is set up to search, so
  * the same file can pull a different image on another machine. A `FROM ${BASE_IMAGE}` is judged by
  * the default of its build argument; a caller that passes another value answers for that value.
- * The base image is built on the machine itself, and `localhost/` is the registry name for that.
+ * The base image is built on the machine itself. Its default name starts with `localhost/`: Podman
+ * reads that as a locally built image, and Docker as a registry on this machine, so a build run by
+ * hand with the default fails there instead of asking Docker Hub for a stranger's image. Compose,
+ * the release pipeline and the e2e scripts all pass `BASE_IMAGE`.
  *
  * Every `deno install` and `deno cache` runs with `--frozen`, so an image build fails when
  * `deno.lock` does not match `deno.jsonc` instead of resolving versions CI never tested.
@@ -22,13 +25,21 @@ export function isDockerfile(name: string): boolean {
   return /^dockerfile(\..+)?$/i.test(name) || /\.dockerfile$/i.test(name)
 }
 
-/** Every Dockerfile under `directory`, as its path from the root. `.git` and `node_modules` are left out. */
+/**
+ * A directory the search does not enter. `.volumes` holds the data of the development stack, which
+ * belongs to the containers' users and often cannot be read.
+ */
+export function isSkippedDirectory(name: string): boolean {
+  return name === ".git" || name === "node_modules" || name === ".volumes"
+}
+
+/** Every Dockerfile under `directory`, as its path from the root. */
 async function dockerfiles(directory = ""): Promise<string[]> {
   const found: string[] = []
   for await (const entry of Deno.readDir(`${ROOT}${directory}`)) {
     const path = `${directory}${entry.name}`
     if (entry.isDirectory) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue
+      if (isSkippedDirectory(entry.name)) continue
       found.push(...await dockerfiles(`${path}/`))
     } else if (entry.isFile && isDockerfile(entry.name)) found.push(path)
   }
@@ -180,5 +191,15 @@ Deno.test("an install is unfrozen without --frozen, with --frozen=false, or besi
     "deno install --frozen=false",
     "deno cache apps/healthcheck.ts",
     "deno i --allow-scripts",
+  ])
+})
+
+Deno.test("the search for Dockerfiles stays out of git's folder, installed packages and the stack's data", () => {
+  expect([".git", "node_modules", ".volumes"].map(isSkippedDirectory)).toEqual([true, true, true])
+  expect(["apps", ".woodpecker", "volumes", "infra"].map(isSkippedDirectory)).toEqual([
+    false,
+    false,
+    false,
+    false,
   ])
 })
