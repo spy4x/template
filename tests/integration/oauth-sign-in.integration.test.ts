@@ -1,6 +1,6 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
-import { Hono } from "hono"
+import { Hono, type MiddlewareHandler } from "hono"
 import postgres from "postgres"
 import {
   AuthAuditEventType,
@@ -113,8 +113,12 @@ function buildApp(
   sql: postgres.Sql,
   people: Record<string, ProviderPerson>,
   on: ("google" | "github")[] = ["google", "github"],
+  limits: Partial<Record<"strictByIp" | "normal", MiddlewareHandler<APIContext>>> = {},
 ) {
   let now = Date.now()
+  /** The ids of the users whose sign-out was announced, and what was logged as an error. */
+  const signedOut: number[] = []
+  const logged: string[] = []
   const db = new AppDbBase({ sql })
   const credentials = { clientId: "test-client-id", clientSecret: "test-client-secret" }
   const signIn = createSignIn({
@@ -137,10 +141,11 @@ function buildApp(
     "/auth",
     createOAuthRoute({
       signIn,
-      emit: () => {},
+      emit: (event) => void signedOut.push(event.data.userId),
       mutationGuards: createMutationGuards(ORIGIN),
-      rateLimits: { strictByIp: pass, normal: pass },
+      rateLimits: { strictByIp: pass, normal: pass, ...limits },
       origin: ORIGIN,
+      logError: (message) => void logged.push(message),
     }),
   )
   // The password sign-up and sign-in, for accounts that exist before a provider is used.
@@ -154,7 +159,7 @@ function buildApp(
     const result = await signIn.signIn(c, email, PASSWORD)
     return result ? c.json(result.user) : c.json({ error: "refused" }, 401)
   })
-  return { app, db, sql, advance: (ms: number) => now += ms }
+  return { app, db, sql, signedOut, logged, advance: (ms: number) => now += ms }
 }
 
 type App = ReturnType<typeof buildApp>
@@ -162,13 +167,17 @@ type App = ReturnType<typeof buildApp>
 /** A browser: it keeps the cookies the app sets and sends them back. */
 function browser({ app }: App) {
   const cookies = new Map<string, string>()
-  const send = async (method: string, path: string, body?: unknown): Promise<Response> => {
+  const send = async (
+    method: string,
+    path: string,
+    body?: unknown,
+    from: Record<string, string> = { origin: ORIGIN, "sec-fetch-site": "same-origin" },
+  ): Promise<Response> => {
     const response = await app.request(`http://local${path}`, {
       method,
       headers: {
         "content-type": "application/json",
-        origin: ORIGIN,
-        "sec-fetch-site": "same-origin",
+        ...from,
         "user-agent": "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0",
         "x-real-ip": "203.0.113.42",
         cookie: [...cookies].map(([name, value]) => `${name}=${value}`).join("; "),
@@ -190,6 +199,9 @@ function browser({ app }: App) {
     get: (path: string) => send("GET", path),
     post: (path: string, body: unknown = {}) => send("POST", path, body),
     delete: (path: string) => send("DELETE", path),
+    /** The request another site makes this browser send: its cookies, the other site's origin. */
+    fromAnotherSite: (method: "POST" | "DELETE", path: string) =>
+      send(method, path, {}, { origin: "https://evil.example", "sec-fetch-site": "cross-site" }),
     /**
      * Goes to the provider and comes back as the person `code` names: follows `startUrl` (the
      * start route, or the address a link request answered) and returns the callback's answer.
@@ -259,8 +271,11 @@ Deno.test("only a provider with credentials is listed and can be started", async
     const visitor = browser(app)
 
     expect(await (await visitor.get("/auth/providers")).json()).toEqual({ providers: ["google"] })
-    expect((await visitor.get("/auth/github/start")).status).toBe(404)
-    expect((await visitor.get("/auth/github/callback?code=ada&state=x")).status).toBe(404)
+    // Both are pages a browser opens: the person lands on the sign-in page, not on JSON.
+    expect(target(await visitor.get("/auth/github/start"))).toBe("/sign-in?oauth=failed")
+    expect(target(await visitor.get("/auth/github/callback?code=ada&state=x")))
+      .toBe("/sign-in?oauth=failed")
+    expect(await accounts(sql)).toEqual({ authUsers: 0, profiles: 0 })
     const started = await visitor.get("/auth/google/start")
     const provider = new URL(started.headers.get("location")!)
     expect(provider.origin).toBe("https://accounts.google.com")
@@ -348,13 +363,239 @@ Deno.test("going back creates nothing and the question cannot be answered afterw
     expect((await visitor.post("/auth/sign-up/confirm")).status).toBe(400)
     expect(await accounts(sql)).toEqual({ authUsers: 0, profiles: 0 })
 
-    // Even a browser that kept the cookie: the held sign-up expires after ten minutes.
+    // Even a browser that kept the cookie: going back took the held sign-up away on the server.
     const keeper = browser(app)
     for (const [name, value] of held) keeper.cookies.set(name, value)
-    app.advance(10 * 60_000 + 1000)
-    expect(await pendingOf(keeper)).toBe(null)
     expect((await keeper.post("/auth/sign-up/confirm")).status).toBe(400)
     expect(await accounts(sql)).toEqual({ authUsers: 0, profiles: 0 })
+  })
+})
+
+Deno.test("a question left unanswered for ten minutes can no longer be answered", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const visitor = browser(app)
+    await visitor.through("google", "ada")
+    app.advance(10 * 60_000 - 5000)
+    expect(await pendingOf(visitor)).not.toBe(null)
+
+    app.advance(6000)
+
+    expect(await pendingOf(visitor)).toBe(null)
+    expect((await visitor.post("/auth/sign-up/confirm")).status).toBe(400)
+    expect(await accounts(sql)).toEqual({ authUsers: 0, profiles: 0 })
+  })
+})
+
+Deno.test("the question says when creating would lock an unconfirmed account with that address", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, {
+      ada: ADA,
+      eve: { sub: "4004", email: "ada@example.com", verified: false },
+      bob: { sub: "3003", email: "bob@example.com", verified: true },
+    })
+    // Someone signed up with the address and a password, and never confirmed the address.
+    const first = browser(app)
+    expect((await first.post("/password/sign-up", { email: "ada@example.com" })).status).toBe(200)
+
+    const owner = browser(app)
+    await owner.through("google", "ada")
+    expect((await pendingOf(owner))!.unconfirmedAccount).toBe(true)
+
+    // No other account uses Bob's address, and an address the provider does not vouch for takes
+    // nothing away: neither is warned.
+    const bob = browser(app)
+    await bob.through("google", "bob")
+    expect((await pendingOf(bob))!.unconfirmedAccount).toBe(false)
+    const eve = browser(app)
+    await eve.through("google", "eve")
+    expect((await pendingOf(eve))!.unconfirmedAccount).toBe(false)
+
+    // Going back keeps the first account as it was: its password still signs in.
+    expect((await owner.post("/auth/sign-up/cancel")).status).toBe(200)
+    expect((await browser(app).post("/password/sign-in", { email: "ada@example.com" })).status)
+      .toBe(200)
+    expect(await accounts(sql)).toEqual({ authUsers: 1, profiles: 1 })
+  })
+})
+
+Deno.test("creating the account records that an unconfirmed account lost its password", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const first = browser(app)
+    const firstUser = await (await first.post("/password/sign-up", { email: "ada@example.com" }))
+      .json()
+    const before = await audit(sql, firstUser.id)
+    const owner = browser(app)
+    await owner.through("google", "ada")
+
+    const confirmed = await owner.post("/auth/sign-up/confirm")
+
+    expect(confirmed.status).toBe(201)
+    const created = await confirmed.json()
+    expect(created.id).not.toBe(firstUser.id)
+    expect((await audit(sql, firstUser.id)).slice(before.length)).toEqual([[
+      AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
+      "oauth:google",
+    ]])
+    expect(await audit(sql, created.id)).toEqual([[
+      AuthAuditEventType.SIGNED_UP,
+      "ada@example.com",
+    ]])
+    // What the row is about: the first account is locked.
+    expect(await app.db.authStore.listKeys(firstUser.id)).toHaveLength(0)
+    expect((await first.get("/auth/methods")).status).toBe(401)
+    expect((await browser(app).post("/password/sign-in", { email: "ada@example.com" })).status)
+      .toBe(401)
+  })
+})
+
+Deno.test("creating an account whose address nobody claimed records nothing about another account", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, {
+      ada: ADA,
+      eve: { sub: "4004", email: "bob@example.com", verified: false },
+    })
+    // Bob never confirmed his address, and the provider does not vouch for Eve's use of it.
+    const bob = await (await browser(app).post("/password/sign-up", { email: "bob@example.com" }))
+      .json()
+    const before = await audit(sql, bob.id)
+    const ada = browser(app)
+    await ada.through("google", "ada")
+    expect((await ada.post("/auth/sign-up/confirm")).status).toBe(201)
+    // Eve rewrites her own cookie to say the provider vouched for the address. The cookie only
+    // feeds the question page: what was taken is read from the database.
+    const eve = browser(app)
+    await eve.through("google", "eve")
+    const kept = JSON.parse(decodeURIComponent(eve.cookies.get("oauth_sign_up")!))
+    expect(kept.verified).toBe(false)
+    eve.cookies.set(
+      "oauth_sign_up",
+      encodeURIComponent(JSON.stringify({ ...kept, verified: true })),
+    )
+    expect((await eve.post("/auth/sign-up/confirm")).status).toBe(201)
+
+    expect(await audit(sql, bob.id)).toEqual(before)
+    const [{ taken }] = await sql`
+      SELECT count(*)::int AS taken FROM auth_audits
+      WHERE event_type = ${AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN}`
+    expect(taken).toBe(0)
+    expect((await browser(app).post("/password/sign-in", { email: "bob@example.com" })).status)
+      .toBe(200)
+  })
+})
+
+Deno.test("another site cannot answer the question for a browser", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const visitor = browser(app)
+    await visitor.through("google", "ada")
+
+    expect((await visitor.fromAnotherSite("POST", "/auth/sign-up/confirm")).status).toBe(403)
+    expect(await accounts(sql)).toEqual({ authUsers: 0, profiles: 0 })
+    expect((await visitor.fromAnotherSite("POST", "/auth/sign-up/cancel")).status).toBe(403)
+
+    // The question still waits for the person's own answer.
+    expect(await pendingOf(visitor)).not.toBe(null)
+    expect((await visitor.post("/auth/sign-up/confirm")).status).toBe(201)
+  })
+})
+
+Deno.test("the cookies of a flow are kept from page scripts and gone once used", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const visitor = browser(app)
+    const attributes = (response: Response, name: string) =>
+      response.headers.getSetCookie().find((line) => line.startsWith(`${name}=`))
+        ?.toLowerCase().split(";").map((part) => part.trim()) ?? []
+
+    const started = await visitor.get("/auth/google/start")
+    const state = attributes(started, "oauth_state_google")
+    expect(state).toContain("httponly")
+    expect(state).toContain("samesite=lax")
+    expect(state).toContain("path=/api/auth")
+
+    const back = await visitor.through("google", "ada", started.headers.get("location")!)
+    const question = attributes(back, "oauth_sign_up")
+    expect(question).toContain("httponly")
+    expect(question).toContain("samesite=lax")
+    expect(question).toContain("path=/api/auth")
+    expect(visitor.cookies.has("oauth_state_google")).toBe(false)
+
+    await visitor.post("/auth/sign-up/confirm")
+    expect(visitor.cookies.has("oauth_sign_up")).toBe(false)
+  })
+})
+
+Deno.test("signing in with a provider ends the session the browser had before", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, {
+      ada: ADA,
+      bob: { sub: "3003", email: "bob@example.com", verified: true },
+    })
+    const shared = browser(app)
+    const adaId = await provenPasswordAccount(app, shared, "ada@example.com")
+    const adaSession = new Map(shared.cookies)
+    const sessionsOf = async (userId: number) =>
+      (await sql`SELECT count(*)::int AS open FROM auth_sessions WHERE user_id = ${userId}`)[0].open
+    expect(await sessionsOf(adaId)).toBe(1)
+
+    // Bob creates his account in the same browser, without signing Ada out first.
+    await shared.through("google", "bob")
+    expect(await sessionsOf(adaId)).toBe(1)
+    const bob = await (await shared.post("/auth/sign-up/confirm")).json()
+
+    expect(await sessionsOf(adaId)).toBe(0)
+    const kept = browser(app)
+    for (const [name, value] of adaSession) kept.cookies.set(name, value)
+    expect((await kept.get("/auth/methods")).status).toBe(401)
+    expect(await sessionsOf(bob.id)).toBe(1)
+
+    // And the same when a known provider account signs in over a session.
+    const again = browser(app)
+    expect((await again.post("/password/sign-in", { email: "ada@example.com" })).status).toBe(200)
+    expect(await sessionsOf(adaId)).toBe(1)
+    expect(target(await again.through("google", "bob"))).toBe("/")
+    expect(await sessionsOf(adaId)).toBe(0)
+    expect(await sessionsOf(bob.id)).toBe(2)
+  })
+})
+
+Deno.test("a spent rate limit or a failure sends the person to the sign-in page with a reason", async () => {
+  await withSchema(async (sql) => {
+    const spent: MiddlewareHandler<APIContext> = (c) => {
+      c.header("Retry-After", "42")
+      return Promise.resolve(c.json({ error: "Too many requests" }, 429))
+    }
+    const limited = buildApp(sql, { ada: ADA }, ["google"], { strictByIp: spent, normal: spent })
+    const start = await browser(limited).get("/auth/google/start")
+    expect(target(start)).toBe("/sign-in?oauth=busy")
+    expect(start.headers.get("retry-after")).toBe("42")
+    expect(target(await browser(limited).get("/auth/google/callback?code=ada&state=x")))
+      .toBe("/sign-in?oauth=busy")
+    // The routes a script calls keep the limiter's own answer.
+    expect((await browser(limited).get("/auth/providers")).status).toBe(429)
+
+    const down: MiddlewareHandler<APIContext> = () => Promise.reject(new Error("store down"))
+    const broken = buildApp(sql, { ada: ADA }, ["google"], { strictByIp: down })
+    expect(target(await browser(broken).through("google", "ada"))).toBe("/sign-in?oauth=failed")
+    expect(broken.logged).toEqual(["error: provider sign-in could not count its rate limit"])
+    expect(await accounts(sql)).toEqual({ authUsers: 0, profiles: 0 })
+  })
+})
+
+Deno.test("a failure inside the callback is logged and shown as a sentence, not as an error page", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const visitor = browser(app)
+    await provenPasswordAccount(app, browser(app), "ada@example.com")
+    // The audit table is gone, so the sign-in cannot be recorded.
+    await sql`ALTER TABLE auth_audits RENAME TO auth_audits_away`
+
+    expect(target(await visitor.through("google", "ada"))).toBe("/sign-in?oauth=failed")
+
+    expect(app.logged).toEqual(["error: provider sign-in failed"])
+    expect((await visitor.get("/auth/methods")).status).toBe(401)
   })
 })
 
@@ -460,6 +701,37 @@ Deno.test("a provider sign-in returns to the page it was started for, and never 
       const answer = await lured.through("google", "ada", begun.headers.get("location")!)
       expect(answer.headers.get("location")).toBe(`${ORIGIN}/`)
     }
+  })
+})
+
+Deno.test("a return page written into the flow's cookie by hand is checked again", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const first = browser(app)
+    await first.through("google", "ada")
+    await first.post("/auth/sign-up/confirm")
+
+    for (const next of ["//evil.example", "https://evil.example/", "/api/auth/sign-out"]) {
+      const visitor = browser(app)
+      const started = (await visitor.get("/auth/google/start")).headers.get("location")!
+      const kept = JSON.parse(decodeURIComponent(visitor.cookies.get("oauth_state_google")!))
+      visitor.cookies.set(
+        "oauth_state_google",
+        encodeURIComponent(JSON.stringify({ ...kept, next })),
+      )
+
+      expect(target(await visitor.through("google", "ada", started))).toBe("/")
+    }
+
+    // A page of the app written the same way is kept, so the loop above proves the check.
+    const visitor = browser(app)
+    const started = (await visitor.get("/auth/google/start")).headers.get("location")!
+    const kept = JSON.parse(decodeURIComponent(visitor.cookies.get("oauth_state_google")!))
+    visitor.cookies.set(
+      "oauth_state_google",
+      encodeURIComponent(JSON.stringify({ ...kept, next: "/notes" })),
+    )
+    expect(target(await visitor.through("google", "ada", started))).toBe("/notes")
   })
 })
 
@@ -602,6 +874,8 @@ Deno.test("unlinking a provider ends the sessions that signed in with it and kee
 
     expect(answer.status).toBe(200)
     expect(await answer.json()).toEqual({ signedOut: false })
+    // Announced, so the sockets of the ended sessions close.
+    expect(app.signedOut).toEqual([ownerId])
     expect((await withGoogle.get("/auth/methods")).status).toBe(401)
     expect((await methodsOf(withPassword)).methods.map((method) => method.kind))
       .toEqual(["password"])
@@ -623,7 +897,53 @@ Deno.test("unlinking the method this device signed in with signs it out", async 
     const answer = await withGoogle.delete(`/auth/methods/${google.id}`)
 
     expect(await answer.json()).toEqual({ signedOut: true })
+    // The browser is told to drop the session cookie, not left to find out it is dead.
+    expect([...withGoogle.cookies.keys()].filter((name) => !name.startsWith("oauth_")))
+      .toEqual([])
     expect((await withGoogle.get("/auth/methods")).status).toBe(401)
+  })
+})
+
+Deno.test("another site cannot unlink a method of a signed-in person", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const owner = browser(app)
+    const ownerId = await provenPasswordAccount(app, owner, "ada@example.com")
+    await browser(app).through("google", "ada")
+    const google = (await methodsOf(owner)).methods.find((method) => method.kind === "google")!
+
+    const forged = await owner.fromAnotherSite("DELETE", `/auth/methods/${google.id}`)
+
+    expect(forged.status).toBe(403)
+    expect((await app.db.authStore.listKeys(ownerId)).map((key) => key.method)).toEqual([
+      "password",
+      "oauth:google",
+    ])
+    expect(app.signedOut).toEqual([])
+  })
+})
+
+Deno.test("a provider that was switched off does not count as a way in", async () => {
+  await withSchema(async (sql) => {
+    const both = buildApp(sql, { ada: ADA })
+    const visitor = browser(both)
+    await visitor.through("google", "ada")
+    const user = await (await visitor.post("/auth/sign-up/confirm")).json()
+    expect(target(await visitor.through("github", "ada"))).toBe("/")
+
+    // The same database, with GitHub's credentials removed from the configuration.
+    const googleOnly = buildApp(sql, { ada: ADA }, ["google"])
+    const later = browser(googleOnly)
+    expect(target(await later.through("google", "ada"))).toBe("/")
+    const { methods, available } = await methodsOf(later)
+
+    expect(methods.map((method) => [method.kind, method.canUnlink])).toEqual([["google", false]])
+    expect(available).toEqual([])
+    expect((await later.delete(`/auth/methods/${methods[0].id}`)).status).toBe(409)
+    expect((await googleOnly.db.authStore.listKeys(user.id)).map((key) => key.method)).toEqual([
+      "oauth:google",
+      "oauth:github",
+    ])
   })
 })
 

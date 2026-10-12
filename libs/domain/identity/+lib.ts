@@ -286,6 +286,12 @@ export enum AuthAuditEventType {
   SIGN_IN_METHOD_LINKED = 13,
   /** The person removed a sign-in method, with the key's method in `identifier`. */
   SIGN_IN_METHOD_UNLINKED = 14,
+  /**
+   * The account lost its password because it never confirmed its address, and someone a provider
+   * vouched for as the owner of that address created an account of their own. `identifier` is the
+   * method of that provider (`oauth:google`). The account keeps its data but has no way in.
+   */
+  UNCONFIRMED_ADDRESS_TAKEN = 15,
 }
 
 export const authAuditBaseSchema = type({
@@ -305,6 +311,7 @@ export const authAuditBaseSchema = type({
     AuthAuditEventType.API_TOKEN_REFUSED,
     AuthAuditEventType.SIGN_IN_METHOD_LINKED,
     AuthAuditEventType.SIGN_IN_METHOD_UNLINKED,
+    AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
   ),
   identifier: "string <= 320 | null = null",
   ip: "string <= 45 | null = null",
@@ -390,6 +397,12 @@ export interface PendingSignUp {
   email: string | null
   /** ISO 8601. After this the sign-up can no longer be confirmed. */
   expiresAt: string
+  /**
+   * An account here signed up with a password and this address but never confirmed it. The
+   * provider vouches that the person at the question owns the address, so creating the new
+   * account takes the password away from that one. The question page says so first.
+   */
+  unconfirmedAccount: boolean
 }
 
 /** What `GET /auth/sign-up/pending` answers: the sign-up that waits, or `null` when none does. */
@@ -428,10 +441,14 @@ export type OAuthNotice =
   | "linked"
   /** Not linked: the provider's verified address is not this account's proven address. */
   | "link-mismatch"
-  /** Not linked: the provider account already signs in to another account. */
+  /**
+   * Not linked to the signed-in account: the provider account signs in to another account, by its
+   * id or because its verified address is that account's proven address.
+   */
   | "link-other-account"
+  /** Too many attempts from this address in a minute; nothing was tried. */
+  | "busy"
 
-/** The query parameter that carries an {@link OAuthNotice}. */
 /**
  * The web app's pages a provider's callback redirects to. `apps/spa` routes each one
  * (`spa-paths.ts`), and its tests fail when one is missing there.
@@ -447,6 +464,7 @@ export const OAUTH_PAGES = {
   profile: "/",
 } as const
 
+/** The query parameter that carries an {@link OAuthNotice}. */
 export const OAUTH_NOTICE_PARAM = "oauth"
 
 /** What each {@link OAuthNotice} tells the person. */
@@ -456,6 +474,7 @@ export const OAUTH_NOTICES: Record<OAuthNotice, string> = {
   "link-mismatch":
     "Not linked: that account has a different e-mail address than this one, or has not verified it.",
   "link-other-account": "Not linked: that account already signs in to another account here.",
+  "busy": "Too many attempts. Wait a minute, then try again.",
 }
 
 /** `value` as a notice, or `null` when it is none. */

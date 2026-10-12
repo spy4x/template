@@ -111,7 +111,14 @@ const rateLimits = createAuthRateLimits({
 // Before the auth routes: their session middleware would answer for the public paths here too.
 app.route(
   "/auth",
-  createOAuthRoute({ signIn, emit, mutationGuards, rateLimits, origin: config.webAppUrl }),
+  createOAuthRoute({
+    signIn,
+    emit,
+    mutationGuards,
+    rateLimits,
+    origin: config.webAppUrl,
+    logError: (message, error) => log(message, error),
+  }),
 )
 app.route(
   "/auth",

@@ -11,13 +11,24 @@
  *   for an unknown person holds the profile for 10 minutes under a single-use token, which goes to
  *   the browser in an HttpOnly cookie. `confirmSignUp` spends it and creates the auth user, key,
  *   session, profile, first group and audit row in one transaction, as the password sign-up does.
- *   Leaving the page creates nothing, and the token expires by itself.
+ *   "Go back" takes the held profile out of the flow store, so the token is dead at once, and
+ *   leaving the page creates nothing: the token expires by itself.
+ * - **The question says what creating costs.** The package deletes every other user's unproven
+ *   claim to an address the moment someone proves it, so nobody can sit on an address they do
+ *   not own. A password account that never confirmed its address therefore loses its password
+ *   when the provider's verified owner of that address creates an account. Joining the two
+ *   instead would hand the newcomer an account whose password someone else chose, so the rule
+ *   stays; the question page warns first, and the account that lost its password gets an audit
+ *   row (`UNCONFIRMED_ADDRESS_TAKEN`).
  * - **An address that is not verified links nothing.** The package ignores it when it resolves the
  *   person, so such a callback always ends at the question, never inside someone's account.
  * - **Linking from the profile.** The package cannot attach a provider to the signed-in user; it
  *   links only by a verified address that a user owns proven. So a link started from the profile
- *   is a provider sign-in whose result must be the signed-in user: otherwise nothing is kept (the
- *   session the package started is deleted) and the page says why.
+ *   is a provider sign-in whose result must be the signed-in user: otherwise the session the
+ *   package started is deleted and the page says why. One thing is still kept then: when the
+ *   provider's verified address is another account's proven address, the package has already
+ *   linked the provider to that account, as a signed-out sign-in with it would. That ends when
+ *   linking moves to the package's connect call (https://github.com/spy4x/ts-libs/pull/591).
  * - **Unlinking.** Only a provider method, and never the last way in. The key's sessions end with
  *   it through the foreign key, so unlinking the method this device signed in with signs it out.
  *
@@ -30,7 +41,13 @@ import type { Context } from "hono"
 import { deleteCookie, getCookie, setCookie } from "hono/cookie"
 import { type Type, type } from "arktype"
 import { validate } from "@spy4x/validation"
-import type { AuthKey, AuthSessionRecord, AuthStore, AuthUser } from "@spy4x/server/auth"
+import {
+  type AuthKey,
+  type AuthSessionRecord,
+  type AuthStore,
+  type AuthUser,
+  normalizeEmail,
+} from "@spy4x/server/auth"
 import {
   type ConfirmableOAuthSignIn,
   createMemoryOAuthFlowStore,
@@ -103,7 +120,11 @@ function pageOrNull(next: string | null | undefined): string | null {
 const signUpCookieSchema = type({
   provider: type.enumerated(...OAUTH_PROVIDERS),
   token: "string > 0",
+  /** Where the flow store keeps the held profile, so "go back" can take it out. */
+  held: "string > 0",
   email: "string | null",
+  /** Whether the provider vouches for `email`. */
+  verified: "boolean",
   expiresAt: "string.date.iso",
 })
 
@@ -208,16 +229,24 @@ export interface OAuthOperations {
     current: AppAuthState | null,
   ): Promise<OAuthCallbackResult>
   /** The sign-up this browser may confirm, or `null` when none waits or it has expired. */
-  pendingSignUp(c: Context): PendingSignUp | null
+  pendingSignUp(c: Context): Promise<PendingSignUp | null>
   /**
    * Creates the account the waiting sign-up asks for and signs it in, in one transaction, and
-   * clears the sign-up cookie. `null` when nothing waits, or the token is used or expired.
+   * clears the sign-up cookie. `null` when nothing waits, or the token is used or expired. The
+   * session the browser had before (`current`) ends: the device is the new account's now.
    *
    * @param firstGroupId The id of the person's first group. Defaults to a new UUID.
    */
-  confirmSignUp(c: Context, firstGroupId?: string): Promise<SignedIn | null>
-  /** Forgets the waiting sign-up in this browser. Nothing was created; the token just expires. */
-  cancelSignUp(c: Context): void
+  confirmSignUp(
+    c: Context,
+    current: AppAuthState | null,
+    firstGroupId?: string,
+  ): Promise<SignedIn | null>
+  /**
+   * Answers "I already have an account": nothing was created, the cookie goes and the held
+   * profile leaves the flow store, so a kept copy of the cookie confirms nothing either.
+   */
+  cancelSignUp(c: Context): Promise<void>
   /** The user's ways in, and the providers they could still link. */
   methods(state: AppAuthState): Promise<SignInMethodsResponse>
   /** Removes provider method `keyId` of the user, with its sessions, unless it is the last way in. */
@@ -254,12 +283,22 @@ export function createOAuthOperations(
       sessions: SessionManager<AuthSessionRecord>
       secondFactorFor: (user: AuthUser) => Promise<SecondFactorStatus>
     },
+    /** Told where the flow store keeps a profile that waits for the person's answer. */
+    onHeld?: (key: string) => void,
   ): ConfirmableOAuthSignIn {
     return createOAuthSignIn({
       ...over,
       provider: enabled.get(id)!,
       redirectUri: `${options!.origin}/api/auth/${id}/callback`,
-      flows,
+      flows: onHeld
+        ? {
+          take: (key) => flows.take(key),
+          async put(key, flow, expiresAt) {
+            await flows.put(key, flow, expiresAt)
+            if (flow.signUp) onHeld(key)
+          },
+        }
+        : flows,
       fetch: options!.fetch,
       clock,
       signUp: "confirm",
@@ -289,6 +328,19 @@ export function createOAuthOperations(
       })),
       available: [...enabled.keys()].filter((id) => !ways.some((way) => way.kind === id)),
     }
+  }
+
+  /**
+   * The password key that claims the waiting sign-up's address without having proven it, or
+   * `null`. Only an address the provider vouches for can take such a claim away.
+   */
+  async function unconfirmedClaim(
+    store: AuthStore,
+    waiting: typeof signUpCookieSchema.infer,
+  ): Promise<AuthKey | null> {
+    const email = waiting.verified ? normalizeEmail(waiting.email) : null
+    const key = email === null ? null : await store.findKey(PASSWORD_METHOD, email)
+    return key && key.provenAt === null ? key : null
   }
 
   /** The waiting sign-up in the request's cookie, token included, or `null`. */
@@ -372,6 +424,7 @@ export function createOAuthOperations(
       // A link belongs to the person who started it: signed out or replaced since, it is void.
       if (linking && current?.user.id !== kept.link) return failed()
 
+      let held = ""
       let result
       try {
         result = await signInWith(id, {
@@ -382,7 +435,7 @@ export function createOAuthOperations(
           secondFactorFor: linking
             ? () => Promise.resolve(SecondFactorStatus.Pending)
             : own.secondFactorFor(c),
-        }).handleCallback({
+        }, (key) => held = key).handleCallback({
           query: new URL(c.req.url).searchParams,
           browserState: kept?.state,
           device: own.deviceOf(c),
@@ -400,7 +453,9 @@ export function createOAuthOperations(
         const shown: typeof signUpCookieSchema.infer = {
           provider: id,
           token: result.token,
+          held,
           email: typeof email === "string" && email.length <= MAX_SHOWN_EMAIL ? email : null,
+          verified: result.profile.emailVerified === true,
           expiresAt: result.expiresAt.toISOString(),
         }
         setCookie(c, SIGN_UP_COOKIE, JSON.stringify(shown), {
@@ -411,11 +466,10 @@ export function createOAuthOperations(
       }
 
       if (!linking) {
-        return {
-          kind: "signed-in",
-          signedIn: await finishSignIn(c, result),
-          next: pageOrNull(kept?.next),
-        }
+        const signedIn = await finishSignIn(c, result)
+        // The cookie now names the new session; the one this browser had would only linger.
+        if (current) await sessions.deleteForUser(current.user.id, current.session.id)
+        return { kind: "signed-in", signedIn, next: pageOrNull(kept?.next) }
       }
 
       // A link keeps the session the person already has: the one the package started goes.
@@ -436,19 +490,25 @@ export function createOAuthOperations(
       return { kind: "notice", notice: "linked", linking }
     },
 
-    pendingSignUp(c) {
+    async pendingSignUp(c) {
       const waiting = readSignUp(c)
       if (!waiting) return null
-      return { provider: waiting.provider, email: waiting.email, expiresAt: waiting.expiresAt }
+      return {
+        provider: waiting.provider,
+        email: waiting.email,
+        expiresAt: waiting.expiresAt,
+        unconfirmedAccount: await unconfirmedClaim(db.authStore, waiting) !== null,
+      }
     },
 
-    async confirmSignUp(c, firstGroupId = uuidV7()) {
+    async confirmSignUp(c, current, firstGroupId = uuidV7()) {
       const waiting = readSignUp(c)
       deleteCookie(c, SIGN_UP_COOKIE, cookieOptions)
       if (!waiting) return null
       let created
       try {
         created = await db.begin(async (tx) => {
+          const claim = await unconfirmedClaim(tx.authStore, waiting)
           // Built over the transaction's stores, so the auth user, key and session join it.
           const result = await signInWith(waiting.provider, {
             store: tx.authStore,
@@ -466,6 +526,18 @@ export function createOAuthOperations(
             })
             await tx.group.createFirst({ id: firstGroupId, name: "Personal" }, user.id)
             await tx.starterData.queue(user.id)
+            // The package took the unproven claim to this address away: say so where the owner
+            // of the product will look when that account's person asks what happened.
+            if (claim && await tx.authStore.findKeyById(claim.id) === null) {
+              await tx.authAudit.insert(
+                own.auditRow(
+                  c,
+                  claim.userId,
+                  AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
+                  result.key.method,
+                ),
+              )
+            }
             await tx.authAudit.insert(
               own.auditRow(
                 c,
@@ -491,11 +563,14 @@ export function createOAuthOperations(
         throw error
       }
       await cookie.set(c, created.session, created.cookieValue)
+      if (current) await sessions.deleteForUser(current.user.id, current.session.id)
       return { user: created.user, session: created.session }
     },
 
-    cancelSignUp(c) {
+    async cancelSignUp(c) {
+      const waiting = readSignUp(c)
       deleteCookie(c, SIGN_UP_COOKIE, cookieOptions)
+      if (waiting) await flows.take(waiting.held)
     },
 
     async methods({ user, session }) {
