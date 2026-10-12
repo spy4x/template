@@ -1,0 +1,225 @@
+/**
+ * The three pages of sign-in with a provider, drawn by the real views over a fake API in a
+ * browser DOM (happy-dom): what each asks the API for, and what it shows for the answer. The
+ * screens' own tests cannot show that a view makes its request at all.
+ */
+
+import { expect } from "@std/expect"
+import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd"
+import { Window } from "happy-dom"
+import { render, type VNode } from "preact"
+import { act } from "preact/test-utils"
+import { Router } from "wouter-preact"
+import { memoryLocation } from "wouter-preact/memory-location"
+import { OAUTH_NOTICES, type SignInMethod, UserMFAStatus } from "@domain/identity"
+import { sessionState } from "../state/session.ts"
+import { AuthView } from "./AuthView.tsx"
+import { ConfirmSignUpView } from "./ConfirmSignUpView.tsx"
+import { ProfileView } from "./ProfileView.tsx"
+
+const window = new Window({ url: "http://app.localhost/" })
+const own = {
+  document: globalThis.document,
+  FormData: globalThis.FormData,
+  getComputedStyle: globalThis.getComputedStyle,
+  location: globalThis.location,
+  fetch: globalThis.fetch,
+}
+const signedOut = sessionState.value
+
+beforeAll(() => {
+  Object.assign(globalThis, {
+    document: window.document,
+    FormData: window.FormData,
+    getComputedStyle: window.getComputedStyle.bind(window),
+    location: window.location,
+  })
+})
+
+afterAll(async () => {
+  Object.assign(globalThis, own)
+  await window.happyDOM.close()
+})
+
+let root: HTMLElement | null = null
+
+afterEach(async () => {
+  if (root) await act(() => render(null, root!))
+  document.body.innerHTML = ""
+  root = null
+  sessionState.value = signedOut
+  globalThis.fetch = own.fetch
+})
+
+/** Lets the pending requests answer and the page draw what they changed. */
+const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 250))
+
+/**
+ * An API that answers each `METHOD /path` in `routes` with its status and body, and anything else
+ * with `other` (an empty 200 unless given). Returns the calls it received, in order.
+ */
+function api(
+  routes: Record<string, [number, unknown]>,
+  other: [number, unknown] = [200, {}],
+): string[] {
+  const calls: string[] = []
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input, "http://app.localhost")
+    const call = `${init?.method ?? "GET"} ${url.pathname}`
+    calls.push(call)
+    const [status, body] = routes[call] ?? other
+    return Promise.resolve(Response.json(body, { status }))
+  }) as typeof fetch
+  return calls
+}
+
+/** The view at `path`, with a router that records where the app went. */
+async function open(path: string, view: VNode) {
+  // The query string comes with the hook: the router takes its search hook from it.
+  const { hook, history } = memoryLocation({ path, record: true })
+  root = document.createElement("div")
+  document.body.append(root)
+  await act(() => render(<Router hook={hook}>{view}</Router>, root!))
+  await settle()
+  return history
+}
+
+function text(selector: string): string {
+  const element = document.querySelector(selector)
+  if (!element) throw new Error(`nothing matches ${selector}`)
+  return element.textContent ?? ""
+}
+
+async function press(selector: string): Promise<void> {
+  const element = document.querySelector<HTMLElement>(selector)
+  if (!element) throw new Error(`nothing matches ${selector}`)
+  element.dispatchEvent(
+    new window.MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    }) as unknown as Event,
+  )
+  await settle()
+}
+
+const waiting = {
+  provider: "google",
+  email: "ada@example.com",
+  expiresAt: "2026-11-04T08:10:00.000Z",
+  unconfirmedAccount: true,
+}
+
+describe("the sign-in page", () => {
+  it("offers the providers the API says are on", async () => {
+    const calls = api({ "GET /api/auth/providers": [200, { providers: ["github"] }] })
+
+    await open("/sign-in", <AuthView screen="sign-in" />)
+
+    expect(calls).toContain("GET /api/auth/providers")
+    expect(text("[data-e2e=provider-github]")).toBe("Continue with GitHub")
+    expect(document.querySelectorAll("[data-e2e=provider-google]").length).toBe(0)
+  })
+
+  it("says why a provider sign-in that came back with a notice did not work", async () => {
+    api({})
+
+    await open("/sign-in?oauth=failed", <AuthView screen="sign-in" />)
+    expect(document.body.textContent).toContain(OAUTH_NOTICES.failed)
+  })
+
+  it("says to wait when the provider sign-in was sent back by the rate limit", async () => {
+    api({})
+
+    await open("/sign-in?oauth=busy", <AuthView screen="sign-in" />)
+    expect(document.body.textContent).toContain(OAUTH_NOTICES.busy)
+  })
+})
+
+describe("the question before a provider creates an account", () => {
+  it("shows the sign-up the API holds, with its warning", async () => {
+    const calls = api({ "GET /api/auth/sign-up/pending": [200, { pending: waiting }] })
+
+    await open("/sign-up/confirm", <ConfirmSignUpView />)
+
+    expect(calls).toEqual(["GET /api/auth/sign-up/pending"])
+    expect(text("[data-e2e=confirm-sign-up-email]")).toBe("ada@example.com")
+    expect(text("[data-e2e=confirm-sign-up-unconfirmed]")).toContain("never confirmed it")
+  })
+
+  it("says there is nothing to confirm when the API holds no sign-up", async () => {
+    api({ "GET /api/auth/sign-up/pending": [200, { pending: null }] })
+
+    await open("/sign-up/confirm", <ConfirmSignUpView />)
+
+    expect(text("[data-e2e=confirm-sign-up-gone]")).toContain("Nothing to confirm")
+  })
+
+  it("tells the API when the person goes back, then opens the sign-in page", async () => {
+    const calls = api({ "GET /api/auth/sign-up/pending": [200, { pending: waiting }] })
+    const history = await open("/sign-up/confirm", <ConfirmSignUpView />)
+
+    await press("[data-e2e=confirm-sign-up-back]")
+
+    expect(calls.slice(1)).toEqual(["POST /api/auth/sign-up/cancel"])
+    expect(history.at(-1)).toBe("/sign-in")
+  })
+
+  it("asks the API to create the account, and shows its reason when it refuses", async () => {
+    const calls = api({
+      "GET /api/auth/sign-up/pending": [200, { pending: waiting }],
+      "POST /api/auth/sign-up/confirm": [400, { error: "This took too long." }],
+    })
+    const history = await open("/sign-up/confirm", <ConfirmSignUpView />)
+
+    await press("[data-e2e=confirm-sign-up-create]")
+
+    expect(calls.slice(1)).toEqual(["POST /api/auth/sign-up/confirm"])
+    expect(text("[data-e2e=confirm-sign-up-error]")).toContain("This took too long.")
+    expect(history.at(-1)).toBe("/sign-up/confirm")
+  })
+})
+
+describe("the profile page", () => {
+  const google: SignInMethod = {
+    id: 8,
+    kind: "google",
+    email: "gia@example.com",
+    current: true,
+    canUnlink: false,
+  }
+
+  it("reads the account's sign-in methods and lists them", async () => {
+    // Every other read of the page fails, which each of its sections must survive anyway.
+    const calls = api(
+      { "GET /api/auth/methods": [200, { methods: [google], available: ["github"] }] },
+      [503, { error: "down" }],
+    )
+    sessionState.value = {
+      ...signedOut,
+      isReady: true,
+      user: {
+        id: 1,
+        firstName: "Gia",
+        lastName: "",
+        mfa: UserMFAStatus.NOT_CONFIGURED,
+      } as NonNullable<typeof signedOut.user>,
+    }
+
+    await open("/", <ProfileView />)
+
+    expect(calls).toContain("GET /api/auth/methods")
+    expect(text("[data-e2e=sign-in-method-google]")).toContain("gia@example.com")
+    expect(text("[data-e2e=sign-in-method-link-github]")).toBe("Link GitHub")
+    // An account without a password is not offered a password change.
+    expect(text("[data-e2e=password-none]")).toBe("None. You sign in with Google.")
+  })
+
+  it("asks for no sign-in methods while nobody is signed in", async () => {
+    const calls = api({})
+
+    await open("/", <ProfileView />)
+
+    expect(calls).not.toContain("GET /api/auth/methods")
+  })
+})

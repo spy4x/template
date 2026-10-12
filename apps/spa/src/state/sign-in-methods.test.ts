@@ -204,7 +204,12 @@ describe("what the sign-in pages read", () => {
   })
 
   it("reads the sign-up that waits, and none when the API holds none", async () => {
-    const waiting = { provider: "google", email: "ada@example.com", expiresAt: "2026-11-04T08:10Z" }
+    const waiting = {
+      provider: "google",
+      email: "ada@example.com",
+      expiresAt: "2026-11-04T08:10Z",
+      unconfirmedAccount: false,
+    }
     const asked = answers(200, { pending: waiting })
     expect(await readPendingSignUp()).toEqual(waiting)
     expect(asked).toEqual(["/api/auth/sign-up/pending"])
