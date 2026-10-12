@@ -439,6 +439,8 @@ export type OAuthNotice =
   | "failed"
   /** Linked: the provider is now a way into the signed-in account. */
   | "linked"
+  /** Nothing changed: that provider account was already a way into the signed-in account. */
+  | "link-exists"
   /** Not linked: another account here already signs in with that provider account. */
   | "link-taken"
   /** Too many attempts from this address in a minute; nothing was tried. */
@@ -466,6 +468,7 @@ export const OAUTH_NOTICE_PARAM = "oauth"
 export const OAUTH_NOTICES: Record<OAuthNotice, string> = {
   "failed": "That sign-in did not work. Try again.",
   "linked": "Linked. You can now sign in with it.",
+  "link-exists": "Already linked. You can sign in with it as before.",
   "link-taken": "Not linked: that account is already linked to another account here.",
   "busy": "Too many attempts. Wait a minute, then try again.",
 }

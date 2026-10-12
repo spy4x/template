@@ -124,7 +124,9 @@ export function ProfileView() {
     if (!notice) return
     const toast = { body: OAUTH_NOTICES[notice], dataE2E: `sign-in-method-${notice}` }
     if (notice === "linked") toasts.success({ title: "Sign-in method linked", ...toast })
-    else toasts.error({ title: "Sign-in method not linked", ...toast })
+    else if (notice === "link-exists") {
+      toasts.info({ title: "Sign-in method already linked", ...toast })
+    } else toasts.error({ title: "Sign-in method not linked", ...toast })
     navigate(SCREEN_PATHS.profile, { replace: true })
   }, [search])
 

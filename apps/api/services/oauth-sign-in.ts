@@ -516,8 +516,9 @@ export function createOAuthOperations(
         if (!current || current.session.secondFactor === SecondFactorStatus.Pending) {
           return failed()
         }
+        let added
         try {
-          await db.begin(async (tx) => {
+          added = await db.begin(async (tx) => {
             const taken: AuthKey[] = []
             const { key, outcome } = await signInWith(id, {
               store: reportingTakenClaims(tx.authStore, taken),
@@ -528,11 +529,12 @@ export function createOAuthOperations(
               browserState: connect.state,
               userId: current.user.id,
             })
-            if (outcome !== OAuthOutcome.Connected) return
+            if (outcome !== OAuthOutcome.Connected) return false
             await tx.authAudit.insert(
               own.auditRow(c, key.userId, AuthAuditEventType.SIGN_IN_METHOD_LINKED, key.method),
             )
             await writeTakenClaims(c, tx, taken, key.method)
+            return true
           })
         } catch (error) {
           if (error instanceof OAuthSignInError) {
@@ -540,7 +542,7 @@ export function createOAuthOperations(
           }
           throw error
         }
-        return { kind: "notice", notice: "linked", linking }
+        return { kind: "notice", notice: added ? "linked" : "link-exists", linking }
       }
 
       let held = ""

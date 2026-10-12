@@ -964,7 +964,7 @@ Deno.test("Alice links a Google account whose verified address is Bob's and Bob'
   })
 })
 
-Deno.test("linking the same provider account a second time records nothing new", async () => {
+Deno.test("linking the same provider account a second time says so and records nothing new", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql, { ada: ADA })
     const owner = browser(app)
@@ -976,7 +976,7 @@ Deno.test("linking the same provider account a second time records nothing new",
     const again = await owner.post("/auth/methods/google/link")
     const answer = await owner.through("google", "ada", (await again.json()).url)
 
-    expect(target(answer)).toBe("/?oauth=linked")
+    expect(target(answer)).toBe("/?oauth=link-exists")
     expect(await audit(sql, ownerId)).toEqual(recorded)
     expect((await app.db.authStore.listKeys(ownerId)).length).toBe(2)
   })

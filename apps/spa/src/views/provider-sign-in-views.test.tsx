@@ -15,6 +15,7 @@ import { OAUTH_NOTICES, type SignInMethod, UserMFAStatus } from "@domain/identit
 import { memoryStorage } from "@spy4x/platform/browser/storage"
 import { lastSignIn } from "../state/last-sign-in.ts"
 import { sessionState } from "../state/session.ts"
+import { toasts } from "../state/toasts.ts"
 import { AuthView } from "./AuthView.tsx"
 import { ConfirmSignUpView } from "./ConfirmSignUpView.tsx"
 import { ProfileView } from "./ProfileView.tsx"
@@ -58,6 +59,7 @@ afterEach(async () => {
   sessionState.value = signedOut
   globalThis.fetch = own.fetch
   kept = memoryStorage()
+  toasts.clear()
 })
 
 /** Lets the pending requests answer and the page draw what they changed. */
@@ -257,5 +259,17 @@ describe("the profile page", () => {
     await open("/", <ProfileView />)
 
     expect(calls).not.toContain("GET /api/auth/methods")
+  })
+
+  it("says that a provider account linked a second time was linked already, not that it failed", async () => {
+    api({})
+
+    const history = await open("/?oauth=link-exists", <ProfileView />)
+
+    expect(toasts.list.value.map((toast) => [toast.title, toast.body])).toEqual([
+      ["Sign-in method already linked", OAUTH_NOTICES["link-exists"]],
+    ])
+    // Said once: the notice leaves the address, so a reload does not say it again.
+    expect(history.at(-1)).toBe("/")
   })
 })
