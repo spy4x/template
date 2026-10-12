@@ -147,9 +147,10 @@ export interface OnboardingCardProps {
  * template's five steps, and its `Tour` over the main screens. It holds no state: the steps tick
  * themselves from `steps`, and the app owns what is dismissed and where the tour stands.
  *
- * The tour is offered on the card, never opened unasked. When "Skip the tour" removes the offer
- * while focus is on it, focus moves to the card's heading. The tour itself puts focus back where
- * the library says: on the control that had it, or on the step's target when that control is gone.
+ * The tour is offered on the card, never opened unasked. Every way out of the tour ("Skip the
+ * tour" on the card; Done, Skip tour, Close and Escape in the tour) moves focus to the card's
+ * heading. The library would hand focus back to "Take the tour", which leaves with the offer, or to
+ * the step's target, which a narrow window hides, so focus would be lost there.
  */
 export function OnboardingCard(
   {
@@ -167,14 +168,19 @@ export function OnboardingCard(
   }: OnboardingCardProps,
 ): JSX.Element {
   const card = useRef<HTMLDivElement>(null)
-  /** Set when "Skip the tour" is pressed: the offer leaves the page with focus on it. */
-  const skipped = useRef(false)
+  /** Set when the person ends the tour: the control that had focus is about to leave the page. */
+  const ended = useRef(false)
+  const end = () => {
+    ended.current = true
+    onTourEnd()
+  }
 
+  // After the library's own hand-back, which runs first (a child's layout effect).
   useLayoutEffect(() => {
-    if (!skipped.current || tourOffered) return
-    skipped.current = false
+    if (!ended.current || tourOpen) return
+    ended.current = false
     card.current?.querySelector<HTMLElement>(`[role="region"] h2`)?.focus()
-  }, [tourOffered])
+  }, [tourOffered, tourOpen])
 
   return (
     <div ref={card} class={ACCOUNT_COLUMN} data-e2e="onboarding">
@@ -201,10 +207,7 @@ export function OnboardingCard(
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    skipped.current = true
-                    onTourEnd()
-                  }}
+                  onClick={end}
                   data-e2e="onboarding-tour-skip"
                 >
                   Skip the tour
@@ -220,7 +223,7 @@ export function OnboardingCard(
         open={tourOpen}
         index={tourIndex}
         onIndexChange={onTourIndexChange}
-        onClose={onTourEnd}
+        onClose={end}
       />
     </div>
   )

@@ -260,6 +260,89 @@ describe("first-steps tour", () => {
     expect(document.activeElement?.textContent).toBe("Get started")
   })
 
+  for (const way of ["Skip tour", "Close", "Escape", "Done"] as const) {
+    it(`moves focus to the card's heading when the tour ends by ${way}, with the step's target hidden`, async () => {
+      const last = way === "Done" ? TOUR_STEPS.length - 1 : 0
+      const { calls, update } = await mount()
+      control("Take the tour").focus()
+      await update({ tourOpen: true, tourIndex: last })
+
+      if (way === "Escape") {
+        const key = new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+        await act(() => void document.activeElement?.dispatchEvent(key as unknown as Event))
+      } else if (way === "Close") {
+        const click = new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })
+        await act(() => void all(`button[aria-label="Close"]`)[0].dispatchEvent(click as never))
+      } else await press(way)
+      expect(calls.log).toEqual(["tour end"])
+      await update({ tourOpen: false, tourOffered: false })
+
+      expect(document.activeElement?.tagName).toBe("H2")
+      expect(document.activeElement?.textContent).toBe("Get started")
+    })
+  }
+
+  it("moves focus to the card's heading, not to the step's target, when the tour ends on a wide window", async () => {
+    const rail = window.document.createElement("nav")
+    rail.setAttribute("data-e2e", "rail-shell-rail")
+    rail.innerHTML = `<a href="/notes">Notes</a>`
+    window.document.body.appendChild(rail)
+    try {
+      const { update } = await mount()
+      control("Take the tour").focus()
+      await update({ tourOpen: true })
+
+      await press("Skip tour")
+      await update({ tourOpen: false, tourOffered: false })
+
+      expect(document.activeElement?.textContent).toBe("Get started")
+    } finally {
+      rail.remove()
+    }
+  })
+
+  it("keeps focus on the card's heading when the offer comes back because the end was not saved", async () => {
+    const { update } = await mount({ tourOpen: true })
+    await press("Skip tour")
+    await update({ tourOpen: false, tourOffered: false })
+
+    await update({ tourOffered: true, error: "Try again later" })
+
+    expect(document.activeElement?.textContent).toBe("Get started")
+  })
+
+  it("leaves focus alone when the app closes the tour itself", async () => {
+    const { update } = await mount({ tourOpen: true })
+    control("Dismiss").focus()
+
+    await update({ tourOpen: false })
+
+    expect(document.activeElement?.textContent?.trim()).toBe("Dismiss")
+  })
+
+  it("walks the side navigation and the bell, in that order, and keeps the hooks the browser tests use", async () => {
+    await mount()
+
+    expect(TOUR_STEPS.map((step) => step.id)).toEqual([
+      "notes",
+      "groups",
+      "notifications",
+      "profile",
+    ])
+    expect(TOUR_STEPS.map((step) => step.target)).toEqual([
+      `[data-e2e="rail-shell-rail"] a[href="/notes"]`,
+      `[data-e2e="rail-shell-rail"] a[href="/groups"]`,
+      `[data-e2e="shell-bell"]`,
+      `[data-e2e="rail-shell-rail"] a[href="/"]`,
+    ])
+    expect(all("[data-e2e=onboarding-tour-start]").map((b) => b.textContent?.trim())).toEqual([
+      "Take the tour",
+    ])
+    expect(all("[data-e2e=onboarding-tour-skip]").map((b) => b.textContent?.trim())).toEqual([
+      "Skip the tour",
+    ])
+  })
+
   it("leaves focus alone when the offer leaves because another tab ended the tour", async () => {
     const { update } = await mount()
     control("Dismiss").focus()
