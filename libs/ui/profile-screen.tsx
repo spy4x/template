@@ -19,6 +19,7 @@ import { PageHeader, TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
 import { type Navigate, PROFILE_ANCHORS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-row"
 import { SignedInDevices, type SignedInDevicesProps } from "./signed-in-devices.tsx"
+import { SignInMethods, type SignInMethodsProps } from "./sign-in-methods.tsx"
 import { ApiTokens, type ApiTokensProps } from "./api-tokens.tsx"
 import { useSucceeded } from "@spy4x/preact-ui/use-succeeded"
 import { TwoFactorStep, twoFactorStep } from "./two-factor.ts"
@@ -110,7 +111,9 @@ export interface ProfileScreenProps {
    * Without it the dialog has no such box.
    */
   onSignOutOthersChange?: (signOutOthers: boolean) => void
-  /** The "Signed-in devices" section, after Security. Without it the page has none. */
+  /** The "Sign-in methods" section, after Security. Without it the page has none. */
+  methods?: SignInMethodsProps
+  /** The "Signed-in devices" section, after the sign-in methods. Without it the page has none. */
   devices?: SignedInDevicesProps
   /** The "API tokens" section, after the signed-in devices. Without it the page has none. */
   apiTokens?: ApiTokensProps
@@ -157,6 +160,7 @@ export function ProfileScreen(
     onCancelPassword,
     signOutOthers = true,
     onSignOutOthersChange,
+    methods,
     devices,
     apiTokens,
     onStartTotp,
@@ -372,6 +376,7 @@ export function ProfileScreen(
         </SettingGroup>
       </div>
 
+      {methods && <SignInMethods {...methods} />}
       {devices && <SignedInDevices {...devices} />}
 
       {apiTokens && <ApiTokens {...apiTokens} />}
