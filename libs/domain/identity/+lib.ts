@@ -392,6 +392,11 @@ export interface PendingSignUp {
   expiresAt: string
 }
 
+/** What `GET /auth/sign-up/pending` answers: the sign-up that waits, or `null` when none does. */
+export interface PendingSignUpResponse {
+  pending: PendingSignUp | null
+}
+
 /** One way into the account, as `GET /api/auth/methods` lists it (#141). */
 export interface SignInMethod {
   /** The id to unlink it by. */
@@ -449,7 +454,7 @@ export const OAUTH_NOTICES: Record<OAuthNotice, string> = {
   "failed": "That sign-in did not work. Try again.",
   "linked": "Linked. You can now sign in with it.",
   "link-mismatch":
-    "Not linked: that account's verified address is not the verified address of this account.",
+    "Not linked: that account has a different e-mail address than this one, or has not verified it.",
   "link-other-account": "Not linked: that account already signs in to another account here.",
 }
 

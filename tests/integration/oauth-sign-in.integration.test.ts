@@ -2,7 +2,12 @@
 import { expect } from "@std/expect"
 import { Hono } from "hono"
 import postgres from "postgres"
-import { AuthAuditEventType, type SignInMethodsResponse, UserMFAStatus } from "@domain/identity"
+import {
+  AuthAuditEventType,
+  type PendingSignUp,
+  type SignInMethodsResponse,
+  UserMFAStatus,
+} from "@domain/identity"
 import {
   GITHUB_EMAILS_ENDPOINT,
   GITHUB_TOKEN_ENDPOINT,
@@ -233,6 +238,13 @@ async function provenPasswordAccount(
   return id
 }
 
+/** The sign-up that waits in this browser, as the question page reads it. */
+async function pendingOf(visitor: ReturnType<typeof browser>): Promise<PendingSignUp | null> {
+  const response = await visitor.get("/auth/sign-up/pending")
+  expect(response.status).toBe(200)
+  return (await response.json()).pending
+}
+
 async function methodsOf(visitor: ReturnType<typeof browser>): Promise<SignInMethodsResponse> {
   const response = await visitor.get("/auth/methods")
   expect(response.status).toBe(200)
@@ -263,7 +275,7 @@ Deno.test("a first Google sign-in creates nothing until the person confirms the 
 
     expect(target(await visitor.through("google", "ada"))).toBe("/sign-up/confirm")
     expect(await accounts(sql)).toEqual({ authUsers: 0, profiles: 0 })
-    const pending = await (await visitor.get("/auth/sign-up/pending")).json()
+    const pending = (await pendingOf(visitor))!
     expect(pending.provider).toBe("google")
     expect(pending.email).toBe("ada@example.com")
     // Not signed in yet.
@@ -284,7 +296,7 @@ Deno.test("a first Google sign-in creates nothing until the person confirms the 
     expect((await methodsOf(visitor)).methods.map((method) => [method.kind, method.current]))
       .toEqual([["google", true]])
     // The question is answered: nothing waits any more.
-    expect((await visitor.get("/auth/sign-up/pending")).status).toBe(204)
+    expect(await pendingOf(visitor)).toBe(null)
   })
 })
 
@@ -332,7 +344,7 @@ Deno.test("going back creates nothing and the question cannot be answered afterw
 
     expect((await visitor.post("/auth/sign-up/cancel")).status).toBe(200)
 
-    expect((await visitor.get("/auth/sign-up/pending")).status).toBe(204)
+    expect(await pendingOf(visitor)).toBe(null)
     expect((await visitor.post("/auth/sign-up/confirm")).status).toBe(400)
     expect(await accounts(sql)).toEqual({ authUsers: 0, profiles: 0 })
 
@@ -340,7 +352,7 @@ Deno.test("going back creates nothing and the question cannot be answered afterw
     const keeper = browser(app)
     for (const [name, value] of held) keeper.cookies.set(name, value)
     app.advance(10 * 60_000 + 1000)
-    expect((await keeper.get("/auth/sign-up/pending")).status).toBe(204)
+    expect(await pendingOf(keeper)).toBe(null)
     expect((await keeper.post("/auth/sign-up/confirm")).status).toBe(400)
     expect(await accounts(sql)).toEqual({ authUsers: 0, profiles: 0 })
   })
@@ -428,7 +440,7 @@ Deno.test("a provider that refuses the code signs nobody in", async () => {
     expect(target(await visitor.through("google", "nobody"))).toBe("/sign-in?oauth=failed")
 
     expect(await accounts(sql)).toEqual({ authUsers: 0, profiles: 0 })
-    expect((await visitor.get("/auth/sign-up/pending")).status).toBe(204)
+    expect(await pendingOf(visitor)).toBe(null)
   })
 })
 
@@ -507,7 +519,7 @@ Deno.test("linking a provider account with another address links nothing and cre
     expect((await methodsOf(owner)).methods.map((method) => method.kind)).toEqual(["password"])
     expect(await accounts(sql)).toEqual({ authUsers: 1, profiles: 1 })
     // No question is left open in this browser either.
-    expect((await owner.get("/auth/sign-up/pending")).status).toBe(204)
+    expect(await pendingOf(owner)).toBe(null)
   })
 })
 

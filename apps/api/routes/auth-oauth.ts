@@ -8,6 +8,7 @@ import {
   type OAuthNotice,
   oauthProviderId,
   type OAuthProvidersResponse,
+  type PendingSignUpResponse,
 } from "@domain/identity"
 import type { SignIn } from "@api/services/sign-in.ts"
 import { UnlinkOutcome } from "@api/services/oauth-sign-in.ts"
@@ -105,10 +106,9 @@ export function createOAuthRoute(
         302,
       )
     })
-    // What the question page shows. 204 when nothing waits, so the page can send the person back.
+    // What the question page shows; `null` when nothing waits, and the page says so.
     .get(`/sign-up/pending`, rateLimits.normal, (c) => {
-      const pending = oauth.pendingSignUp(c)
-      return pending ? c.json(pending) : c.body(null, 204)
+      return c.json({ pending: oauth.pendingSignUp(c) } satisfies PendingSignUpResponse)
     })
     .post(
       `/sign-up/confirm`,
