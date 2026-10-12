@@ -9,7 +9,8 @@ import { Window } from "happy-dom"
 import { render, type VNode } from "preact"
 import { act } from "preact/test-utils"
 import { Button } from "@spy4x/preact-ui/button"
-import type { PendingSignUp, SignInMethod } from "@domain/identity"
+import { type PendingSignUp, type SignInMethod, UserMFAStatus } from "@domain/identity"
+import { ProfileScreen, type ProfileScreenProps, providerOnlyNames } from "./profile-screen.tsx"
 import { AuthScreen, type AuthScreenProps } from "./auth-screen.tsx"
 import { ConfirmSignUpScreen, type ConfirmSignUpScreenProps } from "./confirm-sign-up-screen.tsx"
 import { SignInMethods, type SignInMethodsProps } from "./sign-in-methods.tsx"
@@ -170,6 +171,7 @@ const waiting: PendingSignUp = {
   provider: "google",
   email: "ada@example.com",
   expiresAt: "2026-11-04T08:10:00.000Z",
+  unconfirmedAccount: false,
 }
 
 /** The question with a sign-up waiting, recording which answer the app received. */
@@ -196,6 +198,28 @@ describe("ConfirmSignUpScreen", () => {
     expect(card).toContain("signs in with the Google account ada@example.com.")
     expect(find("[data-e2e=confirm-sign-up-email]").textContent).toBe("ada@example.com")
     expect(card).toContain("Nothing has been created yet.")
+  })
+
+  it("warns before creating that an unconfirmed account with this address gets locked", async () => {
+    const mounted = await mount(<ConfirmSignUpScreen {...confirmProps([])} />)
+    expect(document.querySelectorAll("[data-e2e=confirm-sign-up-unconfirmed]").length).toBe(0)
+
+    await act(() => {
+      render(
+        <ConfirmSignUpScreen
+          {...confirmProps([], { pending: { ...waiting, unconfirmedAccount: true } })}
+        />,
+        mounted,
+      )
+    })
+
+    const warning = find("[data-e2e=confirm-sign-up-unconfirmed]")
+    expect(warning.textContent).toContain("already uses this address, but never confirmed it.")
+    expect(warning.textContent).toContain("its password stops working")
+    expect(warning.textContent).toContain("To keep it, go back, sign in with its password")
+    // Read before either answer can be given.
+    const back = find("[data-e2e=confirm-sign-up-back]")
+    expect(warning.compareDocumentPosition(back) & 4).toBe(4)
   })
 
   it("makes going back the first and the main action, and creating the second", async () => {
@@ -420,10 +444,76 @@ describe("SignInMethods", () => {
       .toContain("This is your only way to sign in.")
   })
 
+  it("moves focus to the list when the unlinked method leaves it", async () => {
+    const mounted = await mount(<SignInMethods {...methodsProps([])} />)
+    find("[data-e2e=sign-in-method-unlink-google]").focus()
+
+    // The same list again moves nothing.
+    await act(() => {
+      render(<SignInMethods {...methodsProps([], { methods: [password, google] })} />, mounted)
+    })
+    expect(focused()).toBe("sign-in-method-unlink-google")
+
+    await act(() => {
+      render(<SignInMethods {...methodsProps([], { methods: [password] })} />, mounted)
+    })
+    expect(focused()).toBe("sign-in-methods-list")
+  })
+
   it("shows that the list is loading before it is known", async () => {
     await mount(<SignInMethods {...methodsProps([], { methods: null, available: [] })} />)
 
     expect(find("[data-e2e=sign-in-methods]").textContent).toContain("Loading")
     expect(document.querySelectorAll("button").length).toBe(0)
+  })
+})
+
+describe("ProfileScreen for an account without a password", () => {
+  const profile = {
+    onRemovePush: () => {},
+    user: { id: 1, firstName: "Gia", lastName: "", mfa: UserMFAStatus.NOT_CONFIGURED },
+    isMfaRequired: false,
+    email: { email: "gia@example.com", proven: true, pending: null },
+    values: { firstName: "Gia", lastName: "", currentPassword: "", newPassword: "", otp: "" },
+    onValueChange: () => {},
+    errors: { fields: {}, profile: null, password: null, totp: null, push: null },
+    pending: { profile: false, password: false, totp: false, push: false },
+    enrolment: null,
+    pushDevices: [],
+  } as unknown as ProfileScreenProps
+  const onlyGoogle = { ...google, current: true, canUnlink: false }
+
+  it("shows the provider's address and offers no change that would ask for a password", async () => {
+    await mount(
+      <ProfileScreen {...profile} methods={methodsProps([], { methods: [onlyGoogle] })} />,
+    )
+
+    const page = document.body.textContent ?? ""
+    expect(page).not.toContain("You sign in with your username")
+    expect(find("[data-e2e=profile-email-from-provider]").textContent).toBe(
+      "From Google. It cannot be changed here: this account has no password to confirm the change with.",
+    )
+    expect(page).toContain("gia@example.com")
+    expect(document.querySelectorAll("[data-e2e=profile-email-link]").length).toBe(0)
+    expect(find("[data-e2e=password-none]").textContent).toBe("None. You sign in with Google.")
+    expect(document.querySelectorAll("[data-e2e=password-open]").length).toBe(0)
+  })
+
+  it("keeps both changes for an account that has a password", async () => {
+    await mount(
+      <ProfileScreen {...profile} methods={methodsProps([], { methods: [password, google] })} />,
+    )
+
+    expect(find("[data-e2e=profile-email-link]").textContent).toBe("Change e-mail address")
+    expect(find("[data-e2e=password-open]").textContent).toBe("Change password")
+    expect(document.querySelectorAll("[data-e2e=profile-email-from-provider]").length).toBe(0)
+    expect(document.querySelectorAll("[data-e2e=password-none]").length).toBe(0)
+  })
+
+  it("names every provider of an account that has two and no password", () => {
+    const github = { ...google, id: 9, kind: "github" as const }
+    expect(providerOnlyNames([onlyGoogle, github])).toBe("Google and GitHub")
+    expect(providerOnlyNames(null)).toBe(null)
+    expect(providerOnlyNames([])).toBe(null)
   })
 })

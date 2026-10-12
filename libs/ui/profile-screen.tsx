@@ -12,14 +12,19 @@ import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
 import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
-import { type EmailStatus, UserMFAStatus, type UserPushTokenPublic } from "@domain/identity"
+import {
+  type EmailStatus,
+  type SignInMethod,
+  UserMFAStatus,
+  type UserPushTokenPublic,
+} from "@domain/identity"
 import { AccountDelete, type AccountDeleteProps } from "./account-delete.tsx"
 import { ACCOUNT_COLUMN } from "./frame.tsx"
 import { PageHeader, TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
 import { type Navigate, PROFILE_ANCHORS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-row"
 import { SignedInDevices, type SignedInDevicesProps } from "./signed-in-devices.tsx"
-import { SignInMethods, type SignInMethodsProps } from "./sign-in-methods.tsx"
+import { signInMethodName, SignInMethods, type SignInMethodsProps } from "./sign-in-methods.tsx"
 import { ApiTokens, type ApiTokensProps } from "./api-tokens.tsx"
 import { useSucceeded } from "@spy4x/preact-ui/use-succeeded"
 import { TwoFactorStep, twoFactorStep } from "./two-factor.ts"
@@ -174,6 +179,7 @@ export function ProfileScreen(
   }: ProfileScreenProps,
 ): JSX.Element {
   const step = user ? twoFactorStep(user.mfa, enrolment !== null) : null
+  const providerOnly = providerOnlyNames(methods?.methods)
   const fieldRefs = {
     firstName: useRef<HTMLInputElement>(null),
     lastName: useRef<HTMLInputElement>(null),
@@ -287,8 +293,8 @@ export function ProfileScreen(
           />
           <SettingRow
             label="E-mail address"
-            value={<EmailValue email={email} />}
-            action={
+            value={<EmailValue email={email} provider={providerOnly} />}
+            action={providerOnly === null && (
               <Button
                 href={SCREEN_PATHS.email}
                 navigate={navigate}
@@ -300,7 +306,7 @@ export function ProfileScreen(
                 {email?.email === null ? "Add" : "Change"}{" "}
                 <span class="sr-only">e-mail address</span>
               </Button>
-            }
+            )}
           />
         </SettingList>
       </SettingGroup>
@@ -311,8 +317,10 @@ export function ProfileScreen(
           <SettingList>
             <SettingRow
               label="Password"
-              value="Asked for when you sign in on a new device."
-              action={
+              value={providerOnly === null
+                ? "Asked for when you sign in on a new device."
+                : <span data-e2e="password-none">None. You sign in with {providerOnly}.</span>}
+              action={providerOnly === null && (
                 <Button
                   type="button"
                   variant="secondary"
@@ -323,7 +331,7 @@ export function ProfileScreen(
                 >
                   Change <span class="sr-only">password</span>
                 </Button>
-              }
+              )}
             />
             <SettingRow
               label="Two-factor sign-in"
@@ -670,18 +678,50 @@ export function ProfileScreen(
   )
 }
 
+/**
+ * The names of the providers of an account that has no password ("Google", "Google and GitHub"),
+ * or `null` for an account with one, or while the sign-in methods are not known. Changing the
+ * e-mail address or the password asks for the current password, so such an account can do neither.
+ */
+export function providerOnlyNames(
+  methods: readonly SignInMethod[] | null | undefined,
+): string | null {
+  if (!methods || methods.length === 0) return null
+  if (methods.some((method) => method.kind === "password")) return null
+  return methods.map((method) => signInMethodName(method.kind)).join(" and ")
+}
+
 /** The address and whether it is proven, or a placeholder while it is not known. */
-function EmailValue({ email }: { email?: EmailStatus | null }): JSX.Element {
+function EmailValue(
+  { email, provider }: { email?: EmailStatus | null; provider: string | null },
+): JSX.Element {
   if (!email) return <span>…</span>
-  if (email.email === null) return <span>None. You sign in with your username.</span>
+  if (email.email === null) {
+    return (
+      <span>
+        {provider === null
+          ? "None. You sign in with your username."
+          : `None. ${provider} shared no verified address.`}
+      </span>
+    )
+  }
   return (
-    <span class="flex flex-wrap items-center gap-2">
-      <span class="wrap-anywhere">{email.email}</span>
-      <Badge
-        text={email.proven ? "Verified" : "Not verified"}
-        color={email.proven ? "green" : "orange"}
-        type="outline"
-      />
+    <span class="flex flex-col items-start gap-1">
+      <span class="flex flex-wrap items-center gap-2">
+        <span class="wrap-anywhere">{email.email}</span>
+        <Badge
+          text={email.proven ? "Verified" : "Not verified"}
+          color={email.proven ? "green" : "orange"}
+          type="outline"
+        />
+      </span>
+      {provider !== null && (
+        <span data-e2e="profile-email-from-provider">
+          From{" "}
+          {provider}. It cannot be changed here: this account has no password to confirm the change
+          with.
+        </span>
+      )}
     </span>
   )
 }

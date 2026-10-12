@@ -79,6 +79,14 @@ export function ConfirmSignUpScreen(
         If you already have an account, go back and sign in the way you did before. You can then
         link {provider} on your profile. Nothing has been created yet.
       </p>
+      {pending.unconfirmedAccount && (
+        <p class="text-sm" role="note" data-e2e="confirm-sign-up-unconfirmed">
+          <strong>An account here already uses this address, but never confirmed it.</strong>{" "}
+          Creating a new account locks that one: its password stops working and its devices are
+          signed out. To keep it, go back, sign in with its password and confirm the address with
+          the code we e-mail you.
+        </p>
+      )}
       <div class="flex flex-col gap-3">
         <Button
           type="button"

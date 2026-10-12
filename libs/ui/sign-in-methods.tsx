@@ -44,6 +44,15 @@ export function SignInMethods(
   useEffect(() => {
     if (error) message.current?.focus()
   }, [error])
+  // The "Unlink" button that had focus goes away with its row: the list takes focus, so the
+  // keyboard and a screen reader stay where the change happened.
+  const list = useRef<HTMLDivElement>(null)
+  const shown = useRef<readonly number[]>([])
+  useEffect(() => {
+    const ids = methods?.map((method) => method.id) ?? []
+    if (shown.current.some((id) => !ids.includes(id))) list.current?.focus()
+    shown.current = ids
+  }, [methods])
 
   return (
     <SettingGroup
@@ -57,29 +66,31 @@ export function SignInMethods(
       {methods === null
         ? <p class="text-sm text-muted">Loading your sign-in methods…</p>
         : (
-          <SettingList>
-            {methods.map((method) => (
-              <SettingRow
-                key={method.id}
-                dataE2E={`sign-in-method-${method.kind}`}
-                label={signInMethodName(method.kind)}
-                value={<MethodDetails method={method} only={methods.length === 1} />}
-                action={method.canUnlink && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    class={TOUCH_TARGET}
-                    data-e2e={`sign-in-method-unlink-${method.kind}`}
-                    disabled={pending}
-                    onClick={() => setConfirming(method)}
-                  >
-                    Unlink <span class="sr-only">{signInMethodName(method.kind)}</span>
-                  </Button>
-                )}
-              />
-            ))}
-          </SettingList>
+          <div ref={list} tabIndex={-1} data-e2e="sign-in-methods-list">
+            <SettingList>
+              {methods.map((method) => (
+                <SettingRow
+                  key={method.id}
+                  dataE2E={`sign-in-method-${method.kind}`}
+                  label={signInMethodName(method.kind)}
+                  value={<MethodDetails method={method} only={methods.length === 1} />}
+                  action={method.canUnlink && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      class={TOUCH_TARGET}
+                      data-e2e={`sign-in-method-unlink-${method.kind}`}
+                      disabled={pending}
+                      onClick={() => setConfirming(method)}
+                    >
+                      Unlink <span class="sr-only">{signInMethodName(method.kind)}</span>
+                    </Button>
+                  )}
+                />
+              ))}
+            </SettingList>
+          </div>
         )}
       {available.length > 0 && (
         <div class="flex flex-col items-start gap-3">
