@@ -17,7 +17,7 @@ const MAX_LOGGED = 30
  * again, up to three times. Any other failure, or the same failure on the last attempt, throws
  * at once, with the uncaught errors of the page, the failed requests, the requests still pending and
  * the console of the last attempt added to the message, so a red run explains itself without a
- * trace. An uncaught error is what leaves a page blank with every request answered.
+ * trace. An uncaught error can leave a page blank with every request answered.
  *
  * `open` makes the first load and defaults to `page.goto(url)`. Where the app loads `url` itself
  * after a click, the click is passed instead (see `submitAuthForm`); every later attempt is

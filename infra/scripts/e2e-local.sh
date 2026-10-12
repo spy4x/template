@@ -22,8 +22,9 @@
 #   - `dev`: the Vite dev server, which compiles each module when a page asks for it;
 #   - `built`: the SPA as a deploy serves it. The script builds the image of
 #     `apps/spa/dockerfile.prod` (the base image first) and runs it, so the page is the hashed
-#     bundle behind nginx with `apps/spa/nginx.conf`. The two images it tags are removed at the
-#     end; the first build takes a few minutes.
+#     bundle behind nginx with `apps/spa/nginx.conf`. The builds keep no image of their steps,
+#     and the two images they make carry a label that names this run and are removed by it at
+#     the end. Every run therefore builds from the start, which takes a minute or two.
 # Left unset, the specs that start the app with no network (`OFFLINE_SPECS` of
 # `e2e-local-plan.ts`) get the built SPA and every other spec the dev server (docs/offline.md,
 # "The app shell", says why). One Playwright pass has one server, so a run makes two passes when
@@ -32,8 +33,10 @@
 #   deno task e2e:local e2e/notes.e2e.ts                           one pass, dev server
 #   deno task e2e:local e2e/offline.e2e.ts e2e/local-data.e2e.ts   one pass, built SPA
 #   deno task e2e:local e2e/notes.e2e.ts e2e/offline.e2e.ts        two passes, one spec each
-# An argument that is not a spec path goes to both passes. The run fails when either pass fails,
-# or when no test matched in any pass, and its last lines give the counts of each pass. The
+# An argument that is not a spec path goes to both passes. The exit code is Playwright's: the
+# first pass's that is not 0. One exception: of two passes, one in which Playwright found no test
+# (a `-g` that matches tests of the other pass only) does not fail the run; it fails when neither
+# pass found one. The last lines give the counts of each pass, when the reporter prints them. The
 # report of the second of two passes is in `e2e/report/offline`. With `E2E_SPA` set, every spec
 # asked for runs in one pass against that server.
 #
@@ -79,6 +82,8 @@ SPA_NAME="template-e2e-spa-$RUN_ID"
 # Named after this run, so two runs at once never share an image.
 BASE_IMAGE="template-e2e-local-base:$RUN_ID"
 SPA_IMAGE="template-e2e-local-spa:$RUN_ID"
+# On every image a build of this run makes.
+IMAGE_LABEL="template-e2e-local-run=$RUN_ID"
 COPY_DIR="$ROOT/e2e/results/.local-$RUN_ID"
 
 for tool in deno curl openssl "$CONTAINER"; do
@@ -94,7 +99,7 @@ log() { echo "[e2e:local] $*"; }
 SCRATCH=$(mktemp -d)
 PIDS=()
 CONTAINERS=()
-IMAGES=()
+BUILT=0
 
 # Stops a process this script started, with its children: each is started with `setsid`, so it
 # leads a process group. `deno serve` does not exit on SIGTERM while it has open connections, so
@@ -105,7 +110,8 @@ stop_group() {
     kill -0 -- "-$1" 2>/dev/null || return 0
     sleep 0.2
   done
-  kill -KILL -- "-$1" 2>/dev/null
+  # The group may end between the last check and this line; that is not a failure.
+  kill -KILL -- "-$1" 2>/dev/null || true
 }
 
 cleanup() {
@@ -118,7 +124,10 @@ cleanup() {
   for name in "${CONTAINERS[@]}"; do
     timeout 60 "$CONTAINER" rm --force --volumes "$name" >/dev/null 2>&1
   done
-  for image in "${IMAGES[@]}"; do timeout 60 "$CONTAINER" rmi --force "$image" >/dev/null 2>&1; done
+  # Only this run's images: the label names the run. Unused ones, and the container is gone.
+  if [ "$BUILT" = 1 ]; then
+    timeout 120 "$CONTAINER" image prune --all --force --filter "label=$IMAGE_LABEL" >/dev/null 2>&1
+  fi
   find "$COPY_DIR" -delete 2>/dev/null
   find "$SCRATCH" -delete
   find vapid.json -delete 2>/dev/null
@@ -230,28 +239,43 @@ log "starting the worker"
 start worker deno run --allow-all apps/worker/+main.ts
 wait_for worker "${PIDS[-1]}" 60 grep -q "Worker started" "$SCRATCH/worker.log"
 
+# Builds an image with this run's label. In the background, as its own process group, so a signal
+# stops the run at once and cleanup stops the build.
+build_image() { # <name> <arguments for `build`…>
+  local name=$1 options=(--label "$IMAGE_LABEL")
+  shift
+  # Podman keeps every step of a build as an untagged image and starts the next build from those.
+  # Switched off: nothing untagged stays behind, and no build depends on a step image that
+  # another run removes meanwhile (a build failed that way: "image not known"). Docker with
+  # BuildKit keeps no such images and does not know the option.
+  if "$CONTAINER" build --help 2>/dev/null | grep -q -- --layers; then
+    options+=(--layers=false)
+  fi
+  BUILT=1
+  setsid timeout 900 "$CONTAINER" build --quiet "${options[@]}" "$@" >"$SCRATCH/$name.log" 2>&1 &
+  PIDS+=($!)
+  wait "${PIDS[-1]}" || { log "the $name did not build"; tail -n 40 "$SCRATCH/$name.log"; exit 1; }
+}
+
 # Puts <server> at $SPA_PORT, in place of the dev server when that is there. A run starts the dev
 # server first, so the built SPA never has to make way.
 SPA_SERVER=""
 SPA_PID=""
 start_spa() { # <dev|built>
   [ "$SPA_SERVER" = "$1" ] && return 0
-  if [ -n "$SPA_PID" ]; then
-    log "stopping the dev server"
-    stop_group "$SPA_PID"
-    SPA_PID=""
-  fi
   SPA_SERVER=$1
   if [ "$1" = built ]; then
     # The image exactly as a deploy builds it, as `e2e/spa/run.sh` does: keep the two in step.
     log "building the SPA image"
-    IMAGES+=("$BASE_IMAGE" "$SPA_IMAGE")
-    timeout 900 "$CONTAINER" build --quiet --tag "$BASE_IMAGE" --file Dockerfile.base . \
-      >"$SCRATCH/base-image.log" 2>&1 ||
-      { log "the base image did not build"; tail -n 40 "$SCRATCH/base-image.log"; exit 1; }
-    timeout 900 "$CONTAINER" build --quiet --build-arg "BASE_IMAGE=$BASE_IMAGE" \
-      --tag "$SPA_IMAGE" --file apps/spa/dockerfile.prod . >"$SCRATCH/spa-image.log" 2>&1 ||
-      { log "the SPA image did not build"; tail -n 40 "$SCRATCH/spa-image.log"; exit 1; }
+    build_image "base image" --tag "$BASE_IMAGE" --file Dockerfile.base .
+    build_image "SPA image" --build-arg "BASE_IMAGE=$BASE_IMAGE" --tag "$SPA_IMAGE" \
+      --file apps/spa/dockerfile.prod .
+    # Only now, so the port is free for a moment and not for the whole build.
+    if [ -n "$SPA_PID" ]; then
+      log "stopping the dev server"
+      stop_group "$SPA_PID"
+      SPA_PID=""
+    fi
     log "starting the built SPA on 127.0.0.1:$SPA_PORT"
     CONTAINERS+=("$SPA_NAME")
     timeout 300 "$CONTAINER" run --detach --name "$SPA_NAME" --pids-limit=500 --memory=1g \
@@ -323,15 +347,17 @@ copy_specs() { # <all|offline|other>
 }
 
 # What Playwright printed last in <log>: "12 passed (1.2m)", "1 failed", "2 flaky" and the like.
+# Only for the summary: some reporters print no such line, and the exit code never reads it.
 counts() { # <log>
   sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g' "$1" | tr '\r' '\n' |
     grep -E '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' |
     sed -e 's/^ *//' | paste -sd, - | sed -e 's/,/, /g'
 }
 
+PASSES=${#PASS_SERVER[@]}
 STATUS=0
 SUMMARY=()
-MATCHED=0
+EMPTY=0 # the passes in which Playwright found no test
 for i in "${!PASS_SERVER[@]}"; do
   server=${PASS_SERVER[i]}
   start_spa "$server"
@@ -339,13 +365,9 @@ for i in "${!PASS_SERVER[@]}"; do
   ARGS=()
   [ -z "${PASS_ARGS[i]}" ] || mapfile -t ARGS <<<"${PASS_ARGS[i]%$'\n'}"
   REPORT="$ROOT/e2e/report"
-  if [ ${#PASS_SERVER[@]} -gt 1 ]; then
-    # A filter such as `-g` may match in one pass only; the check after the loop catches none.
-    ARGS+=(--pass-with-no-tests)
-    [ "$i" = 0 ] || REPORT="$ROOT/e2e/report/offline"
-  fi
+  [ "$i" = 0 ] || REPORT="$ROOT/e2e/report/offline"
   # In the background, so a signal reaches the traps above while Playwright runs.
-  log "pass $((i + 1)) of ${#PASS_SERVER[@]}: running Playwright at http://app.localhost:$FRONT_PORT ($server)"
+  log "pass $((i + 1)) of $PASSES: running Playwright at http://app.localhost:$FRONT_PORT ($server)"
   PLAYWRIGHT_HTML_OUTPUT_DIR="$REPORT" setsid \
     timeout --kill-after=10 "${E2E_LOCAL_TIMEOUT:-1500}" \
     deno run -A --node-modules-dir npm:playwright@1.57.0 test \
@@ -356,16 +378,22 @@ for i in "${!PASS_SERVER[@]}"; do
   # `tee` may still be writing the last lines.
   sleep 1
   COUNTS=$(counts "$SCRATCH/pass-$i.log" || true)
-  [ -z "$COUNTS" ] || MATCHED=1
+  SHOWN=$PASS_STATUS
   if [ "$PASS_STATUS" = 124 ]; then
     COUNTS="did not finish within ${E2E_LOCAL_TIMEOUT:-1500} s${COUNTS:+, $COUNTS}"
+  elif [ "$PASS_STATUS" != 0 ] && grep -q "Error: No tests found" "$SCRATCH/pass-$i.log"; then
+    # Playwright's own error and exit code, whatever the reporter.
+    COUNTS="no test found"
+    EMPTY=$((EMPTY + 1))
+    # The other pass may hold every test the arguments ask for.
+    [ "$PASSES" = 1 ] || PASS_STATUS=0
   fi
-  SUMMARY+=("pass $((i + 1)), $server: ${COUNTS:-no test matched} (exit $PASS_STATUS)")
+  SUMMARY+=("pass $((i + 1)), $server: ${COUNTS:+$COUNTS }(exit $SHOWN)")
   [ "$STATUS" != 0 ] || STATUS=$PASS_STATUS
 done
 for line in "${SUMMARY[@]}"; do log "$line"; done
-if [ "$MATCHED" = 0 ] && [ "$STATUS" = 0 ]; then
-  log "no test matched in any pass"
+if [ "$PASSES" -gt 1 ] && [ "$EMPTY" = "$PASSES" ]; then
+  log "no test found in any pass"
   STATUS=1
 fi
 exit "$STATUS"

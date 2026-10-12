@@ -258,7 +258,8 @@ The two specs that start the app with no network, `e2e/offline.e2e.ts` and
 against the dev server ([docs/offline.md](docs/offline.md), "The app shell", says why). A run that
 needs both makes two Playwright passes, the dev server first and then the built SPA in its place,
 so `deno task e2e:local` alone still runs every spec. It fails when either pass fails, and its last
-lines give the counts of each pass. An argument that is not a spec path goes to both passes.
+lines give the counts of each pass. The report of the second pass is in `e2e/report/offline`, which
+`deno task e2e:report` does not open. An argument that is not a spec path goes to both passes.
 `E2E_SPA=dev` or `E2E_SPA=built` puts every spec asked for on that one server.
 
 It needs a container tool (`CONTAINER_PROVIDER`, `podman` by default) and the Chromium of the
