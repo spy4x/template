@@ -19,6 +19,7 @@ const own = {
   document: globalThis.document,
   FormData: globalThis.FormData,
   getComputedStyle: globalThis.getComputedStyle,
+  location: globalThis.location,
 }
 
 beforeAll(() => {
@@ -26,6 +27,8 @@ beforeAll(() => {
     document: window.document,
     FormData: window.FormData,
     getComputedStyle: window.getComputedStyle.bind(window),
+    // A link asks whether its address is this page's own before it hands a click to the router.
+    location: window.location,
   })
 })
 
@@ -58,7 +61,11 @@ function find<T extends Element = HTMLElement>(selector: string): T {
 async function click(selector: string): Promise<void> {
   await act(() => {
     find(selector).dispatchEvent(
-      new window.MouseEvent("click", { bubbles: true, cancelable: true }) as unknown as Event,
+      new window.MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+      }) as unknown as Event,
     )
   })
 }
@@ -136,9 +143,13 @@ describe("AuthScreen provider links", () => {
       />,
     )
 
+    // A link inside the app goes through the router: without it this test would prove nothing.
+    await click(`a[href="/forgot-password"]`)
+    expect(routed).toEqual(["/forgot-password"])
+
     await click("[data-e2e=provider-google]")
 
-    expect(routed).toEqual([])
+    expect(routed).toEqual(["/forgot-password"])
   })
 
   it("offers no provider on the one-time-code page", async () => {
@@ -182,7 +193,7 @@ describe("ConfirmSignUpScreen", () => {
 
     expect(find("h1").textContent).toBe("Create a new account?")
     const card = find("[data-e2e=confirm-sign-up]").textContent
-    expect(card).toContain("Google")
+    expect(card).toContain("signs in with the Google account ada@example.com.")
     expect(find("[data-e2e=confirm-sign-up-email]").textContent).toBe("ada@example.com")
     expect(card).toContain("Nothing has been created yet.")
   })
