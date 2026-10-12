@@ -212,6 +212,20 @@ const INTERRUPTED = `Interrupted before Postgres 16 was stopped.`
 const describe = (cause: unknown) => cause instanceof Error ? cause.message : String(cause)
 
 /**
+ * A printer that never throws. When the terminal is gone (a dropped SSH connection) every write
+ * fails, and a failed message must not end a run that still has the apps to start again.
+ */
+export function unfailing<T extends unknown[]>(print: (...args: T) => void): (...args: T) => void {
+  return (...args) => {
+    try {
+      print(...args)
+    } catch {
+      // Nobody is left to read it.
+    }
+  }
+}
+
+/**
  * Runs the upgrade. Resolves with `changed: false` when the server is already on Postgres 18.
  *
  * An interruption counts until the dump is whole: the run stops there and the apps start again.
@@ -223,7 +237,8 @@ const describe = (cause: unknown) => cause instanceof Error ? cause.message : St
  *   apps run again, nothing else changed), or when a later step fails (Postgres 18 and the apps
  *   are stopped, the old directory is untouched).
  */
-export async function runUpgrade(steps: UpgradeSteps): Promise<UpgradeReport> {
+export async function runUpgrade(given: UpgradeSteps): Promise<UpgradeReport> {
+  const steps: UpgradeSteps = { ...given, log: unfailing(given.log) }
   const state = await steps.state()
   if (state === `upgraded` || state === `not-needed`) return { changed: false, state }
   if (state !== `ready`) throw new UpgradeFailedError(REFUSALS[state])
@@ -505,7 +520,7 @@ function realHost(engine: string): UpgradeHost & { interrupt(): void } {
     },
     interrupted: () => interrupted,
     now: () => Date.now(),
-    log,
+    log: unfailing(log),
     facts: () => readPostgresDataFacts(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     rename: (from, to) => Deno.rename(from, to),
@@ -570,6 +585,7 @@ async function main(): Promise<void> {
   const dumpPath = `${DUMP_DIR}/postgres-16-${stamp}.sql`
   const signals = [`SIGINT`, `SIGTERM`, `SIGHUP`] as const
   let onSignal = () => {}
+  const say = unfailing(log)
   const handler = () => onSignal()
   // Listening keeps a signal from ending the run half-way; runUpgrade decides what it means.
   for (const signal of signals) Deno.addSignalListener(signal, handler)
@@ -579,11 +595,12 @@ async function main(): Promise<void> {
       const values = await readEnvFile(ENV_FILE)
       const host = realHost(planCompose(values, [], ENV_FILE).engine)
       onSignal = () => {
-        if (!host.interrupted()) {
-          log(`Interrupted. Before Postgres 16 stops, the run stops and the apps start again;`)
-          log(`after that it goes on to its end. Please wait.`)
-        }
+        // The flag first: on a hang-up the terminal is gone and nothing can be printed.
+        const first = !host.interrupted()
         host.interrupt()
+        if (!first) return
+        say(`Interrupted. Before Postgres 16 stops, the run stops and the apps start again;`)
+        say(`after that it goes on to its end. Please wait.`)
       }
       steps = engineSteps(values, dumpPath, host)
     } catch (err) {
@@ -591,21 +608,21 @@ async function main(): Promise<void> {
     }
     const report = await runUpgrade(steps)
     if (!report.changed) {
-      success(
+      unfailing(success)(
         report.state === `upgraded`
           ? `Already upgraded: ${NEW_DATA_DIR}/${UPGRADE_MARKER} is there. Nothing was changed.`
           : `This server already runs Postgres 18 and has no ${OLD_DATA_DIR}. Nothing was changed.`,
       )
       return
     }
-    success(
+    unfailing(success)(
       `Upgraded to Postgres 18: ${report.rows} rows in ${report.tables} tables match. ` +
         `The apps were down for ${(report.downtimeMs! / 1000).toFixed(1)} s.`,
     )
-    log(`${OLD_DATA_DIR} and ${dumpPath} are kept. Remove them by hand once you trust the new`)
-    log(`database: ${DOC} ("Afterwards").`)
+    say(`${OLD_DATA_DIR} and ${dumpPath} are kept. Remove them by hand once you trust the new`)
+    say(`database: ${DOC} ("Afterwards").`)
   } catch (err) {
-    error(err instanceof UpgradeFailedError ? err.message : describe(err))
+    unfailing(error)(err instanceof UpgradeFailedError ? err.message : describe(err))
     Deno.exit(1)
   } finally {
     for (const signal of signals) Deno.removeSignalListener(signal, handler)

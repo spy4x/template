@@ -129,6 +129,16 @@ Deno.test("an interruption before Postgres 16 stops starts the apps again and ch
   }
 })
 
+Deno.test("an interruption on a terminal that is gone still starts the apps again", async () => {
+  // A dropped SSH connection: the hang-up arrives during the dump and every print fails.
+  const s = steps({ interruptDuring: "dump" })
+  s.log = () => {
+    throw new Error("Input/output error (os error 5)")
+  }
+  await expect(runUpgrade(s)).rejects.toThrow("Interrupted")
+  expect(s.calls.slice(-2)).toEqual(["dump", "startApps"])
+})
+
 Deno.test("a dump that Ctrl-C broke is reported as an interruption, with the dump's own error", async () => {
   const s = steps({ interruptDuring: "dump", fail: "dump" })
   const failure = await runUpgrade(s).catch((error) => error)
