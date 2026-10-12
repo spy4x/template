@@ -243,17 +243,21 @@ These cost real time to find. Do not rediscover them.
    sign-up, sets the cookie `oauth_sign_up` and redirects to `/sign-up/confirm`, where
    `POST /api/auth/sign-up/confirm` creates the user, profile and first group. The library, not
    `provenAddressOwner`, decides whether a provider account joins an existing one: only by an
-   address both sides have verified. Linking from the profile is a provider sign-in that must end
-   at the signed-in user; `DELETE /api/auth/methods/:id` refuses the last usable method and ends
+   address both sides have verified. Linking from the profile is the library's connect flow
+   (`connectUrl`, `handleConnectCallback`): bound to the signed-in user, it adds the provider
+   whatever its address and touches no other account, and a provider account that already signs in
+   to someone else ends at `/?oauth=link-taken`. Its `state` has its own HttpOnly cookie,
+   `oauth_connect_<provider>`; the one callback route runs the connect when that cookie holds the
+   callback's `state`, and the sign-in otherwise. `DELETE /api/auth/methods/:id` refuses the last usable method and ends
    the sessions that method started. A sign-up the provider vouches for deletes another account's
    unproven claim to the same address (the library's rule against sitting on an address): the
    question page warns first (`PendingSignUp.unconfirmedAccount`) and the locked account gets the
    audit row `UNCONFIRMED_ADDRESS_TAKEN`. "Go back" takes the held profile out of the flow store.
    The two routes a browser opens as a page, `start` and `callback`, answer every failure with a
-   redirect to `/sign-in?oauth=…`, a spent rate limit included. Linking still goes through the
-   library's sign-in, so a provider account whose verified address is another account's proven
-   address is linked to that other account; it moves to the library's connect call once
-   https://github.com/spy4x/ts-libs/pull/591 is released. Not built: adding a password to an
+   redirect to `/sign-in?oauth=…`, a spent rate limit included. The sign-in page's "last used"
+   hint is `apps/spa/src/state/last-sign-in.ts` over `createLastSignIn` of
+   `@spy4x/platform/browser/last-sign-in`: the app remembers the method the session used, read
+   from `GET /api/auth/methods`, once a person is signed in with every factor done. Not built: adding a password to an
    account that has none, so such an account cannot change its address, change or reset a
    password, or delete itself, which all ask for the password; its profile says so for the first
    two, and the delete dialog still asks for a password it does not have.

@@ -254,8 +254,14 @@ What a person gets:
 - A provider account joins an existing account by its e-mail address only when both sides have
   verified that address. An address the provider has not verified never links: that person is
   asked whether to create a new account, like anyone unknown.
-- On the profile, a person links and unlinks providers. The last way into an account cannot be
-  unlinked, and unlinking a method signs out the devices that signed in with it.
+- On the profile, a person links and unlinks providers. A provider account links whatever its
+  e-mail address, and linking never changes another person's account; one that already signs in
+  to another account here is refused, and the page says so. The last way into an account cannot
+  be unlinked, and unlinking a method signs out the devices that signed in with it.
+- The sign-in page says how the person last signed in on this browser, with most of the address
+  hidden ("Last time you signed in with Google (a\*\*\*@example.com)"), and "Not you? Forget"
+  removes it. Only the method's name and the masked address are kept, in the browser's storage,
+  and only after a finished sign-in.
 - An account made with a provider has no password. Its profile shows the provider's address, and
   it cannot change that address, set a password or delete itself yet: each asks for the password.
 
