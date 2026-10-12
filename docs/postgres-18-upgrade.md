@@ -13,8 +13,8 @@ where it was, in `.volumes/postgres`, untouched.
 
 Left like that, the first deploy would start an empty Postgres 18, run the migrations on it and
 serve an app with no users. `deno task compose` therefore refuses every command that can start the
-database (`up`, `start`, `restart`, `run`, `create`) while `.volumes/postgres` exists and no
-upgrade has finished:
+database (`up`, `start`, `restart`, `run`, `create`, `scale`, `watch`) while `.volumes/postgres`
+exists and no upgrade has finished:
 
 ```text
 Refusing to start: ./.volumes/postgres holds a Postgres 16 database, and Postgres 18 keeps its
@@ -31,12 +31,23 @@ deploy and `deno task dev` run. `docker compose up` typed by hand goes around it
 the empty database: do not start this stack that way on a machine that still has
 `.volumes/postgres`.
 
+The same check refuses after a rollback, with a message that says "Postgres 16 ran again": see
+"Rolling back".
+
 ## The upgrade
 
 It needs free disk space for one plain-text dump and one new data directory, each about the size
 of the database. The app is down from the moment the API and the worker stop until they are back.
 In the rehearsal (87 MB, 110,562 rows in 40 tables) that was 31 seconds; a dump and a restore
 grow with the data, so expect roughly proportionally more.
+
+Run step 2 inside `tmux` or `screen`, so a lost SSH connection does not interrupt it. Do not run
+`deno task compose down` before it: the script dumps from the running Postgres 16 container.
+
+Postgres' memory settings now fit a container limit of 2048 MB (`DB_MEM_LIMIT=2048m`, the
+example's value). If the server's `infra/envs/.env` sets a larger `DB_MEM_LIMIT`, set the five
+`DB_SHARED_BUFFERS`-style variables listed under it in `infra/envs/.env.example` before step 1, or
+Postgres 18 starts with 512 MB of shared buffers whatever the limit.
 
 1. On your machine, deploy this version. It stops at "Starting the app" as described above, with
    the new files on the server and the old containers still running.
@@ -60,12 +71,14 @@ grow with the data, so expect roughly proportionally more.
 
 What the script does, in order (`infra/scripts/db-upgrade-18.ts`):
 
-1. Builds the images while everything still runs.
+1. Fetches the Postgres 18 image and builds the others while everything still runs. If the image
+   cannot be fetched, it stops here and nothing was changed.
 2. Stops the API and the worker, so nothing writes any more.
 3. Counts the rows of every table in every database and dumps the whole server with `pg_dumpall`
    into `.db-upgrade/postgres-16-<time>.sql`, readable by you only. If the count or the dump
    fails, or the dump is cut short, it starts the API and the worker again and stops: nothing
-   else was changed.
+   else was changed. What the failed dump wrote stays beside it as `….sql.partial`; it is not a
+   backup and can be deleted.
 4. Stops Postgres 16 and starts Postgres 18 on the new, empty `.volumes/postgres18`.
 5. Restores the dump and counts the rows again. A table that is missing or extra, or a count that
    differs, fails the upgrade. So does any restore error other than the two a fresh server always
@@ -91,34 +104,82 @@ The script never renames, writes or deletes `.volumes/postgres`.
   migration or an app failed afterwards. Read its log (`deno task compose logs migrate`), fix it
   and run `deno task compose up -d`.
 
+### When the run is interrupted
+
+Ctrl-C, or a signal from a closed terminal, is handled like this:
+
+- **Until the dump is whole**, the script stops, starts the API and the worker again and ends with
+  "Interrupted … Nothing was changed".
+- **Once it says "From here on the run cannot be stopped"**, it carries on to the end, because
+  stopping there would leave the server without a database. Ctrl-C in a terminal also reaches the
+  command the script is running at that moment; if that command dies, the run ends as "The upgrade
+  failed" above.
+
+When the script itself was killed, or the server went down, nothing put the apps back, and the
+dump it was writing in `.db-upgrade` is partial although its name ends in `.sql`: delete it. Find
+where the run stopped:
+
+```bash
+deno task compose ps --all
+ls .volumes
+```
+
+- **There is no `.volumes/postgres18`**: Postgres 16 was never replaced. Either run
+  `deno task db:upgrade-18` again, which does the whole upgrade from the start, or bring the app
+  back as it was. `deno task compose start` is refused here, so start the old containers by name;
+  starting a container that already runs does nothing.
+
+  ```bash
+  docker start <PROJECT>-db <PROJECT>-api <PROJECT>-worker
+  ```
+
+  The upgrade also needs that first container: when it answers "The database container does not
+  answer", run `docker start <PROJECT>-db` and then the upgrade again.
+- **`.volumes/postgres18` is there without `upgraded-from-16` in it**: the script answers "an
+  upgrade never finished". Roll back as below, move that directory away, then upgrade again.
+
 ## Rolling back
 
 Rolling back is starting Postgres 16 on the old directory again, which is what the previous
 version's Compose file does. Everything written to Postgres 18 since the upgrade is lost: the old
 directory holds the data as it was when the API and the worker stopped.
 
-1. On your machine, deploy the last commit before this change. A deploy from an older commit
-   replaces every newer file on the server, the Compose file included.
+On your machine, deploy the last commit before this change. A deploy from an older commit replaces
+every newer file on the server, the Compose file included.
 
-   ```bash
-   git switch --detach <last commit that ran Postgres 16>
-   deno task deploy
-   git switch -
-   ```
-
-2. On the server, in the app's directory, move the Postgres 18 directory out of the way. It now
-   misses everything written since the rollback, and its marker would let a later deploy start
-   on it.
-
-   ```bash
-   sudo mv .volumes/postgres18 .volumes/postgres18-rolled-back-$(date +%F)
-   ```
-
-To upgrade again later, deploy this version and run `deno task db:upgrade-18` as above. If step 2
-was skipped, the script refuses and says so.
+```bash
+git switch --detach <last commit that ran Postgres 16>
+deno task deploy
+git switch -
+```
 
 In the rehearsal the rollback took 9 seconds, and Postgres 16 showed the same 110,562 rows it had
 before the upgrade.
+
+### Upgrading again after a rollback
+
+`.volumes/postgres18` still holds the copy from before the rollback, and its marker. Postgres 16
+changes its own directory every time it starts, so `deno task compose` sees that it ran after the
+marker was written and refuses to start Postgres 18 on that older copy:
+
+```text
+Refusing to start: ./.volumes/postgres changed after the upgrade to Postgres 18 finished, so
+Postgres 16 ran again (a rollback) and ./.volumes/postgres18 misses everything written since.
+```
+
+So deploying this version again stops at "Starting the app" with Postgres 16 still serving, as on
+the first deploy, and `deno task db:upgrade-18` refuses with "this server was rolled back". On
+the server, move the stale directory away, then upgrade:
+
+```bash
+sudo mv .volumes/postgres18 .volumes/postgres18-rolled-back-$(date +%F)
+deno task db:upgrade-18
+```
+
+The check compares two modification times: `.volumes/postgres` itself and the marker. If you
+created or removed a file directly in `.volumes/postgres` by hand after an upgrade and Postgres 16
+never ran again, the refusal is a false alarm; `sudo touch .volumes/postgres18/upgraded-from-16`
+clears it.
 
 ## Afterwards
 
