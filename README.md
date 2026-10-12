@@ -255,15 +255,20 @@ What a person gets:
   verified that address. An address the provider has not verified never links: that person is
   asked whether to create a new account, like anyone unknown.
 - On the profile, a person links and unlinks providers. A provider account links whatever its
-  e-mail address, and linking never changes another person's account; one that already signs in
-  to another account here is refused, and the page says so. The last way into an account cannot
-  be unlinked, and unlinking a method signs out the devices that signed in with it.
+  e-mail address, and linking never changes another person's confirmed account; one that already
+  signs in to another account here is refused, and the page says so. The last way into an account
+  cannot be unlinked, and unlinking a method signs out the devices that signed in with it.
+- Linking differs from signing up in one case. When the provider has verified an address that
+  another account here uses with a password but never confirmed, the link locks that account, as
+  creating a new account would, and it gets the same audit row. The person linking is not warned
+  first: a link has no question page.
 - The sign-in page says how the person last signed in on this browser, with most of the address
   hidden ("Last time you signed in with Google (a\*\*\*@example.com)"), and "Not you? Forget"
   removes it. Only the method's name and the masked address are kept, in the browser's storage,
   and only after a finished sign-in.
-- An account made with a provider has no password. Its profile shows the provider's address, and
-  it cannot change that address, set a password or delete itself yet: each asks for the password.
+- An account made with a provider has no password. It cannot change its address, set a password
+  or delete itself yet, because each asks for the password; its profile shows the provider's
+  address, offers none of the three and says why.
 
 ## Admin consoles
 
