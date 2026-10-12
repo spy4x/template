@@ -8,6 +8,7 @@ import { Route, type StringRouteParams, Switch, useLocation, useSearch } from "w
 import { useRouteAnnouncer } from "@spy4x/preact-system/route-announcer"
 import { canSignOut, sessionState } from "./state/session.ts"
 import { bootstrapSession, settleOwedSignOut } from "./state/auth.ts"
+import { rememberSignIn } from "./state/last-sign-in.ts"
 import { groupsStore } from "./state/groups.ts"
 import { notesStore } from "./state/notes.ts"
 import { tagsStore } from "./state/tags.ts"
@@ -189,6 +190,12 @@ export function App() {
     if (user && !isMfaRequired) rememberUser(user)
     else if (isReady && !user) void forgetUser()
   }, [sessionState.value.user, sessionState.value.isReady, sessionState.value.isMfaRequired])
+
+  // The sign-in page of this browser later says which method the person used (#142).
+  useEffect(() => void rememberSignIn(sessionState.value), [
+    sessionState.value.user?.id,
+    sessionState.value.isMfaRequired,
+  ])
 
   // A change made in another tab while this socket was down is read when it opens again.
   useEffect(() => profileStore.onSocketStatus(sessionState.value.wsStatus), [

@@ -16,6 +16,7 @@ import {
 } from "@domain/identity"
 import { checkTotp, signIn, signUp } from "../state/auth.ts"
 import { listProviders } from "../state/sign-in-methods.ts"
+import { lastSignIn, lastSignInHint } from "../state/last-sign-in.ts"
 import { sessionState } from "../state/session.ts"
 
 /**
@@ -33,6 +34,7 @@ export function AuthView({ screen }: { screen: AuthScreenKind }) {
     return notice && OAUTH_NOTICES[notice]
   })
   const [busy, setBusy] = useState(false)
+  const [last, setLast] = useState(() => lastSignInHint())
   const [providers, setProviders] = useState<OAuthProviderId[]>([])
   useEffect(() => {
     if (screen === "one-time-code") return
@@ -71,6 +73,11 @@ export function AuthView({ screen }: { screen: AuthScreenKind }) {
       navigate={navigate}
       next={next}
       providers={providers}
+      lastSignIn={last}
+      onForgetLastSignIn={() => {
+        lastSignIn.forget()
+        setLast(null)
+      }}
       onSignIn={({ login, password }: AuthCredentials) => attempt(() => signIn(login, password))}
       onSignUp={({ login, password }: AuthCredentials) => attempt(() => signUp(login, password))}
       onOneTimeCode={(code) => attempt(() => checkTotp(code))}

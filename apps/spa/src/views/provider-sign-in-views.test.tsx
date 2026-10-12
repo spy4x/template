@@ -12,6 +12,8 @@ import { act } from "preact/test-utils"
 import { Router } from "wouter-preact"
 import { memoryLocation } from "wouter-preact/memory-location"
 import { OAUTH_NOTICES, type SignInMethod, UserMFAStatus } from "@domain/identity"
+import { memoryStorage } from "@spy4x/platform/browser/storage"
+import { lastSignIn } from "../state/last-sign-in.ts"
 import { sessionState } from "../state/session.ts"
 import { AuthView } from "./AuthView.tsx"
 import { ConfirmSignUpView } from "./ConfirmSignUpView.tsx"
@@ -24,7 +26,10 @@ const own = {
   getComputedStyle: globalThis.getComputedStyle,
   location: globalThis.location,
   fetch: globalThis.fetch,
+  localStorage: Object.getOwnPropertyDescriptor(globalThis, "localStorage"),
 }
+/** What the browser keeps: memory, never the real `localStorage`, which lasts between runs. */
+let kept = memoryStorage()
 const signedOut = sessionState.value
 
 beforeAll(() => {
@@ -34,10 +39,13 @@ beforeAll(() => {
     getComputedStyle: window.getComputedStyle.bind(window),
     location: window.location,
   })
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get: () => kept })
 })
 
 afterAll(async () => {
-  Object.assign(globalThis, own)
+  const { localStorage, ...rest } = own
+  Object.assign(globalThis, rest)
+  if (localStorage) Object.defineProperty(globalThis, "localStorage", localStorage)
   await window.happyDOM.close()
 })
 
@@ -49,6 +57,7 @@ afterEach(async () => {
   root = null
   sessionState.value = signedOut
   globalThis.fetch = own.fetch
+  kept = memoryStorage()
 })
 
 /** Lets the pending requests answer and the page draw what they changed. */
@@ -119,6 +128,33 @@ describe("the sign-in page", () => {
     expect(calls).toContain("GET /api/auth/providers")
     expect(text("[data-e2e=provider-github]")).toBe("Continue with GitHub")
     expect(document.querySelectorAll("[data-e2e=provider-google]").length).toBe(0)
+  })
+
+  it("says how the person last signed in here, and forgets it on request", async () => {
+    api({})
+    lastSignIn.remember("github", "ada@example.com")
+
+    await open("/sign-in", <AuthView screen="sign-in" />)
+    expect(text("[data-e2e=last-sign-in] span"))
+      .toBe("Last time you signed in with GitHub (a***@example.com).")
+
+    await press("[data-e2e=last-sign-in-forget]")
+
+    expect(lastSignIn.read()).toBe(null)
+    expect(document.querySelectorAll("[data-e2e=last-sign-in]").length).toBe(0)
+    // Opened again, the page has nothing to say.
+    await act(() => render(null, root!))
+    await open("/sign-in", <AuthView screen="sign-in" />)
+    expect(document.querySelectorAll("[data-e2e=last-sign-in]").length).toBe(0)
+    expect(document.querySelectorAll("[data-e2e=last-sign-in-forgotten]").length).toBe(0)
+  })
+
+  it("says nothing about a last sign-in on a browser that remembers none", async () => {
+    api({})
+
+    await open("/sign-in", <AuthView screen="sign-in" />)
+
+    expect(document.querySelectorAll("[data-e2e=last-sign-in]").length).toBe(0)
   })
 
   it("says why a provider sign-in that came back with a notice did not work", async () => {

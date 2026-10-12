@@ -107,6 +107,51 @@ const authDefaults: AuthScreenProps = {
   error: null,
 }
 
+describe("AuthScreen last sign-in", () => {
+  const last = { method: "google", email: "a***@example.com" } as const
+
+  it("says on the sign-in screen which method was used last, with the masked address", async () => {
+    await mount(<AuthScreen {...authDefaults} lastSignIn={last} />)
+
+    expect(find("[data-e2e=last-sign-in] span").textContent)
+      .toBe("Last time you signed in with Google (a***@example.com).")
+    expect(find("[data-e2e=last-sign-in-forget]").textContent).toBe("Not you? Forget")
+  })
+
+  it("names a password sign-in that kept no address", async () => {
+    await mount(<AuthScreen {...authDefaults} lastSignIn={{ method: "password", email: null }} />)
+
+    expect(find("[data-e2e=last-sign-in] span").textContent)
+      .toBe("Last time you signed in with your password.")
+  })
+
+  it("shows nothing when the browser remembers nothing, or on another screen", async () => {
+    await mount(<AuthScreen {...authDefaults} />)
+    expect(document.querySelectorAll("[data-e2e=last-sign-in]").length).toBe(0)
+
+    for (const screen of ["sign-up", "one-time-code"] as const) {
+      await act(() =>
+        render(<AuthScreen {...authDefaults} screen={screen} lastSignIn={last} />, root!)
+      )
+      expect(document.querySelectorAll("[data-e2e=last-sign-in]").length).toBe(0)
+    }
+  })
+
+  it("forgets on request, says so and moves focus to that sentence", async () => {
+    let forgotten = 0
+    await mount(
+      <AuthScreen {...authDefaults} lastSignIn={last} onForgetLastSignIn={() => forgotten++} />,
+    )
+
+    await click("[data-e2e=last-sign-in-forget]")
+
+    expect(forgotten).toBe(1)
+    expect(document.querySelectorAll("[data-e2e=last-sign-in]").length).toBe(0)
+    expect(find("[data-e2e=last-sign-in-forgotten]").getAttribute("role")).toBe("status")
+    expect(focused()).toBe("last-sign-in-forgotten")
+  })
+})
+
 describe("AuthScreen provider links", () => {
   it("offers one link per provider that is on, to the API's start route", async () => {
     await mount(<AuthScreen {...authDefaults} providers={["google", "github"]} />)
