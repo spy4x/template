@@ -485,6 +485,9 @@ CREATE UNIQUE INDEX idx_group_invitations_token_hash ON group_invitations (token
 CREATE INDEX idx_group_invitations_group_created ON group_invitations (group_id, created_at DESC);
 -- The invitations a person sees for the addresses they proved.
 CREATE INDEX idx_group_invitations_email ON group_invitations (email) WHERE email IS NOT NULL;
+-- Whether a person ever made an invitation (the first-steps checklist), and the cascade when a
+-- user is deleted.
+CREATE INDEX idx_group_invitations_created_by ON group_invitations (created_by_user_id);
 
 -- Who accepted each invitation. A person accepts one invitation once: a member removed from the
 -- group cannot come back through the team link they joined with.

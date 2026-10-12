@@ -9,3 +9,10 @@
 ALTER TABLE users
   ADD COLUMN onboarding_dismissed_at TIMESTAMPTZ,
   ADD COLUMN onboarding_tour_seen_at TIMESTAMPTZ;
+
+-- The "invite someone" step asks whether the person ever made an invitation. Without this index
+-- that read, and the cascade when a user is deleted, scan the whole table.
+--
+-- Safe on a table with rows: the build blocks writes to `group_invitations` (not reads) while it
+-- runs, and the table holds one short row per invitation ever made.
+CREATE INDEX idx_group_invitations_created_by ON group_invitations (created_by_user_id);
