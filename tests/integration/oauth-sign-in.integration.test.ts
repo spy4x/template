@@ -563,10 +563,14 @@ Deno.test("signing in with a provider ends the session the browser had before", 
 
 Deno.test("a spent rate limit or a failure sends the person to the sign-in page with a reason", async () => {
   await withSchema(async (sql) => {
-    const spent: MiddlewareHandler<APIContext> = (c) => {
-      c.header("Retry-After", "42")
-      return Promise.resolve(c.json({ error: "Too many requests" }, 429))
-    }
+    // The refusal as a response of its own: nothing is left on the request for the redirect.
+    const spent: MiddlewareHandler<APIContext> = () =>
+      Promise.resolve(
+        Response.json({ error: "Too many requests" }, {
+          status: 429,
+          headers: { "retry-after": "42" },
+        }),
+      )
     const limited = buildApp(sql, { ada: ADA }, ["google"], { strictByIp: spent, normal: spent })
     const start = await browser(limited).get("/auth/google/start")
     expect(target(start)).toBe("/sign-in?oauth=busy")
