@@ -1,7 +1,7 @@
 import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
-import type { OutboxEvent } from "@spy4x/server/outbox"
-import { cleanupJob, type CleanupStep, ReportingJobPublisher } from "./job-failures.ts"
+import type { OutboxAttemptFailure, OutboxEvent } from "@spy4x/server/outbox"
+import { cleanupJob, type CleanupStep, logAttemptFailure } from "./job-failures.ts"
 
 const ID = "01900000-0000-7000-8000-000000000001"
 
@@ -24,7 +24,7 @@ describe("cleanupJob", () => {
     const ran: string[] = []
     const logged: string[] = []
 
-    const run = cleanupJob(steps(ran), 20, (line) => logged.push(line))(row(1))
+    const run = cleanupJob(steps(ran), (line) => logged.push(line))(row(1))
 
     await expect(run).rejects.toThrow(`nightly cleanup: 1 step(s) failed: "broken"`)
     expect(ran).toEqual(["first", "last"])
@@ -33,86 +33,74 @@ describe("cleanupJob", () => {
     ])
   })
 
-  it("ends normally on the last attempt, so the next night's run is still written", async () => {
-    const ran: string[] = []
-    const logged: string[] = []
-
-    await cleanupJob(steps(ran), 20, (line) => logged.push(line))(row(20))
-
-    expect(ran).toEqual(["first", "last"])
-    expect(logged[1]).toBe(
-      `error: nightly cleanup gave up on "broken" after 20 attempts; the next run is tomorrow`,
-    )
-  })
-
   it("logs nothing and ends normally when every step succeeds", async () => {
     const logged: string[] = []
     const ran: string[] = []
     const fine = steps(ran).filter(([name]) => name !== "broken")
 
-    await cleanupJob(fine, 20, (line) => logged.push(line))(row(1))
+    await cleanupJob(fine, (line) => logged.push(line))(row(1))
 
     expect(ran).toEqual(["first", "last"])
     expect(logged).toEqual([])
   })
 })
 
-describe("ReportingJobPublisher", () => {
-  /** A publisher whose one job and whose fallback both throw, logging into `logged`. */
-  function publisher(logged: string[]): ReportingJobPublisher {
-    return new ReportingJobPublisher({
-      aggregateType: "job",
-      handlers: { "mail.send": () => Promise.reject(new Error("mail not sent")) },
-      fallback: { publish: () => Promise.reject(new TypeError("no channel")) },
+describe("logAttemptFailure", () => {
+  /** What the processor reports for attempt `attempt` of 3 of a mail job that threw. */
+  function failure(
+    attempt: number,
+    more: Partial<OutboxAttemptFailure> = {},
+  ): OutboxAttemptFailure {
+    return {
+      event: row(attempt),
+      error: new TypeError("no route to ann@example.com"),
+      attempt,
       maxAttempts: 3,
-      log: (line) => logged.push(line),
-    })
+      lastAttempt: attempt >= 3,
+      stage: "publish",
+      ...more,
+    }
   }
 
-  it("logs a failed attempt with the job's kind and the error, and still throws", async () => {
+  it("logs a failed attempt with the row's kind, the stage and the error's name", () => {
     const logged: string[] = []
 
-    await expect(publisher(logged).publish(row(2))).rejects.toThrow("mail not sent")
+    logAttemptFailure((line) => logged.push(line))(failure(2))
 
     expect(logged).toEqual([
-      `warn: job mail.send (job ${ID}) failed, attempt 2 of 3: mail not sent`,
+      `warn: outbox row mail.send (job ${ID}) failed at publish, attempt 2 of 3: TypeError`,
     ])
   })
 
-  it("logs the last attempt as abandoned, naming the job's kind", async () => {
+  it("logs the last attempt as abandoned, naming the row's kind", () => {
     const logged: string[] = []
 
-    await expect(publisher(logged).publish(row(3))).rejects.toThrow("mail not sent")
+    logAttemptFailure((line) => logged.push(line))(failure(3))
 
     expect(logged).toEqual([
-      `error: job mail.send (job ${ID}) abandoned after 3 attempts: mail not sent`,
+      `error: outbox row mail.send (job ${ID}) abandoned at publish after 3 attempts: TypeError`,
     ])
   })
 
-  it("logs a failing row that is not a job too", async () => {
+  it("never logs the error's message, which can quote an address", () => {
     const logged: string[] = []
 
-    await expect(publisher(logged).publish(row(1, "group", "group.renamed"))).rejects.toThrow(
-      "no channel",
+    logAttemptFailure((line) => logged.push(line))(failure(1))
+    logAttemptFailure((line) => logged.push(line))(failure(1, { error: "ann@example.com" }))
+
+    expect(logged.join("\n")).not.toContain("ann@example.com")
+    expect(logged[1]).toContain(": string")
+  })
+
+  it("names the error an earlier attempt stored when the worker died mid-run", () => {
+    const logged: string[] = []
+
+    logAttemptFailure((line) => logged.push(line))(
+      failure(3, { stage: "lease", error: new Error("lost"), storedErrorCode: "PostgresError" }),
     )
 
     expect(logged).toEqual([
-      `warn: outbox row group.renamed (group ${ID}) failed, attempt 1 of 3: no channel`,
+      `error: outbox row mail.send (job ${ID}) abandoned at lease after 3 attempts: PostgresError`,
     ])
-  })
-
-  it("logs nothing for a job that succeeds", async () => {
-    const logged: string[] = []
-    const quiet = new ReportingJobPublisher({
-      aggregateType: "job",
-      handlers: { "mail.send": () => Promise.resolve() },
-      fallback: { publish: () => Promise.resolve() },
-      maxAttempts: 3,
-      log: (line) => logged.push(line),
-    })
-
-    await quiet.publish(row(1))
-
-    expect(logged).toEqual([])
   })
 })

@@ -2,6 +2,7 @@ import type postgres from "postgres"
 import { nextUtcHour } from "@spy4x/platform/universal/time"
 import {
   ensureScheduledOutboxEvent,
+  JobPublisher,
   OutboxProcessor,
   PostgresOutboxRepository,
 } from "@spy4x/server/outbox"
@@ -54,7 +55,7 @@ import {
   subscriberWelcomeMailJob,
 } from "./subscriber-mail.ts"
 import type { SubscribersSetup } from "../subscribers/subscribers.ts"
-import { cleanupJob, type CleanupStep, JOB_RETRY, ReportingJobPublisher } from "./job-failures.ts"
+import { cleanupJob, type CleanupStep, JOB_RETRY, logAttemptFailure } from "./job-failures.ts"
 import {
   JOB_AGGREGATE,
   JOB_AGGREGATE_ID,
@@ -87,8 +88,10 @@ const NIGHTLY_HOUR_UTC = 3
  * `graceDays` and `trialRequiresCard` make true.
  *
  * A row that fails is retried by {@link JOB_RETRY}; every failed attempt is logged through
- * `mail.log` with the row's kind, and the last one as abandoned. A cleanup step that throws stops
- * no other step and never ends the nightly chain.
+ * `mail.log` with the row's kind and the error's name, and the last one as abandoned. A row that
+ * is given up is closed, so the cleanup removes it a week later with the other processed rows. A
+ * cleanup step that throws stops no other step, and a cleanup that is given up still writes the
+ * next night's run.
  *
  * With `subscribers`, the subscriber jobs sign and mail confirm links, welcomes and issues. Without
  * it, they drop what they find.
@@ -104,14 +107,10 @@ export function createOutboxProcessor(
   const notifier = new GroupChangeNotifier(sql)
   return new OutboxProcessor(
     new PostgresOutboxRepository(sql),
-    new ReportingJobPublisher({
+    new JobPublisher({
       aggregateType: JOB_AGGREGATE,
       handlers: {
-        [OUTBOX_CLEANUP_JOB]: cleanupJob(
-          cleanupSteps(sql, provider, mail.log),
-          JOB_RETRY.maxAttempts,
-          mail.log,
-        ),
+        [OUTBOX_CLEANUP_JOB]: cleanupJob(cleanupSteps(sql, provider, mail.log), mail.log),
         [SEAT_SYNC_JOB]: provider ? seatSyncJob({ sql, provider }) : async () => {},
         [PASSWORD_RESET_MAIL_JOB]: passwordResetMailJob({ sql, ...mail }),
         [EMAIL_CODE_MAIL_JOB]: emailCodeMailJob({ sql, ...mail }),
@@ -134,10 +133,13 @@ export function createOutboxProcessor(
         [SUBSCRIBER_SEND_ISSUE_JOB]: subscriberSendIssueJob({ sql, ...mail, setup: subscribers }),
       },
       fallback: provider ? new SeatSyncPublisher(sql, notifier) : notifier,
-      maxAttempts: JOB_RETRY.maxAttempts,
-      log: mail.log,
     }),
-    { repeatEveryMs: { [OUTBOX_CLEANUP_JOB]: DAY_MS }, ...JOB_RETRY },
+    {
+      repeatEveryMs: { [OUTBOX_CLEANUP_JOB]: DAY_MS },
+      repeatAfterGiveUp: true,
+      onAttemptFailed: logAttemptFailure(mail.log),
+      ...JOB_RETRY,
+    },
   )
 }
 
@@ -237,35 +239,26 @@ function billingNoticeJobs(
 
 /**
  * Starts the nightly cleanup chain at the next 03:00 UTC unless one is already waiting. A cleanup
- * row that used up its attempts would count as waiting for good, so it is marked done first and
- * told to `log`: the chain then starts again. The cleanup job itself never fails its last attempt,
- * so such a row comes from a worker that died mid-run each time, or from before that was so.
+ * row left unprocessed with its attempts used up, by a worker from before the processor closed
+ * such rows, is closed first and told to `log`, so the chain starts again.
  */
 export async function scheduleNightlyJobs(
   sql: postgres.Sql,
   now = new Date(),
   log: (line: string) => void = console.warn,
 ): Promise<void> {
-  const gaveUp = await sql<{ lastErrorCode: string | null }[]>`
-    UPDATE outbox_events
-    SET processed_at = now()
-    WHERE event_kind = ${OUTBOX_CLEANUP_JOB}
-      AND aggregate_type = ${JOB_AGGREGATE}
-      AND aggregate_id = ${JOB_AGGREGATE_ID}
-      AND processed_at IS NULL
-      AND attempt_count >= ${JOB_RETRY.maxAttempts}
-    RETURNING last_error_code AS "lastErrorCode"
-  `
-  for (const { lastErrorCode } of gaveUp) {
-    log(
-      `warn: the nightly cleanup had stopped after ${JOB_RETRY.maxAttempts} attempts (last error: ${
-        lastErrorCode ?? "none stored"
-      }); starting it again`,
-    )
-  }
   await ensureScheduledOutboxEvent(
     sql,
     { eventKind: OUTBOX_CLEANUP_JOB, aggregateType: JOB_AGGREGATE, aggregateId: JOB_AGGREGATE_ID },
     { at: nextUtcHour(now, NIGHTLY_HOUR_UTC) },
+    {
+      replaceGivenUpAfter: JOB_RETRY.maxAttempts,
+      onReplaced: ({ attemptCount, lastErrorCode }) =>
+        log(
+          `warn: the nightly cleanup had stopped after ${attemptCount} attempts (last error: ${
+            lastErrorCode ?? "none stored"
+          }); starting it again`,
+        ),
+    },
   )
 }

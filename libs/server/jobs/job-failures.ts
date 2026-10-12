@@ -1,4 +1,4 @@
-import { JobPublisher, type JobPublisherOptions, type OutboxEvent } from "@spy4x/server/outbox"
+import type { JobHandler, OutboxAttemptFailure } from "@spy4x/server/outbox"
 
 /**
  * How the worker retries a failing outbox row: the waits double from one second up to fifteen
@@ -17,49 +17,31 @@ export function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Options of {@link ReportingJobPublisher}. */
-export interface ReportingJobPublisherOptions extends JobPublisherOptions {
-  /** The processor's own `maxAttempts`: a failure on that attempt is the last. */
-  maxAttempts: number
-  /** Told every failed attempt. Gets the row's kind, aggregate and id, and the error's message. */
-  log: (line: string) => void
+/** The name of whatever a job threw, such as `TypeError`: what the outbox row stores too. */
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error
 }
 
 /**
- * The worker's `JobPublisher`, with no failing row silent: every failed attempt, of a job or of
- * any other row, is logged with the row's kind and the error's message, and the attempt after
- * which the processor gives the row up is logged as abandoned. The error is thrown on, so the
- * processor still retries.
+ * The worker's `onAttemptFailed`: one log line for every failed attempt of an outbox row, a job or
+ * any other, and one for the attempt after which the processor gives the row up. A line names the
+ * row's kind, its aggregate and id, the attempt, where it failed (`publish`, `markProcessed`, or
+ * `lease` for a worker that died mid-run) and the error's name.
  *
- * A row the processor gave up for another reason, such as a worker that died mid-run each time,
- * logs nothing here.
+ * Never the error's message: a mail or billing error can quote an address or a provider's answer,
+ * and the log is no place for either. A job that wants more in the log writes it itself.
  */
-export class ReportingJobPublisher extends JobPublisher {
-  readonly #jobType: string
-  readonly #maxAttempts: number
-  readonly #log: (line: string) => void
-
-  constructor({ maxAttempts, log, ...options }: ReportingJobPublisherOptions) {
-    super(options)
-    this.#jobType = options.aggregateType
-    this.#maxAttempts = maxAttempts
-    this.#log = log
-  }
-
-  override async publish(event: OutboxEvent): Promise<void> {
-    try {
-      await super.publish(event)
-    } catch (error) {
-      const noun = event.aggregateType === this.#jobType ? "job" : "outbox row"
-      const what = `${noun} ${event.eventKind} (${event.aggregateType} ${event.aggregateId})`
-      const text = errorText(error)
-      this.#log(
-        event.attemptCount >= this.#maxAttempts
-          ? `error: ${what} abandoned after ${event.attemptCount} attempts: ${text}`
-          : `warn: ${what} failed, attempt ${event.attemptCount} of ${this.#maxAttempts}: ${text}`,
-      )
-      throw error
-    }
+export function logAttemptFailure(
+  log: (line: string) => void,
+): (failure: OutboxAttemptFailure) => void {
+  return ({ event, error, attempt, maxAttempts, lastAttempt, stage, storedErrorCode }) => {
+    const what = `outbox row ${event.eventKind} (${event.aggregateType} ${event.aggregateId})`
+    const name = storedErrorCode ?? errorName(error)
+    log(
+      lastAttempt
+        ? `error: ${what} abandoned at ${stage} after ${attempt} attempts: ${name}`
+        : `warn: ${what} failed at ${stage}, attempt ${attempt} of ${maxAttempts}: ${name}`,
+    )
   }
 }
 
@@ -72,16 +54,14 @@ export type CleanupStep = readonly [name: string, run: () => Promise<void>]
  * then fails, so the processor retries the whole list; every step only removes what is due, so a
  * rerun of one that succeeded finds nothing.
  *
- * On the processor's last attempt (`maxAttempts`) the job ends normally whatever failed: a
- * repeating job that fails its last attempt writes no next run, and the cleanup would stop for
- * good. The steps that still fail are logged and tried again the next night.
+ * A cleanup that fails its last attempt too is given up for that night only: the processor's
+ * `repeatAfterGiveUp` still writes the next night's run.
  */
 export function cleanupJob(
   steps: readonly CleanupStep[],
-  maxAttempts: number,
   log: (line: string) => void,
-): (event: OutboxEvent) => Promise<void> {
-  return async (event) => {
+): JobHandler {
+  return async () => {
     const failed: string[] = []
     for (const [name, run] of steps) {
       try {
@@ -93,12 +73,6 @@ export function cleanupJob(
     }
     if (failed.length === 0) return
     const names = failed.map((name) => `"${name}"`).join(", ")
-    if (event.attemptCount >= maxAttempts) {
-      log(
-        `error: nightly cleanup gave up on ${names} after ${event.attemptCount} attempts; the next run is tomorrow`,
-      )
-      return
-    }
     throw new Error(`nightly cleanup: ${failed.length} step(s) failed: ${names}`)
   }
 }

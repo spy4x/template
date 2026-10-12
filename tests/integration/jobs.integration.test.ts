@@ -551,16 +551,20 @@ Deno.test("the worker's processor when a job keeps failing", async (t) => {
       }
 
       expect(attempts).toBe(JOB_RETRY.maxAttempts)
-      const about = `job ${PASSWORD_RESET_MAIL_JOB} (${JOB_AGGREGATE} ${id})`
+      const about = `outbox row ${PASSWORD_RESET_MAIL_JOB} (${JOB_AGGREGATE} ${id})`
       const reported = logged.filter((line) => line.includes(about))
       expect(reported).toHaveLength(JOB_RETRY.maxAttempts)
       expect(reported[0]).toBe(
-        `warn: ${about} failed, attempt 1 of ${JOB_RETRY.maxAttempts}: password reset mail not sent`,
+        `warn: ${about} failed at publish, attempt 1 of ${JOB_RETRY.maxAttempts}: Error`,
       )
       expect(reported.at(-1)).toBe(
-        `error: ${about} abandoned after ${JOB_RETRY.maxAttempts} attempts: password reset mail not sent`,
+        `error: ${about} abandoned at publish after ${JOB_RETRY.maxAttempts} attempts: Error`,
       )
       expect(logged.join("\n")).not.toContain("ann@example.com")
+      // The row is closed with its error's name, so no worker claims it again.
+      expect(
+        await sql`SELECT last_error_code, processed_at IS NOT NULL AS closed FROM outbox_events`,
+      ).toEqual([{ lastErrorCode: "Error", closed: true }])
     })
 
     await sql`DELETE FROM outbox_events`
@@ -594,14 +598,16 @@ Deno.test("the worker's processor when a job keeps failing", async (t) => {
           `error: nightly cleanup step "remove unsent password reset requests" failed: ` +
             `relation "password_reset_requests" does not exist`,
         )
-        expect(logged[1]).toContain(`job ${OUTBOX_CLEANUP_JOB} `)
-        expect(logged[1]).toContain(`failed, attempt 1 of ${JOB_RETRY.maxAttempts}`)
+        expect(logged[1]).toBe(
+          `warn: outbox row ${OUTBOX_CLEANUP_JOB} (${JOB_AGGREGATE} ${JOB_AGGREGATE_ID}) ` +
+            `failed at publish, attempt 1 of ${JOB_RETRY.maxAttempts}: Error`,
+        )
         expect(await cleanupRows()).toHaveLength(1)
       },
     )
 
     await t.step(
-      "a cleanup that still fails on its last attempt writes the next night's run all the same",
+      "a cleanup that is given up is logged as abandoned, and the next night's run is still written",
       async () => {
         const logged: string[] = []
         const processor = createOutboxProcessor(sql, {
@@ -616,10 +622,10 @@ Deno.test("the worker's processor when a job keeps failing", async (t) => {
 
         const result = await processor.drainOnce()
 
-        expect(result).toEqual({ claimed: 1, published: 1, failed: 0 })
+        expect(result).toEqual({ claimed: 1, published: 0, failed: 1 })
         expect(logged.at(-1)).toBe(
-          `error: nightly cleanup gave up on "remove unsent password reset requests" after ` +
-            `${JOB_RETRY.maxAttempts} attempts; the next run is tomorrow`,
+          `error: outbox row ${OUTBOX_CLEANUP_JOB} (${JOB_AGGREGATE} ${JOB_AGGREGATE_ID}) ` +
+            `abandoned at publish after ${JOB_RETRY.maxAttempts} attempts: Error`,
         )
         expect(await cleanupRows()).toEqual([
           { attemptCount: JOB_RETRY.maxAttempts, processed: true, hours: expect.any(Number) },

@@ -74,7 +74,7 @@ const processor = createOutboxProcessor(
 )
 
 // Starts the nightly chain the first time; a restart finds the row and adds nothing, unless that
-// row used up its attempts: it is then replaced, so a chain that stopped starts again.
+// row was left with its attempts used up: it is then replaced, so a stopped chain starts again.
 await scheduleNightlyJobs(sql)
 
 /** How often the outbox is looked at when it is empty; the delay before a push. */
