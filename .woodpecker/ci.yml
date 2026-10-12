@@ -197,7 +197,10 @@ steps:
       # Chromium resolves *.localhost itself. The requests a spec makes outside the browser ask the
       # system resolver, which in this container does not know the name.
       - echo "127.0.0.1 app.localhost" >> /etc/hosts
-      - deno task e2e:local --smoke
+      # Playwright stops after three failed tests. When sign-in itself is broken every test fails,
+      # each after 30 s and two retries, and the step would otherwise run into the script's limit
+      # of 25 minutes.
+      - deno task e2e:local --smoke --max-failures=3
     # After e2e-spa: the three run scripts keep the API's vapid.json in the shared checkout while
     # they run, and each starts a worker on the one Valkey service, where a worker would take
     # another stack's jobs.
@@ -236,7 +239,8 @@ steps:
       - deno --version
       - apt-get install -y -qq --no-install-recommends nginx
       - echo "127.0.0.1 app.localhost" >> /etc/hosts
-      - deno task e2e:local
+      # Stops after ten failed tests in a pass, for the same reason as in e2e-smoke.
+      - deno task e2e:local --max-failures=10
     depends_on: [e2e-spa]
 
 services:

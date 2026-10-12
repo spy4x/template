@@ -25,12 +25,12 @@ check ──┬── build ────────┐
 - `e2e-mpa` and `e2e-spa` run the website's browser tests and the SPA behind nginx
   (`e2e/mpa/run.sh`, `e2e/spa/run.sh`).
 - `e2e-smoke` runs the product's smoke set on every pull request and tag:
-  `deno task e2e:local --smoke`, the script a developer runs, against the Postgres and Valkey
+  `deno task e2e:local --smoke --max-failures=3`, the script a developer runs, against the Postgres and Valkey
   services (`E2E_SERVICES=environment`). The set is `SMOKE_SPECS` in
   `infra/scripts/e2e-local-plan.ts`: `auth-profile-ws-push.e2e.ts`, `sign-in-next.e2e.ts`,
   `notes.e2e.ts`, `profile-two-tabs.e2e.ts`, `groups-pages.e2e.ts` and `url-filters.e2e.ts`. A pull
   request that breaks sign-in, the profile, notes or the groups pages in a browser fails here.
-- `e2e-full` runs every `e2e/*.e2e.ts` on a push to `main` only: `deno task e2e:local`, with the
+- `e2e-full` runs every `e2e/*.e2e.ts` on a push to `main` only: `deno task e2e:local --max-failures=10`, with the
   built SPA in the container's own nginx for the specs that start the app with no network
   (`E2E_BUILT=nginx`). It is not part of the pull-request check, so it blocks no merge; a red run
   on `main` says the last merge broke a screen outside the smoke set.
@@ -41,6 +41,8 @@ check ──┬── build ────────┐
   the image belongs to that version.
 - The browser steps run one after another: each keeps the API's `vapid.json` in the shared
   checkout and starts a worker on the one Valkey service.
+- Both steps stop after that many failed tests. With sign-in broken every test fails, each after
+  30 s and two retries, and a step would otherwise run into the script's limit of 25 minutes.
 - A failed test is retried twice in CI and then counts as passed ("flaky" in the step's last
   lines). Whether that stays is an open decision
   (<https://github.com/spy4x/template/issues/357>).

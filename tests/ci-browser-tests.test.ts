@@ -16,8 +16,10 @@ const ROOT = new URL("../", import.meta.url)
 const read = (path: string) => Deno.readTextFile(fromFileUrl(new URL(path, ROOT)))
 
 const CI = ".woodpecker/ci.yml"
-const SUITE = "deno task e2e:local"
-const SMOKE = `${SUITE} ${SMOKE_FLAG}`
+// Both stop after a few failed tests: with sign-in broken every test fails slowly, and a red
+// check must not take the step's whole limit.
+const SUITE = "deno task e2e:local --max-failures=10"
+const SMOKE = `deno task e2e:local ${SMOKE_FLAG} --max-failures=3`
 
 /** One condition of a Woodpecker `when`. */
 interface Condition {
@@ -88,7 +90,7 @@ Deno.test("a step runs for an event when it has no condition or one condition na
 Deno.test("a command counts only as a whole line, and a step that ignores its failure blocks nothing", () => {
   expect(runs({ commands: [`  ${SMOKE}  `] }, SMOKE)).toBe(true)
   expect(runs({ commands: [`# ${SMOKE}`] }, SMOKE)).toBe(false)
-  expect(runs({ commands: [SMOKE] }, SUITE)).toBe(false)
+  expect(runs({ commands: [`${SUITE} ${SMOKE_FLAG}`] }, SUITE)).toBe(false)
   expect(runs({ commands: [`${SMOKE} || true`] }, SMOKE)).toBe(false)
   const steps = { smoke: { commands: [SMOKE], failure: "ignore" } }
   expect(blockingSteps({ steps }, SMOKE, "pull_request", "main")).toEqual([])

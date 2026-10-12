@@ -344,7 +344,9 @@ The smoke set is `SMOKE_SPECS` in
 
 A screen outside the set (members, invitations, tags, offline, sessions, billing, password reset,
 account deletion) is tested only on `main`: a red `e2e-full` there, and a red badge at the top of
-this page, means the last merge broke one. It blocks no pull request. Before you add a spec to the
+this page, means the last merge broke one. It blocks no pull request. Both steps stop early, the
+smoke set after three failed tests and the whole suite after ten in a pass, so the list of failures
+in a red step may be incomplete: run the specs here for the rest. Before you add a spec to the
 set, run it ten times in a row (`deno task e2e:local e2e/<spec> --repeat-each=10`): one that fails
 once on a healthy branch blocks every pull request.
 
