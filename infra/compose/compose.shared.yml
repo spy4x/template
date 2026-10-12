@@ -13,13 +13,13 @@ services:
         '-c', 
         'shared_preload_libraries=pg_stat_statements',
         '-c',
-        'shared_buffers=512MB', # A quarter of the container's memory limit (DB_MEM_LIMIT, 2048m in .env.example); raise both together
+        'shared_buffers=${DB_SHARED_BUFFERS:-512MB}', # A quarter of the container's memory limit. The five DB_* defaults here fit DB_MEM_LIMIT=2048m; a larger limit sets them beside it (infra/envs/.env.example)
         '-c',
-        'work_mem=16MB', # Memory for sorting/hash joins per operation; 30 connections can each use it
+        'work_mem=${DB_WORK_MEM:-16MB}', # Memory for sorting/hash joins per operation; 30 connections can each use it
         '-c',
-        'maintenance_work_mem=128MB', # Memory for maintenance operations
+        'maintenance_work_mem=${DB_MAINTENANCE_WORK_MEM:-128MB}', # Memory for maintenance operations
         '-c',
-        'effective_cache_size=1536MB', # Shared buffers plus the page cache the limit leaves: three quarters of it
+        'effective_cache_size=${DB_EFFECTIVE_CACHE_SIZE:-1536MB}', # Shared buffers plus the page cache the limit leaves: three quarters of it
         '-c',
         'max_connections=30', # Limit max client connections
         '-c',
@@ -37,7 +37,7 @@ services:
         '-c',
         'autovacuum_vacuum_cost_limit=1000', # Cost limit for vacuuming. 1000-2000 to allow autovacuum processes to perform more work in each cycle on larger tables.
         '-c',
-        'autovacuum_work_mem=128MB', # Memory for each autovacuum worker (three by default)
+        'autovacuum_work_mem=${DB_AUTOVACUUM_WORK_MEM:-128MB}', # Memory for each autovacuum worker (three by default)
         '-c',
         'random_page_cost=1.1', # Set the cost of a non-sequentially fetched disk page to 1.1, which is a good starting point for SSDs.
         '-c',

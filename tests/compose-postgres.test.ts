@@ -6,7 +6,8 @@
  * one version and production runs another. The two documents that print the image must name it
  * too. The Postgres 18 image keeps its data under `/var/lib/postgresql`, in a host directory of
  * its own: mounted at the old path, or on the Postgres 16 directory, it would start empty or not
- * at all (docs/postgres-18-upgrade.md).
+ * at all (docs/postgres-18-upgrade.md). Its memory settings must fit the memory limit the example
+ * env file gives the container, and stay settable for a server with a larger limit.
  */
 
 import { expect } from "@std/expect"
@@ -37,10 +38,14 @@ export function pinnedMinor(tag: string): string | undefined {
   return /^(18\.\d+)(-alpine)?$/.exec(tag)?.[1]
 }
 
-async function dbService(): Promise<{ image?: string; volumes?: string[] }> {
-  const compose = parse(await read(COMPOSE)) as {
-    services?: Record<string, { image?: string; volumes?: string[] }>
-  }
+interface DbService {
+  image?: string
+  volumes?: string[]
+  command?: string[]
+}
+
+async function dbService(): Promise<DbService> {
+  const compose = parse(await read(COMPOSE)) as { services?: Record<string, DbService> }
   const db = compose.services?.db
   if (!db) throw new Error(`${COMPOSE} has no db service`)
   return db
@@ -87,4 +92,55 @@ Deno.test("Postgres 18 keeps its data under /var/lib/postgresql, in a directory 
   const host = (dir: string) => dir.replace(/^\.\//, "../../")
   expect(mounts).toEqual([[host(NEW_DATA_DIR), "/var/lib/postgresql", "Z"]])
   expect(NEW_DATA_DIR).not.toBe(OLD_DATA_DIR)
+})
+
+/** `512MB` and `2048m` give megabytes; anything else gives `undefined`. */
+export function megabytes(size: string): number | undefined {
+  const match = /^(\d+)(MB|m)$/.exec(size)
+  return match ? Number(match[1]) : undefined
+}
+
+/** The env variable and the default of one `name=${VARIABLE:-default}` server setting. */
+function setting(command: string[], name: string): { variable?: string; fallback?: string } {
+  const value = command.find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1) ?? ""
+  const match = /^\$\{(DB_[A-Z_]+):-([^}]+)\}$/.exec(value)
+  return { variable: match?.[1], fallback: match?.[2] }
+}
+
+Deno.test("Postgres' memory settings come from the env file and their defaults fit the example memory limit", async () => {
+  const command = (await dbService()).command ?? []
+  const names = {
+    shared_buffers: "DB_SHARED_BUFFERS",
+    work_mem: "DB_WORK_MEM",
+    maintenance_work_mem: "DB_MAINTENANCE_WORK_MEM",
+    effective_cache_size: "DB_EFFECTIVE_CACHE_SIZE",
+    autovacuum_work_mem: "DB_AUTOVACUUM_WORK_MEM",
+  }
+  const defaults: Record<string, number> = {}
+  for (const [name, variable] of Object.entries(names)) {
+    const found = setting(command, name)
+    // A fixed number here would take memory from a server whose env file raises the limit.
+    expect({ name, variable: found.variable }).toEqual({ name, variable })
+    const size = megabytes(found.fallback ?? "")
+    expect({ name, megabytes: size }).not.toEqual({ name, megabytes: undefined })
+    defaults[name] = size!
+  }
+  const example = await read("infra/envs/.env.example")
+  const limit = megabytes(/^DB_MEM_LIMIT=(.+)$/m.exec(example)?.[1] ?? "")
+  expect(limit).toBeDefined()
+  const connections = Number(
+    command.find((part) => part.startsWith("max_connections="))?.split("=")[1],
+  )
+  expect(connections).toBeGreaterThan(0)
+  // The most Postgres takes at once: its shared buffers, one sort per connection, one
+  // maintenance run and the three autovacuum workers it starts by default.
+  const most = defaults.shared_buffers + connections * defaults.work_mem +
+    defaults.maintenance_work_mem + 3 * defaults.autovacuum_work_mem
+  expect({ most, fits: most <= limit! }).toEqual({ most, fits: true })
+  // The planner's hint counts the page cache too, but never more than the container may hold.
+  expect(defaults.effective_cache_size).toBeLessThanOrEqual(limit!)
+  // The example file names every variable, so the person who raises the limit sees them.
+  for (const variable of Object.values(names)) {
+    expect({ variable, named: example.includes(`${variable}=`) }).toEqual({ variable, named: true })
+  }
 })
