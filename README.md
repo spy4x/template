@@ -248,11 +248,16 @@ What a person gets:
   still asked for its code.
 - Someone new is asked "Create a new account?" first, and nothing is created until they answer.
   The question waits 10 minutes; "I already have an account" creates nothing.
+- When an account here already uses that address with a password but never confirmed it, the
+  question says so first: creating the new account locks the old one (its password stops working),
+  because the provider has proven who owns the address. The old account gets an audit row.
 - A provider account joins an existing account by its e-mail address only when both sides have
   verified that address. An address the provider has not verified never links: that person is
   asked whether to create a new account, like anyone unknown.
 - On the profile, a person links and unlinks providers. The last way into an account cannot be
   unlinked, and unlinking a method signs out the devices that signed in with it.
+- An account made with a provider has no password. Its profile shows the provider's address, and
+  it cannot change that address, set a password or delete itself yet: each asks for the password.
 
 ## Admin consoles
 

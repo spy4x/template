@@ -245,9 +245,18 @@ These cost real time to find. Do not rediscover them.
    `provenAddressOwner`, decides whether a provider account joins an existing one: only by an
    address both sides have verified. Linking from the profile is a provider sign-in that must end
    at the signed-in user; `DELETE /api/auth/methods/:id` refuses the last usable method and ends
-   the sessions that method started. Not built: adding a password to an account that has none,
-   and so such an account cannot change its address or delete itself, which both ask for the
-   password.
+   the sessions that method started. A sign-up the provider vouches for deletes another account's
+   unproven claim to the same address (the library's rule against sitting on an address): the
+   question page warns first (`PendingSignUp.unconfirmedAccount`) and the locked account gets the
+   audit row `UNCONFIRMED_ADDRESS_TAKEN`. "Go back" takes the held profile out of the flow store.
+   The two routes a browser opens as a page, `start` and `callback`, answer every failure with a
+   redirect to `/sign-in?oauth=…`, a spent rate limit included. Linking still goes through the
+   library's sign-in, so a provider account whose verified address is another account's proven
+   address is linked to that other account; it moves to the library's connect call once
+   https://github.com/spy4x/ts-libs/pull/591 is released. Not built: adding a password to an
+   account that has none, so such an account cannot change its address, change or reset a
+   password, or delete itself, which all ask for the password; its profile says so for the first
+   two, and the delete dialog still asks for a password it does not have.
 
    **Changing the address.** `POST /api/auth/email/change` with `{ email,
    password }` stores the new address in `email_changes` and mails it a code;
