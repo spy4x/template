@@ -439,13 +439,8 @@ export type OAuthNotice =
   | "failed"
   /** Linked: the provider is now a way into the signed-in account. */
   | "linked"
-  /** Not linked: the provider's verified address is not this account's proven address. */
-  | "link-mismatch"
-  /**
-   * Not linked to the signed-in account: the provider account signs in to another account, by its
-   * id or because its verified address is that account's proven address.
-   */
-  | "link-other-account"
+  /** Not linked: another account here already signs in with that provider account. */
+  | "link-taken"
   /** Too many attempts from this address in a minute; nothing was tried. */
   | "busy"
 
@@ -471,9 +466,7 @@ export const OAUTH_NOTICE_PARAM = "oauth"
 export const OAUTH_NOTICES: Record<OAuthNotice, string> = {
   "failed": "That sign-in did not work. Try again.",
   "linked": "Linked. You can now sign in with it.",
-  "link-mismatch":
-    "Not linked: that account has a different e-mail address than this one, or has not verified it.",
-  "link-other-account": "Not linked: that account already signs in to another account here.",
+  "link-taken": "Not linked: that account is already linked to another account here.",
   "busy": "Too many attempts. Wait a minute, then try again.",
 }
 

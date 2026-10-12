@@ -22,13 +22,14 @@
  *   row (`UNCONFIRMED_ADDRESS_TAKEN`).
  * - **An address that is not verified links nothing.** The package ignores it when it resolves the
  *   person, so such a callback always ends at the question, never inside someone's account.
- * - **Linking from the profile.** The package cannot attach a provider to the signed-in user; it
- *   links only by a verified address that a user owns proven. So a link started from the profile
- *   is a provider sign-in whose result must be the signed-in user: otherwise the session the
- *   package started is deleted and the page says why. One thing is still kept then: when the
- *   provider's verified address is another account's proven address, the package has already
- *   linked the provider to that account, as a signed-out sign-in with it would. That ends when
- *   linking moves to the package's connect call (https://github.com/spy4x/ts-libs/pull/591).
+ * - **Linking from the profile.** The package's connect flow: it is bound to the signed-in user,
+ *   adds the provider to that user whatever the provider's address, and never touches another
+ *   account's methods. A provider account another user already signs in with is refused, and the
+ *   page says so. Its `state` has a cookie of its own; the callback, which both kinds of flow
+ *   share, runs the connect when that cookie holds the callback's `state`. A provider key carries
+ *   its address only when the provider vouches for it and nobody else has proven it; adding such
+ *   a key deletes another user's unproven claim to that address, as a sign-up does, and that
+ *   user gets the same audit row.
  * - **Unlinking.** Only a provider method, and never the last way in. The key's sessions end with
  *   it through the foreign key, so unlinking the method this device signed in with signs it out.
  *
@@ -91,8 +92,11 @@ const FLOW_SECONDS = 600
 /** The cookies below go only to the auth routes. */
 const COOKIE_PATH = "/api/auth"
 
-/** Holds a started flow's `state`, and the user who is linking when it started on the profile. */
+/** Holds the `state` of a started sign-in, and the page to return to. */
 const stateCookie = (id: OAuthProviderId) => `oauth_state_${id}`
+
+/** Holds the `state` of a link started on the profile: a flow of its own kind, so a cookie of its own. */
+const connectCookie = (id: OAuthProviderId) => `oauth_connect_${id}`
 
 /** Holds the token of a sign-up that waits for its confirmation, and what the page shows. */
 const SIGN_UP_COOKIE = "oauth_sign_up"
@@ -102,11 +106,11 @@ const MAX_SHOWN_EMAIL = 320
 
 const stateCookieSchema = type({
   state: "string > 0",
-  /** The user who started the flow from the profile, to link the provider. */
-  "link?": "number.integer > 0",
   /** The page sign-in returns to, checked when it was stored and again when it is read. */
   "next?": "string",
 })
+
+const connectCookieSchema = type({ state: "string > 0" })
 
 /**
  * `next` when it is a page of the web app, else `null`: `safeRedirectPath`'s rules, and no `/api`
@@ -343,6 +347,34 @@ export function createOAuthOperations(
     return key && key.provenAt === null ? key : null
   }
 
+  /**
+   * `store`, noting in `taken` each unproven password claim that adding a key with a proven
+   * address took from another user. The package deletes such a claim as it adds the key and
+   * reports nothing, so the claim is looked up before the key is added and again after.
+   */
+  function reportingTakenClaims(store: AuthStore, taken: AuthKey[]): AuthStore {
+    return new Proxy(store, {
+      get(target, name, receiver) {
+        if (name !== "addKey") {
+          const value = Reflect.get(target, name, receiver)
+          return typeof value === "function" ? value.bind(target) : value
+        }
+        return async (...args: Parameters<AuthStore["addKey"]>) => {
+          const [userId, key] = args
+          const claim = key.email !== null && key.provenAt !== null
+            ? await target.findKey(PASSWORD_METHOD, key.email)
+            : null
+          const added = await target.addKey(...args)
+          if (
+            claim && claim.userId !== userId && claim.provenAt === null &&
+            await target.findKeyById(claim.id) === null
+          ) taken.push(claim)
+          return added
+        }
+      },
+    })
+  }
+
   /** The waiting sign-up in the request's cookie, token included, or `null`. */
   function readSignUp(c: Context) {
     const data = readJsonCookie(c, SIGN_UP_COOKIE, signUpCookieSchema)
@@ -396,14 +428,22 @@ export function createOAuthOperations(
 
     async start(c, id, { linking = null, next = null } = {}) {
       if (!enabled.has(id)) return null
-      const { url, state } = await signInWith(id, {
+      const provider = signInWith(id, {
         store: db.authStore,
         sessions,
         secondFactorFor: own.secondFactorFor(c),
-      }).authorizationUrl()
+      })
+      if (linking) {
+        const { url, state } = await provider.connectUrl(linking.user.id)
+        setCookie(c, connectCookie(id), JSON.stringify({ state }), {
+          ...cookieOptions,
+          maxAge: FLOW_SECONDS,
+        })
+        return url.href
+      }
+      const { url, state } = await provider.authorizationUrl()
       const kept: typeof stateCookieSchema.infer = { state }
-      if (linking) kept.link = linking.user.id
-      else if (pageOrNull(next)) kept.next = pageOrNull(next)!
+      if (pageOrNull(next)) kept.next = pageOrNull(next)!
       setCookie(c, stateCookie(id), JSON.stringify(kept), {
         ...cookieOptions,
         maxAge: FLOW_SECONDS,
@@ -412,17 +452,61 @@ export function createOAuthOperations(
     },
 
     async callback(c, id, current) {
-      const kept = readJsonCookie(c, stateCookie(id), stateCookieSchema)
-      deleteCookie(c, stateCookie(id), cookieOptions)
-      const linking = kept?.link !== undefined
+      const query = new URL(c.req.url).searchParams
+      // Both kinds of flow come back here. The one whose cookie holds this `state` is the one
+      // that started it, and only that cookie is used up.
+      const connect = readJsonCookie(c, connectCookie(id), connectCookieSchema)
+      const linking = connect !== null && connect.state === query.get("state")
+      const kept = linking ? null : readJsonCookie(c, stateCookie(id), stateCookieSchema)
+      deleteCookie(c, linking ? connectCookie(id) : stateCookie(id), cookieOptions)
       const failed = (notice: OAuthNotice = "failed"): OAuthCallbackResult => ({
         kind: "notice",
         notice,
         linking,
       })
       if (!enabled.has(id)) return failed()
-      // A link belongs to the person who started it: signed out or replaced since, it is void.
-      if (linking && current?.user.id !== kept.link) return failed()
+
+      if (linking) {
+        // A link needs the person who started it, fully signed in; the package checks that it is
+        // the same user.
+        if (!current || current.session.secondFactor === SecondFactorStatus.Pending) {
+          return failed()
+        }
+        try {
+          await db.begin(async (tx) => {
+            const taken: AuthKey[] = []
+            const { key, outcome } = await signInWith(id, {
+              store: reportingTakenClaims(tx.authStore, taken),
+              sessions: own.sessionsOver(tx.sessionStore),
+              secondFactorFor: own.secondFactorAtSignUp,
+            }).handleConnectCallback({
+              query,
+              browserState: connect.state,
+              userId: current.user.id,
+            })
+            if (outcome !== OAuthOutcome.Connected) return
+            await tx.authAudit.insert(
+              own.auditRow(c, key.userId, AuthAuditEventType.SIGN_IN_METHOD_LINKED, key.method),
+            )
+            for (const claim of taken) {
+              await tx.authAudit.insert(
+                own.auditRow(
+                  c,
+                  claim.userId,
+                  AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
+                  key.method,
+                ),
+              )
+            }
+          })
+        } catch (error) {
+          if (error instanceof OAuthSignInError) {
+            return failed(error.reason === "identity-taken" ? "link-taken" : "failed")
+          }
+          throw error
+        }
+        return { kind: "notice", notice: "linked", linking }
+      }
 
       let held = ""
       let result
@@ -430,13 +514,9 @@ export function createOAuthOperations(
         result = await signInWith(id, {
           store: db.authStore,
           sessions,
-          // A link keeps no session of its own, so it must not restore a deleted account either:
-          // the session below is deleted at once, and owes the code until then.
-          secondFactorFor: linking
-            ? () => Promise.resolve(SecondFactorStatus.Pending)
-            : own.secondFactorFor(c),
+          secondFactorFor: own.secondFactorFor(c),
         }, (key) => held = key).handleCallback({
-          query: new URL(c.req.url).searchParams,
+          query,
           browserState: kept?.state,
           device: own.deviceOf(c),
         })
@@ -446,9 +526,6 @@ export function createOAuthOperations(
       }
 
       if (result.outcome === OAuthOutcome.PendingSignUp) {
-        // Nobody owns this provider account or its address: a link has nothing to attach to, and
-        // the held profile is left to expire.
-        if (linking) return failed("link-mismatch")
         const { email } = result.profile
         const shown: typeof signUpCookieSchema.infer = {
           provider: id,
@@ -465,29 +542,10 @@ export function createOAuthOperations(
         return { kind: "confirm" }
       }
 
-      if (!linking) {
-        const signedIn = await finishSignIn(c, result)
-        // The cookie now names the new session; the one this browser had would only linger.
-        if (current) await sessions.deleteForUser(current.user.id, current.session.id)
-        return { kind: "signed-in", signedIn, next: pageOrNull(kept?.next) }
-      }
-
-      // A link keeps the session the person already has: the one the package started goes.
-      await sessions.deleteForUser(result.user.id, result.session.session.id)
-      // The package links by the verified address, whoever is signed in here: the row goes to the
-      // account that got the method.
-      if (result.outcome === OAuthOutcome.Linked) {
-        await db.authAudit.insert(
-          own.auditRow(
-            c,
-            result.user.id,
-            AuthAuditEventType.SIGN_IN_METHOD_LINKED,
-            result.key.method,
-          ),
-        )
-      }
-      if (result.user.id !== current!.user.id) return failed("link-other-account")
-      return { kind: "notice", notice: "linked", linking }
+      const signedIn = await finishSignIn(c, result)
+      // The cookie now names the new session; the one this browser had would only linger.
+      if (current) await sessions.deleteForUser(current.user.id, current.session.id)
+      return { kind: "signed-in", signedIn, next: pageOrNull(kept?.next) }
     },
 
     async pendingSignUp(c) {

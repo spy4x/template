@@ -776,22 +776,38 @@ Deno.test("the profile links a provider whose verified address is the account's 
   })
 })
 
-Deno.test("linking a provider account with another address links nothing and creates nothing", async () => {
+Deno.test("the profile links a provider account whatever its address, and it then signs in", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql, {
-      other: { sub: "2002", email: "someone-else@example.com", verified: true },
+      work: { sub: "2002", email: "ada@work.example", verified: true },
+      loose: { sub: "2003", email: "ada@loose.example", verified: false },
     })
     const owner = browser(app)
-    await provenPasswordAccount(app, owner, "ada@example.com")
+    const ownerId = await provenPasswordAccount(app, owner, "ada@example.com")
 
-    const link = await owner.post("/auth/methods/google/link")
-    const answer = await owner.through("google", "other", (await link.json()).url)
+    const google = await owner.post("/auth/methods/google/link")
+    expect(target(await owner.through("google", "work", (await google.json()).url)))
+      .toBe("/?oauth=linked")
+    const github = await owner.post("/auth/methods/github/link")
+    expect(target(await owner.through("github", "loose", (await github.json()).url)))
+      .toBe("/?oauth=linked")
 
-    expect(target(answer)).toBe("/?oauth=link-mismatch")
-    expect((await methodsOf(owner)).methods.map((method) => method.kind)).toEqual(["password"])
+    expect((await methodsOf(owner)).methods.map((method) => method.kind))
+      .toEqual(["password", "google", "github"])
     expect(await accounts(sql)).toEqual({ authUsers: 1, profiles: 1 })
     // No question is left open in this browser either.
     expect(await pendingOf(owner)).toBe(null)
+
+    // The linked Google account is now a way in to the same account, with no question asked.
+    const later = browser(app)
+    expect(target(await later.through("google", "work"))).toBe("/")
+    expect((await methodsOf(later)).methods.find((method) => method.current)?.kind).toBe("google")
+    expect(await accounts(sql)).toEqual({ authUsers: 1, profiles: 1 })
+    expect(
+      (await audit(sql, ownerId)).filter(([type]) =>
+        type === AuthAuditEventType.SIGN_IN_METHOD_LINKED
+      ).length,
+    ).toBe(2)
   })
 })
 
@@ -807,17 +823,104 @@ Deno.test("linking a provider account that signs in to another account changes n
     const ada = browser(app)
     const adaId = await provenPasswordAccount(app, ada, "ada@example.com")
     const [{ before }] = await sql`SELECT count(*)::int AS before FROM auth_sessions`
+    const adaAudit = await audit(sql, adaId)
 
     const link = await ada.post("/auth/methods/google/link")
     const answer = await ada.through("google", "bob", (await link.json()).url)
 
-    expect(target(answer)).toBe("/?oauth=link-other-account")
+    expect(target(answer)).toBe("/?oauth=link-taken")
     // Ada is still Ada, with her one method, and no session of Bob's was left behind.
     expect((await methodsOf(ada)).methods.map((method) => method.kind)).toEqual(["password"])
     expect((await app.db.authStore.listKeys(adaId)).length).toBe(1)
     expect((await app.db.authStore.listKeys(bobUser.id)).length).toBe(1)
+    expect(await audit(sql, adaId)).toEqual(adaAudit)
     const [{ after }] = await sql`SELECT count(*)::int AS after FROM auth_sessions`
     expect(after).toBe(before)
+  })
+})
+
+Deno.test("Alice links a Google account whose verified address is Bob's and Bob's account is untouched", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, {
+      // A Google account nobody has used here, whose address is the one Bob proved.
+      stray: { sub: "4004", email: "bob@example.com", verified: true },
+    })
+    const bob = browser(app)
+    const bobId = await provenPasswordAccount(app, bob, "bob@example.com")
+    const bobKeys = await app.db.authStore.listKeys(bobId)
+    const bobAudit = await audit(sql, bobId)
+    const alice = browser(app)
+    const aliceId = await provenPasswordAccount(app, alice, "alice@example.com")
+
+    const link = await alice.post("/auth/methods/google/link")
+    const answer = await alice.through("google", "stray", (await link.json()).url)
+
+    expect(target(answer)).toBe("/?oauth=linked")
+    expect((await methodsOf(alice)).methods.map((method) => method.kind))
+      .toEqual(["password", "google"])
+    // Bob keeps his one key, proven as before, and nothing was written about him.
+    expect(await app.db.authStore.listKeys(bobId)).toEqual(bobKeys)
+    expect(await audit(sql, bobId)).toEqual(bobAudit)
+    expect((await methodsOf(bob)).methods.map((method) => method.kind)).toEqual(["password"])
+    // The address is Bob's: Alice's new key does not carry it as proven.
+    const linked = (await app.db.authStore.listKeys(aliceId)).find((key) =>
+      key.method === "oauth:google"
+    )
+    expect(linked?.provenAt ?? null).toBe(null)
+    // That Google account signs in to Alice, never to Bob.
+    const later = browser(app)
+    expect(target(await later.through("google", "stray"))).toBe("/")
+    const [session] = await sql`
+      SELECT user_id FROM auth_sessions ORDER BY id DESC LIMIT 1`
+    expect(session.userId).toBe(aliceId)
+    expect(await accounts(sql)).toEqual({ authUsers: 2, profiles: 2 })
+  })
+})
+
+Deno.test("linking the same provider account a second time records nothing new", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const owner = browser(app)
+    const ownerId = await provenPasswordAccount(app, owner, "ada@example.com")
+    const first = await owner.post("/auth/methods/google/link")
+    await owner.through("google", "ada", (await first.json()).url)
+    const recorded = await audit(sql, ownerId)
+
+    const again = await owner.post("/auth/methods/google/link")
+    const answer = await owner.through("google", "ada", (await again.json()).url)
+
+    expect(target(answer)).toBe("/?oauth=linked")
+    expect(await audit(sql, ownerId)).toEqual(recorded)
+    expect((await app.db.authStore.listKeys(ownerId)).length).toBe(2)
+  })
+})
+
+Deno.test("linking that takes an unconfirmed account's address records it on that account", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, {
+      mine: { sub: "5005", email: "ada@work.example", verified: true },
+    })
+    // Someone signed up with the address and never confirmed it.
+    const squatter = await (await browser(app).post("/password/sign-up", {
+      email: "ada@work.example",
+    })).json()
+    const owner = browser(app)
+    const ownerId = await provenPasswordAccount(app, owner, "ada@example.com")
+
+    const link = await owner.post("/auth/methods/google/link")
+    expect(target(await owner.through("google", "mine", (await link.json()).url)))
+      .toBe("/?oauth=linked")
+
+    expect(await app.db.authStore.listKeys(squatter.id)).toEqual([])
+    expect((await audit(sql, squatter.id)).at(-1)).toEqual([
+      AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
+      "oauth:google",
+    ])
+    expect(
+      (await audit(sql, ownerId)).filter(([type]) =>
+        type === AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN
+      ),
+    ).toEqual([])
   })
 })
 
@@ -828,16 +931,63 @@ Deno.test("a link belongs to the person who started it", async () => {
     await provenPasswordAccount(app, owner, "ada@example.com")
     const link = await owner.post("/auth/methods/google/link")
     const { url } = await link.json()
-    // Signed out before the provider answered: only the flow's cookie is left.
-    const signedOut = browser(app)
-    for (const [name, value] of owner.cookies) {
-      if (name.startsWith("oauth_state_")) signedOut.cookies.set(name, value)
+    const flowOf = (visitor: ReturnType<typeof browser>) => {
+      for (const [name, value] of owner.cookies) {
+        if (name.startsWith("oauth_connect_")) visitor.cookies.set(name, value)
+      }
+      return visitor
     }
+    // Signed out before the provider answered: only the flow's cookie is left.
+    const signedOut = flowOf(browser(app))
+    // Someone else, signed in, who got hold of the flow's cookie and address.
+    const other = browser(app)
+    const otherId = await provenPasswordAccount(app, other, "eve@example.com")
+    flowOf(other)
 
     expect(target(await signedOut.through("google", "ada", url))).toBe("/?oauth=failed")
+    expect(target(await other.through("google", "ada", url))).toBe("/?oauth=failed")
 
     expect((await methodsOf(owner)).methods.map((method) => method.kind)).toEqual(["password"])
     expect((await signedOut.get("/auth/methods")).status).toBe(401)
+    expect((await app.db.authStore.listKeys(otherId)).length).toBe(1)
+    expect(await accounts(sql)).toEqual({ authUsers: 2, profiles: 2 })
+  })
+})
+
+Deno.test("a session that still owes its second factor cannot finish a link", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { work: { sub: "2002", email: "ada@work.example", verified: true } })
+    const owner = browser(app)
+    const ownerId = await provenPasswordAccount(app, owner, "ada@example.com")
+    const link = await owner.post("/auth/methods/google/link")
+    const { url } = await link.json()
+    await sql`UPDATE users SET mfa = ${UserMFAStatus.CONFIGURED} WHERE id = ${ownerId}`
+    // The password alone, on another device that holds the flow's cookie.
+    const half = browser(app)
+    expect((await half.post("/password/sign-in", { email: "ada@example.com" })).status).toBe(200)
+    for (const [name, value] of owner.cookies) {
+      if (name.startsWith("oauth_connect_")) half.cookies.set(name, value)
+    }
+
+    expect(target(await half.through("google", "work", url))).toBe("/?oauth=failed")
+
+    expect((await app.db.authStore.listKeys(ownerId)).length).toBe(1)
+  })
+})
+
+Deno.test("the cookie of a link is kept from page scripts and gone once the provider answered", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const owner = browser(app)
+    await provenPasswordAccount(app, owner, "ada@example.com")
+
+    const link = await owner.post("/auth/methods/google/link")
+    const set = link.headers.getSetCookie().find((line) => line.startsWith("oauth_connect_google="))
+    expect(set).toMatch(/;\s*HttpOnly/i)
+    expect(set).toMatch(/;\s*SameSite=Lax/i)
+    await owner.through("google", "ada", (await link.json()).url)
+
+    expect([...owner.cookies.keys()].filter((name) => name.startsWith("oauth_"))).toEqual([])
   })
 })
 

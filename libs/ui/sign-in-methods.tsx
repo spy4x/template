@@ -94,10 +94,6 @@ export function SignInMethods(
         )}
       {available.length > 0 && (
         <div class="flex flex-col items-start gap-3">
-          <p class="text-sm text-muted">
-            A provider links when its verified e-mail address is the verified address of this
-            account.
-          </p>
           <div class="flex flex-wrap gap-3">
             {available.map((provider) => (
               <Button
