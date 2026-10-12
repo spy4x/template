@@ -93,7 +93,7 @@ describe("the sign-in methods store", () => {
 
     await store.link("github")
 
-    expect(left).toEqual([])
+    expect(left).toHaveLength(0)
     expect(store.error.value).toBe("This sign-in method is not available.")
     expect(store.pending.value).toBe(false)
   })
