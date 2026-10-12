@@ -28,6 +28,7 @@ import {
 } from "./modules.ts"
 import { toasts } from "./state/toasts.ts"
 import { AuthView } from "./views/AuthView.tsx"
+import { ConfirmSignUpView } from "./views/ConfirmSignUpView.tsx"
 import { EmailView } from "./views/EmailView.tsx"
 import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView.tsx"
 import { GroupsView } from "./views/GroupsView.tsx"
@@ -83,6 +84,7 @@ const PAGES: {
   [Path in SpaRoutePath]: (params: StringRouteParams<Path>) => ComponentChildren
 } = {
   "/sign-up": () => <AuthView key="sign-up" screen="sign-up" />,
+  "/sign-up/confirm": () => <ConfirmSignUpView />,
   "/sign-in": () => <AuthView key="sign-in" screen="sign-in" />,
   "/totp": () => <AuthView key="one-time-code" screen="one-time-code" />,
   "/forgot-password": () => <ForgotPasswordView />,
