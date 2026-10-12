@@ -492,6 +492,7 @@ export function createSignIn(options: SignInOptions): SignIn {
     db,
     sessionsOver,
     cookie,
+    cookieSecret: options.cookieSecret,
     secureCookie: options.secureCookie,
     auditRow,
     deviceOf,

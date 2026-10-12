@@ -1,5 +1,7 @@
 /// <reference lib="deno.ns" />
 import { expect } from "@std/expect"
+import { decodeBase64Url, encodeBase64Url } from "@std/encoding/base64url"
+import { type } from "arktype"
 import { Hono, type MiddlewareHandler } from "hono"
 import postgres from "postgres"
 import {
@@ -22,6 +24,7 @@ import { createMutationGuards } from "../../apps/api/middlewares/mutation-guards
 import type { APIContext } from "../../apps/api/_types.ts"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
+import { createSignedPayloadCodec } from "@spy4x/platform/signed-payload"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
 
 /**
@@ -263,6 +266,22 @@ async function methodsOf(visitor: ReturnType<typeof browser>): Promise<SignInMet
   return await response.json()
 }
 
+/**
+ * What the sign-up cookie of `visitor` says. Its holder can read it, although it is signed, and
+ * can write it back saying something else under the signature it came with.
+ */
+function signUpCookieOf(visitor: ReturnType<typeof browser>) {
+  const [body, signature] = decodeURIComponent(visitor.cookies.get("oauth_sign_up")!).split(".")
+  const envelope = JSON.parse(new TextDecoder().decode(decodeBase64Url(body)))
+  return {
+    payload: envelope.payload as Record<string, unknown>,
+    edited(payload: Record<string, unknown>): string {
+      const changed = new TextEncoder().encode(JSON.stringify({ ...envelope, payload }))
+      return `${encodeBase64Url(changed)}.${signature}`
+    },
+  }
+}
+
 const ADA: ProviderPerson = { sub: "1001", email: "ada@example.com", verified: true }
 
 Deno.test("only a provider with credentials is listed and can be started", async () => {
@@ -450,38 +469,102 @@ Deno.test("creating the account records that an unconfirmed account lost its pas
   })
 })
 
-Deno.test("creating an account whose address nobody claimed records nothing about another account", async () => {
+Deno.test("a sign-up cookie changed by hand is no cookie: nothing is shown, created or taken", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    // Someone signed up with Ada's address and a password, and never confirmed the address.
+    const first = await (await browser(app).post("/password/sign-up", { email: "ada@example.com" }))
+      .json()
+    const before = await audit(sql, first.id)
+    // Written back as it was, the cookie is still the one the API signed.
+    const honest = browser(app)
+    await honest.through("google", "ada")
+    const untouched = signUpCookieOf(honest)
+    honest.cookies.set("oauth_sign_up", untouched.edited(untouched.payload))
+    expect((await pendingOf(honest))!.unconfirmedAccount).toBe(true)
+
+    const changes: Record<string, unknown>[] = [
+      // Would keep the audit row from the account that loses its password.
+      { verified: false },
+      // Would ask the question page about somebody else's address.
+      { email: "bob@example.com" },
+      // Would make "go back" take another entry out of the flow store.
+      { held: "sign-up:oauth:google:somebody-elses" },
+    ]
+    for (const change of changes) {
+      const owner = browser(app)
+      await owner.through("google", "ada")
+      const cookie = signUpCookieOf(owner)
+      owner.cookies.set("oauth_sign_up", cookie.edited({ ...cookie.payload, ...change }))
+
+      expect(await pendingOf(owner), JSON.stringify(change)).toBe(null)
+      expect((await owner.post("/auth/sign-up/confirm")).status, JSON.stringify(change)).toBe(400)
+    }
+
+    // Nobody was created, and the first account keeps its password and gained no audit row.
+    expect(await accounts(sql)).toEqual({ authUsers: 1, profiles: 1 })
+    expect(await audit(sql, first.id)).toEqual(before)
+    expect((await browser(app).post("/password/sign-in", { email: "ada@example.com" })).status)
+      .toBe(200)
+  })
+})
+
+Deno.test("a sign-up cookie the API did not sign shows no sign-up, whatever address it names", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    // An unconfirmed account uses the address: what such a cookie could once find out.
+    expect((await browser(app).post("/password/sign-up", { email: "ada@example.com" })).status)
+      .toBe(200)
+    const said = {
+      provider: "google",
+      token: "t".repeat(43),
+      held: "sign-up:oauth:google:written-by-hand",
+      email: "ada@example.com",
+      verified: true,
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+    }
+    // Signed like the API's own cookie, with a secret that is not the API's.
+    const forger = createSignedPayloadCodec({
+      secret: "not-the-cookie-secret-of-this-api-0123456789",
+      purpose: "oauth.sign-up",
+      version: 1,
+      schema: type("object"),
+    })
+    const written = { "plain JSON": encodeURIComponent(JSON.stringify(said)) }
+    const forged = { "signed with another secret": await forger.sign(said) }
+
+    for (const [how, value] of Object.entries({ ...written, ...forged })) {
+      const visitor = browser(app)
+      visitor.cookies.set("oauth_sign_up", value)
+
+      expect(await pendingOf(visitor), how).toBe(null)
+      expect((await visitor.post("/auth/sign-up/confirm")).status, how).toBe(400)
+    }
+    expect(await accounts(sql)).toEqual({ authUsers: 1, profiles: 1 })
+  })
+})
+
+Deno.test("going back with a cookie pointed at another person's sign-up leaves that sign-up alone", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql, {
       ada: ADA,
-      eve: { sub: "4004", email: "bob@example.com", verified: false },
+      bob: { sub: "3003", email: "bob@example.com", verified: true },
     })
-    // Bob never confirmed his address, and the provider does not vouch for Eve's use of it.
-    const bob = await (await browser(app).post("/password/sign-up", { email: "bob@example.com" }))
-      .json()
-    const before = await audit(sql, bob.id)
     const ada = browser(app)
     await ada.through("google", "ada")
-    expect((await ada.post("/auth/sign-up/confirm")).status).toBe(201)
-    // Eve rewrites her own cookie to say the provider vouched for the address. The cookie only
-    // feeds the question page: what was taken is read from the database.
-    const eve = browser(app)
-    await eve.through("google", "eve")
-    const kept = JSON.parse(decodeURIComponent(eve.cookies.get("oauth_sign_up")!))
-    expect(kept.verified).toBe(false)
-    eve.cookies.set(
-      "oauth_sign_up",
-      encodeURIComponent(JSON.stringify({ ...kept, verified: true })),
-    )
-    expect((await eve.post("/auth/sign-up/confirm")).status).toBe(201)
+    const bob = browser(app)
+    await bob.through("google", "bob")
+    // Bob's own cookie, saying his profile is held where the flow store holds Ada's.
+    const { held } = signUpCookieOf(ada).payload
+    const own = signUpCookieOf(bob)
+    expect(own.payload.held).not.toBe(held)
+    bob.cookies.set("oauth_sign_up", own.edited({ ...own.payload, held }))
 
-    expect(await audit(sql, bob.id)).toEqual(before)
-    const [{ taken }] = await sql`
-      SELECT count(*)::int AS taken FROM auth_audits
-      WHERE event_type = ${AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN}`
-    expect(taken).toBe(0)
-    expect((await browser(app).post("/password/sign-in", { email: "bob@example.com" })).status)
-      .toBe(200)
+    expect((await bob.post("/auth/sign-up/cancel")).status).toBe(200)
+
+    // Ada's question still waits, and her answer creates her account.
+    expect((await ada.post("/auth/sign-up/confirm")).status).toBe(201)
+    expect(await accounts(sql)).toEqual({ authUsers: 1, profiles: 1 })
   })
 })
 

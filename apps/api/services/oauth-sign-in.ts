@@ -13,13 +13,19 @@
  *   session, profile, first group and audit row in one transaction, as the password sign-up does.
  *   "Go back" takes the held profile out of the flow store, so the token is dead at once, and
  *   leaving the page creates nothing: the token expires by itself.
+ * - **The sign-up cookie is signed.** Beside the token it carries what the question shows and
+ *   where the profile is held, and the API acts on both. The package's flow store can only take
+ *   a held profile out, never read it, so those facts cannot be read back from the server; the
+ *   cookie is signed with the cookie secret instead (`@spy4x/platform/signed-payload`), and one
+ *   that was edited or written by hand reads as no cookie.
  * - **The question says what creating costs.** The package deletes every other user's unproven
  *   claim to an address the moment someone proves it, so nobody can sit on an address they do
  *   not own. A password account that never confirmed its address therefore loses its password
  *   when the provider's verified owner of that address creates an account. Joining the two
  *   instead would hand the newcomer an account whose password someone else chose, so the rule
  *   stays; the question page warns first, and the account that lost its password gets an audit
- *   row (`UNCONFIRMED_ADDRESS_TAKEN`).
+ *   row (`UNCONFIRMED_ADDRESS_TAKEN`). Whether a claim was taken is read from the database around
+ *   the write that takes it, never from what the browser sent.
  * - **An address that is not verified links nothing.** The package ignores it when it resolves the
  *   person, so such a callback always ends at the question, never inside someone's account.
  * - **Linking from the profile.** The package's connect flow: it is bound to the signed-in user,
@@ -47,6 +53,7 @@ import {
   type AuthSessionRecord,
   type AuthStore,
   type AuthUser,
+  type NewAuthKey,
   normalizeEmail,
 } from "@spy4x/server/auth"
 import {
@@ -81,6 +88,7 @@ import {
   UserMFAStatus,
   UserRole,
 } from "@domain/identity"
+import { createSignedPayloadCodec } from "@spy4x/platform/signed-payload"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
 import { safeRedirectPath } from "@spy4x/net/redirect-path"
 import type { AppDbBase } from "./db-base.ts"
@@ -98,8 +106,14 @@ const stateCookie = (id: OAuthProviderId) => `oauth_state_${id}`
 /** Holds the `state` of a link started on the profile: a flow of its own kind, so a cookie of its own. */
 const connectCookie = (id: OAuthProviderId) => `oauth_connect_${id}`
 
-/** Holds the token of a sign-up that waits for its confirmation, and what the page shows. */
+/**
+ * Holds the token of a sign-up that waits for its confirmation, and what the page shows, as a
+ * value signed with the cookie secret.
+ */
 const SIGN_UP_COOKIE = "oauth_sign_up"
+
+/** What the sign-up cookie's signature is for: a value signed for anything else is refused. */
+const SIGN_UP_COOKIE_PURPOSE = "oauth.sign-up"
 
 /** Longest address the confirmation page is given to show. */
 const MAX_SHOWN_EMAIL = 320
@@ -170,6 +184,11 @@ export interface OAuthInternals {
   db: AppDbBase
   sessionsOver(store: SessionStore<AuthSessionRecord>): SessionManager<AuthSessionRecord>
   cookie: SessionCookie
+  /**
+   * The secret that signs the session cookie, at least 32 characters. The sign-up cookie is signed
+   * with it too, under a purpose of its own.
+   */
+  cookieSecret: string
   secureCookie: boolean
   auditRow(
     c: Context,
@@ -278,6 +297,12 @@ export function createOAuthOperations(
     sameSite: "Lax",
     path: COOKIE_PATH,
   } as const
+  const signUpCookie = createSignedPayloadCodec({
+    secret: own.cookieSecret,
+    purpose: SIGN_UP_COOKIE_PURPOSE,
+    version: 1,
+    schema: signUpCookieSchema,
+  })
 
   /** The package's sign-in with `id` over these stores. Cheap: it only checks its options. */
   function signInWith(
@@ -336,7 +361,8 @@ export function createOAuthOperations(
 
   /**
    * The password key that claims the waiting sign-up's address without having proven it, or
-   * `null`. Only an address the provider vouches for can take such a claim away.
+   * `null`. Only an address the provider vouches for can take such a claim away. This is what the
+   * question warns about; what was really taken is read by {@link reportingTakenClaims}.
    */
   async function unconfirmedClaim(
     store: AuthStore,
@@ -348,38 +374,56 @@ export function createOAuthOperations(
   }
 
   /**
-   * `store`, noting in `taken` each unproven password claim that adding a key with a proven
-   * address took from another user. The package deletes such a claim as it adds the key and
-   * reports nothing, so the claim is looked up before the key is added and again after.
+   * `store`, noting in `taken` each password claim to an address that a write took away. The
+   * package deletes every other user's unproven claim to an address as it writes a key that
+   * proves it (a new user's first key, or a key added to a user) and reports nothing. So the
+   * claim is read before the write and looked for again after. That it is gone afterwards is the
+   * fact the audit row records: only another user's unproven claim is ever deleted by the write.
    */
   function reportingTakenClaims(store: AuthStore, taken: AuthKey[]): AuthStore {
+    const noting = async <T>(key: NewAuthKey, write: () => Promise<T>): Promise<T> => {
+      const claim = key.email === null ? null : await store.findKey(PASSWORD_METHOD, key.email)
+      const written = await write()
+      if (claim && await store.findKeyById(claim.id) === null) taken.push(claim)
+      return written
+    }
     return new Proxy(store, {
       get(target, name, receiver) {
-        if (name !== "addKey") {
-          const value = Reflect.get(target, name, receiver)
-          return typeof value === "function" ? value.bind(target) : value
+        if (name === "addKey") {
+          return (userId: number, key: NewAuthKey) => noting(key, () => target.addKey(userId, key))
         }
-        return async (...args: Parameters<AuthStore["addKey"]>) => {
-          const [userId, key] = args
-          const claim = key.email !== null && key.provenAt !== null
-            ? await target.findKey(PASSWORD_METHOD, key.email)
-            : null
-          const added = await target.addKey(...args)
-          if (
-            claim && claim.userId !== userId && claim.provenAt === null &&
-            await target.findKeyById(claim.id) === null
-          ) taken.push(claim)
-          return added
+        if (name === "createUserWithKey") {
+          return (key: NewAuthKey) => noting(key, () => target.createUserWithKey(key))
         }
+        const value = Reflect.get(target, name, receiver)
+        return typeof value === "function" ? value.bind(target) : value
       },
     })
   }
 
-  /** The waiting sign-up in the request's cookie, token included, or `null`. */
-  function readSignUp(c: Context) {
-    const data = readJsonCookie(c, SIGN_UP_COOKIE, signUpCookieSchema)
-    if (!data || !enabled.has(data.provider)) return null
-    return Date.parse(data.expiresAt) > clock.now() ? data : null
+  /** One audit row for each account whose unconfirmed claim to an address a new `method` key took. */
+  async function writeTakenClaims(
+    c: Context,
+    tx: AppDbBase,
+    taken: AuthKey[],
+    method: string,
+  ): Promise<void> {
+    for (const claim of taken) {
+      await tx.authAudit.insert(
+        own.auditRow(c, claim.userId, AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN, method),
+      )
+    }
+  }
+
+  /**
+   * The waiting sign-up in the request's cookie, token included, or `null`. A cookie this API did
+   * not sign, or one changed since, is no cookie.
+   */
+  async function readSignUp(c: Context): Promise<typeof signUpCookieSchema.infer | null> {
+    const raw = getCookie(c, SIGN_UP_COOKIE)
+    const read = raw ? await signUpCookie.verify(raw) : null
+    if (!read?.ok || !enabled.has(read.value.provider)) return null
+    return Date.parse(read.value.expiresAt) > clock.now() ? read.value : null
   }
 
   /**
@@ -488,16 +532,7 @@ export function createOAuthOperations(
             await tx.authAudit.insert(
               own.auditRow(c, key.userId, AuthAuditEventType.SIGN_IN_METHOD_LINKED, key.method),
             )
-            for (const claim of taken) {
-              await tx.authAudit.insert(
-                own.auditRow(
-                  c,
-                  claim.userId,
-                  AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
-                  key.method,
-                ),
-              )
-            }
+            await writeTakenClaims(c, tx, taken, key.method)
           })
         } catch (error) {
           if (error instanceof OAuthSignInError) {
@@ -535,7 +570,7 @@ export function createOAuthOperations(
           verified: result.profile.emailVerified === true,
           expiresAt: result.expiresAt.toISOString(),
         }
-        setCookie(c, SIGN_UP_COOKIE, JSON.stringify(shown), {
+        setCookie(c, SIGN_UP_COOKIE, await signUpCookie.sign(shown), {
           ...cookieOptions,
           expires: result.expiresAt,
         })
@@ -549,7 +584,7 @@ export function createOAuthOperations(
     },
 
     async pendingSignUp(c) {
-      const waiting = readSignUp(c)
+      const waiting = await readSignUp(c)
       if (!waiting) return null
       return {
         provider: waiting.provider,
@@ -560,16 +595,16 @@ export function createOAuthOperations(
     },
 
     async confirmSignUp(c, current, firstGroupId = uuidV7()) {
-      const waiting = readSignUp(c)
+      const waiting = await readSignUp(c)
       deleteCookie(c, SIGN_UP_COOKIE, cookieOptions)
       if (!waiting) return null
       let created
       try {
         created = await db.begin(async (tx) => {
-          const claim = await unconfirmedClaim(tx.authStore, waiting)
+          const taken: AuthKey[] = []
           // Built over the transaction's stores, so the auth user, key and session join it.
           const result = await signInWith(waiting.provider, {
-            store: tx.authStore,
+            store: reportingTakenClaims(tx.authStore, taken),
             sessions: own.sessionsOver(tx.sessionStore),
             secondFactorFor: own.secondFactorAtSignUp,
           }).confirmSignUp(waiting.token, own.deviceOf(c))
@@ -584,18 +619,6 @@ export function createOAuthOperations(
             })
             await tx.group.createFirst({ id: firstGroupId, name: "Personal" }, user.id)
             await tx.starterData.queue(user.id)
-            // The package took the unproven claim to this address away: say so where the owner
-            // of the product will look when that account's person asks what happened.
-            if (claim && await tx.authStore.findKeyById(claim.id) === null) {
-              await tx.authAudit.insert(
-                own.auditRow(
-                  c,
-                  claim.userId,
-                  AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
-                  result.key.method,
-                ),
-              )
-            }
             await tx.authAudit.insert(
               own.auditRow(
                 c,
@@ -614,6 +637,9 @@ export function createOAuthOperations(
             if (!user) throw new OAuthSignInError("user-deleted")
             await writeSignInAudit(c, tx, result)
           }
+          // The package took an unproven claim to this address away: say so where the owner of
+          // the product will look when that account's person asks what happened.
+          await writeTakenClaims(c, tx, taken, result.key.method)
           return { user, ...result.session }
         })
       } catch (error) {
@@ -626,7 +652,7 @@ export function createOAuthOperations(
     },
 
     async cancelSignUp(c) {
-      const waiting = readSignUp(c)
+      const waiting = await readSignUp(c)
       deleteCookie(c, SIGN_UP_COOKIE, cookieOptions)
       if (waiting) await flows.take(waiting.held)
     },
