@@ -469,6 +469,71 @@ Deno.test("creating the account records that an unconfirmed account lost its pas
   })
 })
 
+Deno.test("the record of a taken address follows what was written, not what the cookie says", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const first = await (await browser(app).post("/password/sign-up", { email: "ada@example.com" }))
+      .json()
+    const before = await audit(sql, first.id)
+    const owner = browser(app)
+    await owner.through("google", "ada")
+    // A cookie under the API's own secret that says the provider does not vouch for the address,
+    // while the sign-up the server keeps says it does. No browser can make one; it stands for any
+    // way the two could come to disagree.
+    const api = createSignedPayloadCodec({
+      secret: COOKIE_SECRET,
+      purpose: "oauth.sign-up",
+      version: 1,
+      schema: type("object"),
+    })
+    owner.cookies.set(
+      "oauth_sign_up",
+      await api.sign({ ...signUpCookieOf(owner).payload, verified: false }),
+    )
+
+    expect((await owner.post("/auth/sign-up/confirm")).status).toBe(201)
+
+    // The write took the first account's password away, so the row is there.
+    expect(await app.db.authStore.listKeys(first.id)).toHaveLength(0)
+    expect((await audit(sql, first.id)).slice(before.length)).toEqual([[
+      AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
+      "oauth:google",
+    ]])
+  })
+})
+
+Deno.test("a sign-up the provider does not vouch for records no taken address, whatever the cookie says", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { eve: { sub: "4004", email: "bob@example.com", verified: false } })
+    // Bob never confirmed his address, and the provider does not vouch for Eve's use of it.
+    const bob = await (await browser(app).post("/password/sign-up", { email: "bob@example.com" }))
+      .json()
+    const before = await audit(sql, bob.id)
+    const eve = browser(app)
+    await eve.through("google", "eve")
+    const kept = signUpCookieOf(eve).payload
+    expect(kept.verified).toBe(false)
+    // The same disagreement the other way round: the cookie says the provider vouched.
+    const api = createSignedPayloadCodec({
+      secret: COOKIE_SECRET,
+      purpose: "oauth.sign-up",
+      version: 1,
+      schema: type("object"),
+    })
+    eve.cookies.set("oauth_sign_up", await api.sign({ ...kept, verified: true }))
+
+    expect((await eve.post("/auth/sign-up/confirm")).status).toBe(201)
+
+    expect(await audit(sql, bob.id)).toEqual(before)
+    const [{ taken }] = await sql`
+      SELECT count(*)::int AS taken FROM auth_audits
+      WHERE event_type = ${AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN}`
+    expect(taken).toBe(0)
+    expect((await browser(app).post("/password/sign-in", { email: "bob@example.com" })).status)
+      .toBe(200)
+  })
+})
+
 Deno.test("a sign-up cookie changed by hand is no cookie: nothing is shown, created or taken", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql, { ada: ADA })
