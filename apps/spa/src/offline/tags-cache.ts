@@ -44,20 +44,15 @@ export function openTagsCache(userId: number, indexedDB?: IDBFactory): TagsCache
     getId: (tag) => tag.id,
     indexedDB,
   })
-  // Set by `clear`, and read right before every write reaches the database (`openNotesCache`).
-  let cleared = false
   return {
     readTags: (groupId) => tags.read(groupId),
-    replaceTags: (groupId, next) => cleared ? Promise.resolve() : tags.replace(groupId, next),
-    putTag: (tag) =>
-      cleared ? Promise.resolve() : tags.batch([{ op: "put", scope: tag.groupId, item: tag }]),
+    replaceTags: (groupId, next) => tags.replace(groupId, next),
+    putTag: (tag) => tags.batch([{ op: "put", scope: tag.groupId, item: tag }]),
     async removeTag(tagId) {
       const scopes = await tags.scopes()
       await tags.batch(scopes.map((scope) => ({ op: "delete" as const, scope, id: tagId })))
     },
-    clear() {
-      cleared = true
-      return tags.clearAll()
-    },
+    // `finish` and not `clearAll`: a late write saves nothing (`openNotesCache`).
+    clear: () => tags.finish(),
   }
 }

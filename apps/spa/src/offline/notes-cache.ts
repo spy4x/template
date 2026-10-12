@@ -46,18 +46,14 @@ export function openNotesCache(userId: number, indexedDB?: IDBFactory): NotesCac
     getId: (note) => note.id,
     indexedDB,
   })
-  // Set by `clear`. Every write looks at it right before it reaches the database, after its own
-  // reads, so a write that was already running when the person signed out saves nothing either.
-  let cleared = false
   return {
     // A copy kept before tags existed has no `tagIds`: the note then has no tags.
     readNotes: async (groupId) =>
       (await notes.read(groupId)).map((note) => ({ ...note, tagIds: note.tagIds ?? [] })),
-    replaceNotes: (groupId, next) => cleared ? Promise.resolve() : notes.replace(groupId, next),
+    replaceNotes: (groupId, next) => notes.replace(groupId, next),
     async putNote(note) {
       // A moved note changes scope: drop it from every other group's copy in the same step.
       const others = (await notes.scopes()).filter((scope) => scope !== note.groupId)
-      if (cleared) return
       await notes.batch([
         ...others.map((scope) => ({ op: "delete" as const, scope, id: note.id })),
         { op: "put", scope: note.groupId, item: note },
@@ -68,9 +64,8 @@ export function openNotesCache(userId: number, indexedDB?: IDBFactory): NotesCac
       const scopes = await notes.scopes()
       await notes.batch(scopes.map((scope) => ({ op: "delete" as const, scope, id: noteId })))
     },
-    clear() {
-      cleared = true
-      return notes.clearAll()
-    },
+    // `finish` and not `clearAll`: a write that was already running when the person signed out,
+    // or one that comes later, saves nothing.
+    clear: () => notes.finish(),
   }
 }

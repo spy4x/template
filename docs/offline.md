@@ -240,11 +240,12 @@ timeout, or no network at all, since the server may well accept the same read a 
 start that finds no session (the server answers 401, because the session ended elsewhere or
 expired) does the same for the person the device remembered, before the sign-in page shows.
 
-An answer still on its way at sign-out is not saved in this tab. Each copy is finished by its deletion: the
-read cache (`ReadCache.clear`), the notes copy and the tags copy (`clear` in
-`offline/notes-cache.ts` and `offline/tags-cache.ts`) store nothing afterwards, whether the late
-write is a list read, a note being opened, or the server's answer to a queued write that was being
-sent. The next sign-in opens new copies. `offline/device-copies.test.ts` checks this on IndexedDB.
+An answer still on its way at sign-out is not saved in this tab. Each copy is finished by its
+deletion: the read cache (`ReadCache.clear`), and the notes copy and the tags copy, whose `clear`
+(`offline/notes-cache.ts`, `offline/tags-cache.ts`) calls the library's `DataCache.finish`. A
+finished copy stores nothing afterwards, whether the late write is a list read, a note being
+opened, or the server's answer to a queued write that was being sent. The next sign-in opens new
+copies. `offline/device-copies.test.ts` checks this on IndexedDB.
 
 The person is forgotten at once; their copies take IndexedDB a moment. So before a deletion starts,
 the user's id is written to a second `localStorage` key, `offline:owed-deletion`, and removed only
