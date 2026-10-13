@@ -280,6 +280,9 @@ Deno.test("the socket proxy passes on GET only, and only the paths Vector's Dock
       `/containers/${id}/attach/ws`,
       `/containers/${id}/json/../archive`,
       `/containers/${id}/logs/../export`,
+      // An id is one path segment: nothing may climb out of `/containers` and still end in `json`.
+      `/containers/${id}/../../images/${id}/json`,
+      `/containers/${id}/exec/json`,
       `//containers/${id}/archive`,
       `/exec/${id}/json`,
       `/images/json`,
