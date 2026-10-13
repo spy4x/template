@@ -902,7 +902,7 @@ describe("EmailScreen", () => {
 
     await click("[data-e2e=email-change-open]")
 
-    expect(document.querySelector("[data-e2e=email-password]")).toBe(null)
+    expect(document.querySelectorAll("[data-e2e=email-password]").length).toBe(0)
     expect(find("[data-e2e=provider-proof-fresh]").textContent).toContain("Google")
     expect(find("[data-e2e=email-change-dialog]").textContent)
       .toContain("You keep signing in with Google.")
@@ -929,8 +929,8 @@ describe("EmailScreen", () => {
       .toBe("/api/auth/google/start?next=%2Femail")
     expect(find("[data-e2e=provider-proof-github]").getAttribute("href"))
       .toBe("/api/auth/github/start?next=%2Femail")
-    expect(document.querySelector("[data-e2e=email-new]")).toBe(null)
-    expect(document.querySelector("[data-e2e=email-change]")).toBe(null)
+    expect(document.querySelectorAll("[data-e2e=email-new]").length).toBe(0)
+    expect(document.querySelectorAll("[data-e2e=email-change]").length).toBe(0)
   })
 
   it("changes the address in a dialog, which closes and hands focus to the new address's code", async () => {

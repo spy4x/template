@@ -353,7 +353,7 @@ describe("the profile page", () => {
     await press("[data-e2e=account-delete-open]")
 
     expect(text("[data-e2e=provider-proof-google]")).toBe("Sign in with Google again")
-    expect(document.querySelector("[data-e2e=account-delete-submit]")).toBe(null)
+    expect(document.querySelectorAll("[data-e2e=account-delete-submit]").length).toBe(0)
     expect(calls).not.toContain("POST /api/auth/account/delete")
   })
 
@@ -371,7 +371,7 @@ describe("the profile page", () => {
     await open("/email", <EmailView />)
 
     await press("[data-e2e=email-change-open]")
-    expect(document.querySelector("[data-e2e=email-password]")).toBe(null)
+    expect(document.querySelectorAll("[data-e2e=email-password]").length).toBe(0)
     await type("[data-e2e=email-new]", "gia@new.example")
     await submit("[data-e2e=email-new]")
 
