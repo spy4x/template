@@ -201,8 +201,8 @@ services:
   # The only service here that mounts the Docker socket. That socket is the whole Docker API, and
   # `:ro` on the mount stops no call, so this proxy stands between it and Vector and passes on
   # only the read calls Vector's `docker_logs` source makes: every other method and path is
-  # refused (docs/stack.md, "The Docker socket"). It listens on a network that only Vector joins, has no
-  # route to anywhere else and publishes no port.
+  # refused (docs/stack.md, "The Docker socket"). It listens on a network that only Vector joins,
+  # answers Vector's address only, has no route to anywhere else and publishes no port.
   socket-proxy:
     container_name: ${PROJECT}-socket-proxy
     image: wollomatic/socket-proxy:1.13.1
@@ -212,8 +212,9 @@ services:
     user: '0:0'
     command:
       - '-listenip=0.0.0.0'
-      # Any address on its network, which holds Vector and nothing else.
-      - '-allowfrom=0.0.0.0/0'
+      # Only Vector's address, looked up by its service name on each call. The network alone is
+      # no barrier: the host, and so any process on the server, can reach an address on it.
+      - '-allowfrom=vector'
       # The whole path must match (`$$` is a dollar sign for Compose). A container's `json` is
       # `docker inspect`; `archive`, `export`, `exec` and every other path are left out.
       - '-allowGET=^(/v1\.[0-9]+)?/(_ping|version|events|containers/json|containers/[A-Za-z0-9_.-]+/(json|logs))$$'

@@ -164,8 +164,9 @@ as `/v1.44`:
 `405`: no container can be created, started, stopped, killed or removed, no command run in one
 (`exec`), no image pulled. Every other `GET` gets `403`: among them `/containers/<id>/archive`
 and `/containers/<id>/export`, which read files out of a container, and `/images`, `/volumes`,
-`/networks`, `/info` and `/exec`. The whole path must match, so `..` or a doubled slash does not
-get around the list.
+`/networks`, `/info` and `/exec`. The whole path must match, so a doubled slash or a `..` after
+an allowed path does not get around the list. One `..` does pass the pattern, in the place of an
+id (`/containers/../json`); Docker answers it with a redirect to `/json`, which the list refuses.
 
 **What someone who takes over Vector can still do.** Read the log of every container on the host,
 not only this project's, and every container's `inspect` output, which includes its environment:
@@ -176,7 +177,14 @@ reading, and it is serious; it is no longer control of the host. Vector's own fi
 The proxy itself holds the whole socket, so it is given as little as possible to be taken over
 through. It listens on a network of its own (`docker-socket`, `internal: true`) that only Vector
 joins: it is not on the project's network or on `proxy`, has no Traefik label and publishes no
-port. It has no Linux capability and cannot gain one (`cap_drop: [ALL]`, `no-new-privileges`), and
+port. That network keeps other containers out, but not the server itself: the host, and so any
+process on it, including one of a user outside the `docker` group and a container with host
+networking, can connect to an address on a Docker network. So the proxy also checks who is
+calling (`-allowfrom=vector`): on each call it looks up the name `vector` and answers that
+address only; everyone else gets `403`. What is left is someone who can take Vector's address on
+that network, which needs control of Docker or of the host's network already.
+
+It has no Linux capability and cannot gain one (`cap_drop: [ALL]`, `no-new-privileges`), and
 its file system is read-only. It runs as root, because the socket belongs to root and the number
 of its group differs from host to host; without capabilities, root opens the socket as its owner
 and can do little else. SELinux labelling is off for it (`label=disable`), as the socket has no
@@ -187,19 +195,25 @@ read the containers' labels, and with the `host-monitoring` profile the two host
 the host's file system, where the socket is. `tests/compose-monitoring.test.ts` names these three
 and goes red when any other service mounts the socket.
 
-To repeat the refusal check, start the project, then call the proxy from a container on its
-network (`app` is `PROJECT` in lower case; any running container's id will do):
+To repeat the refusal check, start the project, then call the proxy from the Vector container,
+the only caller it answers (`app` is `PROJECT`):
 
 ```sh
-id=$(docker ps -q --no-trunc --filter name=app-vector)
-call() { docker run --rm --network app_docker-socket curlimages/curl:8.16.0 \
-  -s -o /dev/null -w "%{http_code} $1 $2\n" -X "$1" "http://socket-proxy:2375$2"; }
-call GET /containers/json                      # 200
-call POST /containers/create                   # 405
-call POST "/containers/$id/start"              # 405
-call POST "/containers/$id/stop"               # 405
-call POST "/containers/$id/exec"               # 405
-call GET "/containers/$id/archive?path=/etc"   # 403
+call() { docker exec app-vector wget -q -O /dev/null "$@" 2>&1 || true; }
+docker exec app-vector wget -qO- http://socket-proxy:2375/containers/json | head -c 80  # a list
+call --post-data '{}' http://socket-proxy:2375/containers/create                # 405
+call --post-data '' http://socket-proxy:2375/containers/app-vector/start        # 405
+call --post-data '' http://socket-proxy:2375/containers/app-vector/stop         # 405
+call --post-data '{}' http://socket-proxy:2375/containers/app-vector/exec       # 405
+call 'http://socket-proxy:2375/containers/app-vector/archive?path=/etc'         # 403
+```
+
+And from the server itself, as a user outside the `docker` group, which must get `403`:
+
+```sh
+ip=$(docker inspect app-socket-proxy \
+  --format '{{(index .NetworkSettings.Networks "app_docker-socket").IPAddress}}')
+sudo -u nobody curl -s -o /dev/null -w '%{http_code}\n' "http://$ip:2375/containers/json"
 ```
 
 The proxy writes each refused call to its log (`docker logs app-socket-proxy`), with the method

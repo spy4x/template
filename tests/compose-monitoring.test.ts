@@ -300,7 +300,7 @@ Deno.test("the socket proxy passes on GET only, and only the paths Vector's Dock
   ) expect({ path, allowed: get.test(path) }).toEqual({ path, allowed: false })
 })
 
-Deno.test("the socket proxy is on a network of its own that only Vector joins, with no way in from outside", async () => {
+Deno.test("the socket proxy is on a network of its own that only Vector joins, and answers Vector's address only", async () => {
   const path = fromFileUrl(new URL(`compose.shared.yml`, COMPOSE_DIR))
   const { networks } = parse(await Deno.readTextFile(path)) as {
     networks: Record<string, ComposeNetwork>
@@ -319,6 +319,13 @@ Deno.test("the socket proxy is on a network of its own that only Vector joins, w
     }
   }
   expect(members.sort()).toEqual([`compose.shared.yml: socket-proxy`, `compose.shared.yml: vector`])
+
+  // The host can reach any address on a Docker network, `internal` or not, so the proxy itself
+  // refuses every caller but the one the name `vector` resolves to: exactly one such flag.
+  const proxy = (await services())[`socket-proxy`]
+  expect(proxy.command?.filter((flag) => flag.startsWith(`-allowfrom`))).toEqual([
+    `-allowfrom=vector`,
+  ])
 })
 
 Deno.test("Vector reads the Docker API through the socket proxy and starts after it", async () => {
