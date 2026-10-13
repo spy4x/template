@@ -80,7 +80,7 @@ import {
   type AuthSessionRecord,
   normalizeEmail,
 } from "@spy4x/server/auth"
-import { EMAIL_CODE_METHOD, EmailCodeError } from "@spy4x/server/auth/email-code"
+import { EmailCodeError } from "@spy4x/server/auth/email-code"
 import {
   createPasswordSignIn,
   PASSWORD_METHOD,
@@ -106,7 +106,12 @@ import {
 } from "@domain/identity"
 import type { AppDbBase } from "./db-base.ts"
 import { consumePasswordReset } from "@server/auth/password-reset.ts"
-import { passwordKeyOf, proveEmailCode, readEmailStatus } from "@server/auth/email-verification.ts"
+import {
+  dropCodeKeys,
+  passwordKeyOf,
+  proveEmailCode,
+  readEmailStatus,
+} from "@server/auth/email-verification.ts"
 import { hasUnstorableTextCharacters } from "@spy4x/platform/universal/text"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
 import { createOAuthOperations, type OAuthOperations, type OAuthOptions } from "./oauth-sign-in.ts"
@@ -885,7 +890,11 @@ export function createSignIn(options: SignInOptions): SignIn {
           // Two requests at once: the second reads the key the first one added.
           await tx.lockUser(user.id)
           if (await passwordKeyOf(tx.authStore, user.id)) return PasswordSetOutcome.AlreadySet
-          const { email } = await readEmailStatus(tx.emailChange, tx.authStore, user.id)
+          const { email, pending } = await readEmailStatus(
+            tx.emailChange,
+            tx.authStore,
+            user.id,
+          )
           // The password needs a name to sign in with, and the account's address is the only one.
           if (email === null) return PasswordSetOutcome.NoAddress
           // Proven: the address read above is one a provider vouched for or a code proved.
@@ -896,6 +905,10 @@ export function createSignIn(options: SignInOptions): SignIn {
             secret,
             provenAt: new Date(),
           })
+          // The password key holds the address from here on. A code key that held it would stay
+          // behind, proven, when the address changes again, and would then let whoever has that
+          // address later into this account. The key of a change that waits for its code stays.
+          await dropCodeKeys(tx.authStore, user.id, pending)
           await tx.authAudit.insert(
             auditRow(c, user.id, AuthAuditEventType.SIGN_IN_METHOD_LINKED, PASSWORD_METHOD),
           )
@@ -979,6 +992,9 @@ export function createSignIn(options: SignInOptions): SignIn {
         // Taken before the password hash is read, so a reset in flight lands first and its new
         // hash is the one that moves, or waits until the move is done.
         await tx.lockPasswordKey({ userId: user.id })
+        // An account without a password has no key to lock there: a first password takes this
+        // lock, so it lands before the address is read or waits until the move is done.
+        await tx.lockUser(user.id)
         const status = await readEmailStatus(tx.emailChange, tx.authStore, user.id)
         const target = emailToVerify(status)
         const key = await passwordKeyOf(tx.authStore, user.id)
@@ -988,9 +1004,8 @@ export function createSignIn(options: SignInOptions): SignIn {
           return { outcome: EmailVerifyOutcome.NothingToVerify }
         }
         const txSessions = sessionsOver(tx.sessionStore)
-        let proven: AuthKey[]
         try {
-          proven = await proveEmailCode(tx.authStore, user.id, target, code)
+          await proveEmailCode(tx.authStore, user.id, target, code)
         } catch (error) {
           if (error instanceof EmailCodeError) return { outcome: EmailVerifyOutcome.WrongCode }
           // Another user owns the address. The code is spent, and the change cannot happen.
@@ -1006,19 +1021,17 @@ export function createSignIn(options: SignInOptions): SignIn {
         // An address held that way before goes, so the account has one address and the old one
         // is free again. The provider keys keep what their provider vouched for.
         if (key === null) {
-          for (const held of await tx.authStore.listKeys(user.id)) {
-            if (held.method === EMAIL_CODE_METHOD && held.email !== target) {
-              await tx.authStore.deleteKey(user.id, held.id)
-            }
-          }
+          await dropCodeKeys(tx.authStore, user.id, target)
           await tx.emailChange.remove(user.id)
           return { outcome: EmailVerifyOutcome.Verified }
         }
 
         // A new address: `proveAddress` gave the user a proven code key for it, which also removed
         // every other user's unproven claim to it. The password moves onto a key for the new
-        // address, then the code key and the old key go; deleting the old key ends its sessions
-        // and frees the old address.
+        // address, then every code key of the account and the old key go; deleting the old key
+        // ends its sessions. No key of the account's own making is left on an address it had
+        // before, so that address is free again. A provider key keeps what its provider vouched
+        // for.
         const moved = await tx.authStore.addKey(user.id, {
           method: PASSWORD_METHOD,
           subject: target,
@@ -1026,9 +1039,7 @@ export function createSignIn(options: SignInOptions): SignIn {
           secret: key.secret,
           provenAt: now,
         })
-        for (const extra of proven) {
-          if (extra.method !== PASSWORD_METHOD) await tx.authStore.deleteKey(user.id, extra.id)
-        }
+        await dropCodeKeys(tx.authStore, user.id)
         const created = await txSessions.create({
           userId: user.id,
           keyId: moved.id,

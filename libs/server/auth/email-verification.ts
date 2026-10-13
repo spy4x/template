@@ -39,6 +39,24 @@ export async function passwordKeyOf(store: AuthStore, userId: number): Promise<A
   return keys.find((key) => key.method === PASSWORD_METHOD) ?? null
 }
 
+/**
+ * Deletes the user's code keys, except one on the address `keep`. A code key is how an address is
+ * proven, and how an account without a password holds its address. Once the address is held
+ * elsewhere, or the account has moved on, a proven code key left behind would still say "this
+ * person owns that address" and let a provider account of its next owner in.
+ */
+export async function dropCodeKeys(
+  store: AuthStore,
+  userId: number,
+  keep: string | null = null,
+): Promise<void> {
+  for (const key of await store.listKeys(userId)) {
+    if (key.method === EMAIL_CODE_METHOD && key.email !== keep) {
+      await store.deleteKey(userId, key.id)
+    }
+  }
+}
+
 /** The `email_changes` table: one new address per user, waiting for its code. */
 export type EmailChanges = ReturnType<typeof emailChanges>
 
