@@ -336,7 +336,8 @@ These cost real time to find. Do not rediscover them.
        out and set `VM_REMOTE_WRITE_URL` and `VLOGS_URL` for the external mode. Set
        `ALERT_NTFY_URL`, `ALERT_NTFY_TOPIC` and `ALERT_NTFY_TOKEN` if alerts should reach ntfy.
        The `LOKI_*`, `PROMTAIL_*` and `PROMETHEUS_*` lines are no longer read and can go.
-    2. `deno task deploy`.
+    2. `deno task deploy`. On a server that still holds Postgres 16 data it stops at "Starting
+       the app" until `deno task db:upgrade-18` has run there (docs/postgres-18-upgrade.md).
     3. On the server, remove what the new files no longer run. The Compose task is the one the
        deploy uses, so it reads the same env file and the same container engine, and it touches
        this project's containers only. Replace `<app directory>` with `PATH_ON_SERVER`:
@@ -352,7 +353,7 @@ These cost real time to find. Do not rediscover them.
        ```
        `deno task compose ps --all` then lists no `loki`, `prometheus`, `promtail` or
        `minio-configure`, and in the external mode no `grafana`. Postgres, Valkey and MinIO keep
-       running, and their data (`.volumes/postgres`, `.volumes/kv`, the rest of `.volumes/minio`)
+       running, and their data (`.volumes/postgres18`, `.volumes/kv`, the rest of `.volumes/minio`)
        is not touched; MinIO's container restarts once during the deploy, because its start
        command changed.
     4. In Grafana, delete the Loki and Prometheus data sources if someone added them by hand:

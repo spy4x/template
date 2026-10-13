@@ -65,9 +65,10 @@ Then open `http://<DOMAIN>` from the env file: http://app.localhost with the val
 `infra/envs/.env.example`.
 
 Metrics and logs go to VictoriaMetrics and VictoriaLogs, with Grafana on top at
-`http://localhost:3000` ([Admin consoles](#admin-consoles)). `COMPOSE_PROFILES=monitoring` in the env file runs those three in this
-project; without it, `VM_REMOTE_WRITE_URL` and `VLOGS_URL` send the same metrics and logs to a
-monitoring server you already have. [docs/stack.md](docs/stack.md#monitoring) describes both modes.
+`http://localhost:3000` ([Admin consoles](#admin-consoles)). `COMPOSE_PROFILES=monitoring` in the
+env file runs those three in this project; without it, `VM_REMOTE_WRITE_URL` and `VLOGS_URL` send
+the same metrics and logs to a monitoring server you already have.
+[docs/stack.md](docs/stack.md#monitoring) describes both modes.
 node-exporter and cAdvisor watch the whole host, so they are off by default: add `host-monitoring`
 to `COMPOSE_PROFILES` to start them too.
 
@@ -192,9 +193,9 @@ more than usual:
 2. Run `deno task proxy:start` on it: `deno task deploy` restarts the app's containers but never
    the proxy, so the proxy that is already running keeps serving its dashboard at
    `proxy.<DOMAIN>` until then.
-3. The next deploy publishes Grafana on `127.0.0.1:3000` and the MinIO console on
-   `127.0.0.1:9001`; when something on the server already uses one of them, the deploy fails with
-   "port is already allocated". Set `GRAFANA_HOST_PORT` or `MINIO_CONSOLE_HOST_PORT` in the env
+3. The next deploy publishes Grafana (with the `monitoring` profile) on `127.0.0.1:3000` and the
+   MinIO console on `127.0.0.1:9001`; when something on the server already uses one of them, the
+   deploy fails with "port is already allocated". Set `GRAFANA_HOST_PORT` or `MINIO_CONSOLE_HOST_PORT` in the env
    file to a free `127.0.0.1:<port>` first ([Admin consoles](#admin-consoles)).
 
 That deploy also recreates the project's network, which no longer has a fixed subnet, so every

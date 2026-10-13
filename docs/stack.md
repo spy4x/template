@@ -84,8 +84,8 @@ VictoriaLogs, Grafana, vmalert and Alertmanager, and vmagent and Vector send to 
 `127.0.0.1:3000` of the machine, with no public address (README, "Admin consoles"; user `admin`,
 password `GRAFANA_PASS`), with both data sources already there
 (`infra/configs/grafana-datasources.yml`); it downloads the VictoriaLogs data source plugin, at
-the version pinned in the Compose file, at its first start. Both databases keep 14 days, under `.volumes/victoriametrics` and
-`.volumes/victorialogs`.
+the version pinned in the Compose file, at its first start. Both databases keep 14 days, under
+`.volumes/victoriametrics` and `.volumes/victorialogs`.
 
 **External**: take `monitoring` out of `COMPOSE_PROFILES` and name the other server:
 
