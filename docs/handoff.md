@@ -273,7 +273,12 @@ These cost real time to find. Do not rediscover them.
    on the account's address, proven. `GET /api/auth/methods` answers `providerProofUntil`, so the
    dialogs show the form or the links back to the provider (`libs/ui/provider-proof.tsx`). A
    changed address of such an account lives on the `email-code` key its code proved, which
-   `readEmailStatus` reads before the provider's own address. Not built: a first password by
+   `readEmailStatus` reads before the provider's own address. A first password takes that key
+   away (`dropCodeKeys`, `libs/server/auth/email-verification.ts`), and so does a later change of
+   address, so no `email-code` key stays on an address the account has left.
+   `POST /api/auth/password/set` asks for `otp` while two-factor is on, and
+   `POST /api/auth/methods/:provider/link` asks for the password or the same provider proof, so a
+   session cannot make itself recent by linking one more provider. Not built: a first password by
    reset mail, so "forgot password" still finds no key for such an account.
 
    **Changing the address.** `POST /api/auth/email/change` with `{ email,

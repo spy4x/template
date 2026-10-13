@@ -275,6 +275,9 @@ What a person gets:
   and deletes itself after signing in with its provider again: a provider sign-in less than five
   minutes old stands in for the password, and the dialog links to the provider when there is
   none. Once it has a password it is asked for that, like any other account.
+- Linking a provider asks for the same proof: the password when the account has one, otherwise a
+  provider sign-in less than five minutes old. A first password also asks for the authenticator
+  code while two-factor is on.
 
 ## Admin consoles
 
