@@ -3,9 +3,10 @@
 #
 #   backup             a backup now, then one every 24 hours (what the `backup` service runs)
 #   backup once        one backup, then old snapshots are thinned out
-#   backup restore [snapshot]
-#                      loads a snapshot (the latest by default) into the database PGDATABASE names,
-#                      which must hold no tables
+#   backup restore <snapshot>
+#                      loads the snapshot with that id (`latest` for the newest) into the database
+#                      PGDATABASE names, which must hold no tables; without an id it lists the
+#                      snapshots and loads nothing
 #   backup <command>   anything else runs as it is, with the repository set: `backup restic snapshots`
 #
 # It reads the database from libpq's variables (PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE) and
@@ -69,7 +70,15 @@ schedule() {
 }
 
 restore() {
-  local snapshot="${1:-latest}" tables
+  local snapshot="${1:-}" tables found id saved
+  # No default: the newest snapshot is not always the one to take. A replacement server saves its
+  # own empty database as soon as it starts, and a backup made after the damage holds the damage.
+  if [ -z "$snapshot" ]; then
+    restic snapshots --compact || true
+    log "Name the snapshot to restore, by its id from the list above (or \"latest\" for the newest):" \
+      "backup restore <id>. Nothing was changed."
+    exit 1
+  fi
   # A restore over existing tables would mix two states, so it only goes into an empty database.
   tables=$(psql --no-psqlrc --no-password --tuples-only --no-align --set ON_ERROR_STOP=1 --command \
     "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -79,9 +88,17 @@ restore() {
       "was changed (README, \"Backups\")."
     exit 1
   fi
-  log "Restoring snapshot ${snapshot} into ${PGDATABASE}."
+  # Said before anything is loaded, so the person sees which backup they are getting.
+  found=$(restic snapshots --json "$snapshot")
+  id=$(grep -o '"short_id":"[0-9a-f]*' <<<"$found" | head -n 1 | cut -d'"' -f4 || true)
+  saved=$(grep -o '"time":"[^"]*' <<<"$found" | head -n 1 | cut -d'"' -f4 || true)
+  if [ -z "$id" ]; then
+    log "No snapshot ${snapshot} in the repository. Nothing was changed."
+    exit 1
+  fi
+  log "Restoring snapshot ${id}, saved at ${saved}, into ${PGDATABASE}."
   # One transaction: a restore that fails half-way leaves the database empty, not half filled.
-  restic dump "$snapshot" "/$DUMP_NAME" |
+  restic dump "$id" "/$DUMP_NAME" |
     pg_restore --no-owner --no-password --exit-on-error --single-transaction --dbname "$PGDATABASE"
   log "Restore done."
 }

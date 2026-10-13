@@ -342,10 +342,13 @@ not overwritten. On the server, in the app's directory, with `<db>` for `DB_NAME
      -c 'ALTER DATABASE "<db>" RENAME TO "<db>_before_restore"' -c 'CREATE DATABASE "<db>"'
    ```
 
-3. Restore the latest snapshot, or the one whose id you name (`restic snapshots` above lists them):
+3. List the snapshots, choose one by its date, and restore it by its id. The newest is not always
+   the right one: a snapshot made after the damage holds the damage. The restore says which
+   snapshot it loads, with its time, before it changes anything; without an id it only prints the
+   list.
 
    ```sh
-   deno task compose run --rm backup restore
+   deno task compose run --rm backup restic snapshots
    deno task compose run --rm backup restore <snapshot id>
    ```
 
@@ -359,9 +362,14 @@ not overwritten. On the server, in the app's directory, with `<db>` for `DB_NAME
 
 5. When the restored data has proven right, drop `<db>_before_restore` by hand.
 
-On a new server the steps are the same after the first `deno task deploy`, which creates a database
-with empty tables. To rehearse a restore without touching the live database, create a spare one and
-name it: `deno task compose run --rm -e PGDATABASE=<spare> backup restore`.
+On a new server, run the same steps after the first `deno task deploy`, which creates a database
+with empty tables. The backup container there saves that empty database as soon as it starts, so
+the newest snapshots in the list are empty ones: choose the last snapshot from before the old server
+failed. Restore soon after the deploy, because every day the new server runs adds an empty snapshot
+and the old ones thin out.
+
+To rehearse a restore without touching the live database, create a spare one and name it:
+`deno task compose run --rm -e PGDATABASE=<spare> backup restore <snapshot id>`.
 
 `deno task test:backup` runs the same backup and restore against a throwaway Postgres
 (`infra/backup/restore.test.sh`), and CI runs it on every pull request.
