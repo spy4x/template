@@ -94,7 +94,7 @@ Deno.test("the project's containers are read from one JSON object per line or fr
   expect(parseContainers(`{"Name":"shop-db"}`)).toBeUndefined()
 })
 
-Deno.test("a port held by this project's own running container is not probed; one it only held while running is", () => {
+Deno.test("a port held by this project's own running container is not probed; a port of its stopped container is", () => {
   const ports = parseProject(CONFIG, RAW_CONFIG)!.ports
   const containers = parseContainers(
     [ROW("db", "running", 5432), ROW("grafana", "exited", 3000)].join("\n"),
