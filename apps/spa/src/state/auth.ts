@@ -263,10 +263,14 @@ export async function changePassword(
  * Sets the first password of an account that has none. The server takes it only after a sign-in
  * with a provider a moment ago.
  */
-export async function setPassword(newPassword: string): Promise<{ ok: boolean; error?: string }> {
+export async function setPassword(
+  newPassword: string,
+  otp?: string,
+): Promise<{ ok: boolean; error?: string }> {
   const result = await apiFetch<ApiSuccessResponse>("/api/auth/password/set", {
     method: "POST",
-    body: JSON.stringify({ newPassword }),
+    // With two-factor on, the authenticator code goes along.
+    body: JSON.stringify(otp === undefined ? { newPassword } : { newPassword, otp }),
   })
   return result.ok ? { ok: true } : { ok: false, error: result.error.message }
 }

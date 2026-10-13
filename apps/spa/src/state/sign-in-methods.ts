@@ -43,8 +43,11 @@ export async function cancelSignUp(): Promise<void> {
 /** The calls the sign-in methods card makes. The store takes them, so a test passes its own. */
 export interface SignInMethodsHttp {
   list(): Promise<Answer<SignInMethodsResponse>>
-  /** Starts linking `provider`: answers the provider's page to send the browser to. */
-  link(provider: OAuthProviderId): Promise<Answer<{ url: string }>>
+  /**
+   * Starts linking `provider`: answers the provider's page to send the browser to. `password` is
+   * the account's, when it has one.
+   */
+  link(provider: OAuthProviderId, password?: string): Promise<Answer<{ url: string }>>
   /** Unlinks one method. `signedOut` when it was the one this device signed in with. */
   unlink(methodId: number): Promise<Answer<{ signedOut: boolean }>>
 }
@@ -60,9 +63,10 @@ export const signInMethodsHttp: SignInMethodsHttp = {
       providerProofUntil: result.data.providerProofUntil ?? null,
     }
   },
-  async link(provider) {
+  async link(provider, password) {
     const result = await apiFetch<{ url: string }>(`/api/auth/methods/${provider}/link`, {
       method: "POST",
+      body: JSON.stringify(password === undefined ? {} : { password }),
     })
     if (!result.ok) return { ok: false, error: result.error.message }
     return { ok: true, url: result.data.url }
@@ -121,13 +125,20 @@ export function createSignInMethodsStore(
     error.value = null
   }
 
-  /** Sends the browser to `provider` to link it. A refusal sets `error` and stays on the page. */
-  async function link(provider: OAuthProviderId): Promise<void> {
+  /**
+   * Sends the browser to `provider` to link it, with the account's `password` when it has one. A
+   * refusal sets `error` and stays on the page.
+   */
+  async function link(provider: OAuthProviderId, password?: string): Promise<void> {
     if (pending.value) return
     pending.value = true
     error.value = null
-    const answer = await attempt(() => http.link(provider))
+    const answer = await attempt(() => http.link(provider, password))
     if (!answer.ok) {
+      // A refusal may mean the provider sign-in is no longer recent: read until when it is, and
+      // keep the refusal shown.
+      const list = await attempt(http.list)
+      if (list.ok) providerProofUntil.value = list.providerProofUntil
       pending.value = false
       error.value = answer.error
       return

@@ -346,6 +346,64 @@ describe("the profile page", () => {
     expect(calls).not.toContain("POST /api/auth/password/change")
   })
 
+  it("sends the authenticator code with a first password while two-factor is on", async () => {
+    const bodies: Record<string, unknown> = {}
+    const routes = signedInWithGoogle(SOON)
+    sessionState.value = {
+      ...sessionState.value,
+      user: { ...sessionState.value.user!, mfa: UserMFAStatus.CONFIGURED },
+    }
+    const calls = api(
+      { ...routes, "POST /api/auth/password/set": [200, { success: true }] },
+      [503, { error: "down" }],
+      bodies,
+    )
+    await open("/", <ProfileView />)
+    await press("[data-e2e=password-open]")
+    await type("[data-e2e=password-new]", "battery-staple")
+
+    // Without the code nothing is sent, and the field says why.
+    await submit("[data-e2e=password-new]")
+    expect(calls).not.toContain("POST /api/auth/password/set")
+    expect(text("[data-e2e=password-dialog]")).toContain(
+      "Enter the code from your authenticator app",
+    )
+
+    await type("[data-e2e=password-otp]", "123456")
+    await submit("[data-e2e=password-new]")
+    expect(bodies["POST /api/auth/password/set"]).toEqual({
+      newPassword: "battery-staple",
+      otp: "123456",
+    })
+  })
+
+  it("links a provider with the password typed in the dialog", async () => {
+    const bodies: Record<string, unknown> = {}
+    signedInWithGoogle(null)
+    const password: SignInMethod = { ...google, id: 3, kind: "password" }
+    api(
+      {
+        "GET /api/auth/methods": [200, {
+          methods: [password],
+          available: ["github"],
+          providerProofUntil: null,
+        }],
+        // Refused, so the page is not left and the body can be read.
+        "POST /api/auth/methods/github/link": [400, { error: "Invalid password" }],
+      },
+      [503, { error: "down" }],
+      bodies,
+    )
+    await open("/", <ProfileView />)
+
+    await press("[data-e2e=sign-in-method-link-github]")
+    await type("[data-e2e=sign-in-method-link-password]", "Passw0rd!")
+    await submit("[data-e2e=sign-in-method-link-password]")
+
+    expect(bodies["POST /api/auth/methods/github/link"]).toEqual({ password: "Passw0rd!" })
+    expect(text("[data-e2e=sign-in-method-link-dialog]")).toContain("Invalid password")
+  })
+
   it("offers the way back to Google, and no form, once the sign-in is no longer recent", async () => {
     const calls = api(signedInWithGoogle(LONG_AGO), [503, { error: "down" }])
     await open("/", <ProfileView />)

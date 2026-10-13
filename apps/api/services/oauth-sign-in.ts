@@ -28,7 +28,9 @@
  *   the write that takes it, never from what the browser sent.
  * - **An address that is not verified links nothing.** The package ignores it when it resolves the
  *   person, so such a callback always ends at the question, never inside someone's account.
- * - **Linking from the profile.** The package's connect flow: it is bound to the signed-in user,
+ * - **Linking from the profile.** Starting it asks for the account's password, or for a provider
+ *   sign-in of a moment ago when it has none (the route checks; see the last point). Then the
+ *   package's connect flow runs: it is bound to the signed-in user,
  *   adds the provider to that user whatever the provider's address, and never touches another
  *   account's methods. A provider account another user already signs in with is refused, and the
  *   page says so. Its `state` has a cookie of its own; the callback, which both kinds of flow
@@ -42,7 +44,10 @@
  *   has no password to confirm a deletion, a first password or a new address with. Its proof is
  *   the session itself: one a provider sign-in started less than `PROVIDER_PROOF_MINUTES` ago
  *   (`proofUntil`). A session left open on a shared machine is older than that, and the person
- *   who is still there signs in with the provider again.
+ *   who is still there signs in with the provider again. Such a session cannot make itself
+ *   recent either: the one way to get a provider sign-in without the owner's provider account
+ *   would be to link another one, and starting a link asks for the same proof (the password, or
+ *   this sign-in of a moment ago). Unlinking asks for none; it adds no way in.
  *
  * Reads no environment and imports no singleton, like `sign-in.ts`.
  *

@@ -2,6 +2,7 @@
 import { expect } from "@std/expect"
 import { Hono } from "hono"
 import postgres from "postgres"
+import * as OTPAuth from "@hectorm/otpauth"
 import {
   AuthAuditEventType,
   type EmailStatus,
@@ -21,6 +22,7 @@ import { createOAuthRoute } from "../../apps/api/routes/auth-oauth.ts"
 import {
   createAuthRoute,
   PASSWORD_ALREADY_SET,
+  PASSWORD_SET_CODE_REQUIRED,
   PROVIDER_PROOF_REQUIRED,
 } from "../../apps/api/routes/auth.ts"
 import { createMutationGuards } from "../../apps/api/middlewares/mutation-guards.ts"
@@ -151,7 +153,7 @@ function buildApp(sql: postgres.Sql, people: Record<string, ProviderPerson>) {
       signIn,
       emit: () => {},
       mutationGuards,
-      rateLimits: { strictByIp: pass, normal: pass },
+      rateLimits: { strictByIp: pass, strictByUser: pass, normal: pass },
       origin: ORIGIN,
       logError: () => {},
     }),
@@ -234,6 +236,16 @@ function browser({ app }: App) {
 type Browser = ReturnType<typeof browser>
 
 const ADA: ProviderPerson = { sub: "1001", email: "ada@example.com" }
+
+/** The authenticator code of `secret` (base32) at `timestamp`. */
+function totpCode(secret: string, timestamp: number): string {
+  return new OTPAuth.TOTP({
+    secret: OTPAuth.Secret.fromBase32(secret),
+    algorithm: "SHA1",
+    digits: 6,
+    period: 30,
+  }).generate({ timestamp })
+}
 
 /** An account made with Google and no password, signed in on the browser returned with its id. */
 async function googleAccount(app: App): Promise<{ ada: Browser; userId: number }> {
@@ -411,5 +423,153 @@ Deno.test("a Google sign-in from longer ago changes no address", async () => {
 
     expect(await emailOf(ada)).toEqual({ email: "ada@example.com", proven: true, pending: null })
     expect(app.codes.size).toBe(0)
+  })
+})
+
+Deno.test("an address the account left opens it no more, also after a first password in between", async () => {
+  await withSchema(async (sql) => {
+    // Whoever has the middle address later, with a Google account that vouches for it.
+    const app = buildApp(sql, { ada: ADA, later: { sub: "3003", email: "ada@new.example" } })
+    const { ada, userId } = await googleAccount(app)
+    await ada.post("/auth/email/change", { email: "ada@new.example" })
+    await ada.post("/auth/email/verify", { code: app.codes.get("ada@new.example") })
+    expect((await ada.post("/auth/password/set", { newPassword: NEW_PASSWORD })).status).toBe(200)
+
+    const asked = await ada.post("/auth/email/change", {
+      email: "ada@third.example",
+      password: NEW_PASSWORD,
+    })
+    expect(asked.status).toBe(200)
+    const verified = await ada.post("/auth/email/verify", {
+      code: app.codes.get("ada@third.example"),
+    })
+    expect(verified.status).toBe(200)
+
+    const keys = await sql`
+      SELECT method, email FROM auth_keys WHERE user_id = ${userId} ORDER BY method`
+    expect(keys.map((key) => [key.method, key.email])).toEqual([
+      ["oauth:google", "ada@example.com"],
+      [PASSWORD_METHOD, "ada@third.example"],
+    ])
+    // The stranger is asked whether to create an account: Ada's is not theirs.
+    const stranger = browser(app)
+    expect(await stranger.throughGoogle("later")).toBe("/sign-up/confirm")
+    expect((await stranger.get("/auth/methods")).status).toBe(401)
+  })
+})
+
+Deno.test("a first password takes the address off the code key that held it", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada, userId } = await googleAccount(app)
+    await ada.post("/auth/email/change", { email: "ada@new.example" })
+    await ada.post("/auth/email/verify", { code: app.codes.get("ada@new.example") })
+
+    expect((await ada.post("/auth/password/set", { newPassword: NEW_PASSWORD })).status).toBe(200)
+
+    const keys = await sql`
+      SELECT method, email FROM auth_keys WHERE user_id = ${userId} ORDER BY method`
+    expect(keys.map((key) => [key.method, key.email])).toEqual([
+      ["oauth:google", "ada@example.com"],
+      [PASSWORD_METHOD, "ada@new.example"],
+    ])
+  })
+})
+
+Deno.test("a Google sign-in from longer ago links no provider, so it cannot make itself recent", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA, mallory: { sub: "6006", email: "mallory@example.com" } })
+    const { ada, userId } = await googleAccount(app)
+    await outliveTheProof(sql)
+
+    const link = await ada.post("/auth/methods/google/link")
+
+    expect(await refusal(link)).toBe(PROVIDER_PROOF_REQUIRED)
+    // No flow started, so no second Google account lands in Ada's and signs in fresh.
+    const intruder = browser(app)
+    expect(await intruder.throughGoogle("mallory")).toBe("/sign-up/confirm")
+    const [{ keys }] = await sql`
+      SELECT count(*)::int AS keys FROM auth_keys WHERE user_id = ${userId}`
+    expect(keys).toBe(1)
+    expect(await refusal(await ada.post("/auth/account/delete", {}))).toBe(PROVIDER_PROOF_REQUIRED)
+    expect(await refusal(await ada.post("/auth/password/set", { newPassword: NEW_PASSWORD })))
+      .toBe(PROVIDER_PROOF_REQUIRED)
+    expect(await refusal(await ada.post("/auth/email/change", { email: "ada@new.example" })))
+      .toBe(PROVIDER_PROOF_REQUIRED)
+  })
+})
+
+Deno.test("a Google sign-in a moment ago starts the link of another provider account", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada } = await googleAccount(app)
+
+    const link = await ada.post("/auth/methods/google/link")
+
+    expect(link.status).toBe(200)
+    expect(typeof (await link.json()).url).toBe("string")
+  })
+})
+
+Deno.test("an account with a password links a provider only with that password", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada } = await googleAccount(app)
+    expect((await ada.post("/auth/password/set", { newPassword: NEW_PASSWORD })).status).toBe(200)
+
+    // The Google sign-in of a moment ago stands in for no password that exists.
+    expect(await refusal(await ada.post("/auth/methods/google/link"))).toBe("Invalid password")
+    expect(await refusal(await ada.post("/auth/methods/google/link", { password: "Wr0ng-one!" })))
+      .toBe("Invalid password")
+    expect((await ada.post("/auth/methods/google/link", { password: NEW_PASSWORD })).status)
+      .toBe(200)
+  })
+})
+
+Deno.test("a first password waits for the authenticator code while two-factor is on", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada } = await googleAccount(app)
+    const { secret } = await (await ada.post("/auth/totp/connect/start")).json()
+    const now = Date.now()
+    const finished = await ada.post("/auth/totp/connect/finish", { otp: totpCode(secret, now) })
+    expect(finished.status).toBe(200)
+
+    expect(await refusal(await ada.post("/auth/password/set", { newPassword: NEW_PASSWORD })))
+      .toBe(PASSWORD_SET_CODE_REQUIRED)
+    const wrong = await ada.post("/auth/password/set", {
+      newPassword: NEW_PASSWORD,
+      otp: totpCode(secret, now + 10 * 60_000),
+    })
+    expect(await refusal(wrong)).toBe("Code is incorrect")
+    expect((await methodsOf(ada)).methods.map((method) => method.kind)).toEqual(["google"])
+    // So the password that could turn two-factor off does not exist yet.
+    expect((await ada.post("/auth/totp/disconnect", { password: NEW_PASSWORD })).status).toBe(400)
+
+    // The next code: the one that turned two-factor on is spent.
+    const set = await ada.post("/auth/password/set", {
+      newPassword: NEW_PASSWORD,
+      otp: totpCode(secret, now + 30_000),
+    })
+    expect(set.status).toBe(200)
+    expect((await methodsOf(ada)).methods.map((method) => method.kind).sort())
+      .toEqual(["google", "password"])
+  })
+})
+
+Deno.test("a session a password started confirms nothing in a provider's place", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada } = await googleAccount(app)
+    expect((await ada.post("/auth/password/set", { newPassword: NEW_PASSWORD })).status).toBe(200)
+    const phone = browser(app)
+    const signedIn = await phone.post("/auth/password/check", {
+      login: "ada@example.com",
+      password: NEW_PASSWORD,
+    })
+    expect(signedIn.status).toBe(200)
+
+    expect((await methodsOf(phone)).providerProofUntil).toBe(null)
+    expect((await methodsOf(ada)).providerProofUntil).not.toBe(null)
   })
 })

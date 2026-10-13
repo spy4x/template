@@ -45,6 +45,8 @@ export interface ProfileValues {
   lastName: string
   currentPassword: string
   newPassword: string
+  /** The authenticator code a first password needs while two-factor is on. */
+  passwordOtp: string
   otp: string
   /** The password or the authenticator code typed to turn two-factor off. */
   twoFactorProof: string
@@ -76,6 +78,7 @@ const FIELD_ORDER: readonly (keyof ProfileValues)[] = [
   "lastName",
   "currentPassword",
   "newPassword",
+  "passwordOtp",
   "otp",
   "twoFactorProof",
 ]
@@ -212,6 +215,7 @@ export function ProfileScreen(
     lastName: useRef<HTMLInputElement>(null),
     currentPassword: useRef<HTMLInputElement>(null),
     newPassword: useRef<HTMLInputElement>(null),
+    passwordOtp: useRef<HTMLInputElement>(null),
     otp: useRef<HTMLInputElement>(null),
     twoFactorProof: useRef<HTMLInputElement>(null),
   }
@@ -423,7 +427,7 @@ export function ProfileScreen(
         </SettingGroup>
       </div>
 
-      {methods && <SignInMethods {...methods} />}
+      {methods && <SignInMethods {...methods} providerProof={providerProof} />}
       {devices && <SignedInDevices {...devices} />}
 
       {apiTokens && <ApiTokens {...apiTokens} />}
@@ -627,6 +631,26 @@ export function ProfileScreen(
                     required
                   />
                 </Field>
+                {providerProof && user?.mfa === UserMFAStatus.CONFIGURED && (
+                  // The password could turn two-factor off, so it costs the code too.
+                  <Field
+                    id="password-otp"
+                    label="Code from your authenticator app"
+                    error={errors.fields.passwordOtp}
+                    required
+                  >
+                    <Input
+                      ref={fieldRefs.passwordOtp}
+                      data-e2e="password-otp"
+                      name="otp"
+                      inputMode="numeric"
+                      autocomplete="one-time-code"
+                      value={values.passwordOtp}
+                      onInput={(e) => onValueChange("passwordOtp", e.currentTarget.value)}
+                      required
+                    />
+                  </Field>
+                )}
                 {onSignOutOthersChange && !providerProof && (
                   // The row is the 44 px target: the whole label ticks the box.
                   <div class="flex min-h-11 items-center">

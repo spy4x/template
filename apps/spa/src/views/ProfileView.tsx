@@ -73,6 +73,7 @@ export function ProfileView() {
     lastName: session.user?.lastName || "",
     currentPassword: "",
     newPassword: "",
+    passwordOtp: "",
     otp: "",
     twoFactorProof: "",
   })
@@ -230,10 +231,18 @@ export function ProfileView() {
   /** The first password of an account that has none. The list of sign-in methods gains it. */
   const submitFirstPassword = async () => {
     setPasswordError(null)
-    const problems = refusedFields(authPasswordSetSchema, { newPassword: values.newPassword })
-    if (!fieldsPass(problems)) return
+    // With two-factor on the server asks for the code too; the dialog shows its field then.
+    const twoFactor = session.user?.mfa === UserMFAStatus.CONFIGURED
+    const problems: ProfileFieldErrors = {
+      ...refusedFields(authPasswordSetSchema, { newPassword: values.newPassword }),
+    }
+    if (twoFactor && !/^[0-9]{6}$/.test(values.passwordOtp)) problems.passwordOtp = CODE_MISSING
+    if (!fieldsPass(Object.keys(problems).length > 0 ? problems : null)) return
     setBusyPassword(true)
-    const result = await setPassword(values.newPassword)
+    const result = await setPassword(
+      values.newPassword,
+      twoFactor ? values.passwordOtp : undefined,
+    )
     setBusyPassword(false)
     // Read again either way: a refusal may mean the provider sign-in is no longer recent.
     await methods.load()
@@ -241,7 +250,7 @@ export function ProfileView() {
       setPasswordError(result.error || PROFILE_FAILURES.passwordSet)
       return
     }
-    setValues((current) => ({ ...current, newPassword: "" }))
+    setValues((current) => ({ ...current, newPassword: "", passwordOtp: "" }))
     toasts.success({
       title: "Password set",
       body: "You can now sign in with your e-mail address and this password too.",
@@ -418,7 +427,7 @@ export function ProfileView() {
         available: methods.available.value,
         pending: methods.pending.value,
         error: methods.error.value === "" ? SIGN_IN_METHODS_FAILURE : methods.error.value,
-        onLink: (provider) => void methods.link(provider),
+        onLink: (provider, password) => void methods.link(provider, password),
         onUnlink: (id) => void unlinkMethod(id),
       }}
       devices={{

@@ -187,11 +187,25 @@ export type AuthPasswordChange = typeof authPasswordChangeSchema.infer
  */
 export const PROVIDER_PROOF_MINUTES = 5
 
-/** The body of "set a password" for an account that has none: the first password. */
+/**
+ * The body of "set a password" for an account that has none: the first password. `otp` is the
+ * authenticator code, which an account with two-factor on must send too: the password could
+ * otherwise turn two-factor off.
+ */
 export const authPasswordSetSchema = type({
   newPassword: "8 <= string <= 50",
+  "otp?": "/^[0-9]{6}$/",
 })
 export type AuthPasswordSet = typeof authPasswordSetSchema.infer
+
+/**
+ * The body of "link a provider". An account with a password sends it; one without has signed in
+ * with a provider it already has a moment ago instead ({@link PROVIDER_PROOF_MINUTES}).
+ */
+export const signInMethodLinkSchema = type({
+  "password?": authPasswordSchema.get("password"),
+})
+export type SignInMethodLink = typeof signInMethodLinkSchema.infer
 
 /** Days a deleted account waits before it is removed for good. Signing in before then restores it. */
 export const ACCOUNT_DELETION_GRACE_DAYS = 7

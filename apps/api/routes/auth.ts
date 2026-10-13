@@ -123,6 +123,9 @@ const MAX_SESSION_ID = 2_147_483_647
 /** The answer when the account has two-factor on and the request carries no code. */
 export const ACCOUNT_DELETE_CODE_REQUIRED = "Enter the code from your authenticator app"
 
+/** The same answer for a first password: with two-factor on, it needs the code too. */
+export const PASSWORD_SET_CODE_REQUIRED = ACCOUNT_DELETE_CODE_REQUIRED
+
 /**
  * The answer when an account with no password asks for a step that the others confirm with their
  * password, and its session is no sign-in with Google or GitHub of a moment ago.
@@ -511,11 +514,29 @@ export function createAuthRoute(
       if (validationResult.error) {
         return c.json({ error: validationResult.error.description }, 400)
       }
-      const outcome = await signIn.setPassword(
-        c,
-        c.get("auth")!,
-        validationResult.data.newPassword,
-      )
+      const authData = c.get("auth")!
+      const { newPassword, otp } = validationResult.data
+      // With two-factor on, the code is asked as the deletion asks it: the new password is
+      // accepted as proof to turn two-factor off, so it must not cost less than the code.
+      if (authData.user.mfa === UserMFAStatus.CONFIGURED) {
+        if (otp === undefined) return c.json({ error: PASSWORD_SET_CODE_REQUIRED }, 400)
+        // The cheap refusals first, so a code is not spent on a request that sets nothing.
+        if (await signIn.hasPassword(authData.user.id)) {
+          return c.json({ error: PASSWORD_ALREADY_SET }, 400)
+        }
+        if (!(await signIn.confirmedByProvider(authData))) {
+          return c.json({ error: PROVIDER_PROOF_REQUIRED }, 400)
+        }
+        const checked = await checkUnderFailureCount(
+          c,
+          totpFailures,
+          authData.user.id,
+          () => signIn.verifyTotpCode(authData, otp),
+          () => c.json({ error: "Code is incorrect" }, 400),
+        )
+        if (checked !== true) return checked
+      }
+      const outcome = await signIn.setPassword(c, authData, newPassword)
       if (outcome === PasswordSetOutcome.Set) return c.json({ success: true })
       const refusals = {
         [PasswordSetOutcome.AlreadySet]: PASSWORD_ALREADY_SET,

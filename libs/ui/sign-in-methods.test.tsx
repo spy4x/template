@@ -83,6 +83,14 @@ async function submit(selector: string): Promise<void> {
   })
 }
 
+async function type(selector: string, value: string): Promise<void> {
+  const field = find<HTMLInputElement>(selector)
+  field.value = value
+  await act(() => {
+    field.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event)
+  })
+}
+
 /** Clicks the button labelled `label` inside the dialog `dialog` names by its `data-e2e`. */
 async function clickInDialog(dialog: string, label: string): Promise<void> {
   const button = [...document.querySelectorAll(`[data-e2e=${dialog}] button`)]
@@ -453,14 +461,77 @@ describe("SignInMethods", () => {
   })
 
   it("offers to link each provider that is not linked yet", async () => {
-    const asked: (string | number)[] = []
-    await mount(<SignInMethods {...methodsProps(asked)} />)
+    await mount(<SignInMethods {...methodsProps([])} />)
 
     expect(find("[data-e2e=sign-in-method-link-github]").textContent).toBe("Link GitHub")
-    expect(document.querySelector("[data-e2e=sign-in-method-link-google]")).toBe(null)
+    expect(document.querySelectorAll("[data-e2e=sign-in-method-link-google]").length).toBe(0)
+  })
+
+  it("asks an account with a password for it before a link, and hands it to the app", async () => {
+    const asked: [string, string | undefined][] = []
+    await mount(
+      <SignInMethods
+        {...methodsProps([])}
+        onLink={(provider, typed) => void asked.push([provider, typed])}
+      />,
+    )
+
     await click("[data-e2e=sign-in-method-link-github]")
 
-    expect(asked).toEqual(["github"])
+    // Nothing starts until the password is given.
+    expect(asked).toEqual([])
+    expect(isOpen("sign-in-method-link-dialog")).toBe(true)
+    expect(find("[data-e2e=sign-in-method-link-submit]").textContent).toBe("Continue to GitHub")
+    await type("[data-e2e=sign-in-method-link-password]", "Passw0rd!")
+    await submit("[data-e2e=sign-in-method-link-password]")
+    expect(asked).toEqual([["github", "Passw0rd!"]])
+  })
+
+  it("shows a refused password in the link dialog and puts focus back on its field", async () => {
+    const mounted = await mount(<SignInMethods {...methodsProps([])} />)
+    await click("[data-e2e=sign-in-method-link-github]")
+
+    await act(() =>
+      render(<SignInMethods {...methodsProps([], { error: "Invalid password" })} />, mounted)
+    )
+
+    expect(find("[data-e2e=sign-in-method-link-dialog]").textContent).toContain("Invalid password")
+    expect(focused()).toBe("sign-in-method-link-password")
+  })
+
+  it("links at once, asking nothing, after a Google sign-in a moment ago", async () => {
+    const asked: [string, string | undefined][] = []
+    await mount(
+      <SignInMethods
+        {...methodsProps([], { methods: [{ ...google, canUnlink: false }] })}
+        providerProof={{ providers: ["google"], fresh: true }}
+        onLink={(provider, typed) => void asked.push([provider, typed])}
+      />,
+    )
+
+    await click("[data-e2e=sign-in-method-link-github]")
+
+    expect(asked).toEqual([["github", undefined]])
+    expect(isOpen("sign-in-method-link-dialog")).toBe(false)
+  })
+
+  it("sends the person to Google before a link when the sign-in is not recent", async () => {
+    const asked: (string | number)[] = []
+    await mount(
+      <SignInMethods
+        {...methodsProps(asked, { methods: [{ ...google, canUnlink: false }] })}
+        providerProof={{ providers: ["google"], fresh: false }}
+      />,
+    )
+
+    await click("[data-e2e=sign-in-method-link-github]")
+
+    expect(asked).toEqual([])
+    expect(isOpen("sign-in-method-link-dialog")).toBe(true)
+    // A plain link out of the app, which comes back to the profile.
+    expect(find("[data-e2e=provider-proof-google]").getAttribute("href"))
+      .toBe("/api/auth/google/start?next=%2F")
+    expect(document.querySelectorAll("[data-e2e=sign-in-method-link-password]").length).toBe(0)
   })
 
   it("lets nothing be pressed while a change is in flight", async () => {
@@ -524,6 +595,7 @@ describe("ProfileScreen for an account without a password", () => {
       lastName: "",
       currentPassword: "",
       newPassword: "",
+      passwordOtp: "",
       otp: "",
       twoFactorProof: "",
     },
@@ -571,6 +643,50 @@ describe("ProfileScreen for an account without a password", () => {
     expect(find("[data-e2e=password-save]").textContent).toBe("Set password")
     await submit("[data-e2e=password-new]")
     expect(asked).toEqual(["set"])
+  })
+
+  it("asks for the authenticator code with a first password only while two-factor is on", async () => {
+    const withTwoFactor = { ...profile.user!, mfa: UserMFAStatus.CONFIGURED }
+    const mounted = await mount(
+      <ProfileScreen
+        {...profile}
+        methods={methodsProps([], { methods: [onlyGoogle] })}
+        providerProofFresh
+        onSetPassword={() => {}}
+      />,
+    )
+    await click("[data-e2e=password-open]")
+    expect(document.querySelectorAll("[data-e2e=password-otp]").length).toBe(0)
+
+    await act(() =>
+      render(
+        <ProfileScreen
+          {...profile}
+          user={withTwoFactor}
+          methods={methodsProps([], { methods: [onlyGoogle] })}
+          providerProofFresh
+          onSetPassword={() => {}}
+        />,
+        mounted,
+      )
+    )
+
+    const code = find<HTMLInputElement>("[data-e2e=password-otp]")
+    expect(code.required).toBe(true)
+    expect(code.labels?.[0]?.textContent).toContain("Code from your authenticator app")
+  })
+
+  it("hands the account's proof to the link buttons, so an old sign-in links nothing", async () => {
+    const asked: (string | number)[] = []
+    await mount(
+      <ProfileScreen {...profile} methods={methodsProps(asked, { methods: [onlyGoogle] })} />,
+    )
+
+    await click("[data-e2e=sign-in-method-link-github]")
+
+    expect(asked).toEqual([])
+    expect(isOpen("sign-in-method-link-dialog")).toBe(true)
+    expect(document.querySelectorAll("[data-e2e=sign-in-method-link-password]").length).toBe(0)
   })
 
   it("sends the person to Google before a first password when the sign-in is not recent", async () => {
