@@ -110,6 +110,7 @@ Deno.test("the MinIO console and Grafana are published on this machine only by d
 const MONITORING = [
   "vmagent",
   "vector",
+  "socket-proxy",
   "postgres-prometheus-exporter",
   "victoriametrics",
   "victorialogs",
@@ -219,7 +220,9 @@ Deno.test("no project network claims a fixed subnet, so a second project gets a 
       expect({ file, name, ipam: network?.ipam }).toEqual({ file, name, ipam: undefined })
     }
     // Only the proxy's network has one name for every project, and the engine owns its addresses.
-    expect(Object.keys(networks).filter((name) => name !== "proxy")).toEqual([])
+    // The one other network is Vector's way to the Docker socket proxy, named after the project.
+    expect(Object.keys(networks).filter((name) => name !== "proxy"))
+      .toEqual(file === "shared" ? ["docker-socket"] : [])
     expect(networks.proxy).toEqual({ external: true })
   }
 })

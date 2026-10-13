@@ -45,7 +45,8 @@ Defined in `infra/compose/`:
 - **MinIO** - object storage.
 - **Traefik** - reverse proxy, production compose only.
 - **vmagent, Vector, postgres-exporter** - collect this project's metrics and logs and send them
-  on; see "Monitoring" below. They always run.
+  on; see "Monitoring" below. They always run, and so does **socket-proxy**, through which Vector
+  reads the Docker API ("The Docker socket" below).
 - **VictoriaMetrics, VictoriaLogs, Grafana, vmalert, Alertmanager** - store, show and alert on
   them. Behind the `monitoring` compose profile.
 - **node-exporter, cAdvisor** - watch the whole host (CPU, disk, network, every container's
@@ -138,17 +139,71 @@ There is no alert for failing event listeners yet: the API counts them
 
 ### The Docker socket
 
-Vector reads the container logs through `/var/run/docker.sock`, in every deployment. The mount
-says `:ro`, but that does not limit anything: the socket is the whole Docker API, and a read-only
-mount of it still accepts every call, such as starting a container that mounts the host's disk.
-Whoever controls the Vector container controls the host. Traefik's mount in
-`infra/compose/compose.proxy.yml` is the same.
+The Docker socket (`/var/run/docker.sock`) is the whole Docker API. A `:ro` on its mount does not
+limit anything: a read-only mount still accepts every call, such as starting a container that
+mounts the host's disk. Whoever can call it freely controls the host.
 
-This is accepted for now, and the container is given nothing else to make it harder to take over:
-it has no Linux capability and cannot gain one (`cap_drop: [ALL]`, `no-new-privileges`), its file
-system is read-only, it publishes no port, and it reads only its own tracked config. It still runs
-as root, because the socket belongs to root. A proxy in front of the socket that allows only
-listing containers and reading their events and logs would close the gap; it is not there yet.
+Vector needs the API to find this project's containers and read their logs, in every deployment.
+It does not mount the socket. A small proxy, `socket-proxy`
+([wollomatic/socket-proxy](https://github.com/wollomatic/socket-proxy), one static binary), mounts
+it instead and passes on only what Vector's `docker_logs` source calls. Vector reaches the proxy
+at `tcp://socket-proxy:2375` (`docker_host` in `infra/configs/vector.yml`).
+
+**What the proxy allows.** `GET`, on exactly these paths, with or without a version prefix such
+as `/v1.44`:
+
+| Path                                                 | What it gives                                    |
+| ---------------------------------------------------- | ------------------------------------------------ |
+| `/_ping`, `/version`                                 | Whether Docker answers, and its version          |
+| `/containers/json`                                   | The list of containers                           |
+| `/containers/<id>/json`                              | One container's `docker inspect` output          |
+| `/containers/<id>/logs`                              | One container's log                              |
+| `/events`                                            | Containers starting and stopping, as they happen |
+
+**What it refuses.** Everything else. Every other method (`POST`, `PUT`, `DELETE`, `HEAD`) gets
+`405`: no container can be created, started, stopped, killed or removed, no command run in one
+(`exec`), no image pulled. Every other `GET` gets `403`: among them `/containers/<id>/archive`
+and `/containers/<id>/export`, which read files out of a container, and `/images`, `/volumes`,
+`/networks`, `/info` and `/exec`. The whole path must match, so `..` or a doubled slash does not
+get around the list.
+
+**What someone who takes over Vector can still do.** Read the log of every container on the host,
+not only this project's, and every container's `inspect` output, which includes its environment:
+the passwords and keys of this project, and of any other project on the same server. That is
+reading, and it is serious; it is no longer control of the host. Vector's own filter
+(`include_labels`) is no barrier here, because it runs in the container that was taken over.
+
+The proxy itself holds the whole socket, so it is given as little as possible to be taken over
+through. It listens on a network of its own (`docker-socket`, `internal: true`) that only Vector
+joins: it is not on the project's network or on `proxy`, has no Traefik label and publishes no
+port. It has no Linux capability and cannot gain one (`cap_drop: [ALL]`, `no-new-privileges`), and
+its file system is read-only. It runs as root, because the socket belongs to root and the number
+of its group differs from host to host; without capabilities, root opens the socket as its owner
+and can do little else. SELinux labelling is off for it (`label=disable`), as the socket has no
+label a container may use. Vector keeps the same limits, and still runs as root.
+
+Not behind the proxy: Traefik (`infra/compose/compose.proxy.yml`) mounts the socket itself to
+read the containers' labels, and with the `host-monitoring` profile the two host exporters mount
+the host's file system, where the socket is. `tests/compose-monitoring.test.ts` names these three
+and goes red when any other service mounts the socket.
+
+To repeat the refusal check, start the project, then call the proxy from a container on its
+network (`app` is `PROJECT` in lower case; any running container's id will do):
+
+```sh
+id=$(docker ps -q --no-trunc --filter name=app-vector)
+call() { docker run --rm --network app_docker-socket curlimages/curl:8.16.0 \
+  -s -o /dev/null -w "%{http_code} $1 $2\n" -X "$1" "http://socket-proxy:2375$2"; }
+call GET /containers/json                      # 200
+call POST /containers/create                   # 405
+call POST "/containers/$id/start"              # 405
+call POST "/containers/$id/stop"               # 405
+call POST "/containers/$id/exec"               # 405
+call GET "/containers/$id/archive?path=/etc"   # 403
+```
+
+The proxy writes each refused call to its log (`docker logs app-socket-proxy`), with the method
+and the path. An empty log there means Vector asks for nothing outside the list.
 
 ### Trying the external mode
 
