@@ -14,6 +14,7 @@ import {
   authPasswordResetSchema,
   authSignInSchema,
   authSignUpSchema,
+  authTotpDisconnectSchema,
   emailToVerify,
   type User,
   UserMFAStatus,
@@ -109,6 +110,10 @@ const MAX_SESSION_ID = 2_147_483_647
 
 /** The answer when the account has two-factor on and the request carries no code. */
 export const ACCOUNT_DELETE_CODE_REQUIRED = "Enter the code from your authenticator app"
+
+/** The answer when turning two-factor off is asked for with neither a password nor a code. */
+export const TOTP_DISCONNECT_PROOF_REQUIRED =
+  "Enter your password or the code from your authenticator app"
 
 /** Sets `Retry-After` and answers 429 with `error`. */
 function tooMany(c: Context<APIContext>, retryAfterMs: number, error: string): Response {
@@ -318,8 +323,31 @@ export function createAuthRoute(
       return outcome === true ? c.json({ success: true }) : outcome
     })
     .use(isAuthenticated2FA)
-    .post(`/totp/disconnect`, rateLimits.normal, async (c) => {
-      const isSuccess = await signIn.disconnectTotp(c.get("auth")!)
+    // Asks again for what a session left open on a shared machine lacks: the password, or a
+    // current authenticator code. An account with no password proves itself with the code.
+    .post(`/totp/disconnect`, rateLimits.strictByUser, async (c) => {
+      const body = await readApiJson(c)
+      const validationResult = validate(authTotpDisconnectSchema, body)
+      if (validationResult.error) {
+        return c.json({ error: validationResult.error.description }, 400)
+      }
+      const authData = c.get("auth")!
+      const { password, otp } = validationResult.data
+      if (otp !== undefined) {
+        const outcome = await checkUnderFailureCount(
+          c,
+          totpFailures,
+          authData.user.id,
+          () => signIn.verifyTotpCode(authData, otp),
+          () => c.json({ error: "Code is incorrect" }, 400),
+        )
+        if (outcome !== true) return outcome
+      } else if (password === undefined) {
+        return c.json({ error: TOTP_DISCONNECT_PROOF_REQUIRED }, 400)
+      } else if (!(await signIn.checkPassword(authData.user.id, password))) {
+        return c.json({ error: "Invalid password" }, 400)
+      }
+      const isSuccess = await signIn.disconnectTotp(authData)
       if (!isSuccess) {
         return c.json({ error: "OTP already disabled for your account" }, 400)
       }

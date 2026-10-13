@@ -49,6 +49,7 @@ import {
   PASSWORD_RESET_REQUESTED,
   SESSION_IS_CURRENT,
   SESSION_NOT_FOUND,
+  TOTP_DISCONNECT_PROOF_REQUIRED,
 } from "./auth.ts"
 
 /** When the fake sign-in says a deleted account goes for good. */
@@ -309,7 +310,13 @@ const sessionRoutes: SessionRoute[] = [
     body: { otp: "123456" },
     operation: "connectTotpFinish",
   },
-  { method: "POST", path: "/auth/totp/disconnect", body: undefined, operation: "disconnectTotp" },
+  {
+    method: "POST",
+    path: "/auth/totp/disconnect",
+    body: { password: "correct-horse" },
+    operation: "disconnectTotp",
+    calls: { succeeded: ["checkPassword", "disconnectTotp"], failed: ["checkPassword"] },
+  },
   {
     method: "POST",
     path: "/auth/password/change",
@@ -842,6 +849,80 @@ describe("auth routes count wrong one-time codes per user", () => {
       expect(calls).toEqual([route.operation])
     })
   }
+})
+
+describe("auth routes ask for proof before turning two-factor off", () => {
+  const disconnect = (body: unknown) => ({
+    method: "POST" as const,
+    path: "/auth/totp/disconnect",
+    body,
+  })
+
+  for (const [name, body] of [["an empty body", {}], ["no body", undefined]] as const) {
+    it(`refuses ${name}, with neither a password nor a code, and leaves two-factor on`, async () => {
+      const { app, calls } = buildApp()
+      const response = await send(app, disconnect(body), sameOriginHeaders)
+
+      expect(response.status).toBe(400)
+      if (body) expect(await response.json()).toEqual({ error: TOTP_DISCONNECT_PROOF_REQUIRED })
+      expect(calls).toEqual([])
+    })
+  }
+
+  it("refuses a wrong password and leaves two-factor on", async () => {
+    const { app, calls } = buildApp(undefined, { succeed: false })
+    const response = await send(app, disconnect({ password: "wrong-horse" }), sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Invalid password" })
+    expect(calls).toEqual(["checkPassword"])
+  })
+
+  it("turns two-factor off for the account's password", async () => {
+    const { app, calls } = buildApp()
+    const response = await send(app, disconnect({ password: "correct-horse" }), sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(calls).toEqual(["checkPassword", "disconnectTotp"])
+  })
+
+  it("turns two-factor off for a current code without asking for a password, as an account with none needs", async () => {
+    const { app, calls, failureCalls } = buildApp(undefined, {
+      signIn: { checkPassword: () => Promise.reject(new Error("no password was sent")) },
+    })
+    const response = await send(app, disconnect({ otp: "123456" }), sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(calls).toEqual(["verifyTotpCode", "disconnectTotp"])
+    expect(failureCalls).toEqual(["begin", "refund"])
+  })
+
+  it("refuses a wrong code, counts it and leaves two-factor on", async () => {
+    const { app, calls, failureCalls } = buildApp(undefined, { succeed: false })
+    const response = await send(app, disconnect({ otp: "123456" }), sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Code is incorrect" })
+    expect(calls).toEqual(["verifyTotpCode"])
+    expect(failureCalls).toEqual(["begin", "fail"])
+  })
+
+  it("refuses a code while the user is locked after wrong codes, without checking it", async () => {
+    const { app, calls } = buildApp(undefined, { lockedForMs: 90_500 })
+    const response = await send(app, disconnect({ otp: "123456" }), sameOriginHeaders)
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get("retry-after")).toBe("91")
+    expect(calls).toEqual([])
+  })
+
+  it("refuses a code that is not six digits", async () => {
+    const { app, calls } = buildApp()
+    const response = await send(app, disconnect({ otp: "12345" }), sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(calls).toEqual([])
+  })
 })
 
 describe("auth routes reset a password by e-mail link", () => {
