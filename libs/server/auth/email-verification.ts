@@ -19,7 +19,11 @@
 import type { Sql } from "@spy4x/server/db"
 import type { AuthKey, AuthStore } from "@spy4x/server/auth"
 import { normalizeEmail } from "@spy4x/server/auth"
-import { createEmailProof, DEFAULT_CODE_TTL_MINUTES } from "@spy4x/server/auth/email-code"
+import {
+  createEmailProof,
+  DEFAULT_CODE_TTL_MINUTES,
+  EMAIL_CODE_METHOD,
+} from "@spy4x/server/auth/email-code"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import type { EmailStatus } from "@domain/identity"
 
@@ -61,8 +65,9 @@ export function emailChanges(sql: Sql) {
 
 /**
  * Where the user's address stands: the one they sign in with, its proof, and a pending change.
- * The password key's address when there is one; else the address a provider vouched for (#141),
- * which is why an account made with Google reads as having a proven address.
+ * The password key's address when there is one. An account with no password has the address a
+ * code proved for it when it changed its address (#384), else the one a provider vouched for
+ * (#141), which is why an account made with Google reads as having a proven address.
  */
 export async function readEmailStatus(
   changes: Pick<EmailChanges, "find">,
@@ -70,8 +75,10 @@ export async function readEmailStatus(
   userId: number,
 ): Promise<EmailStatus> {
   const keys = await store.listKeys(userId)
+  const held = (candidate: AuthKey) => candidate.email !== null && candidate.provenAt !== null
   const key = keys.find((candidate) => candidate.method === PASSWORD_METHOD) ??
-    keys.find((candidate) => candidate.email !== null && candidate.provenAt !== null)
+    keys.find((candidate) => candidate.method === EMAIL_CODE_METHOD && held(candidate)) ??
+    keys.find(held)
   return {
     email: key?.email ?? null,
     proven: key?.email != null && key.provenAt !== null,

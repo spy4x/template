@@ -53,7 +53,12 @@ export const signInMethodsHttp: SignInMethodsHttp = {
   async list() {
     const result = await apiFetch<SignInMethodsResponse>("/api/auth/methods")
     if (!result.ok) return { ok: false, error: result.error.message }
-    return { ok: true, methods: result.data.methods, available: result.data.available }
+    return {
+      ok: true,
+      methods: result.data.methods,
+      available: result.data.available,
+      providerProofUntil: result.data.providerProofUntil ?? null,
+    }
   },
   async link(provider) {
     const result = await apiFetch<{ url: string }>(`/api/auth/methods/${provider}/link`, {
@@ -85,6 +90,11 @@ export function createSignInMethodsStore(
   /** `null` until the first read answers. */
   const methods = signal<readonly SignInMethod[] | null>(null)
   const available = signal<readonly OAuthProviderId[]>([])
+  /**
+   * Until when this device's sign-in with a provider confirms what an account with no password
+   * cannot give a password for; `null` when it does not.
+   */
+  const providerProofUntil = signal<string | null>(null)
   /** Why the last read or change failed; empty when the server gave no reason. */
   const error = signal<string | null>(null)
   const pending = signal(false)
@@ -107,6 +117,7 @@ export function createSignInMethodsStore(
     }
     methods.value = answer.methods
     available.value = answer.available
+    providerProofUntil.value = answer.providerProofUntil
     error.value = null
   }
 
@@ -141,7 +152,7 @@ export function createSignInMethodsStore(
     return "unlinked"
   }
 
-  return { methods, available, error, pending, load, link, unlink }
+  return { methods, available, providerProofUntil, error, pending, load, link, unlink }
 }
 
 export type SignInMethodsStore = ReturnType<typeof createSignInMethodsStore>

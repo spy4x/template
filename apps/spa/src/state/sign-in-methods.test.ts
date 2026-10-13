@@ -23,6 +23,8 @@ const google: SignInMethod = {
   canUnlink: true,
 }
 
+const PROOF_UNTIL = "2026-10-13T08:05:00.000Z"
+
 /** A server that holds `methods`, records each call and answers as `answers` says. */
 function fakeHttp(
   methods: SignInMethod[],
@@ -33,7 +35,12 @@ function fakeHttp(
     calls,
     list() {
       calls.push("list")
-      return answers.list?.() ?? Promise.resolve({ ok: true, methods, available: ["github"] })
+      return answers.list?.() ?? Promise.resolve({
+        ok: true,
+        methods,
+        available: ["github"],
+        providerProofUntil: PROOF_UNTIL,
+      })
     },
     link(provider) {
       calls.push(`link ${provider}`)
@@ -56,6 +63,7 @@ describe("the sign-in methods store", () => {
 
     expect(store.methods.value).toEqual([password, google])
     expect(store.available.value).toEqual(["github"])
+    expect(store.providerProofUntil.value).toBe(PROOF_UNTIL)
     expect(store.error.value).toBe(null)
   })
 
