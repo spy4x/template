@@ -83,8 +83,8 @@ the traps in this codebase. Read its "Traps in this codebase" before changing th
 ## The live demo is not production
 
 The template's own server, which runs the live demo the README links to, is not in production
-yet: nobody depends on it and nothing on it has to be kept. The owner said so on 2026-10-14. An
-agent may change that server without asking: deploy to it, edit its env file
+yet: nobody depends on it and nothing of this project on it has to be kept. The owner said so on
+2026-10-14. An agent may change that server without asking: deploy to it, edit its env file
 (`infra/envs/.env.prod`, which `deno task deploy` copies there), change or reset its database, and
 delete this project's data under `.volumes/`. Other projects run on the same server and are not
 ours to touch.
