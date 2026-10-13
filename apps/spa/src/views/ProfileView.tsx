@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks"
-import { useLocation } from "wouter-preact"
+import { useLocation, useSearch } from "wouter-preact"
 import { decodeBase64Url } from "@std/encoding"
 import {
   PROFILE_FAILURES,
@@ -33,15 +33,22 @@ import {
   type AccountDeletionBlocker,
   authOTPSchema,
   authPasswordChangeSchema,
+  OAUTH_NOTICE_PARAM,
+  OAUTH_NOTICES,
+  oauthNotice,
   UserMFAStatus,
   userProfileBaseSchema,
 } from "@domain/identity"
 import type { PushPublicKeyResponse } from "@domain/identity"
 import { SESSIONS_FAILURE } from "@ui/signed-in-devices.tsx"
+import { SIGN_IN_METHODS_FAILURE } from "@ui/sign-in-methods.tsx"
 import { apiTokensHttp, createApiTokensStore } from "../state/api-tokens.ts"
+import { passwordChangedMessage } from "./password-changed-message.ts"
 import { createDevicesStore } from "../state/devices.ts"
+import { createSignInMethodsStore } from "../state/sign-in-methods.ts"
 import { localReads } from "../modules.ts"
 import { groupsStore } from "../state/groups.ts"
+import { uuidV7 } from "@spy4x/platform/universal/uuid"
 
 const NO_DELETE_VALUES: AccountDeleteValues = { password: "", otp: "" }
 const NO_DELETE_ERRORS: AccountDeleteErrors = { form: null }
@@ -53,6 +60,7 @@ const CODE_MISSING = "Enter the code from your authenticator app"
  */
 export function ProfileView() {
   const [, navigate] = useLocation()
+  const search = useSearch()
   const session = sessionState.value
   const [values, setValues] = useState<ProfileValues>({
     firstName: session.user?.firstName || "",
@@ -80,6 +88,7 @@ export function ProfileView() {
   // Both lists are kept on the device and shown, with their time, when the server is unreachable.
   const [devices] = useState(() => createDevicesStore(listSessions, localReads))
   const [devicesBusy, setDevicesBusy] = useState(false)
+  const [methods] = useState(() => createSignInMethodsStore())
   const [tokens] = useState(() => createApiTokensStore(apiTokensHttp, localReads))
   const groups = groupsStore.groups.value
 
@@ -105,8 +114,38 @@ export function ProfileView() {
       if (res.ok) setPushPublicKey(res.data.publicKey)
     })
     void loadDevices()
+    void methods.load()
     void tokens.load()
   }, [session.user?.id, session.isMfaRequired])
+
+  // A link started here comes back from the provider with `?oauth=`: say how it ended, once.
+  useEffect(() => {
+    const notice = oauthNotice(new URLSearchParams(search).get(OAUTH_NOTICE_PARAM))
+    if (!notice) return
+    const toast = { body: OAUTH_NOTICES[notice], dataE2E: `sign-in-method-${notice}` }
+    if (notice === "linked") toasts.success({ title: "Sign-in method linked", ...toast })
+    else if (notice === "link-exists") {
+      toasts.info({ title: "Sign-in method already linked", ...toast })
+    } else toasts.error({ title: "Sign-in method not linked", ...toast })
+    navigate(SCREEN_PATHS.profile, { replace: true })
+  }, [search])
+
+  /** Unlinks one method. When this device signed in with it, the page reloads signed out. */
+  const unlinkMethod = async (methodId: number) => {
+    const result = await methods.unlink(methodId)
+    if (result === "signed-out") {
+      location.href = SCREEN_PATHS.signIn
+      return
+    }
+    if (result === "failed") return
+    // The devices that signed in with it were signed out.
+    void loadDevices()
+    toasts.success({
+      title: "Unlinked",
+      body: "The devices that signed in with it were signed out.",
+      dataE2E: "sign-in-method-unlinked",
+    })
+  }
 
   /** Runs one sign-out of other devices, then reads the list again. */
   const endDevices = async (
@@ -168,11 +207,11 @@ export function ProfileView() {
     setSignOutOthers(true)
     // The change ends this device's session too and opens a new one: the list changes either way.
     void loadDevices()
+    // The change revoked every API token of the person: the list is read again.
+    if (result.revokedTokens) void tokens.load()
     toasts.success({
       title: "Password changed",
-      body: signOutOthers
-        ? "Every other device was signed out. Use the new password next time you sign in."
-        : "Use the new password next time you sign in.",
+      body: passwordChangedMessage(signOutOthers, result.revokedTokens ?? 0),
       dataE2E: "password-saved",
     })
   }
@@ -224,7 +263,7 @@ export function ProfileView() {
         applicationServerKey: decodeBase64Url(pushPublicKey),
       })
       const result = await profileStore.registerPush(
-        crypto.randomUUID(),
+        uuidV7(),
         subscriptionToPayload(subscription),
       )
       if (!result.ok) setPushError(result.error || PROFILE_FAILURES.push)
@@ -322,6 +361,14 @@ export function ProfileView() {
       }}
       signOutOthers={signOutOthers}
       onSignOutOthersChange={setSignOutOthers}
+      methods={{
+        methods: methods.methods.value,
+        available: methods.available.value,
+        pending: methods.pending.value,
+        error: methods.error.value === "" ? SIGN_IN_METHODS_FAILURE : methods.error.value,
+        onLink: (provider) => void methods.link(provider),
+        onUnlink: (id) => void unlinkMethod(id),
+      }}
       devices={{
         sessions: devices.sessions.value,
         pending: devicesBusy,

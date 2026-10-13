@@ -9,8 +9,10 @@ import {
 } from "@spy4x/server/outbox"
 import { JOB_AGGREGATE, JOB_AGGREGATE_ID, OUTBOX_CLEANUP_JOB } from "@server/jobs/jobs.ts"
 import { createOutboxProcessor, scheduleNightlyJobs } from "@server/jobs/wiring.ts"
+import { JOB_RETRY } from "@server/jobs/job-failures.ts"
 import {
   enqueuePasswordResetMail,
+  PASSWORD_RESET_MAIL_JOB,
   removeStalePasswordResetRequests,
 } from "@server/jobs/password-reset-mail.ts"
 import { enqueueEmailCodeMail, removeStaleEmailCodeRequests } from "@server/jobs/email-code-mail.ts"
@@ -21,6 +23,8 @@ import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
+import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 const JOB = {
   eventKind: OUTBOX_CLEANUP_JOB,
@@ -32,7 +36,7 @@ const JOB = {
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
   const connection = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...connection, max: 1 })
-  const schema = `jobs_test_${crypto.randomUUID().replaceAll("-", "")}`
+  const schema = `jobs_test_${uuidV7().replaceAll("-", "")}`
   const sql = postgres({
     ...connection,
     max: 5,
@@ -61,6 +65,23 @@ async function advanceClock(sql: postgres.Sql, minutes: number): Promise<void> {
     SET available_at = available_at - make_interval(mins => ${minutes}),
         processed_at = processed_at - make_interval(mins => ${minutes})
   `
+}
+
+/**
+ * Makes every waiting row due now and answers how long, in milliseconds, the longest of them still
+ * had to wait: the clock jumping to the processor's next retry.
+ */
+async function skipWait(sql: postgres.Sql): Promise<number> {
+  const rows = await sql<{ waitMs: number }[]>`
+    WITH waiting AS (
+      SELECT id, available_at FROM outbox_events WHERE processed_at IS NULL FOR UPDATE
+    )
+    UPDATE outbox_events SET available_at = now()
+    FROM waiting
+    WHERE outbox_events.id = waiting.id
+    RETURNING (extract(epoch FROM waiting.available_at - now()) * 1000)::float8 AS "waitMs"
+  `
+  return Math.max(0, ...rows.map((row) => row.waitMs))
 }
 
 const BRAND = { webAppUrl: "http://app.localhost" }
@@ -104,6 +125,7 @@ Deno.test("password reset mails go through the worker's queue", async (t) => {
         const processor = createOutboxProcessor(sql, { store, sender, brand: BRAND, log: () => {} })
         await enqueuePasswordResetMail(sql, "ann@example.com")
         await enqueuePasswordResetMail(sql, "nobody@example.com")
+        expectVersion7Ids(await sql<{ id: string }[]>`SELECT id FROM password_reset_requests`)
 
         const result = await processor.drainOnce()
 
@@ -161,8 +183,8 @@ Deno.test("password reset mails go through the worker's queue", async (t) => {
     await t.step("a request older than a day is removed by the cleanup", async () => {
       await sql`
         INSERT INTO password_reset_requests (id, email, created_at) VALUES
-          (${crypto.randomUUID()}, 'old@example.com', now() - interval '25 hours'),
-          (${crypto.randomUUID()}, 'new@example.com', now() - interval '23 hours')
+          (${uuidV7()}, 'old@example.com', now() - interval '25 hours'),
+          (${uuidV7()}, 'new@example.com', now() - interval '23 hours')
       `
 
       expect(await removeStalePasswordResetRequests(sql)).toBe(1)
@@ -189,6 +211,7 @@ Deno.test("e-mail code mails go through the worker's queue", async (t) => {
       const sender = recordingSender()
       const processor = createOutboxProcessor(sql, { store, sender, brand: BRAND, log: () => {} })
       await enqueueEmailCodeMail(sql, user.id, "ann@example.com")
+      expectVersion7Ids(await sql<{ id: string }[]>`SELECT id FROM email_code_requests`)
 
       expect((await processor.drainOnce()).published).toBe(1)
 
@@ -256,8 +279,8 @@ Deno.test("e-mail code mails go through the worker's queue", async (t) => {
     await t.step("a request older than a day is removed by the cleanup", async () => {
       await sql`
         INSERT INTO email_code_requests (id, user_id, email, created_at) VALUES
-          (${crypto.randomUUID()}, ${user.id}, 'old@example.com', now() - interval '25 hours'),
-          (${crypto.randomUUID()}, ${user.id}, 'new@example.com', now() - interval '23 hours')
+          (${uuidV7()}, ${user.id}, 'old@example.com', now() - interval '25 hours'),
+          (${uuidV7()}, ${user.id}, 'new@example.com', now() - interval '23 hours')
       `
 
       expect(await removeStaleEmailCodeRequests(sql)).toBe(1)
@@ -332,7 +355,7 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
         const group = await sql<{ id: string; userId: number }[]>`
         WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id),
         u AS (INSERT INTO users (id) SELECT id FROM auth_user RETURNING id)
-        SELECT u.id AS user_id, gen_random_uuid() AS id FROM u
+        SELECT u.id AS user_id, ${uuidV7()}::uuid AS id FROM u
       `
         const { id: groupId, userId } = group[0]
         await sql`
@@ -345,7 +368,7 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
             id, event_kind, aggregate_type, aggregate_id, aggregate_version, group_id,
             actor_user_id, processed_at
           ) VALUES (
-            ${crypto.randomUUID()}, 'group.created', 'group', ${groupId}, ${version}, ${groupId},
+            ${uuidV7()}, 'group.created', 'group', ${groupId}, ${version}, ${groupId},
             ${userId}, ${processed === null ? null : sql`now() - ${processed}::interval`}
           )
         `
@@ -388,7 +411,7 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
           INSERT INTO users (id) SELECT id FROM auth_user RETURNING id AS user_id
         `
         const insertDeleted = async (name: string, days: number) => {
-          const id = crypto.randomUUID()
+          const id = uuidV7()
           await sql`
             INSERT INTO groups (id, name, owner_user_id, created_by_user_id, deleted_at)
             VALUES (${id}, ${name}, ${userId}, ${userId}, now() - make_interval(days => ${days}))
@@ -416,13 +439,13 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
           WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id)
           INSERT INTO users (id) SELECT id FROM auth_user RETURNING id AS user_id
         `
-        const groupId = crypto.randomUUID()
+        const groupId = uuidV7()
         await sql`
           INSERT INTO groups (id, name, owner_user_id, created_by_user_id)
           VALUES (${groupId}, 'invitation fixture', ${userId}, ${userId})
         `
         const insertExpired = async (days: number) => {
-          const id = crypto.randomUUID()
+          const id = uuidV7()
           await sql`
             INSERT INTO group_invitations (id, group_id, token_hash, role, created_by_user_id, expires_at)
             VALUES (${id}, ${groupId}, ${id.replaceAll("-", "").repeat(2)}, 1, ${userId},
@@ -446,7 +469,7 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
       const [{ groupId, userId }] = await sql<{ groupId: string; userId: number }[]>`
         WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id),
         u AS (INSERT INTO users (id) SELECT id FROM auth_user RETURNING id)
-        SELECT u.id AS user_id, gen_random_uuid() AS group_id FROM u
+        SELECT u.id AS user_id, ${uuidV7()}::uuid AS group_id FROM u
       `
       await sql`
         INSERT INTO groups (id, name, owner_user_id, created_by_user_id)
@@ -458,7 +481,7 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
             id, event_kind, aggregate_type, aggregate_id, aggregate_version, group_id,
             actor_user_id
           ) VALUES (
-            ${crypto.randomUUID()}, 'group.created', 'group', ${groupId}, ${version}, ${group},
+            ${uuidV7()}, 'group.created', 'group', ${groupId}, ${version}, ${group},
             ${actor}
           )
         `
@@ -467,5 +490,214 @@ Deno.test("delayed and repeating jobs in Postgres", async (t) => {
       await insert(groupId, userId, 3)
       await insert(null, null, 4)
     })
+  })
+})
+
+Deno.test("the worker's processor when a job keeps failing", async (t) => {
+  await withSchema(async (sql) => {
+    const store = createPostgresAuthStore(sql)
+    await store.createUserWithKey({
+      method: PASSWORD_METHOD,
+      subject: "ann@example.com",
+      email: "ann@example.com",
+      secret: "hash",
+      provenAt: null,
+    })
+    const HOUR_MS = 60 * 60_000
+    const cleanupRows = () =>
+      sql<{ attemptCount: number; processed: boolean; hours: number }[]>`
+        SELECT attempt_count, processed_at IS NOT NULL AS processed,
+          round(extract(epoch FROM available_at - now()) / 3600)::int AS hours
+        FROM outbox_events WHERE event_kind = ${OUTBOX_CLEANUP_JOB} ORDER BY created_at, id
+      `
+
+    await t.step("a mail job survives a mail server that is down for an hour", async () => {
+      const sender = recordingSender()
+      sender.failing = true
+      const processor = createOutboxProcessor(sql, { store, sender, brand: BRAND, log: () => {} })
+      await enqueuePasswordResetMail(sql, "ann@example.com")
+
+      // Every retry while the server is down fails; the clock jumps to each next one.
+      let downMs = 0
+      while (downMs < HOUR_MS) {
+        expect((await processor.drainOnce()).failed).toBe(1)
+        downMs += await skipWait(sql)
+      }
+      sender.failing = false
+
+      expect((await processor.drainOnce()).published).toBe(1)
+      expect(sender.sent.map((mail) => mail.to)).toEqual(["ann@example.com"])
+    })
+
+    await sql`DELETE FROM outbox_events`
+
+    await t.step("a job that is given up writes a log line that names its kind", async () => {
+      const sender = recordingSender()
+      sender.failing = true
+      const logged: string[] = []
+      const processor = createOutboxProcessor(sql, {
+        store,
+        sender,
+        brand: BRAND,
+        log: (line) => logged.push(line),
+      })
+      await enqueuePasswordResetMail(sql, "ann@example.com")
+      const [{ id }] = await sql<{ id: string }[]>`SELECT id FROM password_reset_requests`
+
+      let attempts = 0
+      while ((await processor.drainOnce()).failed === 1) {
+        attempts++
+        await skipWait(sql)
+      }
+
+      expect(attempts).toBe(JOB_RETRY.maxAttempts)
+      const about = `outbox row ${PASSWORD_RESET_MAIL_JOB} (${JOB_AGGREGATE} ${id})`
+      const reported = logged.filter((line) => line.includes(about))
+      expect(reported).toHaveLength(JOB_RETRY.maxAttempts)
+      expect(reported[0]).toBe(
+        `warn: ${about} failed at publish, attempt 1 of ${JOB_RETRY.maxAttempts}: Error`,
+      )
+      expect(reported.at(-1)).toBe(
+        `error: ${about} abandoned at publish after ${JOB_RETRY.maxAttempts} attempts: Error`,
+      )
+      expect(logged.join("\n")).not.toContain("ann@example.com")
+      // The row is closed with its error's name, so no worker claims it again.
+      expect(
+        await sql`SELECT last_error_code, processed_at IS NOT NULL AS closed FROM outbox_events`,
+      ).toEqual([{ lastErrorCode: "Error", closed: true }])
+    })
+
+    await sql`DELETE FROM outbox_events`
+
+    await t.step(
+      "with one cleanup step throwing, the other steps still run that night and the failure is logged with its message",
+      async () => {
+        const [{ userId }] = await sql<{ userId: number }[]>`
+          WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id)
+          INSERT INTO users (id) SELECT id FROM auth_user RETURNING id AS user_id
+        `
+        await sql`
+          INSERT INTO groups (id, name, owner_user_id, created_by_user_id, deleted_at)
+          VALUES (${uuidV7()}, 'expired', ${userId}, ${userId}, now() - interval '31 days')
+        `
+        const logged: string[] = []
+        const processor = createOutboxProcessor(sql, {
+          ...mailOff(sql),
+          log: (line) => logged.push(line),
+        })
+        await scheduleNightlyJobs(sql, new Date())
+        await skipWait(sql)
+        // The second step of the cleanup reads this table; the group purge runs three steps later.
+        await sql`ALTER TABLE password_reset_requests RENAME TO password_reset_requests_gone`
+
+        const result = await processor.drainOnce()
+
+        expect(result).toEqual({ claimed: 1, published: 0, failed: 1 })
+        expect(await sql`SELECT 1 FROM groups WHERE name = 'expired'`).toEqual([])
+        expect(logged[0]).toBe(
+          `error: nightly cleanup step "remove unsent password reset requests" failed: ` +
+            `relation "password_reset_requests" does not exist`,
+        )
+        expect(logged[1]).toBe(
+          `warn: outbox row ${OUTBOX_CLEANUP_JOB} (${JOB_AGGREGATE} ${JOB_AGGREGATE_ID}) ` +
+            `failed at publish, attempt 1 of ${JOB_RETRY.maxAttempts}: Error`,
+        )
+        expect(await cleanupRows()).toHaveLength(1)
+      },
+    )
+
+    await t.step(
+      "a cleanup that is given up is logged as abandoned, and the next night's run is still written",
+      async () => {
+        const logged: string[] = []
+        const processor = createOutboxProcessor(sql, {
+          ...mailOff(sql),
+          log: (line) => logged.push(line),
+        })
+        await sql`
+          UPDATE outbox_events SET attempt_count = ${JOB_RETRY.maxAttempts - 1}
+          WHERE event_kind = ${OUTBOX_CLEANUP_JOB}
+        `
+        await skipWait(sql)
+
+        const result = await processor.drainOnce()
+
+        expect(result).toEqual({ claimed: 1, published: 0, failed: 1 })
+        expect(logged.at(-1)).toBe(
+          `error: outbox row ${OUTBOX_CLEANUP_JOB} (${JOB_AGGREGATE} ${JOB_AGGREGATE_ID}) ` +
+            `abandoned at publish after ${JOB_RETRY.maxAttempts} attempts: Error`,
+        )
+        expect(await cleanupRows()).toEqual([
+          { attemptCount: JOB_RETRY.maxAttempts, processed: true, hours: expect.any(Number) },
+          { attemptCount: 0, processed: false, hours: 24 },
+        ])
+        await sql`ALTER TABLE password_reset_requests_gone RENAME TO password_reset_requests`
+      },
+    )
+
+    await sql`DELETE FROM outbox_events`
+
+    await t.step(
+      "after the migration, a mail an older worker gave up is never sent, one still being retried is, and the cleanup starts again",
+      async () => {
+        await store.createUserWithKey({
+          method: PASSWORD_METHOD,
+          subject: "bob@example.com",
+          email: "bob@example.com",
+          secret: "hash",
+          provenAt: null,
+        })
+        await sql`DELETE FROM password_reset_requests`
+        // What a worker with 10 attempts leaves: Ann's mail and the cleanup were given up and stay
+        // unprocessed; Bob's mail has one attempt left.
+        await enqueuePasswordResetMail(sql, "ann@example.com")
+        await sql`UPDATE outbox_events SET attempt_count = 10, last_error_code = 'Error'`
+        await enqueuePasswordResetMail(sql, "bob@example.com")
+        await sql`
+          UPDATE outbox_events SET attempt_count = 9, last_error_code = 'Error'
+          WHERE attempt_count = 0
+        `
+        await sql`
+          INSERT INTO outbox_events (
+            id, event_kind, aggregate_type, aggregate_id, aggregate_version, attempt_count,
+            last_error_code, available_at
+          ) VALUES (
+            ${uuidV7()}, ${OUTBOX_CLEANUP_JOB}, ${JOB_AGGREGATE}, ${JOB_AGGREGATE_ID}, 1,
+            10, 'PostgresError', now() - interval '3 days'
+          )
+        `
+
+        await sql.unsafe(
+          await Deno.readTextFile(
+            "libs/server/db/migrations/2026_11_01_0001_close_given_up_outbox_rows.sql",
+          ),
+        )
+        // The worker starts: twice, as a restart would.
+        await scheduleNightlyJobs(sql, new Date())
+        await scheduleNightlyJobs(sql, new Date())
+
+        const rows = await cleanupRows()
+        expect(rows.map((row) => [row.attemptCount, row.processed])).toEqual([
+          [10, true],
+          [0, false],
+        ])
+        expect(rows[1].hours).toBeGreaterThanOrEqual(0)
+        expect(rows[1].hours).toBeLessThanOrEqual(24)
+        expect(
+          await sql`
+            SELECT last_error_code FROM outbox_events
+            WHERE processed_at IS NOT NULL ORDER BY last_error_code
+          `,
+        ).toEqual([{ lastErrorCode: "Error" }, { lastErrorCode: "PostgresError" }])
+
+        await skipWait(sql)
+        const sender = recordingSender()
+        const processor = createOutboxProcessor(sql, { store, sender, brand: BRAND, log: () => {} })
+
+        // Bob's mail and the fresh cleanup run; Ann's stays unsent.
+        expect(await processor.drainOnce()).toEqual({ claimed: 2, published: 2, failed: 0 })
+        expect(sender.sent.map((mail) => mail.to)).toEqual(["bob@example.com"])
+      },
+    )
   })
 })

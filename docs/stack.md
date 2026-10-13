@@ -80,8 +80,9 @@ Where they send is the only difference between the two modes, and the env file a
 
 **Bundled** (the default of `infra/envs/.env.example`): `COMPOSE_PROFILES` contains `monitoring`,
 and `VM_REMOTE_WRITE_URL` and `VLOGS_URL` are empty. Compose then also runs VictoriaMetrics,
-VictoriaLogs, Grafana, vmalert and Alertmanager, and vmagent and Vector send to them. Grafana is at
-`grafana.<DOMAIN>` (user `admin`, password `GRAFANA_PASS`) with both data sources already there
+VictoriaLogs, Grafana, vmalert and Alertmanager, and vmagent and Vector send to them. Grafana is on
+`127.0.0.1:3000` of the machine, with no public address (README, "Admin consoles"; user `admin`,
+password `GRAFANA_PASS`), with both data sources already there
 (`infra/configs/grafana-datasources.yml`); it downloads the VictoriaLogs data source plugin, at
 the version pinned in the Compose file, at its first start. Both databases keep 14 days, under `.volumes/victoriametrics` and
 `.volumes/victorialogs`.
@@ -256,8 +257,8 @@ Docker Compose for both local development and single-node production. Scaling is
 vertical, through per-service resource limits.
 
 CI is Woodpecker. `.woodpecker/ci.yml` runs `deno task check`, the SPA build, the integration
-tests against a Postgres service and the `url-filters` browser test on every pull request and every
-push to `main`; see [woodpecker-ci-setup.md](woodpecker-ci-setup.md). A `v*` tag publishes the
+tests against a Postgres service and a smoke set of browser tests on every pull request, and every
+browser test on a push to `main`; see [woodpecker-ci-setup.md](woodpecker-ci-setup.md). A `v*` tag publishes the
 images (`.woodpecker/release.yml`). Deploys are not wired up (`.woodpecker/deploy.yml.example`).
 
 ## Conventions worth keeping

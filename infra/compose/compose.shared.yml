@@ -5,20 +5,21 @@ services:
   # region Storages
   db:
     container_name: ${PROJECT}-db
-    image: postgres:16
+    # The same 18 minor as CI and the local browser run: tests/compose-postgres.test.ts.
+    image: postgres:18.6
     restart: unless-stopped
     command: [ 
         'postgres', 
         '-c', 
         'shared_preload_libraries=pg_stat_statements',
         '-c',
-        'shared_buffers=2GB', # Set memory for shared buffers
+        'shared_buffers=${DB_SHARED_BUFFERS:-512MB}', # A quarter of the container's memory limit. The five DB_* defaults here fit DB_MEM_LIMIT=2048m; a larger limit sets them beside it (infra/envs/.env.example)
         '-c',
-        'work_mem=64MB', # Memory for sorting/hash joins per operation
+        'work_mem=${DB_WORK_MEM:-16MB}', # Memory for sorting/hash joins per operation; 30 connections can each use it
         '-c',
-        'maintenance_work_mem=512MB', # Memory for maintenance operations
+        'maintenance_work_mem=${DB_MAINTENANCE_WORK_MEM:-128MB}', # Memory for maintenance operations
         '-c',
-        'effective_cache_size=6GB', # Anticipated OS disk cache
+        'effective_cache_size=${DB_EFFECTIVE_CACHE_SIZE:-1536MB}', # Shared buffers plus the page cache the limit leaves: three quarters of it
         '-c',
         'max_connections=30', # Limit max client connections
         '-c',
@@ -36,7 +37,7 @@ services:
         '-c',
         'autovacuum_vacuum_cost_limit=1000', # Cost limit for vacuuming. 1000-2000 to allow autovacuum processes to perform more work in each cycle on larger tables.
         '-c',
-        'autovacuum_work_mem=512MB', # Memory for autovacuum processes, Explicitly set it to 256MB or 512MB, especially for large tables that are vacuumed frequently.
+        'autovacuum_work_mem=${DB_AUTOVACUUM_WORK_MEM:-128MB}', # Memory for each autovacuum worker (three by default)
         '-c',
         'random_page_cost=1.1', # Set the cost of a non-sequentially fetched disk page to 1.1, which is a good starting point for SSDs.
         '-c',
@@ -52,7 +53,11 @@ services:
           cpus: '${DB_CPU_LIMIT}'
           memory: '${DB_MEM_LIMIT}'
     volumes:
-      - ../../.volumes/postgres:/var/lib/postgresql/data:Z
+      # Postgres 18 keeps its data in a folder named after its version (18/docker) under this
+      # mount. The directory is new on purpose: a server's Postgres 16 data stays in
+      # .volumes/postgres, untouched, and `deno task db:upgrade-18` moves it over
+      # (docs/postgres-18-upgrade.md). Until then `deno task compose up` refuses to start.
+      - ../../.volumes/postgres18:/var/lib/postgresql:Z
     environment:
       - LANG=C.UTF-8
       - LC_ALL=C.UTF-8
@@ -146,11 +151,10 @@ services:
       options:
         max-size: '10m'
         max-file: '3'
-    labels:
-      - 'traefik.enable=true'
-      - 'traefik.http.routers.minio-${PROJECT}.rule=Host(`minio.${DOMAIN}`)'
-      - 'traefik.http.routers.minio-${PROJECT}.entrypoints=web'
-      - 'traefik.http.services.minio-${PROJECT}.loadbalancer.server.port=9001'
+    ports:
+      # The admin console, on this machine only and never behind the proxy: from elsewhere, open
+      # it through an SSH tunnel (README, "Admin consoles").
+      - ${MINIO_CONSOLE_HOST_PORT:-127.0.0.1:9001}:9001
   # endregion Storages
 
   # region Monitoring
@@ -402,7 +406,6 @@ services:
       - ../../infra/configs/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro,Z
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASS}
-      - GF_SERVER_ROOT_URL=https://grafana.${DOMAIN}
       # Grafana has no built-in VictoriaLogs data source; it downloads this plugin at first start.
       - GF_PLUGINS_PREINSTALL_SYNC=victoriametrics-logs-datasource@0.32.0
     deploy:
@@ -424,11 +427,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    labels:
-      - 'traefik.enable=true'
-      - 'traefik.http.routers.grafana-${PROJECT}.rule=Host(`grafana.${DOMAIN}`)'
-      - 'traefik.http.routers.grafana-${PROJECT}.entrypoints=web'
-      - 'traefik.http.services.grafana-${PROJECT}.loadbalancer.server.port=3000'
+    ports:
+      # As for the MinIO console: this machine only, never behind the proxy.
+      - ${GRAFANA_HOST_PORT:-127.0.0.1:3000}:3000
 
   # nodeexporter and cadvisor watch the whole host (its CPU, disk and network, and every
   # container's resources). On a shared server that duplicates the host's own monitoring, so they
@@ -484,10 +485,12 @@ services:
   # endregion Monitoring
 
   # region Apps
-  # Base image with Deno and dependencies pre-installed for caching
+  # Base image with Deno and dependencies pre-installed for caching. Named after the project, as
+  # every container is: two projects on one host hold different dependencies, and one shared tag
+  # would let either build start from the other's. Each build below takes it as BASE_IMAGE.
   deno-base:
     container_name: ${PROJECT}-deno-base
-    image: app/deno-base:${DENO_VERSION}
+    image: ${PROJECT}/deno-base:${DENO_VERSION}
     build:
       context: ../..
       dockerfile: Dockerfile.base
@@ -509,6 +512,7 @@ services:
       dockerfile: apps/api/dockerfile
       args:
         - DENO_VERSION=${DENO_VERSION}
+        - BASE_IMAGE=${PROJECT}/deno-base:${DENO_VERSION}
     command: [ 'deno', 'task', 'db:migrate' ]
     deploy:
       resources:
@@ -547,6 +551,7 @@ services:
       dockerfile: apps/api/dockerfile
       args:
         - DENO_VERSION=${DENO_VERSION}
+        - BASE_IMAGE=${PROJECT}/deno-base:${DENO_VERSION}
     volumes:
       - ../../apps:/app/apps:z
       - ../../libs:/app/libs:z
@@ -564,11 +569,17 @@ services:
       - HOME=/home/deno
       - ENV=${ENV}
       - ERROR_REPORT_DSN=${ERROR_REPORT_DSN:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
       - DENO_DIR=/tmp/deno-cache
       # The port apps/healthcheck.ts probes.
       - HEALTHCHECK_PORT=${API_PORT}
       - DENO_LOG=${DENO_LOG}
-      - DB_HOST=db
+      # The API is on the shared `proxy` network too, where a plain service name such as `db` is
+      # answered by any project's container of that name. The container's own name is unique.
+      - DB_HOST=${PROJECT}-db
       - DB_PORT=5432
       - DB_USER=${DB_USER}
       - DB_PASS=${DB_PASS}
@@ -579,7 +590,7 @@ services:
       - DEV_EMAIL=${DEV_EMAIL}
       - DOMAIN=${DOMAIN}
       - TIMEZONE=${TIMEZONE}
-      - KV_HOSTNAME=kv
+      - KV_HOSTNAME=${PROJECT}-kv
       - KV_PORT=6379
       - KV_PASSWORD=${KV_PASSWORD:?KV_PASSWORD is required}
       - RATE_LIMITER_WINDOW_MS=${RATE_LIMITER_WINDOW_MS}
@@ -603,6 +614,8 @@ services:
       # Mail subscriptions: the API checks the links the worker signs. Unset → off in production.
       - SUBSCRIBERS_SECRET=${SUBSCRIBERS_SECRET:-}
       - SUBSCRIBERS_PREVIOUS_SECRETS=${SUBSCRIBERS_PREVIOUS_SECRETS:-}
+      # The website's host, when it is deployed: the mailed confirm and unsubscribe links open there.
+      - MPA_DOMAIN=${MPA_DOMAIN:-}
     deploy:
       resources:
         limits:
@@ -656,6 +669,7 @@ services:
       dockerfile: apps/api/dockerfile
       args:
         - DENO_VERSION=${DENO_VERSION}
+        - BASE_IMAGE=${PROJECT}/deno-base:${DENO_VERSION}
     command: [ 'deno', 'run', '--allow-sys', '--allow-env', '--allow-net', 'apps/worker/+main.ts' ]
     volumes:
       - ../../apps:/app/apps:z
@@ -689,6 +703,8 @@ services:
       # Mail subscriptions: the API checks the links the worker signs. Unset → off in production.
       - SUBSCRIBERS_SECRET=${SUBSCRIBERS_SECRET:-}
       - SUBSCRIBERS_PREVIOUS_SECRETS=${SUBSCRIBERS_PREVIOUS_SECRETS:-}
+      # The website's host, when it is deployed: the mailed confirm and unsubscribe links open there.
+      - MPA_DOMAIN=${MPA_DOMAIN:-}
     deploy:
       resources:
         limits:
@@ -714,6 +730,7 @@ services:
       dockerfile: apps/spa/dockerfile.prod
       args:
         - DENO_VERSION=${DENO_VERSION}
+        - BASE_IMAGE=${PROJECT}/deno-base:${DENO_VERSION}
     environment:
       - DENO_DIR=/tmp/deno-cache
       - DENO_LOG=${DENO_LOG}
@@ -772,11 +789,13 @@ services:
       dockerfile: apps/mpa/dockerfile.prod
       args:
         - DENO_VERSION=${DENO_VERSION}
+        - BASE_IMAGE=${PROJECT}/deno-base:${DENO_VERSION}
     environment:
       - ENV=${ENV}
       - DOMAIN=${DOMAIN}
       - MPA_DOMAIN=${MPA_DOMAIN:-}
-      - API_URL=http://api:${API_PORT}
+      # Not `http://api`: on the shared `proxy` network that name is any project's API.
+      - API_URL=http://${PROJECT}-api:${API_PORT}
       - DENO_LOG=${DENO_LOG}
       # The port apps/healthcheck.ts probes: the one the image's CMD serves.
       - HEALTHCHECK_PORT=8080
@@ -816,11 +835,8 @@ services:
   # endregion API & SPA
 
 # region Networking
+# The project's own network (`default`) is not declared: the engine then gives each project a free
+# subnet. A fixed one stopped a second project on the same host ("Pool overlaps").
 networks:
   proxy:
     external: true
-  default:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.50.0.0/16

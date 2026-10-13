@@ -23,6 +23,9 @@ group reads notes; an editor or above writes them.
   the version it saw**. A stale version is refused with a typed conflict that carries the current
   version, instead of overwriting a change the client never saw.
 - **Screens are dumb: props in, callbacks out** (see "Three layers of UI" in `AGENTS.md`).
+- **A feature that stores something new about a person edits the privacy page**
+  (`apps/mpa/routes/privacy.tsx`) in the same pull request: what is kept, for how long, and who can
+  read it.
 
 ## The files, in order
 
@@ -52,6 +55,19 @@ so a stranger cannot learn that a group exists.
 Add the table to `SNAPSHOT_TABLES` and apply the migration in
 `tests/integration/groups.integration.test.ts`, which compares the two. Compose applies migrations
 on every start; nothing else is needed to deploy one.
+
+**Naming a migration.** A file is named `YYYY_MM_DD_NNNN_words_in_snake_case.sql` (ending in
+`.no_transaction.sql` for a statement that cannot run in a transaction), and a new one must sort
+after every migration already on `main`. The runner applies files in name order and
+skips the ones a database has recorded, so a file that sorts earlier runs after them on your
+database and before them on an empty one, where the tables it changes do not exist yet. The date is
+a counter, not the calendar, and the names already run ahead of it: do not use today's date. Take
+the newest name on `main` and go one step past it, either the next day with `0001` or the same day
+with the next number. Then append the file name as the last line of `ON_MAIN` in
+`tests/migration-names.test.ts`, which fails for a file that is not listed or sorts before the
+newest one listed. When another pull request merges a migration first, rebase, rename yours past
+it and append it after theirs. A migration on `main` is never renamed: databases that applied it
+know it by its name.
 
 ### 3. Repository: `libs/server/notes/`
 
@@ -144,8 +160,8 @@ an id is taken.
 | `state/notes.test.ts`      | The store against fake calls.                                                                                                                                                                                                               |
 | `views/NotesView.tsx`      | Passes the store and the group's role to `NotesScreen`.                                                                                                                                                                                     |
 | `views/NoteEditorView.tsx` | Passes the store and the group's role to `NoteEditorScreen` for `/notes/new` and `/notes/:id`, with the offline conflict state above it.                                                                                                    |
-| `views/spa-paths.ts`       | Lists the paths the router owns, for preact-components' `UnsavedGuard` in `NoteEditorView.tsx`, which asks before the person leaves the editor page with text that is not saved: on closing the tab, and on a click on any link in the app. |
-| `app.tsx`                  | The routes, and the pull: a hint for the open group reads its notes again.                                                                                                                                                                  |
+| `views/spa-paths.ts` | The route table: every route's pattern, and `open: true` on a page a signed-out person may see. Add the aggregate's routes here; each row must say `open`, and a page that is not open is for signed-in people. The sign-in gate (`views/sign-in-gate.ts`) reads the table to send a signed-out visit to sign-in and back, and preact-components' `UnsavedGuard` in `NoteEditorView.tsx` reads it to know a link stays in the app, so it asks before the person leaves the editor with text that is not saved. |
+| `app.tsx` | What each route of the table draws (`PAGES`; the type check fails for a route in the table with no page, and for a page with no route), and the pull: a hint for the open group reads its notes again. |
 | `modules.ts` | The composition root: the only file that imports the WebSocket module and the offline layer. Stores import their ports from it ([offline.md](offline.md), "The modules and their switches"). |
 | `offline/notes-collection.ts` | Notes are offline-writable (level 3): their adapter for the shared collections layer. A level 1 or 2 aggregate has no file here. |
 
@@ -217,7 +233,11 @@ Copy these choices:
 - **The child's write carries the ids; the server ignores unknown ones** and answers with the
   links the child really has. A client never needs to know whether the parent still exists.
 - **Moving the child maps the parent by name:** a moved note keeps its tags by name, and the target
-  group gets any tag it lacks.
+  group gets any tag it lacks, each with its own audit event.
+- **The parent is capped per group** (`TAG_MAX_PER_GROUP`), because its list has no pages. The
+  repository counts after its insert, inside the transaction that holds the group's row, so two
+  creates at once cannot both pass. A move whose new tags do not fit is refused whole
+  (`TAG_LIMIT_REACHED`): moving the notes without their tags would lose them silently.
 - **Offline, the parent's collection is declared first** in `offline/index.ts` and named in the
   child's `dependencies` (`parents`, `on`, `without`). The four rules are in
   [offline.md](offline.md#tags-the-second-offline-writable-aggregate-and-what-a-parent-means).
@@ -332,7 +352,8 @@ A setting is a property of the group itself, such as its description, colour and
 a new aggregate: the group already has the table, the repository, the transports and the change
 event. Follow the details command (`group.updateDetails`, spy4x/template#134) file by file.
 
-1. **Migration.** One file in `libs/server/db/migrations/` adds the column, with a default or a
+1. **Migration.** One file in `libs/server/db/migrations/`, named by the rule in
+   ["Naming a migration"](#2-database-libsserverdb), adds the column, with a default or a
    nullable type so existing rows stay valid, and a `CHECK` for a limit the database can hold.
    Mirror the same lines in `libs/server/db/schema.sql`; `groups.integration.test.ts` compares the
    snapshot with the migrations. Tests that apply a hand-written list of migrations
@@ -398,6 +419,27 @@ note in the person's first group. The sign-up never waits for it and never fails
 Every list also needs a first-run empty state: `EmptyState` with one action when there is
 something to do (`New note`, `New group`), and none when there is not (the inbox, the activity
 log). See `docs/design/ui-layout.md`.
+
+## Adding a first step
+
+The home page of a new account shows a first-steps checklist and offers a short tour
+(`OnboardingCard` in `libs/ui/onboarding-card.tsx`, over preact-components' `OnboardingChecklist`
+and `Tour`). Nothing ticks a step: each one is a fact your feature already stores, read again when
+the home page opens and, while it is open, when a hint says the person changed something. Once the
+person has dismissed the card the page stops asking.
+
+1. **The fact.** Add one `EXISTS (…)` to `readOnboarding` (`libs/server/auth/onboarding.ts`) and
+   its name to `OnboardingSteps` (`libs/domain/identity/+lib.ts`). Count only what the person did
+   themselves: the welcome note above is created in their name and is left out by its id. The read
+   runs for every person on their home page, so give it an index.
+2. **The step.** Add it to `onboardingSteps` in the card, with the link to the page that does it.
+3. **The tests.** One step in `tests/integration/onboarding.integration.test.ts` (the fact, and
+   that what another member did in the person's own group does not tick it) and the title in `libs/ui/onboarding.test.tsx`.
+
+Dismiss and the end of the tour are kept on the person's `users` row (`onboarding_dismissed_at`,
+`onboarding_tour_seen_at`) through the `onboarding.dismiss` and `onboarding.tour-seen` commands, so
+both follow the person to every device. Add a screen to the tour in `TOUR_STEPS`, with the CSS
+selector of the control that opens it.
 
 ## What is left to the next aggregate
 

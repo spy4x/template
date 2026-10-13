@@ -18,6 +18,7 @@ import {
   HardDeleteOutcome,
 } from "../../libs/server/auth/account-deletion.ts"
 import { issuePasswordReset } from "../../libs/server/auth/password-reset.ts"
+import { createOutboxProcessor, scheduleNightlyJobs } from "../../libs/server/jobs/wiring.ts"
 import {
   ACCOUNT_DELETION_MAIL_JOB,
   ACCOUNT_HARD_DELETE_JOB,
@@ -25,8 +26,11 @@ import {
   accountDeletionMailJob,
   accountRestoredMailJob,
 } from "../../libs/server/jobs/account-deletion.ts"
+import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
+import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 /**
  * Deleting one's own account (#144) against a real Postgres: the request, the refusal while a group
@@ -60,7 +64,7 @@ function totpCode(timestamp: number): string {
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
   const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1, onnotice: () => {} })
-  const schema = `account_deletion_test_${crypto.randomUUID().replaceAll("-", "")}`
+  const schema = `account_deletion_test_${uuidV7().replaceAll("-", "")}`
   const sql = postgres({
     ...settings,
     max: 10,
@@ -177,6 +181,7 @@ async function requestDeletion(
   const [row] = await sql<{ id: string }[]>`
     SELECT id FROM account_deletions WHERE user_id = ${user.id}
   `
+  expectVersion7Ids([row])
   return { id: row.id, deleteAfter: body.deleteAfter! }
 }
 
@@ -248,7 +253,7 @@ Deno.test("deleting one's own account", async (t) => {
         const ann = await signUp(app, "ann")
         const bob = await signUp(app, "bob")
         // Ann works in Bob's group: a note, an audit row, a member she added, an invitation.
-        const shared = crypto.randomUUID()
+        const shared = uuidV7()
         await app.db.group.create({ id: shared, name: "Bob's team" }, bob.id)
         const carl = await signUp(app, "carl")
         await sql`
@@ -256,18 +261,18 @@ Deno.test("deleting one's own account", async (t) => {
           VALUES (${shared}, ${ann.id}, 3, ${bob.id}), (${shared}, ${carl.id}, 1, ${ann.id})
         `
         const note = await app.db.note.create(
-          { groupId: shared, id: crypto.randomUUID(), title: "Ann's note", body: "" },
+          { groupId: shared, id: uuidV7(), title: "Ann's note", body: "" },
           ann.id,
           null,
         )
         await sql`
           INSERT INTO group_invitations (id, group_id, token_hash, role, created_by_user_id,
             expires_at)
-          VALUES (${crypto.randomUUID()}, ${shared}, ${"a".repeat(64)}, 1, ${ann.id},
+          VALUES (${uuidV7()}, ${shared}, ${"a".repeat(64)}, 1, ${ann.id},
             now() + INTERVAL '1 day')
         `
         // And she has her own: a second group, a push device and settings.
-        await app.db.group.create({ id: crypto.randomUUID(), name: "Ann's own" }, ann.id)
+        await app.db.group.create({ id: uuidV7(), name: "Ann's own" }, ann.id)
         await sql`
           INSERT INTO user_push_tokens (user_id, device_id, endpoint, auth, p256dh)
           VALUES (${ann.id}, 'device', 'https://push.example.com/1', 'auth', 'key')
@@ -463,7 +468,7 @@ Deno.test("deleting one's own account", async (t) => {
       async () => {
         const hal = await signUp(app, "hal")
         const ivy = await signUp(app, "ivy")
-        const groupId = crypto.randomUUID()
+        const groupId = uuidV7()
         await app.db.group.create({ id: groupId, name: "Hal's club" }, hal.id)
         await sql`
           INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
@@ -488,7 +493,7 @@ Deno.test("deleting one's own account", async (t) => {
     await t.step("a member who is waiting to be deleted stops the owner too", async () => {
       const jay = await signUp(app, "jay")
       const kim = await signUp(app, "kim")
-      const groupId = crypto.randomUUID()
+      const groupId = uuidV7()
       await app.db.group.create({ id: groupId, name: "Jay's club" }, jay.id)
       await sql`
         INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
@@ -577,8 +582,87 @@ Deno.test("deleting one's own account", async (t) => {
         await sql`
           UPDATE subscriptions SET status = ${BillingStatus.Canceled} WHERE group_id = ${personal.id}
         `
-        expect(await hardDeleteDueAccounts(sql)).toEqual({ deleted: 1, blocked: 0 })
+        expect(await hardDeleteDueAccounts(sql)).toEqual({ deleted: 1, blocked: 0, failed: 0 })
         expect(await sql`SELECT 1 FROM auth_users WHERE id = ${max.id}`).toEqual([])
+      },
+    )
+
+    await t.step(
+      "a request left behind never deletes an account that is live again, and is removed",
+      async () => {
+        const zoe = await signUp(app, "zoe")
+        await requestDeletion(app, sql, zoe)
+        const id = await makeDue(sql, zoe.id)
+        // Restored with the request left in place: no code path writes this, the guard is for it.
+        await sql`UPDATE users SET deleted_at = NULL WHERE id = ${zoe.id}`
+
+        expect(await hardDeleteAccount(sql, id)).toBe(HardDeleteOutcome.NothingDue)
+
+        expect(await sql`SELECT 1 FROM auth_users WHERE id = ${zoe.id}`).toHaveLength(1)
+        expect(await sql`SELECT 1 FROM groups WHERE owner_user_id = ${zoe.id}`).toHaveLength(1)
+        expect(await sql`SELECT 1 FROM account_deletions WHERE id = ${id}`).toEqual([])
+      },
+    )
+
+    await t.step(
+      "an account whose delete throws is logged with the error and holds up no other",
+      async () => {
+        const vic = await signUp(app, "vic")
+        const wes = await signUp(app, "wes")
+        await requestDeletion(app, sql, vic)
+        await requestDeletion(app, sql, wes)
+        const vicRequest = await makeDue(sql, vic.id)
+        await makeDue(sql, wes.id)
+        // Vic's request is the older one, so it is tried first; a row nothing cascades to makes
+        // its delete throw.
+        await sql`
+          UPDATE account_deletions SET delete_after = now() - INTERVAL '1 hour'
+          WHERE id = ${vicRequest}
+        `
+        await sql`CREATE TABLE delete_stopper (user_id INT4 REFERENCES auth_users (id))`
+        const logged: string[] = []
+        try {
+          await sql`INSERT INTO delete_stopper (user_id) VALUES (${vic.id})`
+
+          const result = await hardDeleteDueAccounts(sql, (line) => void logged.push(line))
+
+          expect(result.failed).toBe(1)
+          expect(await sql`SELECT 1 FROM auth_users WHERE id = ${wes.id}`).toEqual([])
+          expect(await sql`SELECT 1 FROM auth_users WHERE id = ${vic.id}`).toHaveLength(1)
+          expect(logged).toHaveLength(1)
+          expect(logged[0]).toContain(
+            `error: the account of deletion request ${vicRequest} was not deleted: `,
+          )
+          expect(logged[0]).toContain(`violates foreign key constraint`)
+
+          // The nightly cleanup runs the same delete as one of its steps: it names the account in
+          // its own log and fails, so the processor retries it.
+          const nightly: string[] = []
+          const processor = createOutboxProcessor(sql, {
+            store: createPostgresAuthStore(sql),
+            sender: null,
+            brand: { webAppUrl: "http://app.localhost" },
+            log: (line) => void nightly.push(line),
+          })
+          await sql`DELETE FROM outbox_events`
+          await scheduleNightlyJobs(sql)
+          await sql`UPDATE outbox_events SET available_at = now()`
+
+          expect(await processor.drainOnce()).toEqual({ claimed: 1, published: 0, failed: 1 })
+          expect(nightly[0]).toContain(
+            `error: the account of deletion request ${vicRequest} was not deleted: `,
+          )
+          expect(nightly[1]).toBe(
+            `error: nightly cleanup step "delete accounts whose wait is over" failed: ` +
+              `1 account(s) due for deletion were not deleted`,
+          )
+          await sql`DELETE FROM outbox_events`
+        } finally {
+          await sql`DROP TABLE delete_stopper`
+        }
+        // With the cause gone the next run deletes it.
+        expect((await hardDeleteDueAccounts(sql)).failed).toBe(0)
+        expect(await sql`SELECT 1 FROM auth_users WHERE id = ${vic.id}`).toEqual([])
       },
     )
 
@@ -587,9 +671,9 @@ Deno.test("deleting one's own account", async (t) => {
       async () => {
         const ned = await signUp(app, "ned")
         const oli = await signUp(app, "oli")
-        const nedsGroup = crypto.randomUUID()
+        const nedsGroup = uuidV7()
         await app.db.group.create({ id: nedsGroup, name: "Ned's club" }, ned.id)
-        const olisGroup = crypto.randomUUID()
+        const olisGroup = uuidV7()
         await app.db.group.create({ id: olisGroup, name: "Oli's club" }, oli.id)
         await sql`
           INSERT INTO group_members (group_id, user_id, role, added_by_user_id)
@@ -598,9 +682,9 @@ Deno.test("deleting one's own account", async (t) => {
         // One into Ned's group made by someone who left it, one Ned made into Oli's group, and
         // Oli's own, which stays.
         const [intoHis, byHim, untouched] = [
-          crypto.randomUUID(),
-          crypto.randomUUID(),
-          crypto.randomUUID(),
+          uuidV7(),
+          uuidV7(),
+          uuidV7(),
         ]
         await sql`
           INSERT INTO group_invitations (id, group_id, token_hash, role, created_by_user_id,
@@ -687,6 +771,7 @@ Deno.test("deleting one's own account", async (t) => {
       expect((await signIn(app, "sam")).status).toBe(200)
       const [raeRestore] = await restoresOf(rae.id)
       const [samRestore] = await restoresOf(sam.id)
+      expectVersion7Ids([raeRestore, samRestore])
       const [queued] = await sql<{ count: number }[]>`
         SELECT count(*)::int AS count FROM outbox_events
         WHERE event_kind = ${ACCOUNT_RESTORED_MAIL_JOB}

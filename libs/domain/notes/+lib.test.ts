@@ -22,6 +22,7 @@ import {
   parseNoteMoveRequest,
   parseNoteRequest,
 } from "./+lib.ts"
+import { isUuid, uuidV7 } from "@spy4x/platform/universal/uuid"
 
 const id = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111001"
 const groupId = "7b6d8d6c-1af5-4f04-8ae4-b1ee5d111002"
@@ -36,7 +37,12 @@ function codeOf(run: () => unknown): string | null {
 }
 
 describe("note requests", () => {
-  it("accepts a create with a UUID v4 id and trims the title", () => {
+  it("accepts a create with a UUID id of version 4 or version 7 and trims the title", () => {
+    expect(isUuid(id, 4)).toBe(true)
+    expect(
+      parseNoteRequest(noteCreateRequestSchema, { id: uuidV7(), title: "New", body: "" }).title,
+    ).toBe("New")
+
     const parsed = parseNoteRequest(
       noteCreateRequestSchema,
       { id, title: "  Groceries  ", body: "milk" },
@@ -107,6 +113,36 @@ describe("note requests", () => {
     expect(parseNoteRequest(noteCreateRequestSchema, { id, title, body: "" }).title)
       .toBe(title)
   })
+
+  it("refuses a NUL or half a surrogate pair in the title, on create and update", () => {
+    for (const title of ["a\u0000b", "a\ud800b"]) {
+      expect(codeOf(() => parseNoteRequest(noteCreateRequestSchema, { id, title, body: "" })))
+        .toBe("INVALID_REQUEST")
+      expect(
+        codeOf(() => parseNoteRequest(noteUpdateRequestSchema, { title, body: "", version: 1 })),
+      ).toBe("INVALID_REQUEST")
+    }
+    expect(() => parseNoteRequest(noteCreateRequestSchema, { id, title: "a\u0000b", body: "" }))
+      .toThrow("Note title must not contain a NUL or a broken character")
+  })
+
+  it("refuses a NUL or half a surrogate pair in the body, on create and update", () => {
+    for (const body of ["a\u0000b", "a\ud800b"]) {
+      expect(codeOf(() => parseNoteRequest(noteCreateRequestSchema, { id, title: "T", body })))
+        .toBe("INVALID_REQUEST")
+      expect(
+        codeOf(() => parseNoteRequest(noteUpdateRequestSchema, { title: "T", body, version: 1 })),
+      ).toBe("INVALID_REQUEST")
+    }
+    expect(() => parseNoteRequest(noteCreateRequestSchema, { id, title: "T", body: "a\u0000b" }))
+      .toThrow("Note body must not contain a NUL or a broken character")
+  })
+
+  it("keeps a line break, a tab and an emoji in the title and the body", () => {
+    const text = "one\ttwo\nthree 😀"
+    expect(parseNoteRequest(noteCreateRequestSchema, { id, title: text, body: text }))
+      .toEqual({ id, title: text, body: text })
+  })
 })
 
 describe("note tags", () => {
@@ -132,8 +168,8 @@ describe("note tags", () => {
     expect("tagIds" in parsed).toBe(false)
   })
 
-  it("refuses a tag id that is not a UUID v4 and more tags than a note may carry", () => {
-    const tooMany = Array.from({ length: NOTE_TAG_MAX + 1 }, () => crypto.randomUUID())
+  it("refuses a tag id that is not a UUID and more tags than a note may carry", () => {
+    const tooMany = Array.from({ length: NOTE_TAG_MAX + 1 }, () => uuidV7())
 
     expect(
       codeOf(() =>
@@ -179,7 +215,7 @@ describe("note move request", () => {
 
   it("accepts the target group and one to NOTE_MOVE_MAX distinct note ids", () => {
     const one = parseNoteMoveRequest(noteMoveRequestSchema, { toGroupId, noteIds: [id] }, groupId)
-    const many = Array.from({ length: NOTE_MOVE_MAX }, () => crypto.randomUUID())
+    const many = Array.from({ length: NOTE_MOVE_MAX }, () => uuidV7())
 
     expect(one).toEqual({ toGroupId, noteIds: [id] })
     expect(parseNoteMoveRequest(noteMoveRequestSchema, { toGroupId, noteIds: many }, groupId))
@@ -187,7 +223,7 @@ describe("note move request", () => {
   })
 
   it("refuses an empty list, too many notes, a repeated note and a field it does not know", () => {
-    const tooMany = Array.from({ length: NOTE_MOVE_MAX + 1 }, () => crypto.randomUUID())
+    const tooMany = Array.from({ length: NOTE_MOVE_MAX + 1 }, () => uuidV7())
     const refused = [
       { toGroupId, noteIds: [] },
       { toGroupId, noteIds: tooMany },

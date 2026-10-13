@@ -112,6 +112,10 @@ CREATE TABLE users (
     mfa INT2 DEFAULT 1 NOT NULL,
     -- #152: last signed-in activity, written at most every five minutes.
     last_seen_at TIMESTAMPTZ,
+    -- #298: when the person closed the first-steps checklist, and when they finished or skipped
+    -- the tour. `NULL` while each is still shown.
+    onboarding_dismissed_at TIMESTAMPTZ,
+    onboarding_tour_seen_at TIMESTAMPTZ,
     CONSTRAINT users_role_check CHECK (role >= 1 AND role <= 4),
     CONSTRAINT users_mfa_check CHECK (mfa = ANY (ARRAY[1, 2, 3])),
     CONSTRAINT users_id_auth_users_fkey FOREIGN KEY (id) REFERENCES auth_users (id)
@@ -184,12 +188,15 @@ CREATE TABLE user_push_tokens (
     id SERIAL PRIMARY KEY,
     user_id INT4 REFERENCES users(id) ON DELETE CASCADE,
     device_id VARCHAR(256) NOT NULL,
-    endpoint VARCHAR(256) NOT NULL,
+    endpoint TEXT NOT NULL,
     auth VARCHAR(256) NOT NULL,
     p256dh VARCHAR(256) NOT NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    deleted_at TIMESTAMPTZ
+    deleted_at TIMESTAMPTZ,
+    -- The limits of `PUSH_TOKEN_LIMITS` (libs/domain/identity). `endpoint` has no index, and must
+    -- never get a btree one: 2048 characters can be 8192 bytes, past what an index row holds.
+    CONSTRAINT user_push_tokens_endpoint_check CHECK (length(endpoint) <= 2048)
 );
 
 CREATE INDEX idx_user_push_tokens_by_deleted_at ON user_push_tokens (deleted_at);
@@ -258,9 +265,9 @@ CREATE INDEX idx_outbox_events_actor_user_id ON outbox_events (actor_user_id);
 -- `status` is 1 while the first run is in flight and 2 once its result is stored. `updated_at`
 -- is when the row was claimed or finished; a claim that stays at 1 past its lease belongs to a
 -- run that died, and the next retry takes it over under a new `claim_token`; `complete` and
--- `release` change only the row whose token they hold. The token's default serves only the previous
--- API during a deploy (see migration 2026_10_03_0001). Rows older than seven days are removed by
--- the worker's sweep and are ignored by readers before that.
+-- `release` change only the row whose token they hold. The store makes the token, a version 7
+-- UUID; the column has no default. Rows older than seven days are removed by the worker's sweep
+-- and are ignored by readers before that.
 --
 -- The key is scoped to the user, so one user cannot replay or block another user's key.
 -- `request_hash` fingerprints the command's input: the same key with different input is refused
@@ -274,7 +281,7 @@ CREATE TABLE idempotency_keys (
     result JSONB,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    claim_token UUID NOT NULL DEFAULT gen_random_uuid(),
+    claim_token UUID NOT NULL,
     PRIMARY KEY (user_id, key),
     CONSTRAINT idempotency_keys_key_check CHECK (length(key) BETWEEN 1 AND 128),
     CONSTRAINT idempotency_keys_status_check CHECK (status = ANY (ARRAY[1, 2])),
@@ -478,6 +485,9 @@ CREATE UNIQUE INDEX idx_group_invitations_token_hash ON group_invitations (token
 CREATE INDEX idx_group_invitations_group_created ON group_invitations (group_id, created_at DESC);
 -- The invitations a person sees for the addresses they proved.
 CREATE INDEX idx_group_invitations_email ON group_invitations (email) WHERE email IS NOT NULL;
+-- Whether a person ever made an invitation (the first-steps checklist), and the cascade when a
+-- user is deleted.
+CREATE INDEX idx_group_invitations_created_by ON group_invitations (created_by_user_id);
 
 -- Who accepted each invitation. A person accepts one invitation once: a member removed from the
 -- group cannot come back through the team link they joined with.
@@ -604,8 +614,10 @@ CREATE INDEX idx_notifications_read_at ON notifications (read_at) WHERE read_at 
 -- #167: personal API tokens. See migration 2026_10_25_0001_api_tokens.sql. A person lets a script use the API in one of their groups. Only a
 -- keyed SHA-256 of the token is kept (`token_hash`): the token itself is shown once and never
 -- stored. `access` is 1 for read-only, 2 for read-write. `expires_at` is NULL for a token that
--- never expires. `last_used_at` is written at most every few minutes. Revoking deletes the row,
--- so the next request with the token is refused. The row goes with its owner and with its group.
+-- never expires. `last_used_at` is written at most every few minutes. Revoking sets `revoked_at`
+-- (migration 2026_10_30_0001_api_token_hardening.sql), so the next request with the token is refused
+-- and can still be audited; the worker deletes the row 30 days later. The row goes with its owner
+-- and with its group.
 CREATE TABLE api_tokens (
     id UUID PRIMARY KEY,
     user_id INT4 NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -616,6 +628,7 @@ CREATE TABLE api_tokens (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     expires_at TIMESTAMPTZ,
     last_used_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
     CONSTRAINT api_tokens_token_hash_key UNIQUE (token_hash),
     CONSTRAINT api_tokens_name_check CHECK (length(btrim(name)) BETWEEN 1 AND 60),
     CONSTRAINT api_tokens_access_check CHECK (access IN (1, 2)),
@@ -629,7 +642,7 @@ CREATE INDEX idx_api_tokens_group_id ON api_tokens (group_id);
 
 -- The audit rows of an account: sign-in, sign-out, profile, sessions and personal API tokens. See
 -- migration 2026_01_26_0002_auth_profiles_audit.sql and, for the event types, the migrations that
--- widen the check (the last is 2026_10_28_0001_api_tokens_purged_audit.sql). `identifier` is plain
+-- widen the check (the last is 2026_11_04_0001_sign_in_method_audit.sql). `identifier` is plain
 -- text with no foreign key, so a row outlives what it names.
 CREATE TABLE auth_audits (
     id SERIAL PRIMARY KEY,
@@ -642,7 +655,7 @@ CREATE TABLE auth_audits (
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMPTZ,
     CONSTRAINT auth_audits_event_type_check
-        CHECK (event_type = ANY (ARRAY[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]))
+        CHECK (event_type = ANY (ARRAY[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]))
 );
 
 CREATE INDEX idx_auth_audits_user_created_at ON auth_audits (user_id, created_at DESC);

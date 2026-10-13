@@ -34,7 +34,7 @@ across real projects, a CLI last.
 
 Green: `deno task check` (205 tests in nine runs), `deno task test:integration` (39 tests, 91
 steps, needs Postgres), `deno task spa:build`, `deno task mpa:check`, the Playwright e2e suite
-(28 tests) and the MPA's browser test (`e2e/mpa/run.sh`, 1 test).
+(28 tests) and the MPA's browser tests (`e2e/mpa/run.sh`, 6 tests).
 
 ```
 apps/api      REST, the /api/ws socket, auth, CQRS dispatch. The only app with real behaviour.
@@ -233,6 +233,41 @@ These cost real time to find. Do not rediscover them.
    (`libs/server/auth/email-verification.ts`) is the one check invitations
    (#131) and OAuth linking (#141) must call before trusting an address.
 
+   **Google and GitHub (#141, #142).** `apps/api/services/oauth-sign-in.ts` wraps
+   `createOAuthSignIn` of `@spy4x/server/auth/oauth`, one per provider whose client id and secret
+   are both set (README, "Sign in with Google and GitHub"); `apps/api/routes/auth-oauth.ts` holds
+   the routes and is mounted before `createAuthRoute`. A provider method is a row of `auth_keys`
+   with the provider's name as `method` and the provider's user id as `subject`: there is no table
+   of its own. The state of a flow lives in Valkey for 10 minutes and in the HttpOnly cookie
+   `oauth_state_<provider>`. An unknown person gets no account: the callback stores a pending
+   sign-up, sets the cookie `oauth_sign_up` and redirects to `/sign-up/confirm`, where
+   `POST /api/auth/sign-up/confirm` creates the user, profile and first group. That cookie is
+   signed with the cookie secret (`@spy4x/platform/signed-payload`), because the API acts on what
+   it says and the library's flow store cannot be read, only taken from: one that was edited or
+   written by hand reads as no cookie. The library, not
+   `provenAddressOwner`, decides whether a provider account joins an existing one: only by an
+   address both sides have verified. Linking from the profile is the library's connect flow
+   (`connectUrl`, `handleConnectCallback`): bound to the signed-in user, it adds the provider
+   whatever its address and touches no other account, and a provider account that already signs in
+   to someone else ends at `/?oauth=link-taken`. Its `state` has its own HttpOnly cookie,
+   `oauth_connect_<provider>`; the one callback route runs the connect when that cookie holds the
+   callback's `state`, and the sign-in otherwise. `DELETE /api/auth/methods/:id` refuses the last usable method and ends
+   the sessions that method started. A sign-up the provider vouches for deletes another account's
+   unproven claim to the same address (the library's rule against sitting on an address): the
+   question page warns first (`PendingSignUp.unconfirmedAccount`) and the locked account gets the
+   audit row `UNCONFIRMED_ADDRESS_TAKEN`. A link whose provider vouches for such an address locks
+   that account too, with the same row but no warning: a link has no question page. Whether a
+   claim was taken is read from the database around the write (`reportingTakenClaims`), never from
+   the browser. "Go back" takes the held profile out of the flow store.
+   The two routes a browser opens as a page, `start` and `callback`, answer every failure with a
+   redirect to `/sign-in?oauth=…`, a spent rate limit included. The sign-in page's "last used"
+   hint is `apps/spa/src/state/last-sign-in.ts` over `createLastSignIn` of
+   `@spy4x/platform/browser/last-sign-in`: the app remembers the method the session used, read
+   from `GET /api/auth/methods`, once a person is signed in with every factor done. Not built: adding a password to an
+   account that has none, so such an account cannot change its address, change or reset a
+   password, or delete itself, which all ask for the password; its profile says so in each row
+   and offers none of the three.
+
    **Changing the address.** `POST /api/auth/email/change` with `{ email,
    password }` stores the new address in `email_changes` and mails it a code;
    the account keeps signing in with the old address until that code is
@@ -279,7 +314,16 @@ These cost real time to find. Do not rediscover them.
    `page.reload` while online, gets none of this and brings the cold-start flakes back. The
    one plain reload left is the one made with the network cut (`e2e/offline.e2e.ts`).
 
-10. **Monitoring moved from Prometheus, Loki and promtail to VictoriaMetrics, VictoriaLogs and
+10. **Rolling the API back past the `api_tokens.revoked_at` migration brings revoked tokens back to
+    life (#293).** A revoked token keeps its row and hash for 30 days, and only code from that
+    change on reads `revoked_at`: older code finds the row and lets the token act. So every token
+    revoked in the last 30 days works again after such a rollback, among them the ones a password
+    change ended after a break-in. Before rolling back, delete those rows:
+    `DELETE FROM api_tokens WHERE revoked_at IS NOT NULL;`. Their audit rows stay and still name
+    them. Going forward is safe: old code runs against the new column, and compose runs the
+    migration before the new API starts.
+
+11. **Monitoring moved from Prometheus, Loki and promtail to VictoriaMetrics, VictoriaLogs and
     Vector (#159).** Which monitoring containers start is now decided by `COMPOSE_PROFILES`
     (docs/stack.md, "Monitoring"); an env file written before this change has no `monitoring`
     profile, so a deploy with it starts neither database nor Grafana. Compose also leaves the
@@ -334,7 +378,7 @@ NAME="template-test-$$"
 PASS=$(openssl rand -hex 24)
 trap 'docker rm -f "$NAME" "$NAME-kv" >/dev/null' EXIT
 docker run -d --name "$NAME" -e POSTGRES_USER=tester -e POSTGRES_PASSWORD="$PASS" \
-  -e POSTGRES_DB=template_test -p 127.0.0.1::5432 postgres:16-alpine
+  -e POSTGRES_DB=template_test -p 127.0.0.1::5432 postgres:18.6-alpine
 docker run -d --name "$NAME-kv" -e REDISCLI_AUTH="$PASS" -p 127.0.0.1::6379 valkey/valkey:8.1 \
   valkey-server --requirepass "$PASS"
 PORT=$(docker port "$NAME" 5432/tcp | cut -d: -f2)
@@ -353,7 +397,9 @@ DB_HOST=127.0.0.1 DB_PORT="$PORT" DB_USER=tester DB_PASS="$PASS" DB_NAME=templat
 Compose, and so `deno task deploy`, applies migrations itself: the one-shot `migrate` service runs
 `deno task db:migrate` on every `up`, and the API and the worker start only after it exits with 0.
 There is no manual migration step in production. A failed migration fails `compose up` and leaves
-the new API and worker created but not started; fix the migration and deploy again.
+the new API and worker created but not started; fix the migration and deploy again. A server that
+still holds Postgres 16 data refuses to start until `deno task db:upgrade-18` has moved it:
+[postgres-18-upgrade.md](postgres-18-upgrade.md).
 
 To run the API for real outside compose you also need Valkey (`valkey-server --requirepass
 <KV_PASSWORD>`; the API refuses to start without `KV_PASSWORD` and sends it with `AUTH`),
@@ -368,16 +414,39 @@ the other tab without a reload or reconnect" fails. Compose runs it as `worker`;
 start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `DB_*`, `ENV` and
 `DOMAIN` values. It also sends the password reset mails (trap 8).
 
-**Personal API tokens: what is kept.** Revoking a token, and resetting the password, delete its row
-at once. An expired token is refused and hidden from the moment it expires, and the nightly
-`outbox.cleanup` job runs `purgeExpiredApiTokens`, which deletes its row
-`API_TOKEN_PURGE_GRACE_DAYS` (30) days after the expiry, by the database clock, so a row may live
-up to a day longer. Only the expiry decides: a token that never expires stays until it is revoked,
-and a token of a soft-deleted group or account is not purged early, because
-it works again after a restore. In the same statement each owner gets an `auth_audits` row of type
-`API_TOKENS_PURGED` (11) whose identifier is the count and the ids of the tokens deleted, eight to
-a row, so the ids in older audit rows can still be matched. No name, hash or part of a token is
-written.
+**Personal API tokens: what is asked, what ends one, what is kept.** Creating a token asks for the
+account's current password (`signIn.checkPassword`, behind the strict per-user limit), so a stolen
+session cannot mint one; an account with no password cannot create tokens and is told so. The
+password is checked inside the create's transaction, under the lock on the person's `users` row
+(`lockUser`). A password change and a reset take that lock too, after the password key's, and
+write the password and revoke the tokens in one transaction: both happen or neither, and a token
+made with the old password never outlives the change. The create queues the
+`api-token.created-mail` job, which mails the owner's proven address. A token's name is one line:
+line breaks and control characters are refused (`hasUnsafeTextCharacters`), since the name goes
+into that mail as plain text.
+
+A token is revoked by its owner, by a password change or reset (every token of the person; "sign
+out other devices" alone leaves them), when its owner leaves or is removed from its group, and when
+its group is deleted. A restored group or a member added back does not get the tokens back. Revoking
+sets `api_tokens.revoked_at` and keeps the row, so the next request with that token can still be
+tied to its owner and audited. A revoked or expired token is refused and hidden from that moment.
+A token of a soft-deleted account is not revoked: it works again if the account is restored.
+The migration that added `revoked_at` also revoked the tokens the older code had left asleep: those
+of people no longer in the token's group and of groups in the trash, each with its audit row.
+
+The nightly `outbox.cleanup` job runs `purgeExpiredApiTokens`, which deletes a row
+`API_TOKEN_PURGE_GRACE_DAYS` (30) days after it expired or was revoked, by the database clock, so a
+row may live up to a day longer. A token that never expires stays until it is revoked.
+
+Every token row in `auth_audits` (created 8, used 9, revoked 10, purged 11, refused 12) names the
+token in `identifier`: `<id> group=<group id> access=<read|write>[ reason=<why>] name=<name>`,
+built in SQL by `apiTokenAuditIdentifier`, so a row still says which token after the token's row is
+gone. No hash or part of a token is written. A revoke's reason is `owner`, `password-change`,
+`password-reset`, `membership-ended` or `group-deleted`. A refused request (reason `revoked`,
+`expired` or `scope`) writes at most one row per token and reason in five minutes
+(`REFUSAL_AUDIT_WINDOW_MS`); while Valkey is down it writes none. A token nobody holds has no owner
+and leaves no row. The purge writes one row per expired token; a revoked one already has its
+revoke row.
 
 ## What is not built yet
 
@@ -420,11 +489,23 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    `available_at` has come. `scheduleOutboxEvent` (from `@spy4x/server/outbox`) writes one, in the
    transaction of the change that needs it. Add a handler to the `JobPublisher` (from `@spy4x/server/outbox`) in
    `libs/server/jobs/wiring.ts`; it reads what it needs from the database. A failing job backs off
-   (1 s, 2 s, 4 s, up to 5 minutes) and after 10 attempts stops with its error in
-   `last_error_code`. A repeating job is listed in `repeatEveryMs`: a successful run writes the
-   next one. The worker starts one, `outbox.cleanup`, at 03:00 UTC and then daily: it removes
-   outbox rows processed more than 7 days ago. A job that gave up stays unprocessed, so the
-   worker does not restart it; look for rows with `last_error_code` set.
+   (1 s, 2 s, 4 s, up to 15 minutes) and after 20 attempts, about two and a half hours, is given
+   up (`JOB_RETRY` in `libs/server/jobs/job-failures.ts`). The row is then closed: `processed_at`
+   is set and the error's class stays in `last_error_code`, until the cleanup removes the row a
+   week later. The worker logs each attempt that fails with the row's kind, the attempt, the stage
+   and the error's class, never its message, and the last one as `abandoned` (`onAttemptFailed`):
+   search the worker's log for that word. Two things are not logged. An attempt lost with a worker
+   that died mid-run is retried after its lease without a line, unless it was the last one, which
+   is logged with stage `lease`. And the line is written after the row is closed, so a worker that
+   dies between the two leaves the closed row as the only trace, for those seven days. A repeating
+   job is listed in `repeatEveryMs`: a run that succeeds or is given up writes the next one
+   (`repeatAfterGiveUp`). The worker starts one, `outbox.cleanup`, at 03:00 UTC and then daily: it
+   removes outbox rows processed more than 7 days ago and runs every purge, each as its own step
+   (`cleanupSteps`). A step that throws is logged with its message and stops no other step; the
+   job is then retried like any other. Rows that a worker from before this (10 attempts, never
+   closed) had given up are closed by migration `2026_11_01_0001_close_given_up_outbox_rows.sql`,
+   so the worker with 20 attempts sends none of them late; a cleanup row among them is closed too,
+   and the worker writes a fresh one when it starts.
 6. A listener on the in-process event bus that throws is isolated, logged as one JSON line with the
    event and listener names and the request id, and counted in `event_listener_failures_total`
    (a `createCounter` from `@spy4x/platform/universal/metrics`). Register listeners with `subscribe` (not `eventBus.on`) so the

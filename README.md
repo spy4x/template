@@ -65,7 +65,7 @@ Then open `http://<DOMAIN>` from the env file: http://app.localhost with the val
 `infra/envs/.env.example`.
 
 Metrics and logs go to VictoriaMetrics and VictoriaLogs, with Grafana on top at
-`http://grafana.<DOMAIN>`. `COMPOSE_PROFILES=monitoring` in the env file runs those three in this
+`http://localhost:3000` ([Admin consoles](#admin-consoles)). `COMPOSE_PROFILES=monitoring` in the env file runs those three in this
 project; without it, `VM_REMOTE_WRITE_URL` and `VLOGS_URL` send the same metrics and logs to a
 monitoring server you already have. [docs/stack.md](docs/stack.md#monitoring) describes both modes.
 node-exporter and cAdvisor watch the whole host, so they are off by default: add `host-monitoring`
@@ -86,9 +86,13 @@ values (plus the seed's `AUTH_PEPPER` and `SEED_PASSWORD`). It drops the databas
 seeds it, after you confirm; `--yes` skips the question. It refuses unless `ENV=dev`, `DB_HOST` is
 `localhost`, `127.0.0.1` or `db`, and `DB_NAME` differs from the one in `infra/envs/.env.prod`. A
 missing or unreadable `.env.prod` also refuses; on a machine without one, add `--no-prod-check`.
+A missing `DB_PORT`, `DB_USER` or `DB_PASS`, or a missing or invalid `AUTH_PEPPER` or
+`SEED_PASSWORD`, refuses too, before anything is dropped.
 
-To add a demo user `demo` who owns a group, run `deno task db:seed` with the same values plus
-`AUTH_PEPPER` (the API's) and `SEED_PASSWORD` (the demo user's password, 8 to 50 characters).
+To add a demo user who signs in as `demo@example.com` and owns the group `Demo team`, run
+`ENV=dev deno task db:seed` with the same values plus `AUTH_PEPPER` (the API's) and `SEED_PASSWORD`
+(the demo user's password, 8 to 50 characters). It runs only with `ENV=dev`. Run again, it finds
+the user and changes nothing; when it cannot create the user, it says so and exits with 1.
 
 ## What a fresh project looks like
 
@@ -153,14 +157,17 @@ The template ships two web apps over the same API, with different jobs.
 The MPA calls the API over HTTP from the server, only for the newsletter, and never touches the
 database itself. It needs `ENV` and `DOMAIN` (the same values as the API), its own host
 `MPA_DOMAIN`, and `API_URL`, the address the MPA's server reaches the API at, such as
-`http://api:8000`; it refuses to start without any of them. To deploy it, set
+`http://<PROJECT>-api:8000` (Compose sets it); it refuses to start without any of them. To deploy it, set
 `COMPOSE_PROFILES=mpa` in the env file (join it with other profiles by commas) and `MPA_DOMAIN` to
 the website's own host, then run `deno task deploy` as usual: Compose builds the `mpa` service from
 `apps/mpa/dockerfile.prod` and serves it at `MPA_DOMAIN`, next to the SPA at `DOMAIN`. The API
 accepts a form only from `http(s)://DOMAIN`, so the MPA, after refusing any post that does not come
 from its own pages, presents its posts to the API with `DOMAIN`'s origin. `MPA_DOMAIN` needs a DNS
-record pointing at the server; Traefik gets its certificate as for `DOMAIN`. Without the profile
-nothing about the deploy changes. The MPA's end-to-end test runs in CI on every pull
+record pointing at the server; Traefik gets its certificate as for `DOMAIN`. The API and the worker
+read `MPA_DOMAIN` too: when it is set, the newsletter's mailed confirm and unsubscribe links open
+the website's pages, which work without JavaScript, so set it only together with the profile.
+Without it the links open the SPA. Without the profile nothing about the deploy changes. The MPA's
+end-to-end test runs in CI on every pull
 request, and locally with `e2e/mpa/run.sh` against a running Postgres and Valkey (see the header
 of that script).
 
@@ -172,9 +179,49 @@ resolver: Let's Encrypt, HTTP challenge on port 80, certificates stored in
 `.volumes/traefik/letsencrypt/acme.json`, expiry notices to `TRAEFIK_ACME_EMAIL`. Point `DOMAIN` at
 the server and run `deno task proxy:start` there.
 
+Plain `http://<DOMAIN>` (and `http://<MPA_DOMAIN>` with the `mpa` profile) answers a permanent
+redirect to HTTPS. The proxy serves nothing of its own but `/ping`: Traefik's dashboard and API are
+off, because they list every router and backend address of every project behind the proxy.
+
+**A server deployed before these changes needs three things once**, and its next deploy does
+more than usual:
+
+1. A server that runs Podman needs `CONTAINER_PROVIDER=podman` in its env file. Without that line
+   the deploy used to run Podman and now runs Docker: it fails at "Starting the app" and the old
+   containers stay up. Any other value than `docker` or `podman` is refused.
+2. Run `deno task proxy:start` on it: `deno task deploy` restarts the app's containers but never
+   the proxy, so the proxy that is already running keeps serving its dashboard at
+   `proxy.<DOMAIN>` until then.
+3. The next deploy publishes Grafana on `127.0.0.1:3000` and the MinIO console on
+   `127.0.0.1:9001`; when something on the server already uses one of them, the deploy fails with
+   "port is already allocated". Set `GRAFANA_HOST_PORT` or `MINIO_CONSOLE_HOST_PORT` in the env
+   file to a free `127.0.0.1:<port>` first ([Admin consoles](#admin-consoles)).
+
+That deploy also recreates the project's network, which no longer has a fixed subnet, so every
+container restarts once, the database included: expect a short outage, not the usual restart of
+the app alone. The base image is now named `<PROJECT>/deno-base`; the old `app/deno-base` image
+stays on the server until you remove it (`docker image rm app/deno-base:<version>`).
+
+`deno task deploy [env file]` reads the server from the env file (`infra/envs/.env.prod` unless you
+name another): `SSH_TO_SERVER`, `PATH_ON_SERVER` and, when Deno is not on the server's `PATH`,
+`DENO_ON_SERVER`. `infra/envs/.env.example` lists them with every other name. The copy replaces
+every server file that differs from your checkout, one edited on the server or newer there too, and
+deletes the ones your checkout no longer has; env files and the web push keys are never touched. So
+deploying an older commit is a full rollback of the code. It does not roll back the database.
+
+**A server that ran Postgres 16 moves its data once.** The Compose file runs Postgres 18, which
+keeps its data in a directory of its own, so the first deploy of this version stops at "Starting
+the app" with a message that says why, and the old containers keep serving. Run
+`deno task db:upgrade-18` on the server to move the data and finish the deploy:
+[docs/postgres-18-upgrade.md](docs/postgres-18-upgrade.md) has the steps, the outage to expect and
+the way back.
+
 `deno task deploy` needs no manual step on a new server: it creates `infra/configs/vapid.json`
 (the web push keys) there when the file is missing, readable by its owner only. It never sends the
-key from your machine and never replaces one that exists. Router, service and middleware names
+key from your machine and never replaces one that exists. It stops before sending anything when a
+password or secret in the env file equals one that `infra/envs/.env.example` prints (those values
+are public), or when one that the example file sets is empty or missing, and names each such
+variable. It reads the example file for that, so keep the file. Router, service and middleware names
 carry `${PROJECT}`, so projects with different `PROJECT` values can share one Traefik. Postgres and
 Valkey stay on `127.0.0.1`. Every image has a pinned version.
 
@@ -182,6 +229,88 @@ The template usually deploys behind a Traefik that several projects share. If th
 defines a resolver, do not start the proxy compose file: set `TRAEFIK_CERT_RESOLVER` to the name it
 defines. If that Traefik defines none, copy the three `--certificatesresolvers.*` flags from
 `compose.proxy.yml` into its command.
+
+## Sign in with Google and GitHub
+
+Both are off until you set their credentials: the sign-in and sign-up pages then show a "Continue
+with …" link for each provider that is on, and the profile gets a "Sign-in methods" card. A
+provider is on only when both of its variables are set in the env file.
+
+| Provider | Where to register                                                         | Variables                                  | Callback URL to register                    |
+| -------- | ------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------- |
+| Google   | Google Cloud console, "APIs & Services", "Credentials", "OAuth client ID" | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | `https://<DOMAIN>/api/auth/google/callback` |
+| GitHub   | GitHub, "Settings", "Developer settings", "OAuth Apps", "New OAuth App"   | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | `https://<DOMAIN>/api/auth/github/callback` |
+
+For Google choose the application type "Web application"; the scopes asked for are `openid` and
+`email`. GitHub is asked for `read:user` and `user:email`. On your own machine the callback is
+`http://app.localhost/api/auth/<provider>/callback`; register it as a second callback URL (Google)
+or in a second OAuth App (GitHub allows one callback per app).
+
+What a person gets:
+
+- Someone the provider already signs in here is signed in. An account with an authenticator app is
+  still asked for its code.
+- Someone new is asked "Create a new account?" first, and nothing is created until they answer.
+  The question waits 10 minutes; "I already have an account" creates nothing.
+- When an account here already uses that address with a password but never confirmed it, the
+  question says so first: creating the new account locks the old one (its password stops working),
+  because the provider has proven who owns the address. The old account gets an audit row.
+- A provider account joins an existing account by its e-mail address only when both sides have
+  verified that address. An address the provider has not verified never links: that person is
+  asked whether to create a new account, like anyone unknown.
+- On the profile, a person links and unlinks providers. A provider account links whatever its
+  e-mail address, and linking never changes another person's confirmed account; one that already
+  signs in to another account here is refused, and the page says so. The last way into an account
+  cannot be unlinked, and unlinking a method signs out the devices that signed in with it.
+- Linking differs from signing up in one case. When the provider has verified an address that
+  another account here uses with a password but never confirmed, the link locks that account, as
+  creating a new account would, and it gets the same audit row. The person linking is not warned
+  first: a link has no question page.
+- The sign-in page says how the person last signed in on this browser, with most of the address
+  hidden ("Last time you signed in with Google (a\*\*\*@example.com)"), and "Not you? Forget"
+  removes it. Only the method's name and the masked address are kept, in the browser's storage,
+  and only after a finished sign-in.
+- An account made with a provider has no password. It cannot change its address, set a password
+  or delete itself yet, because each asks for the password; its profile shows the provider's
+  address, offers none of the three and says why.
+
+## Admin consoles
+
+The MinIO console and Grafana have no public address. Each is published on the machine's own
+address only: the MinIO console on `127.0.0.1:9001` (sign in with `MINIO_USER` and `MINIO_PASS`),
+Grafana on `127.0.0.1:3000` (`admin` and `GRAFANA_PASS`). On your own machine open
+`http://localhost:9001` or `http://localhost:3000`. On a server, open a tunnel first:
+
+```sh
+ssh -L 9001:127.0.0.1:9001 -L 3000:127.0.0.1:3000 <SSH_TO_SERVER>
+```
+
+When a port is taken, set `MINIO_CONSOLE_HOST_PORT` or `GRAFANA_HOST_PORT` in the env file to
+another `127.0.0.1:<port>`. Never publish either on `0.0.0.0`.
+
+## Several projects on one server
+
+Products made from this template can share a server and its Traefik. Each lives in its own
+directory, so each has its own data under `.volumes/`. In the env file of every project after the
+first, change:
+
+- `PROJECT`: containers, the project's network, its base image and its Traefik routers are named
+  after it. Lowercase letters, digits and dashes.
+- `DOMAIN`, and `MPA_DOMAIN` with the `mpa` profile.
+- the four ports published on `127.0.0.1`: `DB_HOST_PORT`, `KV_HOST_PORT`,
+  `MINIO_CONSOLE_HOST_PORT` and `GRAFANA_HOST_PORT`. A port another project holds stops
+  `compose up` with "port is already allocated".
+
+The engine gives every project's network a free subnet, and each project's database, Valkey,
+MinIO and monitoring are on that network only. Two things are shared. The proxy: start it once per
+server, not per project. And the `proxy` network, which the API, the SPA and the website of every
+project join so that Traefik can reach them: a container on it can open any project's API
+directly, without passing the proxy. So share a server only between projects you trust alike. On
+that network a project addresses its own services by container name (`<PROJECT>-api`,
+`<PROJECT>-db`), never by a plain service name such as `api`, which any project would answer.
+
+With the `host-monitoring` profile, turn it on in one project only: its containers watch the whole
+host.
 
 ## Tasks
 
@@ -198,6 +327,7 @@ Current tasks come from [`deno.jsonc`](deno.jsonc).
 | `deno task spa:build`        | Build the SPA                                          |
 | `deno task subscribers:send` | Queue an issue for a mailing list (worker container)   |
 | `deno task deploy`           | Copy the production files to the server and start them |
+| `deno task db:upgrade-18`    | Once per server: move the data from Postgres 16 to 18  |
 
 Run individual app tasks with `api:*`, `spa:*`, or `mpa:*`. Deno workspace members inherit shared
 imports and tooling settings from root `deno.jsonc`.
@@ -213,8 +343,8 @@ deno task hooks:install   # runs the checks before every commit
 
 `deno task e2e` runs the Playwright specs in `e2e/` against the stack `deno task dev` started, at
 `http://app.localhost`. `deno task e2e:local` runs the same specs without that stack: it starts
-its own Postgres and Valkey containers, the API, the worker, the dev server and a proxy on spare
-ports, and removes all of them when it ends or is stopped.
+its own Postgres and Valkey containers, the API, the worker, the SPA and a proxy on spare ports,
+and removes all of them when it ends or is stopped.
 
 ```sh
 deno task e2e:local                        # every spec
@@ -223,10 +353,50 @@ deno task e2e:local -g "signing another"   # any other argument goes to Playwrig
 deno task e2e:report                       # open the report of the last run
 ```
 
+The two specs that start the app with no network, `e2e/offline.e2e.ts` and
+`e2e/local-data.e2e.ts`, run against the built SPA, the image a deploy serves, and every other spec
+against the dev server ([docs/offline.md](docs/offline.md), "The app shell", says why). A run that
+needs both makes two Playwright passes, the dev server first and then the built SPA in its place,
+so `deno task e2e:local` alone still runs every spec. It fails when either pass fails, and its last
+lines give the counts of each pass. The report of the second pass is in `e2e/report/offline`, which
+`deno task e2e:report` does not open. An argument that is not a spec path goes to both passes.
+`E2E_SPA=dev` or `E2E_SPA=built` puts every spec asked for on that one server.
+
 It needs a container tool (`CONTAINER_PROVIDER`, `podman` by default) and the Chromium of the
 pinned Playwright. The header of [`infra/scripts/e2e-local.sh`](infra/scripts/e2e-local.sh) lists
 the rest: the environment variables it reads, and the process cap to allow when you run it under
 one.
+
+#### Which browser tests CI runs
+
+A merge needs the pull-request check, so that check runs a smoke set; the whole suite runs after
+the merge.
+
+| When                    | Step        | Specs                                                      |
+| ----------------------- | ----------- | ---------------------------------------------------------- |
+| Pull request, and a tag | `e2e-smoke` | The smoke set below (`deno task e2e:local --smoke`)        |
+| Push to `main`          | `e2e-full`  | Every `e2e/*.e2e.ts` (`deno task e2e:local`)               |
+| All three               | `e2e-mpa`   | The website's `e2e/mpa/*.mpa.ts`                           |
+| All three               | `e2e-spa`   | `e2e/spa/security-headers.spa.ts`, on the SPA behind nginx |
+
+The smoke set is `SMOKE_SPECS` in
+[`infra/scripts/e2e-local-plan.ts`](infra/scripts/e2e-local-plan.ts), one line per spec:
+
+- `e2e/auth-profile-ws-push.e2e.ts`: a person signs in through the form, edits the profile and
+  signs out;
+- `e2e/sign-in-next.e2e.ts`: sign-in from a link to a page, with and without a one-time code;
+- `e2e/notes.e2e.ts`: a note is created, edited and deleted, and what a viewer may do;
+- `e2e/profile-two-tabs.e2e.ts`: a name saved in one tab shows in another;
+- `e2e/groups-pages.e2e.ts`: a group is created, renamed, deleted and restored;
+- `e2e/url-filters.e2e.ts`: the filters in the address follow the browser's back and forward.
+
+A screen outside the set (members, invitations, tags, offline, sessions, billing, password reset,
+account deletion) is tested only on `main`: a red `e2e-full` there, and a red badge at the top of
+this page, means the last merge broke one. It blocks no pull request. Both steps stop early, the
+smoke set after three failed tests and the whole suite after ten in a pass, so the list of failures
+in a red step may be incomplete: run the specs here for the rest. Before you add a spec to the
+set, run it ten times in a row (`deno task e2e:local e2e/<spec> --repeat-each=10`): one that fails
+once on a healthy branch blocks every pull request.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules, and [docs/handoff.md](docs/handoff.md) for
 the state of the migration and the traps in this codebase. To add a product feature, follow

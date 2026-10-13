@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
 
 // The public website is plain links and forms: a visitor needs no script to get through it.
 test.use({ javaScriptEnabled: false })
@@ -19,11 +20,12 @@ test("a visitor without JavaScript goes from the home page to pricing, to sign-u
   await expect(page).toHaveURL(/\/sign-up$/)
 
   // A fresh address each run: the per-address limit allows three confirm mails an hour.
-  const email = `mpa-site-${crypto.randomUUID().slice(0, 8)}@example.com`
+  const email = `mpa-site-${uuidV7().slice(-8)}@example.com`
   await page.goto("/pricing")
   await page.locator("[data-e2e=footer-subscribe-email]").fill(email)
   await page.locator("[data-e2e=footer-subscribe-submit]").click()
-  await expect(page).toHaveURL("/subscribe")
+  // The website answered the post with a redirect, so a reload asks for no second mail.
+  await expect(page).toHaveURL("/subscribe?state=sent")
   await expect(page.locator("[data-e2e=subscribe-sent]")).toBeVisible()
 })
 

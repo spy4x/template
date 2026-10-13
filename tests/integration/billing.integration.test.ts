@@ -25,6 +25,8 @@ import { createPostgresAuthStore } from "@spy4x/server/auth/postgres"
 import { PostgresGroupRepository } from "@server/groups/postgres-group-repository.ts"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
+import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { expectVersion7Ids } from "./ids.ts"
 
 /**
  * Webhook events applied to a real Postgres built from the migrations. Needs `DB_HOST`, `DB_USER`,
@@ -37,7 +39,7 @@ const MIGRATIONS_DIR = "libs/server/db/migrations"
 async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<void> {
   const settings = buildPostgresOptions(requireDbConnection())
   const admin = postgres({ ...settings, max: 1, onnotice: () => {} })
-  const schema = `billing_test_${crypto.randomUUID().replaceAll("-", "")}`
+  const schema = `billing_test_${uuidV7().replaceAll("-", "")}`
   const sql = postgres({
     ...settings,
     max: 10,
@@ -65,7 +67,7 @@ async function seedGroup(sql: postgres.Sql): Promise<{ groupId: string; owner: n
     WITH auth_user AS (INSERT INTO auth_users DEFAULT VALUES RETURNING id)
     INSERT INTO users (id) SELECT id FROM auth_user RETURNING id
   `)[0].id
-  const groupId = crypto.randomUUID()
+  const groupId = uuidV7()
   await new PostgresGroupRepository(sql).create({ id: groupId, name: "Team" }, owner)
   return { groupId, owner }
 }
@@ -273,7 +275,7 @@ Deno.test("billing events against Postgres", async (t) => {
 
     await t.step("an event that names no group of this app is kept and ignored", async () => {
       const outcome = await billing.applyEvent(
-        event({ id: "evt_g1", reference: crypto.randomUUID(), customerId: "cus_unknown" }),
+        event({ id: "evt_g1", reference: uuidV7(), customerId: "cus_unknown" }),
       )
       const payment: BillingEvent = {
         id: "evt_g2",
@@ -439,7 +441,7 @@ Deno.test("billing events against Postgres", async (t) => {
       async () => {
         const { groupId, owner } = await seedGroup(sql)
         const groups = new PostgresGroupRepository(sql)
-        await groups.create({ id: crypto.randomUUID(), name: "Other" }, owner)
+        await groups.create({ id: uuidV7(), name: "Other" }, owner)
         await billing.applyEvent(event({ id: "evt_l1", reference: groupId, customerId: "cus_l" }))
 
         const refused = await groups.softDelete(groupId, owner).catch((error) => error)
@@ -961,6 +963,12 @@ Deno.test("billing events against Postgres", async (t) => {
           WHERE aggregate_id = ${groupId} AND aggregate_type = ${JOB_AGGREGATE}
           ORDER BY available_at
         `
+        expectVersion7Ids(
+          await sql<{ id: string }[]>`
+            SELECT id FROM outbox_events
+            WHERE aggregate_id = ${groupId} AND aggregate_type = ${JOB_AGGREGATE}
+          `,
+        )
         expect(jobs).toEqual([
           {
             eventKind: BILLING_NOTICE_JOBS[BillingNoticeKind.PaymentFailed],
@@ -1095,12 +1103,18 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
         `
         const sender = recordingSender()
         const logged: string[] = []
-        const processor = createOutboxProcessor(sql, {
-          store: createPostgresAuthStore(sql),
-          sender,
-          brand: { webAppUrl: "http://app.localhost" },
-          log: (line) => logged.push(line),
-        })
+        const processor = createOutboxProcessor(
+          sql,
+          {
+            store: createPostgresAuthStore(sql),
+            sender,
+            brand: { webAppUrl: "http://app.localhost" },
+            log: (line) => logged.push(line),
+          },
+          null,
+          null,
+          7,
+        )
 
         const result = await processor.drainOnce()
 
@@ -1114,12 +1128,101 @@ Deno.test("billing notices reach the owner through the worker's queue", async (t
         ])
         const textTo = (to: string) => sender.sent.find((mail) => mail.to === to)?.text
         expect(textTo("failed@example.com")).toContain("The group is now on the free plan.")
-        expect(textTo("renewal@example.com")).toContain("The plan is kept for a few days")
+        const [{ pastDueSince }] = await sql<{ pastDueSince: Date }[]>`
+          SELECT past_due_since FROM subscriptions WHERE group_id = ${renewal.groupId}
+        `
+        expect(textTo("renewal@example.com")).toContain(
+          `The plan is kept until ${longDate(pastDueSince.getTime() + 7 * DAY)} while`,
+        )
+        expect(textTo("trial@example.com")).toContain(
+          "The subscription then starts and is charged.",
+        )
         expect(sender.sent.find((mail) => mail.to === "trial@example.com")?.text)
           .toContain(`http://app.localhost/groups/${trial.groupId}`)
         expect(logged).toEqual([
           "warn: a billing notice was not sent: the group's owner has no proven address",
         ])
+      },
+    )
+
+    await t.step(
+      "with no grace days and trials without a card, the mails promise neither a grace nor a charge",
+      async () => {
+        await sql`DELETE FROM outbox_events WHERE aggregate_type = ${JOB_AGGREGATE}`
+        const cardless = await seedOwnerWithAddress(sql, "cardless@example.com")
+        const lapsed = await seedOwnerWithAddress(sql, "lapsed@example.com")
+        const trialEnd = new Date(start.getTime() + 10 * DAY)
+        await apply(cardless.groupId, { status: SubscriptionStatus.Trialing, trialEnd })
+        // A renewal that fails after the plan was paid for: with a grace it would keep the plan.
+        await apply(lapsed.groupId, { status: SubscriptionStatus.Active })
+        await apply(lapsed.groupId, { status: SubscriptionStatus.PastDue })
+        await sql`
+          UPDATE outbox_events SET available_at = available_at - make_interval(days => 8)
+          WHERE aggregate_type = ${JOB_AGGREGATE}
+        `
+        const sender = recordingSender()
+        const processor = createOutboxProcessor(
+          sql,
+          {
+            store: createPostgresAuthStore(sql),
+            sender,
+            brand: { webAppUrl: "http://app.localhost" },
+            log: () => {},
+          },
+          null,
+          null,
+          0,
+          false,
+        )
+
+        expect((await processor.drainOnce()).failed).toBe(0)
+
+        const textTo = (to: string) => sender.sent.find((mail) => mail.to === to)?.text
+        expect(textTo("lapsed@example.com")).toContain("The group is now on the free plan.")
+        expect(textTo("lapsed@example.com")).not.toContain("is kept")
+        expect(textTo("cardless@example.com")).toContain(
+          "Without a card, the group moves to the free plan.",
+        )
+        expect(textTo("cardless@example.com")).not.toContain("To stop it, cancel it")
+      },
+    )
+
+    await t.step(
+      "a failed payment on a cancelled plan names the end of the paid period when it comes before the grace ends",
+      async () => {
+        await sql`DELETE FROM outbox_events WHERE aggregate_type = ${JOB_AGGREGATE}`
+        const leaving = await seedOwnerWithAddress(sql, "leaving@example.com")
+        const periodEnd = new Date(start.getTime() + 3 * DAY)
+        await apply(leaving.groupId, { status: SubscriptionStatus.Active })
+        await apply(leaving.groupId, {
+          status: SubscriptionStatus.PastDue,
+          cancelAtPeriodEnd: true,
+          currentPeriodEnd: periodEnd,
+        })
+        await sql`
+          UPDATE outbox_events SET available_at = now() WHERE aggregate_type = ${JOB_AGGREGATE}
+        `
+        const sender = recordingSender()
+        const processor = createOutboxProcessor(
+          sql,
+          {
+            store: createPostgresAuthStore(sql),
+            sender,
+            brand: { webAppUrl: "http://app.localhost" },
+            log: () => {},
+          },
+          null,
+          null,
+          7,
+        )
+
+        expect((await processor.drainOnce()).failed).toBe(0)
+
+        const failed = sender.sent.find((mail) => mail.subject === "A payment for Pro failed")
+        expect(failed?.to).toBe("leaving@example.com")
+        expect(failed?.text).toContain(
+          `The plan is kept until ${longDate(periodEnd.getTime())} while`,
+        )
       },
     )
   })

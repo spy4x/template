@@ -60,8 +60,32 @@ for (const service of ["api", "worker"]) {
   })
 }
 
+// Without it both would build the mailed newsletter links on the SPA's host, where the confirm
+// and unsubscribe pages need JavaScript.
+for (const service of ["api", "worker"]) {
+  Deno.test(`the ${service} container receives the website's host`, async () => {
+    expect(await environmentOf(service)).toContain("MPA_DOMAIN")
+  })
+}
+
 Deno.test("the api container receives the error tracker's DSN", async () => {
   expect(await environmentOf("api")).toContain("ERROR_REPORT_DSN")
+})
+
+// Without them a provider set in `.env` would stay off: the API would never see its values.
+Deno.test("the api container receives each sign-in provider's client id and secret", async () => {
+  const names = await environmentOf("api")
+
+  for (
+    const name of [
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+      "GITHUB_CLIENT_ID",
+      "GITHUB_CLIENT_SECRET",
+    ]
+  ) {
+    expect(names).toContain(name)
+  }
 })
 
 /** The check of every service that runs on Deno: `apps/healthcheck.ts`, which probes one port. */

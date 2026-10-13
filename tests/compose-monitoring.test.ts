@@ -158,7 +158,9 @@ Deno.test("a Vector password with a quote reaches the config only inside base64"
   expect(config.sinks.victorialogs.request?.headers?.Authorization).toBe("Basic ${VLOGS_AUTH}")
 })
 
-Deno.test("no monitoring service publishes a port on the host", async () => {
+// Grafana is the one monitoring service a person opens: tests/compose-exposure.test.ts holds its
+// port to this machine.
+Deno.test("no monitoring service except Grafana publishes a port on the host", async () => {
   const monitoring = [
     `vmagent`,
     `vector`,
@@ -167,7 +169,6 @@ Deno.test("no monitoring service publishes a port on the host", async () => {
     `victorialogs`,
     `vmalert`,
     `alertmanager`,
-    `grafana`,
     `nodeexporter`,
     `cadvisor`,
   ]

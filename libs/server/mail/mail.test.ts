@@ -5,6 +5,7 @@ import { BillingNoticeKind } from "@domain/billing"
 import {
   accountDeletionMail,
   accountRestoredMail,
+  apiTokenCreatedMail,
   billingNoticeMail,
   createMailSender,
   emailCodeMail,
@@ -147,6 +148,47 @@ describe("accountDeletionMail", () => {
   })
 })
 
+describe("apiTokenCreatedMail", () => {
+  const input = {
+    to: "ann@example.com",
+    name: `Zapier <script>`,
+    groupName: "Family & co",
+    canWrite: true,
+    expiresAt: new Date("2027-01-02T10:00:00Z"),
+  }
+  const mail = apiTokenCreatedMail({ webAppUrl: "https://app.example.com" }, input)
+
+  it("names the token, its group, what it can do and when it expires", () => {
+    expect(mail.to).toBe("ann@example.com")
+    expect(mail.subject).toBe("An API token was created")
+    expect(mail.text).toContain(`An API token named "Zapier <script>" was created`)
+    expect(mail.text).toContain(
+      `It can read and write the group "Family & co" and expires on January 2, 2027.`,
+    )
+  })
+
+  it("says a read-only token that never expires is just that", () => {
+    const readOnly = apiTokenCreatedMail({ webAppUrl: "https://app.example.com" }, {
+      ...input,
+      canWrite: false,
+      expiresAt: null,
+    })
+    expect(readOnly.text).toContain(`It can read the group "Family & co" and never expires.`)
+  })
+
+  it("says what to do if it was someone else: revoke it and change the password", () => {
+    expect(mail.text).toContain("If this wasn't you, revoke the token on your profile page")
+    expect(mail.text).toContain("change your password, which revokes every API token")
+    expect(mail.text).toContain("https://app.example.com/")
+  })
+
+  it("escapes the token's and the group's name in the HTML", () => {
+    expect(mail.html).toContain("Zapier &lt;script&gt;")
+    expect(mail.html).toContain("Family &amp; co")
+    expect(mail.html).not.toContain("<script>")
+  })
+})
+
 describe("accountRestoredMail", () => {
   const mail = accountRestoredMail({ webAppUrl: "https://app.example.com" }, {
     to: "ann@example.com",
@@ -233,7 +275,8 @@ describe("billingNoticeMail", () => {
       planName: "Pro",
       at: new Date("2026-10-15T23:30:00Z"),
       link,
-      planKept: true,
+      planKeptUntil: new Date("2026-10-22T23:30:00Z"),
+      trialHasCard: true,
     })
 
   it("says when a trial ends, in UTC, and that it is charged unless cancelled", () => {
@@ -260,11 +303,38 @@ describe("billingNoticeMail", () => {
       planName: "Pro",
       at: new Date("2026-10-15T23:30:00Z"),
       link,
-      planKept: false,
+      planKeptUntil: null,
+      trialHasCard: true,
     })
 
     expect(failedTrial.text).toContain("The group is now on the free plan.")
-    expect(failedTrial.text).not.toContain("kept for a few days")
+    expect(failedTrial.text).not.toContain("is kept")
+  })
+
+  it("names the day the grace period ends, in UTC, when the plan is kept", () => {
+    const failed = mail(BillingNoticeKind.PaymentFailed)
+
+    expect(failed.text).toContain(
+      "The plan is kept until October 22, 2026 while the payment is retried.",
+    )
+  })
+
+  it("tells the owner of a trial without a card that it ends on the free plan unless one is added", () => {
+    const cardless = billingNoticeMail(brand, {
+      to: "ann@example.com",
+      kind: BillingNoticeKind.TrialEnding,
+      groupName: "Tea club",
+      planName: "Pro",
+      at: new Date("2026-10-15T23:30:00Z"),
+      link,
+      planKeptUntil: null,
+      trialHasCard: false,
+    })
+
+    expect(cardless.subject).toBe("Your Pro trial ends on October 15, 2026")
+    expect(cardless.text).toContain("Add a card from the group's page before then to keep the plan")
+    expect(cardless.text).toContain("Without a card, the group moves to the free plan.")
+    expect(cardless.text).not.toContain("To stop it, cancel it")
   })
 
   it("says when a cancelled plan ends and that it can still be renewed", () => {

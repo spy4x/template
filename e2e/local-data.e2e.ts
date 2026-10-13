@@ -6,6 +6,7 @@ import {
 } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
 import { gotoApp, signIn, submitAuthForm } from "./fixtures/app.ts"
+import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
 
 /**
  * The local-data module as a swappable part (ADR 003, sections 1, 4 and 5), in a real browser with
@@ -35,14 +36,14 @@ async function signUp(request: APIRequestContext, email: string): Promise<void> 
 }
 
 async function createGroup(api: APIRequestContext, name: string): Promise<string> {
-  const groupId = crypto.randomUUID()
+  const groupId = uuidV7()
   const group = await api.post(`${apiBase}/api/groups`, { headers, data: { id: groupId, name } })
   expect(group.status(), await group.text()).toBe(201)
   return groupId
 }
 
 async function createNote(api: APIRequestContext, groupId: string, title: string) {
-  const noteId = crypto.randomUUID()
+  const noteId = uuidV7()
   const note = await api.post(`${apiBase}/api/groups/${groupId}/notes`, {
     headers,
     data: { id: noteId, title, body: "" },
@@ -202,7 +203,7 @@ test.describe("the app with the local-data module switched off", () => {
 test.describe("the app with no network, after one visit online", () => {
   test("every list screen shows what it showed last, and the lists that can mislead say when they were saved", async ({ browser, request }) => {
     test.setTimeout(120_000)
-    const id = crypto.randomUUID().slice(0, 8)
+    const id = uuidV7().slice(-8)
     const user = `e2e-kept-user-${id}@example.com`
     const other = `e2e-kept-other-${id}@example.com`
     for (const email of [user, other]) await cleanup(request, email)
@@ -272,6 +273,7 @@ test.describe("the app with no network, after one visit online", () => {
       await gotoApp(page, "/", page.locator("[data-e2e=session-current]"))
       await page.locator("[data-e2e=api-token-create-open]").click()
       await page.locator("[data-e2e=api-token-name]").fill("Kept token")
+      await page.locator("[data-e2e=api-token-password]").fill(password)
       await page.locator("[data-e2e=api-token-create]").click()
       await page.locator("[data-e2e=api-token-done]").click()
       const tokens = page.locator("[data-e2e=api-token-details]")
@@ -352,7 +354,7 @@ test.describe("what a device keeps", () => {
   }
 
   const editQueuedLastWeek = (groupId: string, noteId: string) => ({
-    key: crypto.randomUUID(),
+    key: uuidV7(),
     entityId: noteId,
     kind: "update",
     payload: { groupId, title: "Edited before the update", body: "" },
@@ -438,6 +440,36 @@ test.describe("what a device keeps", () => {
       await expect.poll(() => recordsIn(page, `reads:${userId}`)).toBe(0)
       expect(await recordsIn(page, `offline:user:${userId}:notes`)).toBe(0)
       expect(await recordsIn(page, `offline:user:${userId}:outbox`)).toBe(1)
+    } finally {
+      await context.close()
+      await cleanup(request, user)
+    }
+  })
+
+  test("a start while the proxy answers 502 for the API keeps the person signed in on their saved notes", async ({ browser, request }) => {
+    const user = "e2e_local_data_deploy@example.com"
+    await cleanup(request, user)
+    // Without the socket every call is an HTTP request, which this test answers as the proxy does.
+    const { context, page: unused } = await configured(browser, { realtime: false })
+    await unused.close()
+    try {
+      const { page, userId } = await deviceWithNote(context, request, user)
+      await expect(page.locator("[data-e2e=note-list]")).toContainText("Before the update")
+      await expect.poll(() => recordsIn(page, `reads:${userId}`)).toBeGreaterThan(0)
+      await expect.poll(() => recordsIn(page, `offline:user:${userId}:notes`)).toBeGreaterThan(0)
+
+      // A deploy: the API's container is being replaced, and the proxy answers in its place.
+      await context.route(
+        (url) => url.pathname.startsWith("/api/"),
+        (route) =>
+          route.fulfill({ status: 502, contentType: "text/html", body: "<h1>Bad Gateway</h1>" }),
+      )
+      await gotoApp(page, "/notes", page.locator("[data-e2e=note-list]"))
+
+      await expect(page.locator("[data-e2e=note-list]")).toContainText("Before the update")
+      await expect(page.locator("[data-e2e=signin-required]")).toHaveCount(0)
+      expect(await recordsIn(page, `reads:${userId}`)).toBeGreaterThan(0)
+      expect(await recordsIn(page, `offline:user:${userId}:notes`)).toBeGreaterThan(0)
     } finally {
       await context.close()
       await cleanup(request, user)

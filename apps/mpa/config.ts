@@ -1,6 +1,6 @@
 /** What the MPA needs to know about its surroundings. */
 export interface MpaConfig {
-  /** Where the MPA reaches the API from the server, such as `http://api:8000`. Never a browser URL. */
+  /** Where the MPA reaches the API from the server, such as `http://app-api:8000`. Never a browser URL. */
   apiUrl: string
   /**
    * The origin the browser sees the MPA at, such as `https://www.example.com`, from `MPA_DOMAIN`.
@@ -16,8 +16,8 @@ export interface MpaConfig {
 
 /**
  * Reads the configuration from the environment: `ENV`, `DOMAIN` (as the API reads them), `API_URL`
- * and `MPA_DOMAIN`. Throws when a required one is missing, so a misconfigured MPA
- * refuses to start.
+ * and `MPA_DOMAIN`. Throws when a required one is missing, or when `MPA_DOMAIN` carries a scheme
+ * (it would become the host `https`), so a misconfigured MPA refuses to start.
  */
 export function readMpaConfig(env: { get(name: string): string | undefined }): MpaConfig {
   const required = (name: string): string => {
@@ -26,6 +26,9 @@ export function readMpaConfig(env: { get(name: string): string | undefined }): M
     return value
   }
   const scheme = required("ENV") === "dev" ? "http" : "https"
+  if (required("MPA_DOMAIN").includes("://")) {
+    throw new Error("MPA_DOMAIN must be a host such as www.example.com, without a scheme")
+  }
   const apiOrigin = new URL(`${scheme}://${required("DOMAIN")}`).origin
   return {
     apiUrl: new URL(required("API_URL")).origin,

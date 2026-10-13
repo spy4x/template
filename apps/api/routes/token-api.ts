@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import { isUuid } from "@spy4x/platform/universal/uuid"
 import type { Context, MiddlewareHandler } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { bearerTokenFromHeaders } from "@spy4x/server/http/bearer-auth"
@@ -6,7 +7,6 @@ import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { ApiTokenAccess, ApiTokenError, type ApiTokenErrorCode } from "@domain/api-tokens"
 import type { Actor } from "@domain/identity"
 import {
-  isUuidV4,
   type Note,
   NoteCreateCommand,
   noteCreateRequestSchema,
@@ -33,6 +33,8 @@ export interface TokenApiContext {
 export interface TokenApiDependencies extends NoteListDependencies {
   /** The live token a request presents, or `null`. Reads the database on every call. */
   authenticate(c: Context, presented: string | undefined): Promise<LiveApiToken | null>
+  /** Audits that a live token was refused for its scope, within the audit budget. Never throws. */
+  auditRefusal(c: Context, tokenId: string, reason: "scope"): Promise<void>
   create(command: NoteCreateCommand): Promise<NoteWriteResult>
   get(query: NoteGetQuery): Promise<{ note: Note }>
   /** Spent per client address before the token is checked, so guessing costs a budget. */
@@ -43,6 +45,7 @@ export interface TokenApiDependencies extends NoteListDependencies {
 
 const TOKEN_ERRORS: Record<ApiTokenErrorCode, { status: ContentfulStatusCode; message: string }> = {
   INVALID_REQUEST: { status: 400, message: "Request is invalid" },
+  PASSWORD_INVALID: { status: 400, message: "The password is incorrect" },
   GROUP_NOT_FOUND: { status: 404, message: "Group not found" },
   TOKEN_NOT_FOUND: { status: 404, message: "Token not found" },
   TOO_MANY_TOKENS: { status: 409, message: "Too many tokens" },
@@ -65,12 +68,20 @@ const TOKEN_ERRORS: Record<ApiTokenErrorCode, { status: ContentfulStatusCode; me
  * scope. The session gate refuses another group, a write from a read-only token and every message
  * a token may not send (`cqrs/token-scope.ts`); the handlers refuse what the owner's role does not
  * allow. A missing, revoked or expired token gets 401 `TOKEN_INVALID`, the scope 403 `TOKEN_SCOPE`.
+ * A refusal of a token that has an owner (revoked, expired, or out of its scope) is audited, a few
+ * rows an hour per token at most.
  * No origin check: the browser never attaches the header on its own, so another site cannot make
  * it send one.
  */
 export function createTokenApiRoute(dependencies: TokenApiDependencies): Hono<TokenApiContext> {
   return new Hono<TokenApiContext>()
-    .onError((error, c) => tokenApiErrorResponse(c, error))
+    .onError(async (error, c) => {
+      const token = c.get("apiToken")
+      if (token && error instanceof ApiTokenError && error.code === "TOKEN_SCOPE") {
+        await dependencies.auditRefusal(c, token.id, "scope")
+      }
+      return tokenApiErrorResponse(c, error)
+    })
     .use(dependencies.limitByIp)
     .use(async (c, next) => {
       const token = await dependencies.authenticate(c, bearerTokenFromHeaders(c.req.raw.headers))
@@ -91,7 +102,7 @@ export function createTokenApiRoute(dependencies: TokenApiDependencies): Hono<To
     })
     .get("/groups/:groupId/notes/:noteId", async (c) => {
       const noteId = c.req.param("noteId")
-      if (!isUuidV4(noteId)) throw new NoteFeatureError("INVALID_REQUEST", "Note id is invalid")
+      if (!isUuid(noteId)) throw new NoteFeatureError("INVALID_REQUEST", "Note id is invalid")
       return c.json(
         await dependencies.get(
           new NoteGetQuery({ actor: actorOf(c), groupId: groupIdOf(c), id: noteId }),
@@ -152,7 +163,7 @@ function tokenApiErrorResponse(c: Context<TokenApiContext>, error: unknown): Res
 
 function groupIdOf(c: Context<TokenApiContext>): string {
   const groupId = c.req.param("groupId")
-  if (!groupId || !isUuidV4(groupId)) {
+  if (!groupId || !isUuid(groupId)) {
     throw new NoteFeatureError("INVALID_REQUEST", "Group id is invalid")
   }
   return groupId

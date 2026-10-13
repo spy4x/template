@@ -1,6 +1,7 @@
 import { type } from "arktype"
 import { BaseModelSchema, dateSchema } from "@spy4x/platform/model"
 import type { SecondFactorStatus } from "@spy4x/server/sign-in"
+import { hasUnstorableTextCharacters } from "@spy4x/platform/universal/text"
 
 // Not in @spy4x/platform/model: too template-specific (a user's name length limit) to belong in a
 // general-purpose package. Moved here from the deleted libs/platform/types/+index.ts.
@@ -40,9 +41,19 @@ export type User = typeof userSchema.infer
 export const userUpdateSchema = userBaseSchema.pick("firstName", "lastName")
 export type UserUpdate = typeof userUpdateSchema.infer
 
+/**
+ * One part of a person's name as the profile form sends it: 1 to {@link NAME_MAX_LENGTH}
+ * characters, none of them one Postgres cannot store (NUL, half of a surrogate pair), which would
+ * answer 500 instead of 400.
+ */
+const profileName = type(`1 <= string <= ${NAME_MAX_LENGTH}`).narrow((value, ctx) =>
+  !hasUnstorableTextCharacters(value) || ctx.mustBe("free of NUL and broken characters")
+)
+
+/** The body of a profile edit, over REST and the socket: the only request that writes the names. */
 export const userProfileBaseSchema = type({
-  firstName: `1 <= string <= ${NAME_MAX_LENGTH}`,
-  lastName: `1 <= string <= ${NAME_MAX_LENGTH}`,
+  firstName: profileName,
+  lastName: profileName,
 })
 export type UserProfileBase = typeof userProfileBaseSchema.infer
 
@@ -129,6 +140,32 @@ export function emailToVerify(status: EmailStatus): string | null {
   return status.email !== null && !status.proven ? status.email : null
 }
 
+/** The first steps of a new account, each `true` once the person's own data says it is done. */
+export interface OnboardingSteps {
+  /** A code proved the address the account signs in with. */
+  emailVerified: boolean
+  /** The person wrote a note themselves; the welcome note a new account starts with does not count. */
+  noteCreated: boolean
+  /** The person invited someone to a group. */
+  memberInvited: boolean
+  /** A browser of the person is registered for push notifications. */
+  notificationsOn: boolean
+  /** An authenticator app is set up. */
+  twoFactorOn: boolean
+}
+
+/** What the SPA's first-steps checklist and tour show (`onboarding.get`). Kept per person. */
+export interface OnboardingStatus {
+  steps: OnboardingSteps
+  /** The person closed the checklist; it stays closed on every device. */
+  dismissed: boolean
+  /** The person finished or skipped the tour; it is not offered again on any device. */
+  tourSeen: boolean
+}
+
+/** The two answers a person gives once: closing the checklist, and ending the tour. */
+export type OnboardingMark = "dismissed" | "tourSeen"
+
 export const authPasswordChangeSchema = authPasswordSchema.and({
   newPassword: "8 <= string <= 50",
   /** Ends every other session of the person once the password changed. Left out means `true`. */
@@ -175,12 +212,26 @@ export interface AccountDeletionStatus {
   blockers: AccountDeletionBlocker[]
 }
 
+/**
+ * The longest value, in characters, of each text field of a push device. Three places must agree
+ * on these: the request check (`pushSubscribeRequestSchema` in `@spy4x/platform/model`), the row
+ * schema below and the columns of `user_push_tokens`. A request that passes the check and does not
+ * fit the column is a server error (#355). `push-token-limits.test.ts` holds the request check to
+ * these numbers, and `tests/integration/web-push.integration.test.ts` holds the columns to them.
+ */
+export const PUSH_TOKEN_LIMITS = {
+  deviceId: 256,
+  endpoint: 2048,
+  auth: 256,
+  p256dh: 256,
+} as const
+
 export const userPushTokenSchemaBase = type({
   userId: "number = 0",
-  deviceId: "string <= 256 = ''",
-  endpoint: "string <= 256 = ''",
-  auth: "string <= 256 = ''",
-  p256dh: "string <= 256 = ''",
+  deviceId: `string <= ${PUSH_TOKEN_LIMITS.deviceId} = ''`,
+  endpoint: `string <= ${PUSH_TOKEN_LIMITS.endpoint} = ''`,
+  auth: `string <= ${PUSH_TOKEN_LIMITS.auth} = ''`,
+  p256dh: `string <= ${PUSH_TOKEN_LIMITS.p256dh} = ''`,
 })
 export type UserPushTokenBase = typeof userPushTokenSchemaBase.infer
 
@@ -206,17 +257,41 @@ export enum AuthAuditEventType {
   ACCOUNT_RESTORED = 6,
   /** The person ended one of their other sessions, or all of them, from the devices list. */
   SESSIONS_ENDED = 7,
-  /** The person created a personal API token; `identifier` is its id. */
+  /**
+   * The person created a personal API token. `identifier` names the token, as in every token row
+   * below: its id, group, access and name (`@server/api-tokens/api-tokens.ts` has the format), so
+   * the row still says which token it was once the token is gone. Never the secret or its hash.
+   */
   API_TOKEN_CREATED = 8,
   /** A personal API token was used; written at most once every few minutes per token. */
   API_TOKEN_USED = 9,
-  /** The person revoked a personal API token; `identifier` is its id. */
-  API_TOKEN_REVOKED = 10,
   /**
-   * The worker deleted tokens of this person that expired long ago; `identifier` is their count, a
-   * colon and their ids.
+   * A personal API token was revoked, with the reason in `identifier`: by its owner, by a password
+   * change or reset, because the owner's membership of the group ended, or because the group was
+   * deleted.
    */
+  API_TOKEN_REVOKED = 10,
+  /** The worker deleted this person's token that expired long ago; one row per token. */
   API_TOKENS_PURGED = 11,
+  /**
+   * A request with a personal API token was refused, with the reason in `identifier`: the token was
+   * revoked or expired, or it may not do what was asked. Written a few times an hour per token at
+   * most, so a flood of refused requests cannot fill the table.
+   */
+  API_TOKEN_REFUSED = 12,
+  /**
+   * A Google or GitHub account became a way into this account, with the key's method in
+   * `identifier` (`oauth:google`): the provider vouched for the address the account had proven.
+   */
+  SIGN_IN_METHOD_LINKED = 13,
+  /** The person removed a sign-in method, with the key's method in `identifier`. */
+  SIGN_IN_METHOD_UNLINKED = 14,
+  /**
+   * The account lost its password because it never confirmed its address, and someone a provider
+   * vouched for as the owner of that address created an account of their own. `identifier` is the
+   * method of that provider (`oauth:google`). The account keeps its data but has no way in.
+   */
+  UNCONFIRMED_ADDRESS_TAKEN = 15,
 }
 
 export const authAuditBaseSchema = type({
@@ -233,6 +308,10 @@ export const authAuditBaseSchema = type({
     AuthAuditEventType.API_TOKEN_USED,
     AuthAuditEventType.API_TOKEN_REVOKED,
     AuthAuditEventType.API_TOKENS_PURGED,
+    AuthAuditEventType.API_TOKEN_REFUSED,
+    AuthAuditEventType.SIGN_IN_METHOD_LINKED,
+    AuthAuditEventType.SIGN_IN_METHOD_UNLINKED,
+    AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
   ),
   identifier: "string <= 320 | null = null",
   ip: "string <= 45 | null = null",
@@ -286,6 +365,119 @@ export interface SignedInDevice {
 /** The answer of `GET /api/auth/sessions`: this device first, then the rest, last used first. */
 export interface SignedInDevicesResponse {
   sessions: SignedInDevice[]
+}
+
+/** The providers a person can sign in with besides a password (#141), as the API's paths name them. */
+export const OAUTH_PROVIDERS = ["google", "github"] as const
+export type OAuthProviderId = typeof OAUTH_PROVIDERS[number]
+
+/** What each provider is called on a button and in a sentence. */
+export const OAUTH_PROVIDER_NAMES: Record<OAuthProviderId, string> = {
+  google: "Google",
+  github: "GitHub",
+}
+
+/** `value` as a provider id, or `null` when it names none. */
+export function oauthProviderId(value: unknown): OAuthProviderId | null {
+  return OAUTH_PROVIDERS.find((id) => id === value) ?? null
+}
+
+/** The answer of `GET /api/auth/providers`: the providers whose credentials are set. */
+export interface OAuthProvidersResponse {
+  providers: OAuthProviderId[]
+}
+
+/**
+ * A provider sign-in that would create a new account and waits for the person to confirm it
+ * (#142), as `GET /api/auth/sign-up/pending` answers it.
+ */
+export interface PendingSignUp {
+  provider: OAuthProviderId
+  /** The address the provider reported, vouched for or not; `null` when it shared none. */
+  email: string | null
+  /** ISO 8601. After this the sign-up can no longer be confirmed. */
+  expiresAt: string
+  /**
+   * An account here signed up with a password and this address but never confirmed it. The
+   * provider vouches that the person at the question owns the address, so creating the new
+   * account takes the password away from that one. The question page says so first.
+   */
+  unconfirmedAccount: boolean
+}
+
+/** What `GET /auth/sign-up/pending` answers: the sign-up that waits, or `null` when none does. */
+export interface PendingSignUpResponse {
+  pending: PendingSignUp | null
+}
+
+/** One way into the account, as `GET /api/auth/methods` lists it (#141). */
+export interface SignInMethod {
+  /** The id to unlink it by. */
+  id: number
+  kind: "password" | OAuthProviderId
+  /** The address this method proved or signs in with; `null` when it carries none. */
+  email: string | null
+  /** This device signed in with it, so unlinking it signs this device out. */
+  current: boolean
+  /** A provider method that is not the last way in. The password is never unlinked. */
+  canUnlink: boolean
+}
+
+/** The answer of `GET /api/auth/methods`. */
+export interface SignInMethodsResponse {
+  methods: SignInMethod[]
+  /** Providers that are on and not linked to this account yet. */
+  available: OAuthProviderId[]
+}
+
+/**
+ * How a provider sign-in or a link ended, as the API's callback puts it in the `oauth` query
+ * parameter of the page it sends the browser to.
+ */
+export type OAuthNotice =
+  /** The sign-in failed: the provider refused, the attempt expired, or the account is gone. */
+  | "failed"
+  /** Linked: the provider is now a way into the signed-in account. */
+  | "linked"
+  /** Nothing changed: that provider account was already a way into the signed-in account. */
+  | "link-exists"
+  /** Not linked: another account here already signs in with that provider account. */
+  | "link-taken"
+  /** Too many attempts from this address in a minute; nothing was tried. */
+  | "busy"
+
+/**
+ * The web app's pages a provider's callback redirects to. `apps/spa` routes each one
+ * (`spa-paths.ts`), and its tests fail when one is missing there.
+ */
+export const OAUTH_PAGES = {
+  /** Sign-in: where a failed provider sign-in says so. */
+  signIn: "/sign-in",
+  /** Asks "Create a new account?" before a provider signs anyone up. */
+  confirmSignUp: "/sign-up/confirm",
+  /** Asks for the authenticator code a provider sign-in still owes. */
+  oneTimeCode: "/totp",
+  /** The profile: where sign-in lands without a `next`, and where linking reports. */
+  profile: "/",
+} as const
+
+/** The query parameter that carries an {@link OAuthNotice}. */
+export const OAUTH_NOTICE_PARAM = "oauth"
+
+/** What each {@link OAuthNotice} tells the person. */
+export const OAUTH_NOTICES: Record<OAuthNotice, string> = {
+  "failed": "That sign-in did not work. Try again.",
+  "linked": "Linked. You can now sign in with it.",
+  "link-exists": "Already linked. You can sign in with it as before.",
+  "link-taken": "Not linked: that account is already linked to another account here.",
+  "busy": "Too many attempts. Wait a minute, then try again.",
+}
+
+/** `value` as a notice, or `null` when it is none. */
+export function oauthNotice(value: unknown): OAuthNotice | null {
+  return typeof value === "string" && Object.hasOwn(OAUTH_NOTICES, value)
+    ? value as OAuthNotice
+    : null
 }
 
 // The four response shapes below have no @spy4x/platform/api counterpart: they name this app's

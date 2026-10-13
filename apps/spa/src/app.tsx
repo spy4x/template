@@ -1,12 +1,14 @@
 import "./app.css"
+import type { ComponentChildren } from "preact"
 import { useEffect, useState } from "preact/hooks"
-import { InstallPrompt } from "@spy4x/preact-system/install-prompt"
 import { SWUpdater } from "@spy4x/preact-system/sw-updater"
 import { LoadingSpinner } from "@spy4x/preact-ui/loading-spinner"
 import { Toastr } from "@spy4x/preact-ui/toastr"
-import { Route, Switch, useLocation, useSearch } from "wouter-preact"
+import { Route, type StringRouteParams, Switch, useLocation, useSearch } from "wouter-preact"
+import { useRouteAnnouncer } from "@spy4x/preact-system/route-announcer"
 import { canSignOut, sessionState } from "./state/session.ts"
 import { bootstrapSession, settleOwedSignOut } from "./state/auth.ts"
+import { rememberSignIn } from "./state/last-sign-in.ts"
 import { groupsStore } from "./state/groups.ts"
 import { notesStore } from "./state/notes.ts"
 import { tagsStore } from "./state/tags.ts"
@@ -26,8 +28,8 @@ import {
   stopChanges,
 } from "./modules.ts"
 import { toasts } from "./state/toasts.ts"
-import { install } from "./install.ts"
 import { AuthView } from "./views/AuthView.tsx"
+import { ConfirmSignUpView } from "./views/ConfirmSignUpView.tsx"
 import { EmailView } from "./views/EmailView.tsx"
 import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView.tsx"
 import { GroupsView } from "./views/GroupsView.tsx"
@@ -35,9 +37,12 @@ import { SubscribeView, SubscriptionConfirmView, UnsubscribeView } from "./views
 import { GroupSettingsView } from "./views/GroupSettingsView.tsx"
 import { NotificationsView } from "./views/NotificationsView.tsx"
 import { GroupActivityView } from "./views/GroupActivityView.tsx"
+import { InstallOffer } from "./views/InstallOffer.tsx"
 import { InvitationView } from "./views/InvitationView.tsx"
 import { notificationsStore } from "./state/notifications.ts"
 import { invitationsStore } from "./state/invitations.ts"
+import { onboardingStore } from "./state/onboarding.ts"
+import { OnboardingView } from "./views/OnboardingView.tsx"
 import { PricingView } from "./views/BillingViews.tsx"
 import { billingStore } from "./state/billing.ts"
 import { NoteEditorView } from "./views/NoteEditorView.tsx"
@@ -46,6 +51,7 @@ import { TagsView } from "./views/TagsView.tsx"
 import { ProfileView } from "./views/ProfileView.tsx"
 import { AppShell, PublicFrame } from "./views/AppShell.tsx"
 import { signInRedirect } from "./views/sign-in-gate.ts"
+import { SPA_ROUTE_PATHS, type SpaRoutePath } from "./views/spa-paths.ts"
 import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 
 /**
@@ -71,45 +77,49 @@ function OpenIfSelected({ groupId, noteId }: { groupId: string; noteId?: string 
   return <LoadingSpinner size="lg" label="Opening the notes..." class="min-h-[50vh]" />
 }
 
+/**
+ * What each route of the table draws. The type asks for every route of `SPA_ROUTES` and no other,
+ * so a page cannot be routed without saying who may open it.
+ */
+const PAGES: {
+  [Path in SpaRoutePath]: (params: StringRouteParams<Path>) => ComponentChildren
+} = {
+  "/sign-up": () => <AuthView key="sign-up" screen="sign-up" />,
+  "/sign-up/confirm": () => <ConfirmSignUpView />,
+  "/sign-in": () => <AuthView key="sign-in" screen="sign-in" />,
+  "/totp": () => <AuthView key="one-time-code" screen="one-time-code" />,
+  "/forgot-password": () => <ForgotPasswordView />,
+  "/reset-password": () => <ResetPasswordView />,
+  "/email": () => <EmailView />,
+  "/subscribe": () => <SubscribeView />,
+  "/subscribe/confirm": () => <SubscriptionConfirmView />,
+  "/unsubscribe": () => <UnsubscribeView />,
+  "/groups": () => <GroupsView />,
+  "/groups/:groupId": (params) => <GroupSettingsView groupId={params.groupId} />,
+  "/groups/:groupId/activity": (params) => <GroupActivityView groupId={params.groupId} />,
+  "/groups/:groupId/pricing": (params) => <PricingView groupId={params.groupId} />,
+  "/groups/:groupId/notes": (params) => <OpenIfSelected groupId={params.groupId} />,
+  "/groups/:groupId/notes/:noteId": (params) => (
+    <OpenIfSelected groupId={params.groupId} noteId={params.noteId} />
+  ),
+  "/invite/:token": (params) => <InvitationView key={params.token} token={params.token} />,
+  "/notifications": () => <NotificationsView />,
+  "/tags": () => <TagsView />,
+  "/notes": () => <NotesView />,
+  "/notes/new": () => <NoteEditorView key="new" />,
+  "/notes/:noteId": (params) => <NoteEditorView key={params.noteId} noteId={params.noteId} />,
+  "/": () => <ProfileView />,
+}
+
+/** One `<Route>` per row of the route table, in its order. */
 function Routes() {
   return (
     <Switch>
-      <Route path="/sign-up">{() => <AuthView key="sign-up" screen="sign-up" />}</Route>
-      <Route path="/sign-in">{() => <AuthView key="sign-in" screen="sign-in" />}</Route>
-      <Route path="/totp">{() => <AuthView key="one-time-code" screen="one-time-code" />}</Route>
-      <Route path="/forgot-password" component={ForgotPasswordView} />
-      <Route path="/reset-password" component={ResetPasswordView} />
-      <Route path="/email" component={EmailView} />
-      <Route path="/subscribe" component={SubscribeView} />
-      <Route path="/subscribe/confirm" component={SubscriptionConfirmView} />
-      <Route path="/unsubscribe" component={UnsubscribeView} />
-      <Route path="/groups" component={GroupsView} />
-      <Route path="/groups/:groupId">
-        {(params) => <GroupSettingsView groupId={params.groupId} />}
-      </Route>
-      <Route path="/groups/:groupId/activity">
-        {(params) => <GroupActivityView groupId={params.groupId} />}
-      </Route>
-      <Route path="/groups/:groupId/pricing">
-        {(params) => <PricingView groupId={params.groupId} />}
-      </Route>
-      <Route path="/groups/:groupId/notes">
-        {(params) => <OpenIfSelected groupId={params.groupId} />}
-      </Route>
-      <Route path="/groups/:groupId/notes/:noteId">
-        {(params) => <OpenIfSelected groupId={params.groupId} noteId={params.noteId} />}
-      </Route>
-      <Route path="/invite/:token">
-        {(params) => <InvitationView key={params.token} token={params.token} />}
-      </Route>
-      <Route path="/notifications" component={NotificationsView} />
-      <Route path="/tags" component={TagsView} />
-      <Route path="/notes" component={NotesView} />
-      <Route path="/notes/new">{() => <NoteEditorView key="new" />}</Route>
-      <Route path="/notes/:noteId">
-        {(params) => <NoteEditorView key={params.noteId} noteId={params.noteId} />}
-      </Route>
-      <Route path="/" component={ProfileView} />
+      {SPA_ROUTE_PATHS.map((path) => (
+        <Route key={path} path={path}>
+          {PAGES[path] as (params: Record<string, string>) => ComponentChildren}
+        </Route>
+      ))}
     </Switch>
   )
 }
@@ -132,15 +142,19 @@ function SignInGate() {
 /** A fully signed-in user gets the library `Shell`; everyone else the plain public frame. */
 function Frame() {
   const session = sessionState.value
+  // A route change swaps the page without a load: the hook moves focus to the `<h1>` the new page
+  // shows first, as a load would put the reader at its top. Focus still ends on the document body
+  // where that heading is replaced afterwards: opening a note and saving a new one (the loading
+  // heading goes when the note arrives), and signing out (the shell is swapped). The app has no
+  // page titles yet, so the tab's title stays.
+  const [path] = useLocation()
+  useRouteAnnouncer({ path })
   if (session.user && !session.isMfaRequired) {
     return (
       <AppShell user={session.user} wsStatus={connectionDisplay(session)}>
-        <InstallPrompt
-          mode={install.visible.value ? install.mode.value : "unavailable"}
-          onInstall={() => install.install()}
-          onDismiss={() => install.dismiss()}
-          class="mx-auto mb-4 w-full max-w-3xl"
-        />
+        <InstallOffer />
+        {/* The first steps show on the home page, where a new account lands. */}
+        {path === SCREEN_PATHS.profile && <OnboardingView />}
         <Routes />
       </AppShell>
     )
@@ -177,6 +191,12 @@ export function App() {
     else if (isReady && !user) void forgetUser()
   }, [sessionState.value.user, sessionState.value.isReady, sessionState.value.isMfaRequired])
 
+  // The sign-in page of this browser later says which method the person used (#142).
+  useEffect(() => void rememberSignIn(sessionState.value), [
+    sessionState.value.user?.id,
+    sessionState.value.isMfaRequired,
+  ])
+
   // A change made in another tab while this socket was down is read when it opens again.
   useEffect(() => profileStore.onSocketStatus(sessionState.value.wsStatus), [
     sessionState.value.wsStatus,
@@ -197,6 +217,7 @@ export function App() {
       billingStore.reset()
       invitationsStore.reset()
       notificationsStore.reset()
+      onboardingStore.reset()
       return
     }
     // The REST read is the pull: it runs at start-up, after every reconnect and for every push
@@ -212,6 +233,7 @@ export function App() {
       tags: tagsStore,
       members: membersStore,
       notifications: notificationsStore,
+      onboarding: onboardingStore,
     }
     selectionStore.start(userId)
     // The banner asks for a code while the address waits for one.

@@ -12,13 +12,19 @@ import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
 import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
-import { type EmailStatus, UserMFAStatus, type UserPushTokenPublic } from "@domain/identity"
+import {
+  type EmailStatus,
+  type SignInMethod,
+  UserMFAStatus,
+  type UserPushTokenPublic,
+} from "@domain/identity"
 import { AccountDelete, type AccountDeleteProps } from "./account-delete.tsx"
 import { ACCOUNT_COLUMN } from "./frame.tsx"
 import { PageHeader, TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
-import { type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
+import { type Navigate, PROFILE_ANCHORS, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-row"
 import { SignedInDevices, type SignedInDevicesProps } from "./signed-in-devices.tsx"
+import { signInMethodName, SignInMethods, type SignInMethodsProps } from "./sign-in-methods.tsx"
 import { ApiTokens, type ApiTokensProps } from "./api-tokens.tsx"
 import { useSucceeded } from "@spy4x/preact-ui/use-succeeded"
 import { TwoFactorStep, twoFactorStep } from "./two-factor.ts"
@@ -110,7 +116,9 @@ export interface ProfileScreenProps {
    * Without it the dialog has no such box.
    */
   onSignOutOthersChange?: (signOutOthers: boolean) => void
-  /** The "Signed-in devices" section, after Security. Without it the page has none. */
+  /** The "Sign-in methods" section, after Security. Without it the page has none. */
+  methods?: SignInMethodsProps
+  /** The "Signed-in devices" section, after the sign-in methods. Without it the page has none. */
   devices?: SignedInDevicesProps
   /** The "API tokens" section, after the signed-in devices. Without it the page has none. */
   apiTokens?: ApiTokensProps
@@ -129,7 +137,7 @@ export interface ProfileScreenProps {
    * The "Danger zone" with "Delete my account", at the bottom. Without it the page has none.
    * `twoFactor` and `navigate` come from this screen's own props.
    */
-  accountDeletion?: Omit<AccountDeleteProps, "twoFactor" | "navigate">
+  accountDeletion?: Omit<AccountDeleteProps, "twoFactor" | "navigate" | "unavailable">
   navigate?: Navigate
 }
 
@@ -157,6 +165,7 @@ export function ProfileScreen(
     onCancelPassword,
     signOutOthers = true,
     onSignOutOthersChange,
+    methods,
     devices,
     apiTokens,
     onStartTotp,
@@ -170,6 +179,7 @@ export function ProfileScreen(
   }: ProfileScreenProps,
 ): JSX.Element {
   const step = user ? twoFactorStep(user.mfa, enrolment !== null) : null
+  const providerOnly = providerOnlyNames(methods?.methods)
   const fieldRefs = {
     firstName: useRef<HTMLInputElement>(null),
     lastName: useRef<HTMLInputElement>(null),
@@ -283,8 +293,8 @@ export function ProfileScreen(
           />
           <SettingRow
             label="E-mail address"
-            value={<EmailValue email={email} />}
-            action={
+            value={<EmailValue email={email} provider={providerOnly} />}
+            action={providerOnly === null && (
               <Button
                 href={SCREEN_PATHS.email}
                 navigate={navigate}
@@ -296,141 +306,157 @@ export function ProfileScreen(
                 {email?.email === null ? "Add" : "Change"}{" "}
                 <span class="sr-only">e-mail address</span>
               </Button>
-            }
+            )}
           />
         </SettingList>
       </SettingGroup>
 
-      <SettingGroup title="Security">
-        <SettingList>
-          <SettingRow
-            label="Password"
-            value="Asked for when you sign in on a new device."
-            action={
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                class={TOUCH_TARGET}
-                data-e2e="password-open"
-                onClick={() => setChangingPassword(true)}
-              >
-                Change <span class="sr-only">password</span>
-              </Button>
-            }
-          />
-          <SettingRow
-            label="Two-factor sign-in"
-            dataE2E="totp-row"
-            value={step === TwoFactorStep.Disable
-              ? (
-                <span class="flex flex-wrap items-center gap-2">
-                  <Badge text="On" color="green" type="outline" />
-                  Sign-in also asks for a code from your authenticator app.
-                </span>
-              )
-              : "Off. Add a code from an authenticator app to every sign-in."}
-            action={step === TwoFactorStep.Disable
-              ? (
+      {/* The first-steps card links here (`PROFILE_ANCHORS`); the header above is sticky. */}
+      <div id={PROFILE_ANCHORS.security} class="scroll-mt-16">
+        <SettingGroup title="Security">
+          <SettingList>
+            <SettingRow
+              label="Password"
+              value={providerOnly === null
+                ? "Asked for when you sign in on a new device."
+                : <span data-e2e="password-none">None. You sign in with {providerOnly}.</span>}
+              action={providerOnly === null && (
                 <Button
-                  ref={disableButton}
                   type="button"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   class={TOUCH_TARGET}
-                  data-e2e="totp-disable"
-                  disabled={pending.totp}
-                  onClick={() => setConfirmingDisable(true)}
+                  data-e2e="password-open"
+                  onClick={() => setChangingPassword(true)}
                 >
-                  Turn off <span class="sr-only">two-factor sign-in</span>
+                  Change <span class="sr-only">password</span>
                 </Button>
-              )
-              : (
-                <ScreenForm
-                  pending={pending.totp}
-                  onSubmit={onStartTotp}
-                >
+              )}
+            />
+            <SettingRow
+              label="Two-factor sign-in"
+              dataE2E="totp-row"
+              value={step === TwoFactorStep.Disable
+                ? (
+                  <span class="flex flex-wrap items-center gap-2">
+                    <Badge text="On" color="green" type="outline" />
+                    Sign-in also asks for a code from your authenticator app.
+                  </span>
+                )
+                : "Off. Add a code from an authenticator app to every sign-in."}
+              action={step === TwoFactorStep.Disable
+                ? (
                   <Button
-                    ref={enableButton}
-                    type="submit"
-                    variant="secondary"
+                    ref={disableButton}
+                    type="button"
+                    variant="ghost"
                     size="sm"
                     class={TOUCH_TARGET}
-                    data-e2e="totp-start"
-                    busy={pending.totp && step === TwoFactorStep.Enable}
-                    busyLabel="Preparing..."
+                    data-e2e="totp-disable"
+                    disabled={pending.totp}
+                    onClick={() => setConfirmingDisable(true)}
                   >
-                    Turn on <span class="sr-only">two-factor sign-in</span>
+                    Turn off <span class="sr-only">two-factor sign-in</span>
                   </Button>
-                </ScreenForm>
-              )}
-          />
-        </SettingList>
-        {step !== TwoFactorStep.Confirm && <ErrorState message={errors.totp} />}
-      </SettingGroup>
+                )
+                : (
+                  <ScreenForm
+                    pending={pending.totp}
+                    onSubmit={onStartTotp}
+                  >
+                    <Button
+                      ref={enableButton}
+                      type="submit"
+                      variant="secondary"
+                      size="sm"
+                      class={TOUCH_TARGET}
+                      data-e2e="totp-start"
+                      busy={pending.totp && step === TwoFactorStep.Enable}
+                      busyLabel="Preparing..."
+                    >
+                      Turn on <span class="sr-only">two-factor sign-in</span>
+                    </Button>
+                  </ScreenForm>
+                )}
+            />
+          </SettingList>
+          {step !== TwoFactorStep.Confirm && <ErrorState message={errors.totp} />}
+        </SettingGroup>
+      </div>
 
+      {methods && <SignInMethods {...methods} />}
       {devices && <SignedInDevices {...devices} />}
 
       {apiTokens && <ApiTokens {...apiTokens} />}
 
-      <SettingGroup
-        title="Push devices"
-        description="Devices that get a notification when something changes."
-      >
-        <ErrorState message={errors.push} />
-        {pushDevices.length === 0
-          ? (
-            <EmptyState
-              icon={<IconBell class="size-6" />}
-              title="No devices yet"
-              headingLevel={3}
-              class="w-full max-w-none"
-              description="Add this browser to get notifications on it."
-              action={onRegisterPush && <AddDevice onClick={onRegisterPush} busy={pending.push} />}
-            />
-          )
-          : (
-            <>
-              <SettingList>
-                {pushDevices.map((device) => (
-                  <SettingRow
-                    key={device.id}
-                    dataE2E={`push-device-${device.deviceId}`}
-                    label={`Device ${device.deviceId.slice(0, 8)}`}
-                    value={`Added ${new Date(device.createdAt).toLocaleString()}`}
-                    action={
-                      <ScreenForm
-                        pending={pending.push}
-                        onSubmit={() => onRemovePush(device.deviceId)}
-                      >
-                        <Button
-                          type="submit"
-                          variant="ghost"
-                          size="sm"
-                          class={TOUCH_TARGET}
-                          data-e2e={`push-remove-${device.deviceId}`}
-                          disabled={pending.push}
-                        >
-                          Remove <span class="sr-only">device {device.deviceId.slice(0, 8)}</span>
-                        </Button>
-                      </ScreenForm>
-                    }
+      <div id={PROFILE_ANCHORS.pushDevices} class="scroll-mt-16">
+        <SettingGroup
+          title="Push devices"
+          description="Devices that get a notification when something changes."
+        >
+          <ErrorState message={errors.push} />
+          {pushDevices.length === 0
+            ? (
+              <EmptyState
+                icon={<IconBell class="size-6" />}
+                title="No devices yet"
+                headingLevel={3}
+                class="w-full max-w-none"
+                description="Add this browser to get notifications on it."
+                action={onRegisterPush && (
+                  <AddDevice
+                    onClick={onRegisterPush}
+                    busy={pending.push}
                   />
-                ))}
-              </SettingList>
-              {onRegisterPush && (
-                <div>
-                  <AddDevice onClick={onRegisterPush} busy={pending.push} />
-                </div>
-              )}
-            </>
-          )}
-      </SettingGroup>
+                )}
+              />
+            )
+            : (
+              <>
+                <SettingList>
+                  {pushDevices.map((device) => (
+                    <SettingRow
+                      key={device.id}
+                      dataE2E={`push-device-${device.deviceId}`}
+                      label={`Device ${device.deviceId.slice(-8)}`}
+                      value={`Added ${new Date(device.createdAt).toLocaleString()}`}
+                      action={
+                        <ScreenForm
+                          pending={pending.push}
+                          onSubmit={() => onRemovePush(device.deviceId)}
+                        >
+                          <Button
+                            type="submit"
+                            variant="ghost"
+                            size="sm"
+                            class={TOUCH_TARGET}
+                            data-e2e={`push-remove-${device.deviceId}`}
+                            disabled={pending.push}
+                          >
+                            Remove <span class="sr-only">device {device.deviceId.slice(-8)}</span>
+                          </Button>
+                        </ScreenForm>
+                      }
+                    />
+                  ))}
+                </SettingList>
+                {onRegisterPush && (
+                  <div>
+                    <AddDevice onClick={onRegisterPush} busy={pending.push} />
+                  </div>
+                )}
+              </>
+            )}
+        </SettingGroup>
+      </div>
 
       {accountDeletion && (
         <AccountDelete
           {...accountDeletion}
           twoFactor={user.mfa === UserMFAStatus.CONFIGURED}
+          unavailable={providerOnly === null
+            ? null
+            : "This account cannot be deleted here yet: it has no password to confirm the deletion with."}
           navigate={navigate}
         />
       )}
@@ -655,18 +681,51 @@ export function ProfileScreen(
   )
 }
 
+/**
+ * The names of the providers of an account that has no password ("Google", "Google and GitHub"),
+ * or `null` for an account with one, or while the sign-in methods are not known. Changing the
+ * e-mail address or the password and deleting the account each ask for the current password, so
+ * such an account can do none of them.
+ */
+export function providerOnlyNames(
+  methods: readonly SignInMethod[] | null | undefined,
+): string | null {
+  if (!methods || methods.length === 0) return null
+  if (methods.some((method) => method.kind === "password")) return null
+  return methods.map((method) => signInMethodName(method.kind)).join(" and ")
+}
+
 /** The address and whether it is proven, or a placeholder while it is not known. */
-function EmailValue({ email }: { email?: EmailStatus | null }): JSX.Element {
+function EmailValue(
+  { email, provider }: { email?: EmailStatus | null; provider: string | null },
+): JSX.Element {
   if (!email) return <span>…</span>
-  if (email.email === null) return <span>None. You sign in with your username.</span>
+  if (email.email === null) {
+    return (
+      <span>
+        {provider === null
+          ? "None. You sign in with your username."
+          : `None. ${provider} shared no verified address.`}
+      </span>
+    )
+  }
   return (
-    <span class="flex flex-wrap items-center gap-2">
-      <span class="wrap-anywhere">{email.email}</span>
-      <Badge
-        text={email.proven ? "Verified" : "Not verified"}
-        color={email.proven ? "green" : "orange"}
-        type="outline"
-      />
+    <span class="flex flex-col items-start gap-1">
+      <span class="flex flex-wrap items-center gap-2">
+        <span class="wrap-anywhere">{email.email}</span>
+        <Badge
+          text={email.proven ? "Verified" : "Not verified"}
+          color={email.proven ? "green" : "orange"}
+          type="outline"
+        />
+      </span>
+      {provider !== null && (
+        <span data-e2e="profile-email-from-provider">
+          From{" "}
+          {provider}. It cannot be changed here: this account has no password to confirm the change
+          with.
+        </span>
+      )}
     </span>
   )
 }

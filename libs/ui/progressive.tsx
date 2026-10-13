@@ -42,6 +42,8 @@ export const TAG_PATHS = {
 export const SCREEN_PATHS = {
   signIn: "/sign-in",
   signUp: "/sign-up",
+  /** Asks "Create a new account?" after a provider sign-in nobody here is known by. */
+  confirmSignUp: "/sign-up/confirm",
   oneTimeCode: "/totp",
   forgotPassword: "/forgot-password",
   profile: "/",
@@ -53,6 +55,12 @@ export const SCREEN_PATHS = {
   /** Asks for the address to send news to. */
   subscribe: "/subscribe",
 } as const
+
+/**
+ * The parts of the profile page that the first-steps card links to. The profile is the home page,
+ * where the card is, so these are links within the page and the browser scrolls to them itself.
+ */
+export const PROFILE_ANCHORS = { security: "security", pushDevices: "push-devices" } as const
 
 /**
  * The query parameter, and the hidden field of each auth form, that carries the page a signed-out

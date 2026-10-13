@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd"
 import { type User, UserMFAStatus } from "@domain/identity"
 import {
   bootstrapSession,
+  confirmProviderSignUp,
   deleteAccount,
   signIn,
   signOut,
@@ -95,6 +96,68 @@ describe("bootstrapSession", () => {
     await bootstrapSession(() => ({ id: 5 } as User))
 
     expect(sessionState.value.user).toBeNull()
+  })
+
+  // What a person meets while the API is replaced by a deploy, or struggles: none of these answers
+  // says that the session ended.
+  const errorAnswers = [
+    { name: "a proxy's 502", status: 502, body: "<html>Bad Gateway</html>", type: "text/html" },
+    { name: "a proxy's bare 404", status: 404, body: "404 page not found", type: "text/plain" },
+    { name: "a 403", status: 403, body: "<html>Forbidden</html>", type: "text/html" },
+    { name: "a 500", status: 500, body: "Internal Server Error", type: "text/plain" },
+    {
+      name: "a 429",
+      status: 429,
+      body: JSON.stringify({ error: "Too many requests" }),
+      type: "application/json",
+    },
+  ]
+  for (const { name, status, body, type } of errorAnswers) {
+    it(`opens as the remembered user when /me answers ${name}`, async () => {
+      globalThis.fetch = () =>
+        Promise.resolve(new Response(body, { status, headers: { "content-type": type } }))
+
+      await bootstrapSession(() => ({ id: 5 } as User))
+
+      expect(sessionState.value.user?.id).toBe(5)
+      expect(sessionState.value.isMfaRequired).toBe(false)
+      expect(sessionState.value.isReady).toBe(true)
+    })
+  }
+
+  // A 2xx that is not the API's: a maintenance page, a captive portal, a misrouted proxy.
+  const strangerAnswers = [
+    { name: "a 200 with a page", answer: () => new Response("<html>Back soon</html>") },
+    { name: "a 200 with an empty object", answer: () => Response.json({}) },
+    { name: "a 204", answer: () => new Response(null, { status: 204 }) },
+  ]
+  for (const { name, answer } of strangerAnswers) {
+    it(`opens as the remembered user when /me answers ${name}`, async () => {
+      globalThis.fetch = () => Promise.resolve(answer())
+
+      await bootstrapSession(() => ({ id: 5 } as User))
+
+      expect(sessionState.value.user).toEqual({ id: 5 })
+      expect(sessionState.value.isReady).toBe(true)
+    })
+
+    it(`shows the sign-in page when /me answers ${name} and nobody is remembered`, async () => {
+      globalThis.fetch = () => Promise.resolve(answer())
+
+      await bootstrapSession(() => null)
+
+      expect(sessionState.value.user).toBeNull()
+      expect(sessionState.value.isReady).toBe(true)
+    })
+  }
+
+  it("shows the sign-in page when /me answers 502 and nobody is remembered", async () => {
+    globalThis.fetch = () => Promise.resolve(new Response("Bad Gateway", { status: 502 }))
+
+    await bootstrapSession(() => null)
+
+    expect(sessionState.value.user).toBeNull()
+    expect(sessionState.value.isReady).toBe(true)
   })
 })
 
@@ -249,6 +312,48 @@ describe("signOut", () => {
 
     await signOut()
 
+    expect(sessionState.value.user).toBeNull()
+  })
+})
+
+describe("confirming a sign-up a provider vouched for", () => {
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    sessionState.value = { ...sessionState.value, user: null, isMfaRequired: false }
+  })
+
+  /** Makes the API answer `status`, and records the method and path of each request. */
+  function confirmAnswers(status: number, answer: unknown): string[] {
+    const asked: string[] = []
+    globalThis.fetch = (input, init) => {
+      const url = new URL(String(input instanceof Request ? input.url : input), "http://x")
+      asked.push(`${init?.method ?? "GET"} ${url.pathname}`)
+      return Promise.resolve(
+        new Response(JSON.stringify(answer), {
+          status,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+    }
+    return asked
+  }
+
+  it("signs the page in as the account the server created", async () => {
+    const asked = confirmAnswers(201, user)
+
+    expect(await confirmProviderSignUp()).toEqual({ ok: true, mfaRequired: false })
+
+    expect(asked).toEqual(["POST /api/auth/sign-up/confirm"])
+    expect(sessionState.value.user?.id).toBe(1)
+  })
+
+  it("gives the server's reason and signs nobody in when the sign-up no longer waits", async () => {
+    confirmAnswers(400, { error: "This took too long. Start again from the sign-in page." })
+
+    const result = await confirmProviderSignUp()
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toBe("This took too long. Start again from the sign-in page.")
     expect(sessionState.value.user).toBeNull()
   })
 })

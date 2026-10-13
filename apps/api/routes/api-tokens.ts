@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import type { MiddlewareHandler } from "hono"
 import { ApiTokenError, parseApiTokenCreateRequest } from "@domain/api-tokens"
-import { isUuidV4 } from "@domain/notes"
+import { isUuid } from "@spy4x/platform/universal/uuid"
 import type { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
 import type { SignIn } from "@api/services/sign-in.ts"
@@ -14,11 +14,17 @@ export interface ApiTokensRouteDependencies {
   mutationGuards: MutationGuards
   /** The normal per-user budget the session routes spend too. */
   limit: MiddlewareHandler<APIContext>
+  /**
+   * The limit a create spends before its password is checked: the per-user budget a password
+   * change spends, so a stolen session cannot guess the password here.
+   */
+  passwordLimit: MiddlewareHandler<APIContext>
   tokens: Pick<ApiTokens, "list" | "create" | "revoke">
 }
 
 const STATUS = {
   INVALID_REQUEST: 400,
+  PASSWORD_INVALID: 400,
   GROUP_NOT_FOUND: 404,
   TOKEN_NOT_FOUND: 404,
   TOO_MANY_TOKENS: 409,
@@ -31,8 +37,10 @@ const STATUS = {
  * factor reaches them, never a token: tokens are accepted at `/api/v1` alone.
  *
  * - `GET /` lists the live tokens: `{ tokens }`.
- * - `POST /` creates one from `{ name, groupId, access, expiresInDays }`: 201 `{ token, secret }`.
- *   The secret is in this answer only.
+ * - `POST /` creates one from `{ name, groupId, access, expiresInDays, password }`: 201
+ *   `{ token, secret }`. The secret is in this answer only. `password` is the person's current
+ *   password, asked again because a stolen session does not have it: 400 `PASSWORD_INVALID`
+ *   without the right one. The owner is mailed that a token was created.
  * - `DELETE /:id` revokes one: `{ success: true }`, or 404 when the person has no such token.
  *
  * A refusal answers `{ error, code }`, the message the web app shows.
@@ -49,7 +57,7 @@ export function createApiTokensRoute(dependencies: ApiTokensRouteDependencies): 
     .get(`/`, async (c) => {
       return c.json({ tokens: await dependencies.tokens.list(c.get("auth")!.user.id) })
     })
-    .post(`/`, async (c) => {
+    .post(`/`, dependencies.passwordLimit, async (c) => {
       const request = parseApiTokenCreateRequest(await readApiJson(c))
       const created = await dependencies.tokens.create(c, c.get("auth")!.user.id, request)
       // The only answer that carries the secret: no cache may keep it.
@@ -58,7 +66,7 @@ export function createApiTokensRoute(dependencies: ApiTokensRouteDependencies): 
     })
     .delete(`/:id`, async (c) => {
       const id = c.req.param("id")
-      const revoked = isUuidV4(id) &&
+      const revoked = isUuid(id) &&
         await dependencies.tokens.revoke(c, c.get("auth")!.user.id, id)
       if (!revoked) throw new ApiTokenError("TOKEN_NOT_FOUND", "Token not found")
       return c.json({ success: true })

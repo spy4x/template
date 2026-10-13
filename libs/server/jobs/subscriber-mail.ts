@@ -12,11 +12,13 @@ import { isSubscriberList, type SubscriberList } from "@domain/subscribers"
 import {
   createListCrypto,
   subscriberConfirmLink,
+  subscriberPagesUrl,
   type SubscribersSetup,
   subscriberUnsubscribeLink,
 } from "../subscribers/subscribers.ts"
 import type { MailBrand } from "../mail/mail.ts"
 import { JOB_AGGREGATE, type JobHandler } from "./jobs.ts"
+import { uuidV7 } from "@spy4x/platform/universal/uuid"
 
 /** Mails a confirm link to an address that asked to join a list. */
 export const SUBSCRIBER_CONFIRM_MAIL_JOB = `subscribers.confirm-mail`
@@ -46,7 +48,7 @@ export async function enqueueSubscriberMail(
   list: string,
   email: string,
 ): Promise<void> {
-  const id = crypto.randomUUID()
+  const id = uuidV7()
   await sql`INSERT INTO subscription_requests (id, list_id, email) VALUES (${id}, ${list}, ${email})`
   await scheduleOutboxEvent(
     sql,
@@ -86,7 +88,7 @@ export function subscriberConfirmMailJob(deps: SubscriberMailDeps): JobHandler {
   return requestJob(deps, async (request, setup) => {
     const crypto = await createListCrypto(setup, request.listId)
     const link = subscriberConfirmLink(
-      deps.brand.webAppUrl,
+      subscriberPagesUrl(setup, deps.brand.webAppUrl),
       request.listId,
       await crypto.confirmToken(request.email),
     )

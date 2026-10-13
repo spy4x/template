@@ -61,7 +61,8 @@ export async function settleOwedSignOut(): Promise<boolean> {
 /**
  * Asks the server who is signed in. When the server cannot be reached at all, `recall` may name
  * the user this browser last saw signed in, so the app opens offline; without it, or with none
- * remembered, the person is signed out.
+ * remembered, the person is signed out. An error answer other than 401 is read the same way: a
+ * proxy's 502 during a deploy, a 500 or a 429 says nothing about the session.
  */
 export async function bootstrapSession(
   recall?: () => SessionUser | null,
@@ -94,16 +95,21 @@ export async function bootstrapSession(
     sessionState.value = {
       ...sessionState.value,
       isReady: true,
-      user: null,
+      // Only a 401 is the server saying that nobody is signed in.
+      user: me.status === 401 ? null : recall?.() ?? null,
       isMfaRequired: false,
     }
     return
   }
   // 202 carries no profile: the session owes its one-time code, so there is no user yet.
   const isMfaRequired = me.status === 202
+  // A 2xx without a profile (a maintenance page, a captive portal, an empty body) is not the API's
+  // answer and says nothing about the session either.
+  const profile = me.data as Partial<User> | null
+  const user = typeof profile?.id === "number" ? profile as User : recall?.() ?? null
   sessionState.value = {
     ...sessionState.value,
-    user: isMfaRequired ? null : me.data as User,
+    user: isMfaRequired ? null : user,
     isMfaRequired,
     isReady: true,
   }
@@ -135,6 +141,21 @@ export async function signIn(login: string, password: string): Promise<{
   const result = await apiFetch<SessionUser | PendingSecondFactor>("/api/auth/password/check", {
     method: "POST",
     body: JSON.stringify({ login, password }),
+  })
+  return handleAuthResponse(result)
+}
+
+/**
+ * Answers "Create a new account" after a provider sign-in nobody here was known by: the server
+ * creates the account the provider vouched for and signs it in.
+ */
+export async function confirmProviderSignUp(): Promise<{
+  ok: boolean
+  mfaRequired: boolean
+  error?: string
+}> {
+  const result = await apiFetch<SessionUser | PendingSecondFactor>("/api/auth/sign-up/confirm", {
+    method: "POST",
   })
   return handleAuthResponse(result)
 }
@@ -217,20 +238,25 @@ export async function checkTotp(otp: string): Promise<{ ok: boolean; error?: str
   return { ok: true }
 }
 
-/** Changes the password; `signOutOthers` also ends every other session of the person. */
+/**
+ * Changes the password; `signOutOthers` also ends every other session of the person. The change
+ * revokes every API token of the person: `revokedTokens` says how many.
+ */
 export async function changePassword(
   password: string,
   newPassword: string,
   signOutOthers = true,
-): Promise<{ ok: boolean; error?: string }> {
-  const result = await apiFetch<ApiSuccessResponse>("/api/auth/password/change", {
+): Promise<{ ok: boolean; error?: string; revokedTokens?: number }> {
+  const result = await apiFetch<
+    ApiSuccessResponse & { revokedTokens?: number }
+  >("/api/auth/password/change", {
     method: "POST",
     body: JSON.stringify({ password, newPassword, signOutOthers }),
   })
   if (!result.ok) {
     return { ok: false, error: result.error.message }
   }
-  return { ok: true }
+  return { ok: true, revokedTokens: result.data.revokedTokens ?? 0 }
 }
 
 /** The devices the person is signed in on, this one first. */

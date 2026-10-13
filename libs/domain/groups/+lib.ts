@@ -1,6 +1,11 @@
 /// <reference lib="es2022.intl" />
 import type { Command, Query } from "@spy4x/platform/cqrs"
 import { isRecord } from "@spy4x/platform/universal/is-record"
+import {
+  hasUnsafeTextCharacters,
+  hasUnstorableTextCharacters,
+} from "@spy4x/platform/universal/text"
+import { isUuid } from "@spy4x/platform/universal/uuid"
 import type { Actor } from "@domain/identity"
 
 export * from "./activity.ts"
@@ -591,8 +596,6 @@ export interface GroupRepository {
   ): Promise<boolean>
 }
 
-/** The shape of every id (group, note, tag): a lowercase UUID v4. */
-export const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const GROUP_ID_KEYS = ["groupId"]
 const CREATE_KEYS = ["id", "name"]
 const RENAME_BODY_KEYS = ["name"]
@@ -604,7 +607,10 @@ function hasExactKeys(value: unknown, keys: string[]): value is Record<string, u
   return isRecord(value) && Object.keys(value).sort().join(",") === keys.join(",")
 }
 
-/** A group name from a request: trimmed, 1 to 100 characters. */
+/**
+ * A group name from a request: trimmed, 1 to 100 characters, none of them a control character
+ * (NUL, a tab, a line break), which Postgres may refuse, or an invisible or text-direction one.
+ */
 export function parseGroupName(value: unknown): string {
   if (typeof value !== "string") {
     throw new GroupError("INVALID_REQUEST", "Group name must be a string")
@@ -613,6 +619,12 @@ export function parseGroupName(value: unknown): string {
   const nameLength = Array.from(name).length
   if (nameLength < 1 || nameLength > 100) {
     throw new GroupError("INVALID_REQUEST", "Group name must contain 1 to 100 characters")
+  }
+  if (hasUnsafeTextCharacters(name)) {
+    throw new GroupError(
+      "INVALID_REQUEST",
+      "Group name must not contain control or invisible characters",
+    )
   }
   return name
 }
@@ -640,7 +652,10 @@ export function parseRenameGroupRequest(value: unknown): { groupId: string; name
   return { groupId: parseGroupId(value.groupId), name: parseGroupName(value.name) }
 }
 
-/** A group description: at most {@link GROUP_DESCRIPTION_MAX} characters once trimmed, may be empty. */
+/**
+ * A group description: at most {@link GROUP_DESCRIPTION_MAX} characters once trimmed, may be empty.
+ * It may hold line breaks, but no character Postgres cannot store (NUL, half of a surrogate pair).
+ */
 export function parseGroupDescription(value: unknown): string {
   if (typeof value !== "string") {
     throw new GroupError("INVALID_REQUEST", "Group description must be a string")
@@ -650,6 +665,12 @@ export function parseGroupDescription(value: unknown): string {
     throw new GroupError(
       "INVALID_REQUEST",
       `Group description must contain at most ${GROUP_DESCRIPTION_MAX} characters`,
+    )
+  }
+  if (hasUnstorableTextCharacters(description)) {
+    throw new GroupError(
+      "INVALID_REQUEST",
+      "Group description must not contain a NUL or a broken character",
     )
   }
   return description
@@ -723,7 +744,7 @@ export function parseGroupDetailsRequest(value: unknown): GroupDetails & { group
 
 /**
  * The body of a request that names one group (select, delete, restore): exactly `{ groupId }`, a
- * lowercase UUID v4.
+ * lowercase UUID.
  */
 export function parseGroupIdRequest(value: unknown): { groupId: string } {
   if (!hasExactKeys(value, GROUP_ID_KEYS)) {
@@ -802,15 +823,10 @@ export function parseTransferBody(
   return { userId: parseMemberUserId(value.userId), name: value.name, password: value.password }
 }
 
-/** Whether `value` is a lowercase UUID v4, the shape of every group and note id. */
-export function isUuidV4(value: unknown): value is string {
-  return typeof value === "string" && UUID_V4.test(value)
-}
-
-/** A group id from a request: a lowercase UUID v4, or `INVALID_REQUEST`. */
+/** A group id from a request: a lowercase UUID of any version, or `INVALID_REQUEST`. */
 export function parseGroupId(value: unknown): string {
-  if (!isUuidV4(value)) {
-    throw new GroupError("INVALID_REQUEST", "Group id must be a lowercase UUID v4")
+  if (!isUuid(value)) {
+    throw new GroupError("INVALID_REQUEST", "Group id must be a lowercase UUID")
   }
   return value
 }
