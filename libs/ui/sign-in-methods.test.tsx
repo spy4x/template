@@ -535,20 +535,61 @@ describe("ProfileScreen for an account without a password", () => {
   } as unknown as ProfileScreenProps
   const onlyGoogle = { ...google, current: true, canUnlink: false }
 
-  it("shows the provider's address and offers no change that would ask for a password", async () => {
+  it("offers a change of address and a first password", async () => {
     await mount(
       <ProfileScreen {...profile} methods={methodsProps([], { methods: [onlyGoogle] })} />,
     )
 
     const page = document.body.textContent ?? ""
     expect(page).not.toContain("You sign in with your username")
-    expect(find("[data-e2e=profile-email-from-provider]").textContent).toBe(
-      "From Google. It cannot be changed here: this account has no password to confirm the change with.",
-    )
+    expect(page).not.toContain("cannot be changed here")
     expect(page).toContain("gia@example.com")
-    expect(document.querySelectorAll("[data-e2e=profile-email-link]").length).toBe(0)
+    expect(find("[data-e2e=profile-email-link]").textContent).toBe("Change e-mail address")
     expect(find("[data-e2e=password-none]").textContent).toBe("None. You sign in with Google.")
-    expect(document.querySelectorAll("[data-e2e=password-open]").length).toBe(0)
+    expect(find("[data-e2e=password-open]").textContent).toBe("Set password")
+  })
+
+  it("sets a first password after a Google sign-in a moment ago, asking for no current one", async () => {
+    const asked: string[] = []
+    await mount(
+      <ProfileScreen
+        {...profile}
+        methods={methodsProps([], { methods: [onlyGoogle] })}
+        providerProofFresh
+        onSetPassword={() => void asked.push("set")}
+        onChangePassword={() => void asked.push("change")}
+        onSignOutOthersChange={() => {}}
+      />,
+    )
+
+    await click("[data-e2e=password-open]")
+
+    expect(isOpen("password-dialog")).toBe(true)
+    expect(document.querySelectorAll("[data-e2e=password-current]").length).toBe(0)
+    expect(document.querySelectorAll("[data-e2e=password-sign-out-others]").length).toBe(0)
+    expect(find("[data-e2e=provider-proof-fresh]").textContent).toContain("Google")
+    expect(find("[data-e2e=password-save]").textContent).toBe("Set password")
+    await submit("[data-e2e=password-new]")
+    expect(asked).toEqual(["set"])
+  })
+
+  it("sends the person to Google before a first password when the sign-in is not recent", async () => {
+    await mount(
+      <ProfileScreen
+        {...profile}
+        methods={methodsProps([], { methods: [onlyGoogle] })}
+        onSetPassword={() => {}}
+      />,
+    )
+
+    await click("[data-e2e=password-open]")
+
+    // A plain link out of the app, which comes back to the profile.
+    expect(find("[data-e2e=provider-proof-google]").getAttribute("href"))
+      .toBe("/api/auth/google/start?next=%2F")
+    expect(find("[data-e2e=provider-proof-needed]").textContent).toContain("within 5 minutes")
+    expect(document.querySelectorAll("[data-e2e=password-new]").length).toBe(0)
+    expect(document.querySelectorAll("[data-e2e=password-save]").length).toBe(0)
   })
 
   it("keeps both changes for an account that has a password", async () => {
@@ -558,8 +599,10 @@ describe("ProfileScreen for an account without a password", () => {
 
     expect(find("[data-e2e=profile-email-link]").textContent).toBe("Change e-mail address")
     expect(find("[data-e2e=password-open]").textContent).toBe("Change password")
-    expect(document.querySelectorAll("[data-e2e=profile-email-from-provider]").length).toBe(0)
     expect(document.querySelectorAll("[data-e2e=password-none]").length).toBe(0)
+    await click("[data-e2e=password-open]")
+    expect(find("[data-e2e=password-current]").getAttribute("name")).toBe("password")
+    expect(document.querySelectorAll("[data-e2e^=provider-proof]").length).toBe(0)
   })
 
   const deletion = {
@@ -570,7 +613,28 @@ describe("ProfileScreen for an account without a password", () => {
     pending: false,
   }
 
-  it("offers no delete dialog, which would ask for a password, and says why", async () => {
+  it("deletes the account after a Google sign-in a moment ago, asking for no password", async () => {
+    const asked: string[] = []
+    await mount(
+      <ProfileScreen
+        {...profile}
+        methods={methodsProps([], { methods: [onlyGoogle] })}
+        providerProofFresh
+        accountDeletion={{ ...deletion, onDelete: () => void asked.push("delete") }}
+      />,
+    )
+
+    await click("[data-e2e=account-delete-open]")
+
+    expect(isOpen("account-delete-dialog")).toBe(true)
+    expect(document.body.textContent).not.toContain("cannot be deleted here")
+    expect(document.querySelectorAll("[data-e2e=account-delete-password]").length).toBe(0)
+    expect(find("[data-e2e=provider-proof-fresh]").textContent).toContain("Google")
+    await submit("[data-e2e=account-delete-submit]")
+    expect(asked).toEqual(["delete"])
+  })
+
+  it("sends the person to Google before the deletion when the sign-in is not recent", async () => {
     await mount(
       <ProfileScreen
         {...profile}
@@ -579,10 +643,12 @@ describe("ProfileScreen for an account without a password", () => {
       />,
     )
 
-    expect(document.querySelectorAll("[data-e2e=account-delete-open]").length).toBe(0)
-    expect(find("[data-e2e=account-delete-unavailable]").textContent).toBe(
-      "This account cannot be deleted here yet: it has no password to confirm the deletion with.",
-    )
+    await click("[data-e2e=account-delete-open]")
+
+    expect(find("[data-e2e=provider-proof-google]").getAttribute("href"))
+      .toBe("/api/auth/google/start?next=%2F")
+    expect(document.querySelectorAll("[data-e2e=account-delete-password]").length).toBe(0)
+    expect(document.querySelectorAll("[data-e2e=account-delete-submit]").length).toBe(0)
   })
 
   it("keeps the delete action for an account that has a password", async () => {
@@ -595,7 +661,9 @@ describe("ProfileScreen for an account without a password", () => {
     )
 
     expect(find("[data-e2e=account-delete-open]").textContent).toBe("Delete my account")
-    expect(document.querySelectorAll("[data-e2e=account-delete-unavailable]").length).toBe(0)
+    await click("[data-e2e=account-delete-open]")
+    expect(find("[data-e2e=account-delete-password]").getAttribute("name")).toBe("password")
+    expect(document.querySelectorAll("[data-e2e^=provider-proof]").length).toBe(0)
   })
 
   it("names every provider of an account that has two and no password", () => {

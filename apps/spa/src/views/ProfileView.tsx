@@ -18,6 +18,7 @@ import {
   endSession,
   listSessions,
   readAccountDeletionBlockers,
+  setPassword,
   totpConnectFinish,
   totpConnectStart,
   totpDisconnect,
@@ -35,6 +36,7 @@ import {
   authOTPSchema,
   authPasswordChangeSchema,
   authPasswordSchema,
+  authPasswordSetSchema,
   OAUTH_NOTICE_PARAM,
   OAUTH_NOTICES,
   oauthNotice,
@@ -46,6 +48,8 @@ import { SESSIONS_FAILURE } from "@ui/signed-in-devices.tsx"
 import { SIGN_IN_METHODS_FAILURE } from "@ui/sign-in-methods.tsx"
 import { apiTokensHttp, createApiTokensStore } from "../state/api-tokens.ts"
 import { passwordChangedMessage } from "./password-changed-message.ts"
+import { isProviderProofFresh } from "./provider-proof-fresh.ts"
+import { providerProofOf } from "@ui/provider-proof.tsx"
 import { createDevicesStore } from "../state/devices.ts"
 import { createSignInMethodsStore } from "../state/sign-in-methods.ts"
 import { localReads } from "../modules.ts"
@@ -94,6 +98,10 @@ export function ProfileView() {
   const [methods] = useState(() => createSignInMethodsStore())
   const [tokens] = useState(() => createApiTokensStore(apiTokensHttp, localReads))
   const groups = groupsStore.groups.value
+
+  const providerProofFresh = isProviderProofFresh(methods.providerProofUntil.value)
+  /** Set when the account has no password: what confirms its deletion in place of one. */
+  const providerProof = providerProofOf(methods.methods.value, providerProofFresh)
 
   /** Reads the signed-in devices again; a failure shows above the list and keeps the old one. */
   const loadDevices = () => devices.load()
@@ -219,6 +227,28 @@ export function ProfileView() {
     })
   }
 
+  /** The first password of an account that has none. The list of sign-in methods gains it. */
+  const submitFirstPassword = async () => {
+    setPasswordError(null)
+    const problems = refusedFields(authPasswordSetSchema, { newPassword: values.newPassword })
+    if (!fieldsPass(problems)) return
+    setBusyPassword(true)
+    const result = await setPassword(values.newPassword)
+    setBusyPassword(false)
+    // Read again either way: a refusal may mean the provider sign-in is no longer recent.
+    await methods.load()
+    if (!result.ok) {
+      setPasswordError(result.error || PROFILE_FAILURES.passwordSet)
+      return
+    }
+    setValues((current) => ({ ...current, newPassword: "" }))
+    toasts.success({
+      title: "Password set",
+      body: "You can now sign in with your e-mail address and this password too.",
+      dataE2E: "password-set",
+    })
+  }
+
   const startTotp = async () => {
     setTotpError(null)
     setTotpBusy(true)
@@ -305,11 +335,14 @@ export function ProfileView() {
 
   const submitDelete = async () => {
     const twoFactor = session.user?.mfa === UserMFAStatus.CONFIGURED
-    const { password, otp } = deleteValues
-    const problems = refusedFields(
-      accountDeleteSchema,
-      twoFactor && otp !== "" ? { password, otp } : { password },
-    )
+    const { otp } = deleteValues
+    // An account with no password sends none: its provider sign-in a moment ago confirms it.
+    const password = providerProof ? undefined : deleteValues.password
+    // Left out, not `undefined`: the schema takes a missing password and refuses an empty one.
+    const problems = refusedFields(accountDeleteSchema, {
+      ...(password === undefined ? {} : { password }),
+      ...(twoFactor && otp !== "" ? { otp } : {}),
+    })
     const otpMissing = twoFactor && otp === ""
     if (problems || otpMissing) {
       setDeleteErrors({
@@ -325,7 +358,11 @@ export function ProfileView() {
     setDeleteBusy(false)
     if (!result.ok) {
       if (result.blocked) await loadBlockers()
-      else setDeleteErrors({ form: result.error })
+      else {
+        setDeleteErrors({ form: result.error })
+        // A refusal may mean the provider sign-in is no longer recent: the dialog then says so.
+        if (providerProof) void methods.load()
+      }
       return
     }
     navigate(SCREEN_PATHS.signIn, { replace: true })
@@ -341,6 +378,8 @@ export function ProfileView() {
   return (
     <ProfileScreen
       user={session.user}
+      onSetPassword={submitFirstPassword}
+      providerProofFresh={providerProofFresh}
       isMfaRequired={session.isMfaRequired}
       email={emailStore.status.value}
       values={values}
