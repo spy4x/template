@@ -61,7 +61,11 @@ async function errorLog(run: () => Promise<void>): Promise<string[]> {
   return logged
 }
 
-function formPost(path: string, fields: Record<string, string>, headers = sameOrigin): Request {
+function formPost(
+  path: string,
+  fields: Record<string, string>,
+  headers: Record<string, string> = sameOrigin,
+): Request {
   return new Request(`${config.webAppOrigin}${path}`, {
     method: "POST",
     headers,
@@ -107,6 +111,48 @@ describe("pageMiddleware", () => {
     expect(response.status).not.toBe(403)
     expect(calls).toHaveLength(1)
   })
+
+  it("lets a post through that carries the site's own Origin and no Sec-Fetch-Site", async () => {
+    const { calls, fetch } = fakeApi(() => Response.json({}, { status: 202 }))
+
+    const response = await appWith(fetch)(
+      formPost("/subscribe", subscription, { origin: config.webAppOrigin }),
+      info,
+    )
+
+    expect(response.status).not.toBe(403)
+    expect(calls.map((call) => call.path)).toEqual(["/api/subscribers"])
+  })
+
+  for (
+    const [name, headers] of [
+      ["another site's Origin and no Sec-Fetch-Site", { origin: "https://attacker.example" }],
+      ["an Origin of null and no Sec-Fetch-Site", { origin: "null" }],
+      ["neither Origin nor Sec-Fetch-Site", {}],
+      ["no Origin, whatever Sec-Fetch-Site says", { "sec-fetch-site": "same-origin" }],
+      ["the site's own Origin and a Sec-Fetch-Site of cross-site", {
+        origin: config.webAppOrigin,
+        "sec-fetch-site": "cross-site",
+      }],
+      ["the site's own Origin and a Sec-Fetch-Site of same-site", {
+        origin: config.webAppOrigin,
+        "sec-fetch-site": "same-site",
+      }],
+      ["the site's own Origin and an empty Sec-Fetch-Site", {
+        origin: config.webAppOrigin,
+        "sec-fetch-site": "",
+      }],
+    ] as [string, Record<string, string>][]
+  ) {
+    it(`refuses a post with ${name} before the API hears of it`, async () => {
+      const { calls, fetch } = fakeApi(() => Response.json({}, { status: 202 }))
+
+      const response = await appWith(fetch)(formPost("/subscribe", subscription, headers), info)
+
+      expect(response.status).toBe(403)
+      expect(calls).toEqual([])
+    })
+  }
 
   it("answers a form over the size cap with 413 and never calls the API", async () => {
     const { calls, fetch } = fakeApi(() => Response.json({}))
@@ -529,6 +575,16 @@ describe("an MPA on its own domain", () => {
 
     expect(response.status).toBe(403)
     expect(seen).toEqual([])
+  })
+
+  it("tells the API that a post it accepted by Origin alone is same-origin", async () => {
+    const { seen, post } = ownDomainApp()
+
+    const response = await post({ origin: ownDomain.webAppOrigin })
+
+    expect(response.status).toBe(204)
+    expect(seen[0].get("origin")).toBe(ownDomain.apiOrigin)
+    expect(seen[0].get("sec-fetch-site")).toBe("same-origin")
   })
 
   it(`links "Try the demo" to the SPA's sign-up at DOMAIN, not to the website's own host`, async () => {

@@ -72,6 +72,28 @@ describe("createApi", () => {
     expect(await sent("null")).toBe("null")
   })
 
+  it("adds Sec-Fetch-Site only when told the post passed by its Origin, and never over the browser's value", async () => {
+    const sent = async (headers: Record<string, string>, sameOriginByOrigin?: boolean) => {
+      const { seen, fetch } = fakeFetch(Response.json({}))
+      const request = new Request("https://app.example.com/act", { method: "POST", headers })
+      await createApi({
+        apiUrl: "http://api:8000",
+        request,
+        remoteAddress: "",
+        sameOriginByOrigin,
+        fetch,
+      })
+        .call("POST", "/api/subscribers")
+      return seen[0].headers.get("sec-fetch-site")
+    }
+    const origin = "https://app.example.com"
+
+    expect(await sent({ origin }, true)).toBe("same-origin")
+    expect(await sent({ origin })).toBe(null)
+    expect(await sent({ origin }, false)).toBe(null)
+    expect(await sent({ origin, "sec-fetch-site": "cross-site" }, true)).toBe("cross-site")
+  })
+
   it("keeps the client address a proxy in front already set", async () => {
     const { seen, fetch } = fakeFetch(Response.json({}))
     const request = new Request("https://app.example.com/", {
