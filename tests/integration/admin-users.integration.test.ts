@@ -224,6 +224,34 @@ Deno.test("a block ends the person's sessions and refuses their password and API
   })
 })
 
+Deno.test("block, unblock and end sessions each write an audit row that names the operator", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql)
+    const operator = await signUp(app, "ops@example.com")
+    const target = await signUp(app, "ada@example.com")
+    await new AppDbBase({ sql }).admin.setRoleByAddress("ops@example.com", UserRole.OPERATOR)
+
+    for (
+      const kind of [AdminActionKind.Block, AdminActionKind.Unblock, AdminActionKind.EndSessions]
+    ) {
+      const response = await operator.request("POST", `/act/${target.id}/${kind}`)
+      expect(await response.json()).toEqual({ outcome: AdminActOutcome.Done })
+    }
+
+    const audits = await sql<{ eventType: number; identifier: string }[]>`
+      SELECT event_type, identifier FROM auth_audits
+      WHERE user_id = ${target.id} AND identifier LIKE 'operator:%'
+      ORDER BY id
+    `
+    const identifier = `operator:${operator.id}`
+    expect(audits).toEqual([
+      { eventType: AuthAuditEventType.USER_BLOCKED, identifier },
+      { eventType: AuthAuditEventType.USER_UNBLOCKED, identifier },
+      { eventType: AuthAuditEventType.SESSIONS_ENDED, identifier },
+    ])
+  })
+})
+
 Deno.test("an operator acts on no one at or above their own role, nor on themselves", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql)
