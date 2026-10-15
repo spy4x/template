@@ -346,7 +346,8 @@ describe("the admin sign-in", () => {
         onOneTimeCode={(code) => void calls.push(["code", code])}
       />,
     )
-    expect(document.body.textContent).not.toContain("Create")
+    expect(document.querySelectorAll("[data-e2e=auth-form-mode-switch]").length).toBe(0)
+    expect(document.body.textContent).not.toContain("Sign up")
     expect(document.body.textContent).not.toContain("Google")
     await type("input[name=login]", "ops@example.com")
     await type("input[name=password]", "correct-horse")
