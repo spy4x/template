@@ -32,15 +32,18 @@ export function isAdminApiPath(path: string): boolean {
  *   page, never reaches it.
  * - With no admin host configured, the operator area is 404 everywhere.
  *
- * The host is the request's own, as the proxy passed it on. The role check in the operator area's
+ * The path is the one the router matches, with its percent-escapes decoded, so an escaped letter
+ * (`/api/%61dmin`) cannot reach a route the gate did not check. The host is the request's own, as
+ * the proxy passed it on. The role check in the operator area's
  * route still decides who may use it; this gate only decides from where.
  */
 export function createAdminHostGate(adminHost: string | null): MiddlewareHandler<APIContext> {
   return async (c, next) => {
-    const url = new URL(c.req.url)
+    // The decoded path, the one the router matches: `/api/%61dmin` is the operator area too.
+    const path = c.req.path
     const allowed = isAdminHost(c.req.url, adminHost)
-      ? isAdminApiPath(url.pathname) || ADMIN_HOST_AUTH_PATHS.includes(url.pathname)
-      : !isAdminApiPath(url.pathname)
+      ? isAdminApiPath(path) || ADMIN_HOST_AUTH_PATHS.includes(path)
+      : !isAdminApiPath(path)
     if (!allowed) return c.json({ error: "Not found" }, 404)
     await next()
   }
