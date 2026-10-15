@@ -73,7 +73,8 @@ describe("admin host gate", () => {
   })
 
   it("matches the admin host whatever its letter case", async () => {
-    const app = buildApp()
+    // A request's host arrives in lower case; the configured one may not be.
+    const app = buildApp("Admin.Example.com")
     expect(await statusOf(app, "http://ADMIN.Example.com/api/admin/users")).toBe(200)
   })
 })
