@@ -23,7 +23,7 @@ import { GOOGLE_TOKEN_ENDPOINT, GOOGLE_USERINFO_ENDPOINT } from "@spy4x/server/a
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn } from "../../apps/api/services/sign-in.ts"
 import { enabledOAuthProviders } from "../../apps/api/services/oauth-providers.ts"
-import { createOAuthRoute } from "../../apps/api/routes/auth-oauth.ts"
+import { createOAuthRoute, METHOD_IS_LAST } from "../../apps/api/routes/auth-oauth.ts"
 import { PROVIDER_PROOF_REQUIRED } from "../../apps/api/routes/auth.ts"
 import {
   SIGN_IN_METHOD_MAIL_JOB,
@@ -1322,14 +1322,26 @@ Deno.test("two unlinks sent at once leave one way in", async () => {
     const [google, github] = (await methodsOf(visitor)).methods
     expect([google.canUnlink, github.canUnlink]).toEqual([true, true])
 
-    const answers = await Promise.all([
+    const [toGoogle, toGitHub] = await Promise.all([
       visitor.delete(`/auth/methods/${google.id}`),
       visitor.delete(`/auth/methods/${github.id}`),
     ])
 
-    // Each alone would be allowed; together, the second waits for the first and is refused.
-    expect(answers.map((answer) => answer.status).sort()).toEqual([200, 409])
-    expect(await app.db.authStore.listKeys(user.id)).toHaveLength(1)
+    // Each alone would be allowed; together, one wins and the other is refused. The loser that got
+    // past the proof check waits for the winner and finds its method is the last way in. GitHub is
+    // the session's own method: when it wins, the session ends with it, and a Google unlink that
+    // reaches the proof check after that finds no recent provider sign-in left.
+    const [winner, loser, kept] = toGoogle.status === 200
+      ? [toGoogle, toGitHub, "oauth:github"]
+      : [toGitHub, toGoogle, "oauth:google"]
+    const refusal = [loser.status, (await loser.json()).error]
+    expect(winner.status).toBe(200)
+    expect([
+      [409, METHOD_IS_LAST],
+      ...(winner === toGitHub ? [[400, PROVIDER_PROOF_REQUIRED]] : []),
+    ])
+      .toContainEqual(refusal)
+    expect((await app.db.authStore.listKeys(user.id)).map((key) => key.method)).toEqual([kept])
   })
 })
 
