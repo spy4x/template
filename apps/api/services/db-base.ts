@@ -43,8 +43,9 @@ import {
   readAdminUser,
   readAdminUserParts,
   setUserBlocked,
+  setUserRoleByAddress,
 } from "@server/auth/admin-users.ts"
-import type { AdminUserFilter } from "@domain/identity"
+import type { AdminUserFilter, UserRole } from "@domain/identity"
 
 /** A user's authenticator-app enrolment, one row of `user_totp`. */
 export interface UserTotp {
@@ -328,6 +329,9 @@ export class AppDbBase extends DbServiceBase {
       setBlocked: (userId: number, at: Date | null) => setUserBlocked(sql, userId, at),
       /** Whether the person is blocked, deleted or not. */
       isBlocked: (userId: number) => isUserBlocked(sql, userId),
+      /** Gives the person who signs in with `address` the role, and answers their id or `null`. */
+      setRoleByAddress: (address: string, role: UserRole) =>
+        setUserRoleByAddress(sql, address, role),
     }
   }
 
