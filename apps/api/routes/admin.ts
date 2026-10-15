@@ -46,9 +46,9 @@ function userIdOf(raw: string): number | null {
 
 /**
  * The operator area (#146), mounted at `/api/admin` and reached on the admin app's host only
- * (`createAdminHostGate`). Only a signed-in session with its second
- * factor reaches it. Below operator, every path answers 404, so the area is invisible; a signed-out
- * caller gets the 401 every session route gives. The page hides nothing that this does not refuse.
+ * (`createAdminHostGate`). Only a signed-in session with its second factor reaches it. Below
+ * operator, every path answers 404, so the area is invisible; a signed-out caller gets the 401
+ * every session route gives. The page hides nothing that this does not refuse.
  *
  * - `GET /users?q=&role=&blocked=&page=` lists people: `{ users, total, page, pageSize }`.
  * - `GET /users/:id` is one person: `{ user, methods, sessions, groups, audits }`.
