@@ -19,6 +19,9 @@ import { createGroupsRoute } from "./routes/groups.ts"
 import { createNotesRoute } from "./routes/notes.ts"
 import { createTagsRoute } from "./routes/tags.ts"
 import { createApiTokensRoute } from "./routes/api-tokens.ts"
+import { createAdminRoute } from "./routes/admin.ts"
+import { createAdmin } from "./services/admin.ts"
+import { ADMIN_USERS_PAGE_SIZE } from "@domain/identity"
 import { createTokenApiRoute } from "./routes/token-api.ts"
 import { createApiTokens } from "./services/api-tokens.ts"
 import { createTokenRateLimits } from "./middlewares/token-rate-limits.ts"
@@ -109,6 +112,8 @@ const rateLimits = createAuthRateLimits({
   store: (keyPrefix) => createRedisRateLimitStore(kv, { keyPrefix }),
   onStoreError: (error) => log("error: auth rate limit store failed and was let pass", error),
 })
+// One counter of wrong authenticator codes, whichever step asks for one.
+const totpFailures = createTotpFailures({ sql })
 // Before the auth routes: their session middleware would answer for the public paths here too.
 app.route(
   "/auth",
@@ -128,7 +133,7 @@ app.route(
     emit,
     mutationGuards,
     rateLimits,
-    totpFailures: createTotpFailures({ sql }),
+    totpFailures,
     passwordFailures: createPasswordFailures({ sql }),
     requestPasswordReset: (email) => enqueuePasswordResetMail(sql, email),
     emailCodeFailures: createEmailCodeFailures({ sql }),
@@ -170,6 +175,20 @@ app.route(
     limit: rateLimits.normal,
     passwordLimit: rateLimits.strictByUser,
     tokens: apiTokens,
+  }),
+)
+// The operator area (#146). The route answers 404 to anyone below operator.
+app.route(
+  "/admin",
+  createAdminRoute({
+    auth: signIn.auth,
+    mutationGuards,
+    limit: rateLimits.normal,
+    passwordLimit: rateLimits.strictByUser,
+    admin: createAdmin({ db, pageSize: ADMIN_USERS_PAGE_SIZE }),
+    signIn,
+    totpFailures,
+    emit,
   }),
 )
 // The only routes that accept a token, and they accept nothing else.
