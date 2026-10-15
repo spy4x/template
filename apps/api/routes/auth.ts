@@ -34,6 +34,12 @@ import type { AuthRateLimits } from "../middlewares/auth-rate-limits.ts"
 import type { RateLimitDecision } from "@spy4x/platform/rate-limit"
 import { readApiJson } from "@api/services/json-body.ts"
 import { passwordFailureSubject } from "@api/services/password-failures.ts"
+import {
+  ACCOUNT_DELETE_CODE_REQUIRED,
+  checkFreshProof,
+  checkUnderFailureCount,
+  PROVIDER_PROOF_REQUIRED,
+} from "./fresh-proof.ts"
 
 /** What the auth routes call. `index.ts` passes the app's singletons; tests pass fakes. */
 export interface AuthRouteDependencies {
@@ -120,18 +126,10 @@ const SESSION_ID = /^[1-9][0-9]{0,9}$/
 /** The largest id `auth_sessions.id` (a Postgres `integer`) can hold. */
 const MAX_SESSION_ID = 2_147_483_647
 
-/** The answer when the account has two-factor on and the request carries no code. */
-export const ACCOUNT_DELETE_CODE_REQUIRED = "Enter the code from your authenticator app"
+export { ACCOUNT_DELETE_CODE_REQUIRED, PROVIDER_PROOF_REQUIRED }
 
 /** The same answer for a first password: with two-factor on, it needs the code too. */
 export const PASSWORD_SET_CODE_REQUIRED = ACCOUNT_DELETE_CODE_REQUIRED
-
-/**
- * The answer when an account with no password asks for a step that the others confirm with their
- * password, and its session is no sign-in with Google or GitHub of a moment ago.
- */
-export const PROVIDER_PROOF_REQUIRED =
-  "Sign in with Google or GitHub again, then repeat this within a few minutes."
 
 /** The answer when a first password is asked for by an account that has one. */
 export const PASSWORD_ALREADY_SET = "This account has a password already. Change it instead."
@@ -161,31 +159,6 @@ export function passwordLockedMessage(waitMs: number): string {
 function tooMany(c: Context<APIContext>, retryAfterMs: number, error: string): Response {
   c.header("Retry-After", String(Math.ceil(retryAfterMs / 1000)))
   return c.json({ error }, 429)
-}
-
-/**
- * Runs one one-time-code check under the failure counter. While the user is locked the check does
- * not run at all, so not even a correct code gets through, and the answer is 429 with
- * `Retry-After`. A wrong code is recorded, a correct one gives its slot back.
- */
-async function checkUnderFailureCount(
-  c: Context<APIContext>,
-  totpFailures: Lockout,
-  userId: number,
-  check: () => Promise<boolean>,
-  wrongAnswer: () => Response,
-): Promise<Response | true> {
-  const waitMs = await totpFailures.begin(userId)
-  if (waitMs > 0) {
-    c.header("Retry-After", String(Math.ceil(waitMs / 1000)))
-    return c.json({ error: "Too many wrong codes, try again later." }, 429)
-  }
-  if (!(await check())) {
-    await totpFailures.fail(userId)
-    return wrongAnswer()
-  }
-  await totpFailures.refund(userId)
-  return true
 }
 
 /**
@@ -587,26 +560,11 @@ export function createAuthRoute(
       const { password, otp } = validationResult.data
       const blockers = await signIn.accountDeletionBlockers(authData)
       if (blockers.length > 0) return c.json({ error: ACCOUNT_DELETE_BLOCKED, blockers }, 409)
-      if (await signIn.hasPassword(authData.user.id)) {
-        if (
-          password === undefined || !(await signIn.checkPassword(authData.user.id, password))
-        ) {
-          return c.json({ error: "Invalid password" }, 400)
-        }
-      } else if (!(await signIn.confirmedByProvider(authData))) {
-        return c.json({ error: PROVIDER_PROOF_REQUIRED }, 400)
-      }
-      if (authData.user.mfa === UserMFAStatus.CONFIGURED) {
-        if (otp === undefined) return c.json({ error: ACCOUNT_DELETE_CODE_REQUIRED }, 400)
-        const outcome = await checkUnderFailureCount(
-          c,
-          totpFailures,
-          authData.user.id,
-          () => signIn.verifyTotpCode(authData, otp),
-          () => c.json({ error: "Code is incorrect" }, 400),
-        )
-        if (outcome !== true) return outcome
-      }
+      const proof = await checkFreshProof(c, { signIn, totpFailures }, authData, {
+        password,
+        otp,
+      })
+      if (proof !== true) return proof
       const result = await signIn.deleteAccount(c, authData)
       if (result.blockers) {
         if (result.blockers.length === 0) return c.json({ error: "User not signed in" }, 401)
