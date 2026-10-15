@@ -1418,7 +1418,7 @@ async function queuedMethodMails(sql: postgres.Sql): Promise<number> {
   return row.count
 }
 
-Deno.test("unlinking asks an account with a password for it, and a refusal unlinks and mails nothing", async () => {
+Deno.test("unlinking asks an account with a password for it, and a refusal leaves the method linked", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql, { ada: ADA })
     const owner = browser(app)
