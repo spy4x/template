@@ -157,4 +157,20 @@ describe("the API's app", () => {
       )
     }
   })
+
+  it("keeps the operator area to the admin host, and the admin host to the area", async () => {
+    const app = await createApiApp({
+      write: () => {},
+      parseAuth: async (_c, next) => await next(),
+      adminHost: "admin.local",
+    })
+    app.get("/admin/users", (c) => c.json({ users: [] }))
+    app.get("/notifications", (c) => c.json({ notifications: [] }))
+    const status = async (url: string) => (await app.request(url)).status
+
+    expect(await status("http://admin.local/api/admin/users")).toBe(200)
+    expect(await status("http://local/api/admin/users")).toBe(404)
+    expect(await status("http://admin.local/api/notifications")).toBe(404)
+    expect(await status("http://local/api/notifications")).toBe(200)
+  })
 })

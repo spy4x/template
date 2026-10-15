@@ -93,6 +93,7 @@ const app = await createApiApp({
   skipLogPaths: ["/api/health"],
   parseAuth,
   reportError: (error, context) => void errorReporter.report(error, context),
+  adminHost: config.adminDomain,
 })
 
 app.route(
@@ -104,7 +105,7 @@ app.route(
 )
 // The browser sends the web app's origin; behind the TLS-terminating proxy the API sees `http://`.
 const expectedOrigin = new URL(config.webAppUrl).origin
-const mutationGuards = createMutationGuards(config.webAppUrl)
+const mutationGuards = createMutationGuards(config.webAppUrl, config.adminAppUrl)
 const emit = (event: Parameters<typeof eventBus.emit>[0]) => eventBus.emit(event)
 // has some public routes and some more protected
 const rateLimits = createAuthRateLimits({
