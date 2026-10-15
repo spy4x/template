@@ -12,6 +12,7 @@ import type { APIContext } from "../../apps/api/_types.ts"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { applyMigrations } from "./migrations.ts"
 
 /**
  * The operator area (#146) against a real Postgres with every migration applied: the user list's
@@ -22,7 +23,6 @@ import { uuidV7 } from "@spy4x/platform/universal/uuid"
  * they are missing rather than skipping.
  */
 
-const MIGRATIONS_DIR = "libs/server/db/migrations"
 // Test-only secrets, long enough for the package's 32-character minimum.
 const PEPPER = "integration-test-only-pepper-0123456789"
 const COOKIE_SECRET = "integration-test-only-cookie-secret-0123456789"
@@ -41,10 +41,7 @@ async function withSchema(body: (sql: postgres.Sql) => Promise<void>): Promise<v
   })
   try {
     await admin`CREATE SCHEMA ${admin(schema)}`
-    const names = [...Deno.readDirSync(MIGRATIONS_DIR)].map((entry) => entry.name).sort()
-    for (const name of names) {
-      await sql.unsafe(await Deno.readTextFile(`${MIGRATIONS_DIR}/${name}`))
-    }
+    await applyMigrations(sql)
     await body(sql)
   } finally {
     await sql.end({ timeout: 5 })
