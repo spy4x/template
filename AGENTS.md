@@ -75,6 +75,13 @@ A new product aggregate copies the notes aggregate, file by file:
 [docs/aggregates.md](docs/aggregates.md) lists every file in order. Do not invent a second shape.
 Every id is a UUID version 7; a secret is the owner's decision: [docs/ids.md](docs/ids.md).
 
+## The admin panel stays in sync
+
+Every feature of the product's apps (the SPA, the desktop and Android apps, and any app added
+later) has a counterpart in the admin panel, the operator area in the SPA under `/admin`. A change
+that adds or modifies a feature in one of those apps adds or modifies its admin counterpart in the
+same PR, so the two never drift apart.
+
 ## Handoff
 
 [docs/handoff.md](docs/handoff.md) holds the state of the migration, the decisions already made and
