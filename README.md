@@ -181,9 +181,8 @@ resolver: Let's Encrypt, HTTP challenge on port 80, certificates stored in
 the server and run `deno task proxy:start` there.
 
 Plain `http://<DOMAIN>` (and `http://<MPA_DOMAIN>` with the `mpa` profile) answers a permanent
-redirect to HTTPS. Other hosts can answer a permanent redirect to the same path on `DOMAIN` or
-`MPA_DOMAIN`: set `SPA_REDIRECT_RULE` or `MPA_REDIRECT_RULE` to a Traefik rule, such as
-``MPA_REDIRECT_RULE=Host(`www.example.com`)``, for a www host or a domain you moved away from.
+redirect to HTTPS. Other hosts can answer a permanent redirect to the same path on `MPA_DOMAIN`:
+set `MPA_REDIRECT_RULE` to a Traefik rule, such as ``MPA_REDIRECT_RULE=Host(`www.example.com`)``.
 
 The proxy serves nothing of its own but `/ping`: Traefik's dashboard and API are
 off, because they list every router and backend address of every project behind the proxy.
