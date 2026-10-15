@@ -113,8 +113,6 @@ const rateLimits = createAuthRateLimits({
   store: (keyPrefix) => createRedisRateLimitStore(kv, { keyPrefix }),
   onStoreError: (error) => log("error: auth rate limit store failed and was let pass", error),
 })
-// One counter of wrong authenticator codes, whichever step asks for one.
-const totpFailures = createTotpFailures({ sql })
 // Before the auth routes: their session middleware would answer for the public paths here too.
 app.route(
   "/auth",
@@ -134,7 +132,7 @@ app.route(
     emit,
     mutationGuards,
     rateLimits,
-    totpFailures,
+    totpFailures: createTotpFailures({ sql }),
     passwordFailures: createPasswordFailures({ sql }),
     requestPasswordReset: (email) => enqueuePasswordResetMail(sql, email),
     emailCodeFailures: createEmailCodeFailures({ sql }),
