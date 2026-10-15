@@ -72,10 +72,9 @@ test.describe("the admin app", () => {
       await row.click()
       await expect(ops.locator("[data-e2e=admin-user-sessions] li")).toHaveCount(1)
 
-      // Blocks them, with the operator's password.
+      // Blocks them: the dialog only confirms, it asks for no password.
       await ops.locator("[data-e2e=admin-user-menu]").click()
       await ops.locator("[data-e2e=admin-block-open]").click()
-      await ops.locator("[data-e2e=admin-action-password]").fill(password)
       await ops.locator("[data-e2e=admin-action-submit]").click()
       await expect(ops.locator("[data-e2e=admin-user-blocked-notice]")).toBeVisible()
       await expect(ops.locator("[data-e2e=admin-user-sessions] li")).toHaveCount(0)

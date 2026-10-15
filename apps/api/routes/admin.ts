@@ -1,24 +1,19 @@
 import { Hono } from "hono"
 import type { MiddlewareHandler } from "hono"
-import { validate } from "@spy4x/validation"
 import { requestInfoFromContext } from "@spy4x/platform/request-info"
-import { adminActionSchema, canOpenAdmin, parseAdminUserFilter } from "@domain/identity"
+import { canOpenAdmin, parseAdminUserFilter } from "@domain/identity"
 import { UserSignedOutEvent } from "@api/cqrs/events.ts"
 import type { APIContext } from "../_types.ts"
 import type { MutationGuards } from "../middlewares/mutation-guards.ts"
 import type { SignIn } from "@api/services/sign-in.ts"
 import { AdminActionKind, AdminActOutcome, type AdminService } from "@api/services/admin.ts"
-import { readApiJson } from "@api/services/json-body.ts"
-import { checkFreshProof, type FreshProofDependencies } from "./fresh-proof.ts"
 
 /** What the operator routes call. `index.ts` passes the app's singletons. */
-export interface AdminRouteDependencies extends FreshProofDependencies {
+export interface AdminRouteDependencies {
   auth: Pick<SignIn["auth"], "isAuthenticated2FA">
   mutationGuards: MutationGuards
   /** The normal per-user budget the session routes spend too. */
   limit: MiddlewareHandler<APIContext>
-  /** The per-user budget a password check spends, so a stolen session cannot guess it here. */
-  passwordLimit: MiddlewareHandler<APIContext>
   admin: AdminService
   emit(event: UserSignedOutEvent): void
 }
@@ -52,9 +47,9 @@ function userIdOf(raw: string): number | null {
  *
  * - `GET /users?q=&role=&blocked=&page=` lists people: `{ users, total, page, pageSize }`.
  * - `GET /users/:id` is one person: `{ user, methods, sessions, groups, audits }`.
- * - `POST /users/:id/block`, `/unblock` and `/sessions/end` take `{ password?, otp? }`, the fresh
- *   proof that deleting an account asks for, and answer `{ user }`. Each writes an audit row on the
- *   person naming the operator. Block refuses every sign-in, ends every session and closes the
+ * - `POST /users/:id/block`, `/unblock` and `/sessions/end` take no body and answer `{ user }`.
+ *   They ask for no fresh password or code: the owner chose the audit trail over a confirmation
+ *   password (2026-10-15). Each writes an audit row on the person naming the operator. Block refuses every sign-in, ends every session and closes the
  *   person's sockets; ending sessions does the last two.
  *
  * An operator never acts on themselves (403) or on a role at or above their own (403).
@@ -81,15 +76,10 @@ export function createAdminRoute(dependencies: AdminRouteDependencies): Hono<API
     })
 
   for (const [path, action] of Object.entries(ACTIONS)) {
-    route.post(`/users/:id/${path}`, dependencies.passwordLimit, async (c) => {
+    route.post(`/users/:id/${path}`, dependencies.limit, async (c) => {
       const targetId = userIdOf(c.req.param("id"))
       if (targetId === null) return c.json({ error: ADMIN_USER_NOT_FOUND }, 404)
-      const body = validate(adminActionSchema, await readApiJson(c))
-      if (body.error) return c.json({ error: body.error.description }, 400)
-      const authData = c.get("auth")!
-      const proof = await checkFreshProof(c, dependencies, authData, body.data)
-      if (proof !== true) return proof
-      const { outcome, user } = await admin.act(c, authData, targetId, action)
+      const { outcome, user } = await admin.act(c, c.get("auth")!, targetId, action)
       switch (outcome) {
         case AdminActOutcome.NotFound:
           return c.json({ error: ADMIN_USER_NOT_FOUND }, 404)

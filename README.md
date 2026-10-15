@@ -180,8 +180,8 @@ The admin app (`apps/admin`, Preact and Vite) is the operator area: people who r
 find a person by address or name, filter by role and by blocked state, and open their page with
 their sign-in methods, sessions, groups and audit trail. From there they block or unblock the
 person, or end all their sessions. A block refuses every way in (password, Google, GitHub and API
-tokens), ends the person's sessions and closes their open pages. Each action asks for the
-operator's password, and their code when they use two-factor sign-in, and writes an audit event.
+tokens), ends the person's sessions and closes their open pages. Each action is confirmed in a
+dialog, asks for no password, and writes an audit event naming the operator.
 Nobody acts on themselves or on someone whose role is theirs or higher.
 
 It runs on a host of its own, `ADMIN_DOMAIN`, so its session cookie belongs to that host alone. It

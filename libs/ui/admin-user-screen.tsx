@@ -1,12 +1,9 @@
 import type { JSX } from "preact"
-import { useEffect, useRef } from "preact/hooks"
 import { timeAgo } from "@spy4x/platform/universal/time"
 import { Badge } from "@spy4x/preact-ui/badge"
 import { Button } from "@spy4x/preact-ui/button"
 import { DropdownItem } from "@spy4x/preact-ui/dropdown"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
-import { Field } from "@spy4x/preact-ui/field"
-import { Input } from "@spy4x/preact-ui/input"
 import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Modal } from "@spy4x/preact-ui/modal"
 import { Notice } from "@spy4x/preact-ui/notice"
@@ -17,28 +14,13 @@ import { ADMIN_PATHS } from "./admin-frame.tsx"
 import { adminUserName, roleLabel } from "./admin-users-screen.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
 
-/** What an operator can do to a person; each asks for the operator's password first. */
+/** What an operator can do to a person; each is confirmed in a dialog first. */
 export type AdminAction = "block" | "unblock" | "end-sessions"
-
-/** What the action dialog has typed into it. */
-export interface AdminActionValues {
-  password: string
-  otp: string
-}
-
-/** The action dialog's errors: one per field, tied to it, and one that names no field. */
-export interface AdminActionErrors {
-  password?: string | null
-  otp?: string | null
-  form: string | null
-}
 
 /** The signed-in operator, as far as the page needs them. */
 export interface AdminOperator {
   id: number
   role: UserRole
-  /** Two-factor sign-in is on: every action asks for a code as well. */
-  twoFactor: boolean
 }
 
 /** What a group role is called in the person's group list. */
@@ -109,12 +91,10 @@ export interface AdminUserScreenProps {
   /** The action whose dialog is open, or `null`. */
   dialog: AdminAction | null
   onOpenDialog: (action: AdminAction) => void
-  /** The operator closed the dialog: the app drops what was typed and its errors. */
+  /** The operator closed the dialog: the app drops its error. */
   onCloseDialog: () => void
-  values: AdminActionValues
-  onValueChange: (field: keyof AdminActionValues, value: string) => void
-  /** Focus moves to the first field with a message each time the app passes a new object. */
-  errors: AdminActionErrors
+  /** Why the API refused the open dialog's action, shown under its text, or `null`. */
+  actionError: string | null
   pending: boolean
   /** The operator confirmed the open dialog's action. */
   onAction: (action: AdminAction) => void
@@ -124,7 +104,7 @@ export interface AdminUserScreenProps {
 /**
  * One person in the admin app: their account, how they sign in, their sessions, their groups and
  * the newest rows of their audit trail. The "More actions" menu blocks, unblocks or ends every
- * session, each after the operator's password (and code), in a dialog.
+ * session, each confirmed in a dialog. No password is asked: the audit trail records who acted.
  */
 export function AdminUserScreen(props: AdminUserScreenProps): JSX.Element {
   const { detail, error, operator, dialog, navigate } = props
@@ -262,7 +242,15 @@ export function AdminUserScreen(props: AdminUserScreenProps): JSX.Element {
         </Rows>
       </SettingGroup>
 
-      {actOn && dialog && <ActionDialog {...props} action={dialog} />}
+      {actOn && dialog && (
+        <ActionDialog
+          action={dialog}
+          actionError={props.actionError}
+          pending={props.pending}
+          onAction={props.onAction}
+          onCloseDialog={props.onCloseDialog}
+        />
+      )}
     </Stack>
   )
 }
@@ -298,22 +286,17 @@ function methodName(method: string): string {
   return method
 }
 
-/** The dialog of one action: what it does, the operator's password and code, and its button. */
+/** The dialog of one action: what it does, why the API refused it, and its button. */
 function ActionDialog(
-  { action, operator, values, onValueChange, errors, pending, onAction, onCloseDialog }:
-    & AdminUserScreenProps
-    & { action: AdminAction },
+  { action, actionError, pending, onAction, onCloseDialog }: {
+    action: AdminAction
+    actionError: string | null
+    pending: boolean
+    onAction: (action: AdminAction) => void
+    onCloseDialog: () => void
+  },
 ): JSX.Element {
   const copy = ACTIONS[action]
-  const password = useRef<HTMLInputElement>(null)
-  const otp = useRef<HTMLInputElement>(null)
-
-  // A refused submit lands the operator on the field to fix.
-  useEffect(() => {
-    if (errors.password) password.current?.focus()
-    else if (errors.otp) otp.current?.focus()
-  }, [errors])
-
   return (
     <Modal
       open
@@ -326,43 +309,7 @@ function ActionDialog(
       <ScreenForm pending={pending} onSubmit={() => onAction(action)}>
         <Stack>
           <p class="text-sm text-muted">{copy.text}</p>
-          <Field
-            id="admin-action-password"
-            label="Your password"
-            error={errors.password}
-            required
-          >
-            <Input
-              ref={password}
-              data-e2e="admin-action-password"
-              name="password"
-              type="password"
-              autocomplete="current-password"
-              value={values.password}
-              onInput={(e) => onValueChange("password", e.currentTarget.value)}
-              required
-            />
-          </Field>
-          {operator.twoFactor && (
-            <Field
-              id="admin-action-otp"
-              label="Code from your authenticator app"
-              error={errors.otp}
-              required
-            >
-              <Input
-                ref={otp}
-                data-e2e="admin-action-otp"
-                name="otp"
-                inputMode="numeric"
-                autocomplete="one-time-code"
-                value={values.otp}
-                onInput={(e) => onValueChange("otp", e.currentTarget.value)}
-                required
-              />
-            </Field>
-          )}
-          <ErrorState message={errors.form} />
+          <ErrorState message={actionError} />
           <Cluster justify="end">
             <Button type="button" variant="ghost" onClick={onCloseDialog}>Cancel</Button>
             <Button

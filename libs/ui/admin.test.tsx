@@ -228,7 +228,7 @@ const detail: AdminUserDetail = {
   }],
 }
 
-const operator = { id: 7, role: UserRole.OPERATOR, twoFactor: false }
+const operator = { id: 7, role: UserRole.OPERATOR }
 
 function userProps(calls: unknown[][], props: Partial<AdminUserScreenProps> = {}) {
   return {
@@ -238,9 +238,7 @@ function userProps(calls: unknown[][], props: Partial<AdminUserScreenProps> = {}
     dialog: null,
     onOpenDialog: (action) => void calls.push(["open", action]),
     onCloseDialog: () => void calls.push(["close"]),
-    values: { password: "", otp: "" },
-    onValueChange: (field, value) => void calls.push(["value", field, value]),
-    errors: { form: null },
+    actionError: null,
     pending: false,
     onAction: (action) => void calls.push(["action", action]),
     ...props,
@@ -299,38 +297,21 @@ describe("one person in the admin app", () => {
     expect(find("[data-e2e=admin-user-no-actions]").textContent).toContain("yours or higher")
   })
 
-  it("asks for the password, reports typing, and confirms the open action", async () => {
+  it("confirms the open action without asking for a password", async () => {
     const calls: unknown[][] = []
     await mount(<AdminUserScreen {...userProps(calls, { dialog: "block" })} />)
 
-    expect(has("[data-e2e=admin-action-otp]")).toBe(false)
-    await type("[data-e2e=admin-action-password]", "correct-horse")
+    expect(has("[data-e2e=admin-action-dialog] input")).toBe(false)
     await submit("[data-e2e=admin-action-submit]")
-    expect(calls).toEqual([["value", "password", "correct-horse"], ["action", "block"]])
+    expect(calls).toEqual([["action", "block"]])
   })
 
-  it("asks a two-factor operator for the code too", async () => {
+  it("shows why the API refused the action inside its dialog", async () => {
+    const message = "You cannot do this to someone whose role is yours or higher"
     await mount(
-      <AdminUserScreen
-        {...userProps([], { dialog: "end-sessions", operator: { ...operator, twoFactor: true } })}
-      />,
+      <AdminUserScreen {...userProps([], { dialog: "end-sessions", actionError: message })} />,
     )
-    expect(has("[data-e2e=admin-action-otp]")).toBe(true)
-  })
-
-  it("moves focus to the password when the API refused it", async () => {
-    const calls: unknown[][] = []
-    await mount(<AdminUserScreen {...userProps(calls, { dialog: "block" })} />)
-    await mount(
-      <AdminUserScreen
-        {...userProps(calls, {
-          dialog: "block",
-          errors: { password: "Invalid password", form: null },
-        })}
-      />,
-    )
-    expect(focused()).toBe("admin-action-password")
-    expect(document.body.textContent).toContain("Invalid password")
+    expect(find("[data-e2e=admin-action-dialog]").textContent).toContain(message)
   })
 })
 

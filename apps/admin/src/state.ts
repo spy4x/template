@@ -8,15 +8,9 @@ import {
   type AdminUserRow,
   canOpenAdmin,
   type User,
-  UserMFAStatus,
 } from "@domain/identity"
 import type { AuthCredentials } from "@spy4x/preact-system/auth-form"
-import type {
-  AdminAction,
-  AdminActionErrors,
-  AdminActionValues,
-  AdminOperator,
-} from "@ui/admin-user-screen.tsx"
+import type { AdminAction, AdminOperator } from "@ui/admin-user-screen.tsx"
 
 /** One answer of the API: the data, or its status and message. */
 export type AdminApiResult<T> = Awaited<ReturnType<typeof apiFetch<T>>>
@@ -32,11 +26,7 @@ export interface AdminApi {
   signOut(): Promise<AdminApiResult<unknown>>
   list(filter: AdminUserFilter): Promise<AdminApiResult<AdminUserListResponse>>
   detail(userId: number): Promise<AdminApiResult<AdminUserDetail>>
-  act(
-    userId: number,
-    action: AdminAction,
-    proof: { password: string; otp?: string },
-  ): Promise<AdminApiResult<{ user: AdminUserRow }>>
+  act(userId: number, action: AdminAction): Promise<AdminApiResult<{ user: AdminUserRow }>>
 }
 
 /** Each action's path under `/api/admin/users/:id/`. */
@@ -62,8 +52,7 @@ export const adminHttp: AdminApi = {
     return apiFetch(`/api/admin/users${query ? `?${query}` : ""}`, {})
   },
   detail: (userId) => apiFetch(`/api/admin/users/${userId}`, {}),
-  act: (userId, action, proof) =>
-    apiFetch(`/api/admin/users/${userId}/${ACTION_PATHS[action]}`, post(proof)),
+  act: (userId, action) => apiFetch(`/api/admin/users/${userId}/${ACTION_PATHS[action]}`, post()),
 }
 
 /** The message when a call failed without one of its own, as when the network is down. */
@@ -96,21 +85,16 @@ export interface AdminPersonState {
 
 export interface AdminDialogState {
   action: AdminAction | null
-  values: AdminActionValues
-  errors: AdminActionErrors
+  /** Why the API refused the action, or `null`. */
+  error: string | null
   pending: boolean
 }
 
-const NO_VALUES: AdminActionValues = { password: "", otp: "" }
-const NO_ERRORS: AdminActionErrors = { form: null }
+const NO_DIALOG: AdminDialogState = { action: null, error: null, pending: false }
 
-/** A wrong password and a wrong or missing code, as `checkFreshProof` of the API words them. */
-const PASSWORD_ERRORS = new Set(["Invalid password"])
-const CODE_ERRORS = new Set(["Code is incorrect", "Enter the code from your authenticator app"])
-
-/** The operator the person page needs: who they are, their role, whether they owe a code. */
+/** The operator the person page needs: who they are and their role. */
 export function operatorOf(user: User): AdminOperator {
-  return { id: user.id, role: user.role, twoFactor: user.mfa === UserMFAStatus.CONFIGURED }
+  return { id: user.id, role: user.role }
 }
 
 /** Whether the signed-in person may use the app. The API decides on its own; this only says it. */
@@ -145,18 +129,13 @@ export function createAdminStore(api: AdminApi) {
   })
   const list = signal<AdminListState>({ filter: null, list: null, pending: false, error: null })
   const person = signal<AdminPersonState>({ userId: null, detail: null, error: null })
-  const dialog = signal<AdminDialogState>({
-    action: null,
-    values: NO_VALUES,
-    errors: NO_ERRORS,
-    pending: false,
-  })
+  const dialog = signal<AdminDialogState>(NO_DIALOG)
 
   function signedOut(error: string | null = null): void {
     session.value = { step: "credentials", user: null, busy: false, error }
     list.value = { filter: null, list: null, pending: false, error: null }
     person.value = { userId: null, detail: null, error: null }
-    dialog.value = { action: null, values: NO_VALUES, errors: NO_ERRORS, pending: false }
+    dialog.value = NO_DIALOG
   }
 
   /** Applies a sign-in answer: a user signs in, a 202 asks for the code. */
@@ -237,59 +216,32 @@ export function createAdminStore(api: AdminApi) {
     },
 
     openDialog(action: AdminAction): void {
-      dialog.value = { action, values: NO_VALUES, errors: NO_ERRORS, pending: false }
+      dialog.value = { action, error: null, pending: false }
     },
 
     closeDialog(): void {
       if (dialog.value.pending) return
-      dialog.value = { action: null, values: NO_VALUES, errors: NO_ERRORS, pending: false }
-    },
-
-    setValue(field: keyof AdminActionValues, value: string): void {
-      dialog.value = { ...dialog.value, values: { ...dialog.value.values, [field]: value } }
+      dialog.value = NO_DIALOG
     },
 
     /**
-     * Sends the open dialog's action with the typed proof. On success the dialog closes and the
-     * person is read again, so their sessions, status and audit trail show what changed.
+     * Sends the open dialog's action. It asks for no password: the API records the operator in the
+     * audit trail. On success the dialog closes and the person is read again, so their sessions,
+     * status and audit trail show what changed.
      */
     async act(): Promise<void> {
-      const { action, values, pending } = dialog.value
+      const { action, pending } = dialog.value
       const userId = person.value.userId
-      const user = session.value.user
-      if (!action || pending || userId === null || !user) return
-      if (!values.password) {
-        dialog.value = { ...dialog.value, errors: { password: "Enter your password", form: null } }
-        return
-      }
-      const twoFactor = operatorOf(user).twoFactor
-      if (twoFactor && !values.otp) {
-        dialog.value = {
-          ...dialog.value,
-          errors: { otp: "Enter the code from your authenticator app", form: null },
-        }
-        return
-      }
-      dialog.value = { ...dialog.value, pending: true, errors: NO_ERRORS }
-      const result = await attempt(() =>
-        api.act(userId, action, {
-          password: values.password,
-          ...(twoFactor ? { otp: values.otp } : {}),
-        })
-      )
+      if (!action || pending || userId === null || !session.value.user) return
+      dialog.value = { action, error: null, pending: true }
+      const result = await attempt(() => api.act(userId, action))
       if (result.ok) {
-        dialog.value = { action: null, values: NO_VALUES, errors: NO_ERRORS, pending: false }
+        dialog.value = NO_DIALOG
         await store.loadPerson(userId)
         return
       }
       if (result.status === 401) return signedOut()
-      const message = result.error.message
-      const errors: AdminActionErrors = PASSWORD_ERRORS.has(message)
-        ? { password: message, form: null }
-        : CODE_ERRORS.has(message)
-        ? { otp: message, form: null }
-        : { form: message }
-      dialog.value = { ...dialog.value, pending: false, errors }
+      dialog.value = { action, error: result.error.message, pending: false }
     },
   }
   return store

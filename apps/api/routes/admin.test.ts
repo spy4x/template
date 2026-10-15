@@ -2,7 +2,6 @@ import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import type { MiddlewareHandler } from "hono"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
-import type { Lockout } from "@spy4x/server/lockout"
 import { type AdminUserRow, UserMFAStatus, UserRole } from "@domain/identity"
 import type { UserSignedOutEvent } from "@api/cqrs/events.ts"
 import { AdminActionKind, AdminActOutcome, type AdminService } from "@api/services/admin.ts"
@@ -18,7 +17,6 @@ import {
   testSessionGuards,
 } from "../_testing/mutation-requests.ts"
 import { ADMIN_OUTRANKED, ADMIN_SELF, createAdminRoute } from "./admin.ts"
-import { FRESH_PROOF_PASSWORD_WRONG } from "./fresh-proof.ts"
 
 const target: AdminUserRow = {
   id: 42,
@@ -37,15 +35,10 @@ const operator = () => buildAuthData({ user: { id: 7, role: UserRole.OPERATOR } 
 
 function buildApp(
   auth: APIContext["Variables"]["auth"] = operator(),
-  { outcome = AdminActOutcome.Done, passwordRight = true } = {},
+  { outcome = AdminActOutcome.Done } = {},
 ) {
   const calls: unknown[][] = []
   const emitted: UserSignedOutEvent[] = []
-  const totpFailures: Lockout = {
-    begin: () => Promise.resolve(0),
-    fail: () => Promise.resolve(),
-    refund: () => Promise.resolve(),
-  }
   const admin: AdminService = {
     list: (
       filter,
@@ -72,21 +65,7 @@ function buildApp(
     auth: testSessionGuards(),
     mutationGuards: testMutationGuards,
     limit: passThrough,
-    passwordLimit: async (_c, next) => {
-      calls.push(["passwordLimit"])
-      await next()
-    },
     admin,
-    signIn: {
-      hasPassword: () => Promise.resolve(true),
-      checkPassword: (
-        _id,
-        password,
-      ) => (calls.push(["checkPassword", password]), Promise.resolve(passwordRight)),
-      confirmedByProvider: () => Promise.resolve(false),
-      verifyTotpCode: () => Promise.resolve(true),
-    },
-    totpFailures,
     emit: (event) => emitted.push(event),
   })
   return { app: mountRoute("/admin", route, auth), calls, emitted }
@@ -110,11 +89,8 @@ function send(
   { method, path }: { method: string; path: string },
   headers: Record<string, string> = sameOriginHeaders,
 ) {
-  return app.request(`${API_URL}${path}`, {
-    method,
-    headers: { ...headers },
-    body: method === "POST" ? JSON.stringify({ password: "correct-horse" }) : undefined,
-  })
+  // An action carries no body: it asks for no password or code (owner's decision, 2026-10-15).
+  return app.request(`${API_URL}${path}`, { method, headers: { ...headers } })
 }
 
 describe("operator area routes", () => {
@@ -188,21 +164,17 @@ describe("operator area routes", () => {
     expect((await send(app, ROUTES[7])).status).toBe(404)
   })
 
-  it("blocks a person after the password, then closes their sockets", async () => {
+  it("blocks a person with no password asked, then closes their sockets", async () => {
     const { app, calls, emitted } = buildApp()
     const response = await send(app, ROUTES[3])
 
     expect(response.status).toBe(200)
     expect((await response.json()).user).toEqual(target)
-    expect(calls).toEqual([
-      ["passwordLimit"],
-      ["checkPassword", "correct-horse"],
-      ["act", 7, 42, AdminActionKind.Block],
-    ])
+    expect(calls).toEqual([["act", 7, 42, AdminActionKind.Block]])
     expect(emitted.map((event) => event.data.userId)).toEqual([42])
   })
 
-  it("ends a person's sessions after the password, then closes their sockets", async () => {
+  it("ends a person's sessions, then closes their sockets", async () => {
     const { app, calls, emitted } = buildApp()
     const response = await send(app, ROUTES[5])
 
@@ -211,22 +183,12 @@ describe("operator area routes", () => {
     expect(emitted.map((event) => event.data.userId)).toEqual([42])
   })
 
-  it("unblocks a person after the password and closes nothing", async () => {
+  it("unblocks a person and closes nothing", async () => {
     const { app, calls, emitted } = buildApp()
     const response = await send(app, ROUTES[4])
 
     expect(response.status).toBe(200)
     expect(calls.at(-1)).toEqual(["act", 7, 42, AdminActionKind.Unblock])
-    expect(emitted).toEqual([])
-  })
-
-  it("refuses an action with a wrong password and does nothing", async () => {
-    const { app, calls, emitted } = buildApp(operator(), { passwordRight: false })
-    const response = await send(app, ROUTES[3])
-
-    expect(response.status).toBe(400)
-    expect((await response.json()).error).toBe(FRESH_PROOF_PASSWORD_WRONG)
-    expect(calls.some(([name]) => name === "act")).toBe(false)
     expect(emitted).toEqual([])
   })
 

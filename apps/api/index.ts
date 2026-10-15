@@ -185,10 +185,7 @@ app.route(
     auth: signIn.auth,
     mutationGuards,
     limit: rateLimits.normal,
-    passwordLimit: rateLimits.strictByUser,
     admin: createAdmin({ db, pageSize: ADMIN_USERS_PAGE_SIZE }),
-    signIn,
-    totpFailures,
     emit,
   }),
 )

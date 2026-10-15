@@ -125,9 +125,7 @@ function UserView({ store, id }: { store: AdminStore; id: string }): JSX.Element
       dialog={dialog.action}
       onOpenDialog={store.openDialog}
       onCloseDialog={store.closeDialog}
-      values={dialog.values}
-      onValueChange={store.setValue}
-      errors={dialog.errors}
+      actionError={dialog.error}
       pending={dialog.pending}
       onAction={() => store.act()}
       navigate={navigate}

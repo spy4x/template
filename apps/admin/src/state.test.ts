@@ -47,17 +47,16 @@ function fakeApi(answers: Partial<AdminApi> = {}) {
     act: (
       userId,
       action,
-      proof,
-    ) => (calls.push(["act", userId, action, proof]),
-      answers.act?.(userId, action, proof) ?? Promise.resolve(ok({ user: detail.user }))),
+    ) => (calls.push(["act", userId, action]),
+      answers.act?.(userId, action) ?? Promise.resolve(ok({ user: detail.user }))),
   }
   return { api, calls }
 }
 
-/** A store signed in as `user`, with person 42 open and `action`'s dialog showing. */
-async function withDialog(api: AdminApi, user: User = operator) {
+/** A store signed in as the operator, with person 42 open and the block dialog showing. */
+async function withDialog(api: AdminApi) {
   const store = createAdminStore(api)
-  store.session.value = { step: "signed-in", user, busy: false, error: null }
+  store.session.value = { step: "signed-in", user: operator, busy: false, error: null }
   await store.loadPerson(42)
   store.openDialog("block")
   return store
@@ -129,62 +128,24 @@ it("an answer for a filter the page has left is dropped", async () => {
   expect(store.list.value.filter).toBe(ADMIN_NO_FILTER)
 })
 
-it("an action without a password asks for it and calls nothing", async () => {
+it("a confirmed action asks for no password, closes the dialog and reads the person again", async () => {
   const { api, calls } = fakeApi()
   const store = await withDialog(api)
-  await store.act()
-  expect(store.dialog.value.errors).toEqual({ password: "Enter your password", form: null })
-  expect(calls.some(([name]) => name === "act")).toBe(false)
-})
-
-it("a confirmed action sends the password, closes the dialog and reads the person again", async () => {
-  const { api, calls } = fakeApi()
-  const store = await withDialog(api)
-  store.setValue("password", "correct-horse")
   await store.act()
   expect(calls.filter(([name]) => name === "act" || name === "detail")).toEqual([
     ["detail", 42],
-    ["act", 42, "block", { password: "correct-horse" }],
+    ["act", 42, "block"],
     ["detail", 42],
   ])
-  expect(store.dialog.value.action).toBe(null)
-  expect(store.dialog.value.values).toEqual({ password: "", otp: "" })
+  expect(store.dialog.value).toEqual({ action: null, error: null, pending: false })
 })
 
-it("a two-factor operator sends the code too, and is asked for it when it is missing", async () => {
-  const { api, calls } = fakeApi()
-  const store = await withDialog(api, { ...operator, mfa: UserMFAStatus.CONFIGURED })
-  store.setValue("password", "correct-horse")
+it("a refused action keeps the dialog open with the API's message", async () => {
+  const message = "You cannot do this to someone whose role is yours or higher"
+  const { api } = fakeApi({ act: () => Promise.resolve(fail(403, message)) })
+  const store = await withDialog(api)
   await store.act()
-  expect(store.dialog.value.errors.otp).toBe("Enter the code from your authenticator app")
-  store.setValue("otp", "123456")
-  await store.act()
-  expect(calls.find(([name]) => name === "act")).toEqual([
-    "act",
-    42,
-    "block",
-    { password: "correct-horse", otp: "123456" },
-  ])
-})
-
-it("a refused action puts the API's message under the field it names", async () => {
-  const cases: [string, object][] = [
-    ["Invalid password", { password: "Invalid password", form: null }],
-    ["Code is incorrect", { otp: "Code is incorrect", form: null }],
-    [
-      "You cannot do this to someone whose role is yours or higher",
-      { form: "You cannot do this to someone whose role is yours or higher" },
-    ],
-  ]
-  for (const [message, errors] of cases) {
-    const { api } = fakeApi({ act: () => Promise.resolve(fail(400, message)) })
-    const store = await withDialog(api)
-    store.setValue("password", "correct-horse")
-    await store.act()
-    expect(store.dialog.value.errors).toEqual(errors)
-    expect(store.dialog.value.action).toBe("block")
-    expect(store.dialog.value.pending).toBe(false)
-  }
+  expect(store.dialog.value).toEqual({ action: "block", error: message, pending: false })
 })
 
 it("signing out ends the session even when the server cannot be reached", async () => {

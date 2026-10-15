@@ -780,11 +780,3 @@ export function adminUserFilterQuery(filter: AdminUserFilter): string {
   if (filter.page > 1) params.set("page", String(filter.page))
   return params.toString()
 }
-
-/**
- * The body of every operator action (block, unblock, end all sessions): the operator's own
- * password, or nothing for an operator with no password who signed in with a provider a moment
- * ago, and their authenticator code when two-factor is on. The same proof deleting an account asks.
- */
-export const adminActionSchema = accountDeleteSchema
-export type AdminAction = AccountDelete
