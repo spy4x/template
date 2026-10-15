@@ -7,7 +7,7 @@ import type { EmailMessage } from "@spy4x/email/message"
 import type { EmailSender } from "@spy4x/email/sender"
 import type { OutboxEvent } from "@spy4x/server/outbox"
 import { BillingStatus } from "@domain/billing"
-import { AccountDeletionBlockReason, UserMFAStatus } from "@domain/identity"
+import { AccountDeletionBlockReason, AuthAuditEventType, UserMFAStatus } from "@domain/identity"
 import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn, type SignIn } from "../../apps/api/services/sign-in.ts"
@@ -119,7 +119,7 @@ function buildApp(sql: postgres.Sql) {
   })
   app.post("/reset", async (c) => {
     const { email, code, password } = await c.req.json()
-    const ok = await signIn.resetPassword(email, code, password)
+    const ok = await signIn.resetPassword(email, code, password, c)
     return ok ? c.json({ ok }) : c.json({ error: "refused" }, 401)
   })
   app.post("/delete", async (c) => {
@@ -449,6 +449,34 @@ Deno.test("deleting one's own account", async (t) => {
         const cookie = cookieOf(response)
         expect((await app.request("/strong", { body: {}, cookie })).status).toBe(200)
         expect(await sql`SELECT 1 FROM account_deletions WHERE user_id = ${uma.id}`).toEqual([])
+      },
+    )
+
+    await t.step(
+      "a password reset while waiting restores the account itself, before any sign-in",
+      async () => {
+        const val = await signUp(app, "val")
+        await requestDeletion(app, sql, val)
+        const issued = await issuePasswordReset(app.db.authStore, "val@example.com")
+        expect(issued).not.toBeNull()
+
+        const reset = await app.request("/reset", {
+          body: { email: issued!.email, code: issued!.code, password: PASSWORD },
+        })
+
+        expect(reset.status).toBe(200)
+        const [state] = await sql<{ request: string | null; live: boolean; restores: number }[]>`
+          SELECT
+            (SELECT id FROM account_deletions WHERE user_id = ${val.id}) AS request,
+            (SELECT deleted_at IS NULL FROM users WHERE id = ${val.id}) AS live,
+            (SELECT count(*)::int FROM account_restorations WHERE user_id = ${val.id}) AS restores
+        `
+        expect(state).toEqual({ request: null, live: true, restores: 1 })
+        const [audit] = await sql<{ count: number }[]>`
+          SELECT count(*)::int AS count FROM auth_audits
+          WHERE user_id = ${val.id} AND event_type = ${AuthAuditEventType.ACCOUNT_RESTORED}
+        `
+        expect(audit.count).toBe(1)
       },
     )
 
