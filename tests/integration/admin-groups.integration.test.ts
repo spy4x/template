@@ -258,6 +258,13 @@ Deno.test(`an operator removes a member, who loses tokens and invitations, with 
       SELECT revoked_at FROM group_invitations WHERE id = ${link}
     `
     expect(invitation.revokedAt).not.toBe(null)
+    // The revocation the removal causes is marked as the operator's too.
+    expect(await auditRows(sql, groupId, `group.invitation_revoked`)).toEqual([{
+      actorUserId: operator.id,
+      targetUserId: null,
+      entityId: link,
+      details: { [OPERATOR_DETAIL]: 1 },
+    }])
     expect(await auditRows(sql, groupId, `group.member_removed`)).toEqual([{
       actorUserId: operator.id,
       targetUserId: admin,
@@ -286,9 +293,9 @@ Deno.test(`an operator removes a member, who loses tokens and invitations, with 
   })
 })
 
-Deno.test(`a supervisor transfers a group; an operator and a renewing subscription cannot`, async () => {
+Deno.test(`a supervisor transfers a group only to its own member; an operator and a renewing subscription cannot`, async () => {
   await withSchema(async (sql) => {
-    const { groupId, owner, editor } = await team(sql)
+    const { groupId, owner, editor, stranger } = await team(sql)
     const operator = { id: await operatorUser(sql, UserRole.OPERATOR), role: UserRole.OPERATOR }
     const supervisor = {
       id: await operatorUser(sql, UserRole.SUPERVISOR),
@@ -309,9 +316,17 @@ Deno.test(`a supervisor transfers a group; an operator and a renewing subscripti
     )
     await sql`UPDATE subscriptions SET cancel_at_period_end = TRUE WHERE group_id = ${groupId}`
 
+    // The owner's admin link: an admin of the group may no longer hand out admin access.
+    const adminLink = await insertInvitation(sql, groupId, owner, { role: GroupRole.ADMIN })
     expect(await rows.transferOwnership(supervisor, groupId, editor)).toBe(
       AdminGroupActOutcome.Done,
     )
+    expect(await auditRows(sql, groupId, `group.invitation_revoked`)).toEqual([{
+      actorUserId: supervisor.id,
+      targetUserId: null,
+      entityId: adminLink,
+      details: { [OPERATOR_DETAIL]: 1 },
+    }])
     const roles = await sql<{ userId: number; role: GroupRole }[]>`
       SELECT user_id, role FROM group_members
       WHERE group_id = ${groupId} AND user_id IN ${sql([owner, editor])}
@@ -335,11 +350,17 @@ Deno.test(`a supervisor transfers a group; an operator and a renewing subscripti
     expect(await rows.transferOwnership(supervisor, groupId, editor)).toBe(
       AdminGroupActOutcome.Unchanged,
     )
-    // A person outside the group cannot receive it.
-    const stranger = await insertUser(sql)
+    // A person outside the group cannot receive it, even one who is a member of another group.
     expect(await rows.transferOwnership(supervisor, groupId, stranger)).toBe(
       AdminGroupActOutcome.NotFound,
     )
+    expect(await rows.transferOwnership(supervisor, groupId, await insertUser(sql))).toBe(
+      AdminGroupActOutcome.NotFound,
+    )
+    const [still] = await sql<{ ownerUserId: number }[]>`
+      SELECT owner_user_id FROM groups WHERE id = ${groupId}
+    `
+    expect(still.ownerUserId).toBe(editor)
     // An owner whose role is the supervisor's keeps their group.
     await sql`UPDATE users SET role = ${UserRole.SUPERVISOR} WHERE id = ${editor}`
     expect(await rows.transferOwnership(supervisor, groupId, owner)).toBe(

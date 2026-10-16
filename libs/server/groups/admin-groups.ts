@@ -558,7 +558,9 @@ export async function removeMemberAsOperator(
     })
     await notifyRemoved(tx, groupId, userId)
     // Their own links would let them back in.
-    await revokeInvitationsOf(tx, groupId, userId, null, operator.id, undefined)
+    await revokeInvitationsOf(tx, groupId, userId, null, operator.id, undefined, {
+      [OPERATOR_DETAIL]: 1,
+    })
     await recordAccessChange(tx, groupId, operator.id, MEMBER_REMOVED_EVENT, [userId])
     return AdminGroupActOutcome.Done
   }) as AdminGroupActOutcome
@@ -623,7 +625,9 @@ export async function transferOwnershipAsOperator(
       })
       await notifyOwnershipReceived(tx, groupId, userId)
       // The old owner is now an admin: their admin links go, their viewer and editor links stay.
-      await revokeInvitationsOf(tx, groupId, ownerId, GroupRole.ADMIN, operator.id, undefined)
+      await revokeInvitationsOf(tx, groupId, ownerId, GroupRole.ADMIN, operator.id, undefined, {
+        [OPERATOR_DETAIL]: 1,
+      })
       await recordAccessChange(tx, groupId, operator.id, OWNERSHIP_TRANSFERRED_EVENT, [])
       return AdminGroupActOutcome.Done
     }) as AdminGroupActOutcome
