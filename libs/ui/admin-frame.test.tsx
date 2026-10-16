@@ -200,6 +200,26 @@ describe("AdminShell", () => {
     expect(signedOut).toEqual([true])
   })
 
+  it("signs out from the rail's avatar menu and from the phone's More sheet", async () => {
+    const signedOut: true[] = []
+    await mount(
+      <AdminShell
+        navItems={modules}
+        currentPath="/"
+        operator={operator}
+        onSignOut={() => void signedOut.push(true)}
+      >
+        page
+      </AdminShell>,
+    )
+    await click("[data-e2e=admin-operator-rail]")
+    await click("[data-e2e=admin-signout-rail]")
+    await click("[data-e2e=rail-shell-more]")
+    await click("[data-e2e=admin-operator-overlay]")
+    await click("[data-e2e=admin-signout-overlay]")
+    expect(signedOut).toEqual([true, true])
+  })
+
   it("names the operator's avatar in the rail and shows the same words as its tooltip, hidden while the menu is open", async () => {
     await mount(
       <AdminShell navItems={modules} currentPath="/" operator={operator} onSignOut={() => {}}>

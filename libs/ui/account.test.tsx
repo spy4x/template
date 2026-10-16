@@ -425,6 +425,19 @@ describe("AppFrame", () => {
     expect(signOut.calls).toHaveLength(1)
   })
 
+  it("signs out from the rail's avatar menu and from the phone's Account sheet", async () => {
+    const signOut = spy<[]>()
+    await mount(<AppFrame user={ada} onSignOut={signOut.fn}>page</AppFrame>)
+
+    await click("[data-e2e=shell-user-menu-button-rail]")
+    await click("[data-e2e=signout-rail]")
+    await click("[data-e2e=rail-shell-more]")
+    await click("[data-e2e=shell-user-menu-button-overlay]")
+    await click("[data-e2e=signout-overlay]")
+
+    expect(signOut.calls).toHaveLength(2)
+  })
+
   it("opens Profile from the account menu through navigate, and leaves a Ctrl-click to the browser", async () => {
     const navigate = spy<[string]>()
     await mount(<AppFrame user={ada} onSignOut={() => {}} navigate={navigate.fn}>page</AppFrame>)
@@ -570,6 +583,24 @@ describe("AppFrame", () => {
     await click("[data-e2e=group-picker]")
     await click("[data-e2e=group-picker-g-1]")
     expect(select.calls).toEqual([])
+  })
+
+  it("switches group from the rail's switcher, and not to the group already current", async () => {
+    const select = spy<[string]>()
+    await mount(
+      <AppFrame
+        user={ada}
+        onSignOut={() => {}}
+        groupPicker={{ groups, selectedId: "g-1", onSelect: select.fn }}
+      >
+        page
+      </AppFrame>,
+    )
+    await click("[data-e2e=group-picker-rail]")
+    await click("[data-e2e=group-picker-g-1-rail]")
+    await click("[data-e2e=group-picker-rail]")
+    await click("[data-e2e=group-picker-g-2-rail]")
+    expect(select.calls).toEqual([["g-2"]])
   })
 
   it("lists the groups in the phone's Account sheet, switches on a tap and closes the sheet", async () => {
