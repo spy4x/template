@@ -223,7 +223,24 @@ describe("audit log screen", () => {
     expect(rows[2].textContent).toContain("Themselves")
     expect(rows[2].textContent).toContain("192.0.2.10")
     expect(rows[0].textContent).toContain("Job mail.password_reset")
-    expect(rows[0].textContent).toContain("Deleted account")
+  })
+
+  it("calls a missing person deleted only on a person's own trail", async () => {
+    const gone = { ...signedIn, key: "account-5", person: null, actor: null }
+    await mount(<AdminAuditScreen {...props([], { entries: [retried, gone] })} />)
+    const rows = [...find("[data-e2e=admin-audit-table]").querySelectorAll("tbody tr")]
+
+    expect(rows[0].textContent).not.toContain("Deleted account")
+    expect(rows[1].textContent).toContain("Deleted account")
+  })
+
+  it("names a person's address once when they set no name", async () => {
+    const plain = { id: 12, name: "lin@example.com", email: "lin@example.com" }
+    const entry = { ...signedIn, key: "account-6", person: plain, actor: plain }
+    await mount(<AdminAuditScreen {...props([], { entries: [entry] })} />)
+    const about = find("[data-e2e=admin-audit-table] tbody tr td:nth-child(3)").textContent ?? ""
+
+    expect(about.split("lin@example.com")).toHaveLength(2)
   })
 
   it("shows the same entries on a timeline, people still linked", async () => {

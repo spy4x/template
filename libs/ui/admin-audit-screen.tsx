@@ -356,11 +356,21 @@ function FilterForm(
   )
 }
 
-/** A person as a link to their page, or a quiet word once their account is gone. */
+/**
+ * A person as a link to their page, or a quiet word when the entry names nobody. A person's own
+ * trail always names someone, so there an empty slot means the account is gone; a group or system
+ * entry may name nobody at all, and says only that.
+ */
 function PersonLink(
-  { person, navigate }: { person: AdminAuditPerson | null; navigate?: Navigate },
+  { person, entry, navigate }: {
+    person: AdminAuditPerson | null
+    entry: AdminAuditEntry
+    navigate?: Navigate
+  },
 ): JSX.Element {
-  if (!person) return <span class="text-muted">Deleted account</span>
+  if (!person) {
+    return <span class="text-muted">{entry.source === "account" ? "Deleted account" : "—"}</span>
+  }
   return (
     <Link
       href={ADMIN_PATHS.user(person.id)}
@@ -429,9 +439,10 @@ function AuditTable(
       header: "About",
       render: (entry) => (
         <Cell>
-          <PersonLink person={entry.person} navigate={navigate} />
-          {entry.person?.email && <span class="text-muted wrap-anywhere">{entry.person.email}
-          </span>}
+          <PersonLink entry={entry} person={entry.person} navigate={navigate} />
+          {entry.person && entry.person.email !== entry.person.name && (
+            <span class="text-muted wrap-anywhere">{entry.person.email}</span>
+          )}
         </Cell>
       ),
     },
@@ -441,7 +452,7 @@ function AuditTable(
       render: (entry) =>
         selfDone(entry) ? <span class="text-sm text-muted">Themselves</span> : (
           <Cell>
-            <PersonLink person={entry.actor} navigate={navigate} />
+            <PersonLink entry={entry} person={entry.actor} navigate={navigate} />
           </Cell>
         ),
     },
@@ -498,19 +509,21 @@ function AuditTimeline(
             dataE2E: `admin-audit-entry-${entry.key}`,
             description: (
               <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                {selfDone(entry) ? <PersonLink person={entry.person} navigate={navigate} /> : (
-                  <>
-                    {entry.person && (
-                      <>
-                        <PersonLink person={entry.person} navigate={navigate} />
-                        <span class="text-muted">·</span>
-                      </>
-                    )}
-                    <span class="text-muted">by</span>
-                    <PersonLink person={entry.actor} navigate={navigate} />
-                    {entry.byOperator && <Badge text="Operator" color="blue" type="outline" />}
-                  </>
-                )}
+                {selfDone(entry)
+                  ? <PersonLink entry={entry} person={entry.person} navigate={navigate} />
+                  : (
+                    <>
+                      {entry.person && (
+                        <>
+                          <PersonLink entry={entry} person={entry.person} navigate={navigate} />
+                          <span class="text-muted">·</span>
+                        </>
+                      )}
+                      <span class="text-muted">by</span>
+                      <PersonLink entry={entry} person={entry.actor} navigate={navigate} />
+                      {entry.byOperator && <Badge text="Operator" color="blue" type="outline" />}
+                    </>
+                  )}
                 {detail && <span class="text-muted wrap-anywhere">· {detail}</span>}
                 {entry.ip && <span class="font-mono text-muted">· {entry.ip}</span>}
               </span>
