@@ -206,7 +206,8 @@ describe("NotesScreen", () => {
   it("shows an empty list as an empty state whose one action is New note", () => {
     const html = renderToString(<NotesScreen {...listDefaults} notes={[]} />)
 
-    expect(html).toContain("No notes yet")
+    // A heading, so it has no full stop.
+    expect(html).toMatch(/>No notes yet</)
     expect(tagOf(html, "note-new-empty")).toContain(`href="${NOTE_PATHS.new}"`)
     expect(html).not.toContain(`data-e2e="note-list"`)
   })
@@ -577,8 +578,8 @@ describe("NotesScreen deleted notes", () => {
   })
 
   it("says there are no deleted notes, and that they are loading", () => {
-    expect(renderToString(<NotesScreen {...deletedDefaults} deletedNotes={[]} />)).toContain(
-      "No deleted notes",
+    expect(renderToString(<NotesScreen {...deletedDefaults} deletedNotes={[]} />)).toMatch(
+      />No deleted notes</,
     )
     expect(
       renderToString(<NotesScreen {...deletedDefaults} deletedNotes={[]} deletedLoading />),
