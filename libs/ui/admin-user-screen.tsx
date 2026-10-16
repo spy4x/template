@@ -12,6 +12,7 @@ import { Notice } from "@spy4x/preact-ui/notice"
 import { PageHeader } from "@spy4x/preact-ui/page-header"
 import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-row"
 import { Tabs } from "@spy4x/preact-ui/tabs"
+import { Timeline, type TimelineTone } from "@spy4x/preact-ui/timeline"
 import { type AdminUserDetail, AuthAuditEventType, type UserRole } from "@domain/identity"
 import { ADMIN_PATHS } from "./admin-frame.tsx"
 import { adminUserName, roleColor, roleLabel } from "./admin-users-screen.tsx"
@@ -28,6 +29,36 @@ export interface AdminOperator {
 
 /** What a group role is called in the person's group list. */
 const GROUP_ROLES: Record<number, string> = { 1: "Viewer", 2: "Editor", 3: "Admin", 4: "Owner" }
+
+/**
+ * Each audit event's dot on the Activity timeline. Routine events stay neutral; a new or restored
+ * account is good news; anything that takes access away or may be an attack is a warning; a block
+ * is the one danger. The title still says what happened, so the colour is never the only sign.
+ */
+const AUDIT_TONES: Record<AuthAuditEventType, TimelineTone> = {
+  [AuthAuditEventType.SIGNED_UP]: "success",
+  [AuthAuditEventType.SIGNED_IN]: "neutral",
+  [AuthAuditEventType.SIGNED_OUT]: "neutral",
+  [AuthAuditEventType.PROFILE_UPDATED]: "neutral",
+  [AuthAuditEventType.ACCOUNT_DELETION_REQUESTED]: "warning",
+  [AuthAuditEventType.ACCOUNT_RESTORED]: "success",
+  [AuthAuditEventType.SESSIONS_ENDED]: "warning",
+  [AuthAuditEventType.API_TOKEN_CREATED]: "neutral",
+  [AuthAuditEventType.API_TOKEN_USED]: "neutral",
+  [AuthAuditEventType.API_TOKEN_REVOKED]: "warning",
+  [AuthAuditEventType.API_TOKENS_PURGED]: "neutral",
+  [AuthAuditEventType.API_TOKEN_REFUSED]: "warning",
+  [AuthAuditEventType.SIGN_IN_METHOD_LINKED]: "neutral",
+  [AuthAuditEventType.SIGN_IN_METHOD_UNLINKED]: "warning",
+  [AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN]: "warning",
+  [AuthAuditEventType.USER_BLOCKED]: "danger",
+  [AuthAuditEventType.USER_UNBLOCKED]: "success",
+}
+
+/** An audit event's tone on the Activity timeline; an event this page does not know is neutral. */
+export function auditTone(eventType: AuthAuditEventType): TimelineTone {
+  return AUDIT_TONES[eventType] ?? "neutral"
+}
 
 /** What each audit row says happened. */
 const AUDIT_EVENTS: Record<AuthAuditEventType, string> = {
@@ -362,23 +393,26 @@ function Groups({ detail }: { detail: AdminUserDetail }): JSX.Element {
   )
 }
 
-/** The newest rows of the person's audit trail, newest first. */
+/** The newest rows of the person's audit trail, newest first, on a timeline. */
 function Activity({ detail }: { detail: AdminUserDetail }): JSX.Element {
   return (
-    <Rows empty="Nothing recorded." dataE2E="admin-user-audits">
-      {detail.audits.map((audit) => (
-        <li key={audit.id} class={ROW} data-e2e={`admin-audit-${audit.eventType}`}>
-          <span class="font-medium">{AUDIT_EVENTS[audit.eventType] ?? "Other event"}</span>
-          {audit.identifier && (
-            <span class="text-sm text-muted wrap-anywhere">{audit.identifier}</span>
-          )}
-          <span class="ml-auto text-xs text-muted">
-            <When at={audit.createdAt} />
-            {audit.ip && ` from ${audit.ip}`}
-          </span>
-        </li>
-      ))}
-    </Rows>
+    <Timeline
+      label="Activity"
+      empty="Nothing recorded."
+      dataE2E="admin-user-audits"
+      items={detail.audits.map((audit) => {
+        const parts = [audit.identifier, audit.ip && `from ${audit.ip}`].filter(Boolean)
+        return {
+          id: audit.id,
+          title: AUDIT_EVENTS[audit.eventType] ?? "Other event",
+          at: audit.createdAt,
+          when: timeAgo(audit.createdAt),
+          description: parts.length > 0 ? parts.join(" · ") : undefined,
+          tone: auditTone(audit.eventType),
+          dataE2E: `admin-audit-${audit.eventType}`,
+        }
+      })}
+    />
   )
 }
 

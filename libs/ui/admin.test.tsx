@@ -18,7 +18,7 @@ import {
 } from "@domain/identity"
 import { ADMIN_PATHS, AdminSignInScreen } from "./admin-frame.tsx"
 import { AdminUsersScreen, type AdminUsersScreenProps } from "./admin-users-screen.tsx"
-import { AdminUserScreen, type AdminUserScreenProps } from "./admin-user-screen.tsx"
+import { AdminUserScreen, type AdminUserScreenProps, auditTone } from "./admin-user-screen.tsx"
 import {
   AdminDashboardScreen,
   changeText,
@@ -366,6 +366,35 @@ describe("one person in the admin app", () => {
     const activity = await shown("activity", "[data-e2e=admin-user-audits]")
     expect(activity).toContain("Unblocked by an operator")
     expect(activity).toContain("operator:7")
+  })
+
+  it("colours each activity entry by what happened, the block alone as a danger", async () => {
+    const tones = {
+      neutral: [AuthAuditEventType.SIGNED_IN, AuthAuditEventType.API_TOKEN_USED],
+      success: [AuthAuditEventType.SIGNED_UP, AuthAuditEventType.USER_UNBLOCKED],
+      warning: [
+        AuthAuditEventType.SESSIONS_ENDED,
+        AuthAuditEventType.API_TOKEN_REFUSED,
+        AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
+      ],
+      danger: [AuthAuditEventType.USER_BLOCKED],
+    }
+    for (const [tone, events] of Object.entries(tones)) {
+      for (const event of events) expect([event, auditTone(event)]).toEqual([event, tone])
+    }
+    const everyEvent = Object.values(AuthAuditEventType).filter((value) =>
+      typeof value === "number"
+    )
+    expect(everyEvent.filter((event) => auditTone(event) === "danger")).toEqual([
+      AuthAuditEventType.USER_BLOCKED,
+    ])
+    expect(auditTone(999 as AuthAuditEventType)).toBe("neutral")
+
+    await mount(<AdminUserScreen {...userProps([], { tab: "activity" })} />)
+    const entry = find(`[data-e2e=admin-audit-${AuthAuditEventType.USER_UNBLOCKED}]`)
+    expect(entry.querySelector("[data-timeline-dot]")?.getAttribute("data-timeline-dot"))
+      .toBe("success")
+    expect(entry.textContent).toContain("operator:7 · from 203.0.113.9")
   })
 
   it("asks the app to open a tab when it is pressed", async () => {
