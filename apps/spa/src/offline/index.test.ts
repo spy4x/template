@@ -420,6 +420,21 @@ describe("what the device keeps", () => {
     expect(currentLayer()?.userId).toBe(8)
   })
 
+  it("deletes the remembered person's copies as soon as someone else is remembered, before any layer starts", async () => {
+    const { storage, device } = await deviceInUse()
+    configureModules({ realtime: false, offline: true })
+    rememberUser(user(7))
+
+    rememberUser(user(8), storage)
+    await settle()
+
+    expect([...device.reads.keys()]).toEqual([])
+    expect(await device.notes.readNotes("g-1")).toEqual([])
+    expect(await device.tags.readTags("g-1")).toEqual([])
+    expect((await device.queue.readOutbox()).map((entry) => entry.entityId)).toEqual(["n-1"])
+    expect(kept.getItem(OWED)).toBeNull()
+  })
+
   it("keeps the remembered person's copies at a start as the same person", async () => {
     const { storage, device } = await deviceInUse()
     configureModules({ realtime: false, offline: true })
