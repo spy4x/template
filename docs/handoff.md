@@ -338,7 +338,7 @@ These cost real time to find. Do not rediscover them.
 
 9. **A full-stack e2e spec imports `test` from `e2e/fixtures/stack.ts` and loads pages
    through `gotoApp` or `signIn` (#105).** That fixture warms Vite's page bundles once per
-   worker and blocks Google Fonts, and `gotoApp` loads the page again when a network change
+   worker, and `gotoApp` loads the page again when a network change
    leaves it blank. A spec on Playwright's own `test`, or one calling `page.goto` or
    `page.reload` while online, gets none of this and brings the cold-start flakes back. The
    one plain reload left is the one made with the network cut (`e2e/offline.e2e.ts`).
