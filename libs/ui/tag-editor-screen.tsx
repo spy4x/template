@@ -6,6 +6,7 @@ import { DropdownItem } from "@spy4x/preact-ui/dropdown"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Input } from "@spy4x/preact-ui/input"
+import { LoadingSkeleton } from "@spy4x/preact-ui/loading-skeleton"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { Notice } from "@spy4x/preact-ui/notice"
 import { PageHeader } from "@spy4x/preact-ui/page-header"
@@ -92,7 +93,7 @@ export function TagEditorScreen(props: TagEditorScreenProps): JSX.Element {
     return (
       <EditorPage>
         <PageHeader back={BACK} navigate={navigate} title="Tag" />
-        {props.loading ? waited && <ListEmpty title="Loading the group…" /> : (
+        {props.loading ? waited && <Loading label="Loading the group…" /> : (
           <ListEmpty
             title="This group does not exist."
             action={
@@ -128,7 +129,7 @@ export function TagEditorScreen(props: TagEditorScreenProps): JSX.Element {
     return (
       <EditorPage>
         <PageHeader back={BACK} navigate={navigate} title="Tag" subtitle={group.name} />
-        {waited && <ListEmpty title="Loading the tag…" />}
+        {waited && <Loading label="Loading the tag…" />}
       </EditorPage>
     )
   }
@@ -144,6 +145,22 @@ function useWaited(active: boolean): boolean {
     return () => clearTimeout(timer)
   }, [active])
   return waited
+}
+
+/** The form's width: a page with one short form keeps its fields from stretching across the column. */
+const FORM_WIDTH = "max-w-md"
+
+/**
+ * A read that took longer than the delay: a placeholder in the form's place, and one polite line
+ * for a screen reader, which the placeholder hides itself from.
+ */
+function Loading({ label }: { label: string }): JSX.Element {
+  return (
+    <div data-e2e="tag-loading">
+      <p role="status" class="sr-only">{label}</p>
+      <LoadingSkeleton rows={1} class={FORM_WIDTH} />
+    </div>
+  )
 }
 
 /** The page's content, in the column the app's frame sets: never a width of its own. */
@@ -163,6 +180,23 @@ function Editor(props: WithGroup): JSX.Element {
     if (errors.name) name.current?.focus()
   }, [errors.name])
   const showFooter = canWrite && (tag === null || props.dirty)
+  const fields = useRef<HTMLFieldSetElement>(null)
+  // When an existing tag's footer goes away (Cancel, or a save that went through), the button that
+  // held focus goes with it, and the browser drops focus to the page. Focus moves to the name field
+  // instead, once the save has finished and the fields are enabled again. Focus the person put in
+  // the fields themselves stays where it is.
+  const shown = useRef({ footer: showFooter, tagId: tag?.id })
+  const refocus = useRef(false)
+  useEffect(() => {
+    const before = shown.current
+    if (before.footer && !showFooter && tag && before.tagId === tag.id) refocus.current = true
+    shown.current = { footer: showFooter, tagId: tag?.id }
+    if (!refocus.current || saving) return
+    refocus.current = false
+    const active = fields.current?.ownerDocument.activeElement
+    if (active && fields.current?.contains(active)) return
+    name.current?.focus()
+  }, [showFooter, saving, tag?.id])
   return (
     <EditorPage>
       <PageHeader
@@ -196,9 +230,16 @@ function Editor(props: WithGroup): JSX.Element {
           Only an editor can change tags in this group.
         </p>
       )}
-      <ScreenForm pending={saving} onSubmit={props.onSave}>
-        <Stack>
-          <fieldset disabled={!canWrite} class="contents">
+      <ScreenForm
+        pending={saving}
+        // Enter in the name field submits even with the footer hidden: an existing tag with
+        // nothing changed has nothing to save, so that submit does nothing.
+        onSubmit={() => {
+          if (tag === null || props.dirty) props.onSave?.()
+        }}
+      >
+        <Stack class={FORM_WIDTH}>
+          <fieldset ref={fields} disabled={!canWrite} class="contents">
             <Stack>
               <Field
                 id="tag-name"

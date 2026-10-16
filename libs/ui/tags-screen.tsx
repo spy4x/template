@@ -135,6 +135,13 @@ export function TagsScreen(props: TagsScreenProps): JSX.Element {
                         triggerClasses={MENU_TRIGGER_CLASSES}
                         triggerDataE2E="tag-menu"
                       >
+                        <DropdownItem
+                          href={TAG_PATHS.tag(tag.id)}
+                          navigate={navigate}
+                          dataE2E="tag-menu-edit"
+                        >
+                          Edit tag
+                        </DropdownItem>
                         <DropdownItem onClick={() => setDeleting(tag)} danger dataE2E="tag-delete">
                           Delete tag
                         </DropdownItem>

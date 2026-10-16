@@ -232,6 +232,17 @@ describe("TagsScreen", () => {
     expect(navigate.calls).toEqual([[`/tags/${home.id}`]])
   })
 
+  it("offers Edit tag in each row's menu, leading to the tag's page through the app's router", async () => {
+    const navigate = spy<[string]>()
+    await mount(<TagsScreen {...tagsDefaults} navigate={navigate.fn} />)
+    await click(`[data-e2e=tag-${home.id}] [data-e2e=tag-menu]`)
+    const edit = find(`[data-e2e=tag-${home.id}] [data-e2e=tag-menu-edit]`)
+    expect(edit.textContent?.trim()).toBe("Edit tag")
+    expect(edit.getAttribute("href")).toBe(TAG_PATHS.tag(home.id))
+    expect(await clickOn(edit)).toBe(true)
+    expect(navigate.calls).toEqual([[TAG_PATHS.tag(home.id)]])
+  })
+
   it("deletes a tag only after the person confirms, and says the notes stay", async () => {
     const remove = spy<[string]>()
     await mount(<TagsScreen {...tagsDefaults} onDelete={remove.fn} />)
@@ -443,15 +454,57 @@ describe("TagEditorScreen", () => {
     expect(count("form")).toBe(0)
   })
 
-  it("says it is loading the tag only after 300 ms, so a quick read never flickers", async () => {
+  it("draws a placeholder for the form only after 300 ms, so a quick read never flickers, and says it is loading", async () => {
     await mount(<TagEditorScreen {...tagEditorDefaults} loading />)
     expect(find("h1").textContent).toBe("Tag")
-    expect(document.body.textContent).not.toContain("Loading the tag…")
+    expect(count("[data-e2e=tag-loading]")).toBe(0)
     expect(count("form")).toBe(0)
     await act(() => new Promise((resolve) => setTimeout(resolve, 200)))
-    expect(document.body.textContent).not.toContain("Loading the tag…")
+    expect(count("[data-e2e=tag-loading]")).toBe(0)
     await act(() => new Promise((resolve) => setTimeout(resolve, 150)))
-    expect(document.body.textContent).toContain("Loading the tag…")
+    expect(find("[data-e2e=tag-loading] [role=status]").textContent).toBe("Loading the tag…")
+    // The placeholder is the library's skeleton, which a screen reader skips.
+    expect(count("[data-e2e=tag-loading] [aria-hidden=true] .animate-pulse")).toBeGreaterThan(0)
+  })
+
+  it("moves focus to the name field when Cancel takes the footer away", async () => {
+    const changed = { name: "Hom", color: "blue" as const }
+    await mount(<TagEditorScreen {...editHome} value={changed} dirty />)
+    find("[data-e2e=tag-cancel]").focus()
+    await rerender(<TagEditorScreen {...editHome} />)
+    expect(count("[data-e2e=tag-cancel]")).toBe(0)
+    expect(focused()).toBe("tag-name")
+  })
+
+  it("moves focus to the name field once a save went through, not while it is still running", async () => {
+    const changed = { name: "Hom", color: "blue" as const }
+    await mount(<TagEditorScreen {...editHome} value={changed} dirty />)
+    find("[data-e2e=tag-save]").focus()
+    await rerender(<TagEditorScreen {...editHome} value={changed} saving />)
+    expect(focused()).not.toBe("tag-name")
+    await rerender(<TagEditorScreen {...editHome} value={changed} />)
+    expect(focused()).toBe("tag-name")
+  })
+
+  it("leaves focus in the fields when typing puts the saved name back", async () => {
+    await mount(<TagEditorScreen {...editHome} value={{ name: "Hom", color: "blue" }} dirty />)
+    find("[name=color][value=red]").focus()
+    await rerender(<TagEditorScreen {...editHome} />)
+    expect(document.activeElement?.getAttribute("value")).toBe("red")
+  })
+
+  it("does nothing on Enter in an existing tag with nothing changed", async () => {
+    const save = spy<[]>()
+    await mount(<TagEditorScreen {...editHome} onSave={save.fn} />)
+    await submit("[data-e2e=tag-name]")
+    expect(save.calls).toHaveLength(0)
+  })
+
+  it("keeps the fields to a form's width, with the footer under them, on a wide column", async () => {
+    await mount(<TagEditorScreen {...editHome} value={{ name: "Hom", color: "blue" }} dirty />)
+    const column = find("[data-e2e=tag-name]").closest(".max-w-md")
+    expect(column).not.toBeNull()
+    expect(column?.contains(find("[data-e2e=tag-save]"))).toBe(true)
   })
 
   it("shows a viewer the tag read-only, with who may change it, and no actions", async () => {
