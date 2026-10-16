@@ -254,25 +254,25 @@ describe("SearchPalette", () => {
     expect(status()).toBe("Could not search. Change the text to try again.")
   })
 
-  it("asks the app to open a picked note in its group, and a picked group's page", async () => {
+  it("asks the app to open a picked note of another group in that group, and a picked group's page", async () => {
     const { picked } = await mount()
+    const pick = async (label: string) => {
+      const row = [...document.querySelectorAll("[role=option]")]
+        .find((candidate) => text(candidate).startsWith(label))!
+      await act(() => {
+        row.dispatchEvent(new window.MouseEvent("click", { bubbles: true }) as unknown as Event)
+      })
+    }
     await open()
+    await type("sketch")
+    await pick("Untitled note")
 
-    await act(() => {
-      find("[role=option]").dispatchEvent(
-        new window.MouseEvent("click", { bubbles: true }) as unknown as Event,
-      )
-    })
     await open()
     await type("acme")
-    const group = [...document.querySelectorAll("[role=option]")]
-      .find((row) => text(row).startsWith("Acme Studio |"))!
-    await act(() => {
-      group.dispatchEvent(new window.MouseEvent("click", { bubbles: true }) as unknown as Event)
-    })
+    await pick("Acme Studio |")
 
     expect(picked).toEqual([
-      { kind: "note", noteId: PLAN.id, groupId: HOME.id },
+      { kind: "note", noteId: SKETCH.id, groupId: STUDIO.id },
       { kind: "group", groupId: STUDIO.id },
     ])
   })
