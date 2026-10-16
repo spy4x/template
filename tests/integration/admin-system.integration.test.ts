@@ -124,6 +124,8 @@ Deno.test("system: lists each job's last run and next run", async () => {
     expect(kinds).toHaveLength(1)
     expect(kinds[0]).toMatchObject({ kind: "outbox.cleanup", lastFailed: true })
     expect(kinds[0].nextRunAt).not.toBeNull()
+    // Only these columns leave the store: never a payload or an error message.
+    expect(Object.keys(kinds[0]).sort()).toEqual(["kind", "lastFailed", "lastRunAt", "nextRunAt"])
   })
 })
 
@@ -143,6 +145,15 @@ Deno.test("system: lists failed rows newest first, and which may run again", asy
       [change, false],
     ])
     expect(rows[0]).toMatchObject({ errorCode: "MailSendError", attempts: 20 })
+    // Only these columns leave the store: never a payload or an error message.
+    expect(Object.keys(rows[0]).sort()).toEqual([
+      "attempts",
+      "errorCode",
+      "failedAt",
+      "id",
+      "kind",
+      "retryable",
+    ])
     expect(await readFailedJobs(sql, 1)).toHaveLength(1)
   })
 })

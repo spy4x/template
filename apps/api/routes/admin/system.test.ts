@@ -70,7 +70,13 @@ function buildApp(options: Options = {}) {
         failed: options.failed ?? 0,
         now: NOW,
       })),
-    jobKinds: () => Promise.resolve([]),
+    jobKinds: () =>
+      Promise.resolve([{
+        kind: "outbox.cleanup",
+        lastRunAt: "2026-10-16T08:30:00.000Z",
+        lastFailed: false,
+        nextRunAt: "2026-10-16T09:30:00.000Z",
+      }]),
     failedJobs: (
       limit,
     ) => (calls.push(["failedJobs", limit]), Promise.resolve(options.failed ? [failedJob] : [])),
@@ -166,7 +172,7 @@ describe("system routes", () => {
   })
 
   it("names only parts and states, never a service's address or a secret", async () => {
-    const body = await snapshot()
+    const body = await snapshot({ failed: 1, oldestDueAt: new Date("2026-10-16T08:59:00.000Z") })
 
     expect(Object.keys(body).sort()).toEqual([
       "backup",
@@ -189,6 +195,39 @@ describe("system routes", () => {
       "version",
     ])
     expect(Object.keys(body.cache).sort()).toEqual(["health", "latencyMs", "reachable"])
+    expect(Object.keys(body.queue).sort()).toEqual([
+      "due",
+      "failed",
+      "health",
+      "oldestDueAt",
+      "retrying",
+      "running",
+      "scheduled",
+    ])
+    expect(Object.keys(body.backup).sort()).toEqual(["health", "succeededAt"])
+    expect(Object.keys(body.migrations).sort()).toEqual([
+      "applied",
+      "health",
+      "latest",
+      "latestAt",
+    ])
+    expect(Object.keys(body.build).sort()).toEqual(["commit", "runtime", "startedAt", "version"])
+    expect(body.jobs).toHaveLength(1)
+    expect(Object.keys(body.jobs[0]).sort()).toEqual([
+      "kind",
+      "lastFailed",
+      "lastRunAt",
+      "nextRunAt",
+    ])
+    expect(body.failedJobs).toHaveLength(1)
+    expect(Object.keys(body.failedJobs[0]).sort()).toEqual([
+      "attempts",
+      "errorCode",
+      "failedAt",
+      "id",
+      "kind",
+      "retryable",
+    ])
   })
 
   it("shows the database as an error and reads nothing from it when it does not answer", async () => {
