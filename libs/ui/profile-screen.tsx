@@ -1,4 +1,4 @@
-import type { JSX } from "preact"
+import type { ComponentChildren, JSX } from "preact"
 import { useEffect, useRef, useState } from "preact/hooks"
 import { encodeBase64 } from "@std/encoding"
 import { IconBell, IconLockClosed } from "@spy4x/preact-icons"
@@ -161,6 +161,11 @@ export interface ProfileScreenProps {
    * `twoFactor` and `navigate` come from this screen's own props.
    */
   accountDeletion?: Omit<AccountDeleteProps, "twoFactor" | "navigate" | "providerProof">
+  /**
+   * The first-steps card, under the page header and above the settings, so the page still starts
+   * with its title. Without it the page has none.
+   */
+  onboarding?: ComponentChildren
   navigate?: Navigate
 }
 
@@ -203,6 +208,7 @@ export function ProfileScreen(
     onRegisterPush,
     onRemovePush,
     accountDeletion,
+    onboarding,
     navigate,
   }: ProfileScreenProps,
 ): JSX.Element {
@@ -313,6 +319,8 @@ export function ProfileScreen(
   return (
     <Stack gap="xl">
       <PageHeader title="Profile" />
+
+      {onboarding}
 
       <SettingGroup title="Account">
         <SettingList>

@@ -541,6 +541,25 @@ describe("ProfileScreen", () => {
     }
   })
 
+  it("starts the page with its header and shows the first-steps card under it", async () => {
+    await mount(
+      <ProfileScreen
+        {...profileDefaults}
+        onboarding={<div data-e2e="onboarding">Get started</div>}
+      />,
+    )
+
+    const heading = find("h1")
+    const card = find("[data-e2e=onboarding]")
+    expect(heading.textContent).toBe("Profile")
+    expect(heading.compareDocumentPosition(card) & window.Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy()
+    expect(
+      card.compareDocumentPosition(find("#security")) & window.Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+      .toBeTruthy()
+  })
+
   it("shows an empty push device list inside the section's own card, not in a dashed box", async () => {
     await mount(<ProfileScreen {...profileDefaults} pushDevices={[]} onRegisterPush={() => {}} />)
 
