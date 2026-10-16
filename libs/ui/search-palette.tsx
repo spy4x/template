@@ -167,8 +167,9 @@ export function SearchPalette(props: SearchPaletteProps): JSX.Element {
       labels={{ ...LABELS, empty }}
       dataE2E="search"
       // The library's fixed widths wrap "Search notes and groups" beside the hotkey hint: the
-      // trigger takes the width of its words instead, and the group switcher gives way.
-      class="whitespace-nowrap sm:w-auto lg:w-auto"
+      // trigger takes the width of its words instead, and the group switcher gives way. On a phone
+      // it is 44 px square, like the other header controls.
+      class="min-h-11 min-w-11 justify-center whitespace-nowrap sm:min-h-9 sm:min-w-9 sm:w-auto lg:w-auto"
     />
   )
 }
