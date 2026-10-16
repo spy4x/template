@@ -193,8 +193,8 @@ describe(`the admin group list`, () => {
     const rows = document.querySelectorAll(`[data-e2e=admin-groups-list] tbody tr`)
     expect(rows[0].textContent).toContain(`Ada Lovelace`)
     expect(rows[0].textContent).toContain(`12`)
-    expect(rows[0].querySelector(`[data-e2e=admin-group-deleted]`)).toBe(null)
-    expect(rows[1].querySelector(`[data-e2e=admin-group-deleted]`)).not.toBe(null)
+    expect(rows[0].querySelector(`[data-e2e=admin-group-deleted]`) === null).toBe(true)
+    expect(rows[1].querySelector(`[data-e2e=admin-group-deleted]`) !== null).toBe(true)
   })
 
   it(`moves focus to the count after a page change, not on the first page`, async () => {
@@ -335,7 +335,7 @@ describe(`one group in the admin app`, () => {
     expect(members.querySelector(`[data-e2e=admin-group-member-43]`)!.textContent).toContain(
       `Editor`,
     )
-    expect(members.querySelector(`a[href='/users/43']`)).not.toBe(null)
+    expect(members.querySelector(`a[href='/users/43']`) !== null).toBe(true)
 
     const invitations = await shown(`invitations`, `[data-e2e=admin-group-invitations]`)
     const states = [...invitations.querySelectorAll(`[data-e2e=admin-group-invitation-state]`)]
@@ -370,9 +370,9 @@ describe(`one group in the admin app`, () => {
       find(`[data-e2e=admin-group-member-${id}]`).querySelector(
         `[data-e2e=admin-group-member-menu]`,
       )
-    expect(menu(42)).toBe(null)
-    expect(menu(44)).toBe(null)
-    expect(menu(43)).not.toBe(null)
+    expect(menu(42) === null).toBe(true)
+    expect(menu(44) === null).toBe(true)
+    expect(menu(43) !== null).toBe(true)
     await click(`[data-e2e=admin-group-member-43] [data-e2e=admin-group-remove-open]`)
     expect(calls).toEqual([[`open`, { kind: `remove`, userId: 43 }]])
   })
