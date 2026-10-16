@@ -381,7 +381,9 @@ describe("one person in the admin app", () => {
     await mount(<AdminUserScreen {...userProps([], { extraTabs, tab: "devices" })} />)
 
     const labels = [...document.querySelectorAll("[role=tab]")].map((tab) => tab.textContent)
+    expect(labels[0]).toBe("Overview")
     expect(labels.at(-1)).toBe("Devices")
+    expect(labels.filter((label) => label === "Devices")).toHaveLength(1)
     expect(find("[role=tabpanel]").textContent).toBe("Two phones")
   })
 
