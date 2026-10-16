@@ -106,10 +106,11 @@ test.describe(`the admin app's groups`, () => {
       await expect(owner).toHaveAttribute(`title`, ownerEmail)
       expect((await owner.boundingBox())!.height).toBeLessThan(30)
 
-      // On a phone only the group, its owner and its member count stay.
+      // On a phone only the group, its owner and its member count stay, and they fit.
       const columns = ops.locator(`[data-e2e=admin-groups-list] th:visible`)
       await ops.setViewportSize({ width: 390, height: 844 })
       await expect(columns).toHaveText([/Group/, `Owner`, /Members/])
+      expect(await box.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(false)
       // Between the two, the plan, the note count and the creation date go, and nothing scrolls.
       await ops.setViewportSize({ width: 1024, height: 768 })
       await expect(columns).toHaveText([/Group/, `Owner`, /Members/, /Last activity/])
