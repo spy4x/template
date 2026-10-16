@@ -1340,11 +1340,11 @@ describe("MyInvitationsSection", () => {
     expect([accept.calls, decline.calls]).toEqual([[["i-1"]], [["i-1"]]])
   })
 
-  it("moves focus to the next invitation when one was answered, and to the page's first button after the last", async () => {
+  it("moves focus to the next invitation when one was answered, and to the page's first link or button after the last", async () => {
     const second = { ...preview, id: "i-2", groupName: "Family" }
     const page = (invitations: InvitationPreviewRow[], answeringId: string | null = null) => (
       <div>
-        <button type="button" data-e2e="page-action">New group</button>
+        <a href="/groups/new" data-e2e="page-action">New group</a>
         <MyInvitationsSection invitations={invitations} answeringId={answeringId} />
       </div>
     )
