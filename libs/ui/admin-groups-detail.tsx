@@ -361,7 +361,7 @@ function RowMenu(
   { label, dataE2E, children }: { label: string; dataE2E: string; children: ComponentChildren },
 ): JSX.Element {
   return (
-    <div class="relative -my-2 -mr-2 shrink-0">
+    <div class="relative -my-2 -mr-2 ml-auto shrink-0">
       <Dropdown
         trigger={<IconEllipsisVertical class="size-5" />}
         triggerLabel={label}
