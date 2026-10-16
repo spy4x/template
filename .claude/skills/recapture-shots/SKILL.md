@@ -12,11 +12,8 @@ how.
 
 ## 1. Decide whether to run
 
-Run it when a merged or ready change alters a photographed screen significantly: the shell or
-navigation, a screen's layout, its primary action, or the house palette. The photographed screens
-are listed in `apps/mpa/screenshots/README.md`, "What it does". Skip it for a wording fix, a
-spacing nudge, or a screen the script does not photograph. Unsure → ask the owner in chat, naming
-the change and the screens it touches.
+`AGENTS.md`, "Website screenshots", says when. The photographed screens are listed in
+`apps/mpa/screenshots/README.md`, "What it does".
 
 ## 2. Prepare
 
@@ -29,7 +26,7 @@ the change and the screens it touches.
 
 ## 3. Capture
 
-From `apps/mpa`:
+From `apps/mpa`, through the harness's background runner (a foreground call stops at ten minutes):
 
 ```bash
 systemd-run --user --scope --quiet -p TasksMax=4000 -p MemoryMax=8G timeout 900 deno task screenshots
