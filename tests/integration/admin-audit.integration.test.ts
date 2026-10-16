@@ -187,7 +187,12 @@ Deno.test("audit log: filters by event", async () => {
 
 Deno.test("audit log: filters by person, by id or by name, as subject or as actor", async () => {
   await withSchema(async (sql) => {
-    const { ada, op } = await seed(sql)
+    const { ada, bob, op, groupId } = await seed(sql)
+    // A group entry about Bob that nobody we search for did: found only through its target.
+    await sql`
+      INSERT INTO audit_events (event_kind, group_id, target_user_id, created_at)
+      VALUES ('group.member_removed', ${groupId}, ${bob}, ${T2})
+    `
     const byName = await walk(sql, 50, filter({ person: "ada" }))
     const byId = await walk(sql, 50, filter({ person: String(ada) }))
     const operator = await listAdminAudit(sql, filter({ person: "grace" }), 50, null)
@@ -196,12 +201,22 @@ Deno.test("audit log: filters by person, by id or by name, as subject or as acto
     expect(byName).toHaveLength(3)
     expect(operator.entries.every((entry) => entry.actor?.id === op)).toBe(true)
     expect(operator.entries).toHaveLength(2)
+    const target = await listAdminAudit(sql, filter({ person: "bob" }), 50, null)
+    expect(target.entries.map((entry) => entry.event)).toEqual([
+      "activity:group.member_removed",
+      `account:${AuthAuditEventType.SIGNED_IN}`,
+    ])
   })
 })
 
 Deno.test("audit log: filters by operator, finding only what that operator did", async () => {
   await withSchema(async (sql) => {
-    const { op, bob } = await seed(sql)
+    const { op, bob, groupId } = await seed(sql)
+    // The operator's own group activity is not an operator's action.
+    await sql`
+      INSERT INTO audit_events (event_kind, actor_user_id, group_id, created_at)
+      VALUES ('note.created', ${op}, ${groupId}, ${T2})
+    `
     const theirs = await listAdminAudit(sql, filter({ operator: op }), 50, null)
     const nobody = await listAdminAudit(sql, filter({ operator: bob }), 50, null)
 
