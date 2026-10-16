@@ -161,9 +161,10 @@ describe("ApiTokens", () => {
   it("shows an empty token list inside the section's own card, not in a dashed box", async () => {
     await mount(<ApiTokens {...tokensProps([], { tokens: [] })} />)
 
-    const empty = find("[data-e2e=api-tokens] [role=status]")
-    expect(empty.textContent).toContain("No API tokens")
-    expect(empty.closest(".pc-card")).not.toBeNull()
+    // The saved-copy notice is a status region too, always in the page, so pick the empty state's.
+    const empty = [...document.querySelectorAll("[data-e2e=api-tokens] [role=status]")]
+      .find((region) => region.textContent?.includes("No API tokens"))
+    expect(empty?.closest(".pc-card")).not.toBeNull()
     expect(document.querySelectorAll(".border-dashed").length).toBe(0)
   })
 
@@ -318,14 +319,19 @@ describe("ApiTokens", () => {
     await mount(<ApiTokens {...tokensProps([], { savedAt })} />)
 
     const notice = find("[data-e2e=api-tokens-saved-copy]")
-    expect(notice.textContent).toContain("saved on this device")
-    expect(notice.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-10T08:30:00.000Z")
+    expect(notice.getAttribute("role")).toBe("status")
+    expect(notice.textContent).toContain("Saved copy of your API tokens")
+    expect(notice.textContent).toContain("saved on this device: 10/10/2026")
+    expect(notice.getAttribute("data-saved-at")).toBe("2026-10-10T08:30:00.000Z")
   })
 
-  it("says nothing about a copy when the server answered", async () => {
+  it("keeps an empty live region for the copy when the server answered", async () => {
     await mount(<ApiTokens {...tokensProps([], { savedAt: null })} />)
 
-    expect(document.querySelectorAll("[data-e2e=api-tokens-saved-copy]").length).toBe(0)
+    const notice = find("[data-e2e=api-tokens-saved-copy]")
+    expect(notice.getAttribute("role")).toBe("status")
+    expect(notice.textContent).toBe("")
+    expect(notice.hasAttribute("data-saved-at")).toBe(false)
   })
 })
 

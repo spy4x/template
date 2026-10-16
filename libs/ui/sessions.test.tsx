@@ -195,14 +195,19 @@ describe("SignedInDevices", () => {
     await mount(<SignedInDevices {...devicesProps([], { savedAt })} />)
 
     const notice = find("[data-e2e=sessions-saved-copy]")
-    expect(notice.textContent).toContain("saved on this device")
-    expect(notice.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-10T08:30:00.000Z")
+    expect(notice.getAttribute("role")).toBe("status")
+    expect(notice.textContent).toContain("Saved copy of your devices")
+    expect(notice.textContent).toContain("saved on this device: 10/10/2026")
+    expect(notice.getAttribute("data-saved-at")).toBe("2026-10-10T08:30:00.000Z")
   })
 
-  it("says nothing about a copy when the server answered", async () => {
+  it("keeps an empty live region for the copy when the server answered", async () => {
     await mount(<SignedInDevices {...devicesProps([], { savedAt: null })} />)
 
-    expect(document.querySelectorAll("[data-e2e=sessions-saved-copy]").length).toBe(0)
+    const notice = find("[data-e2e=sessions-saved-copy]")
+    expect(notice.getAttribute("role")).toBe("status")
+    expect(notice.textContent).toBe("")
+    expect(notice.hasAttribute("data-saved-at")).toBe(false)
   })
 })
 
