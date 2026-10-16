@@ -209,7 +209,7 @@ of them came back on the built SPA in October 2026:
   showed the old title after an edit, a save and a reload (2 in 6 runs on an early head of #367),
   or stayed empty for 5 s after that reload (2 in 10 runs, on the dev server). It passed 30 runs
   in a row on the built SPA and 30 on the dev server, and the whole spec 20 runs in a row on the
-  built SPA. That reload was the one plain `page.reload()`
+  built SPA. That reload was a plain `page.reload()`
   made online, which the harness's rule forbids (`docs/handoff.md`, trap 9): a network change on
   the machine, such as a container starting, aborts the page's module scripts, and the page stays
   blank with nothing in the report saying why. The reload now goes through `gotoApp`, which loads
