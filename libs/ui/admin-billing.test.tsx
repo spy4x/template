@@ -291,7 +291,7 @@ describe(`the admin billing list`, () => {
     expect(button()).toBe(`Searching...`)
   })
 
-  it(`moves focus to the count once the list of a search, a chip or a page arrives`, async () => {
+  it(`moves focus to the count once the list of a search or a chip arrives`, async () => {
     const calls: unknown[][] = []
     const count = () => find(`[data-e2e=admin-billing-count]`)
     await mount(<AdminBillingListScreen {...listProps(calls, { list: null, pending: true })} />)
