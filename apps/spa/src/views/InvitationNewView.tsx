@@ -38,7 +38,9 @@ export function InvitationNewView({ groupId }: { groupId: string }) {
   useEffect(() => {
     if (!allowed) return
     void invites.open(groupId)
-    void billingStore.load(groupId)
+    // The group's page has read the plan already. A second read drops it until the server answers,
+    // and the form would offer every role in that moment.
+    if (billingStore.current.value?.groupId !== groupId) void billingStore.load(groupId)
   }, [groupId, allowed])
 
   const offline = !network.online.value

@@ -1023,6 +1023,18 @@ describe("InviteForm", () => {
     expect(drafts.calls).toEqual([[{ ...EMPTY_INVITATION_DRAFT, role: GroupRole.VIEWER }]])
   })
 
+  it("moves the role to one the plan allows again when the app resets its draft to the default", async () => {
+    const drafts = spy<[InvitationDraft]>()
+    await mount(<InviteForm {...defaults} memberRoles={false} onDraftChange={drafts.fn} />)
+    // The app ignored the move and drew its default draft again, as a page that clears the store
+    // as it opens does.
+    await rerender(<InviteForm {...defaults} memberRoles={false} onDraftChange={drafts.fn} />)
+    expect(drafts.calls).toEqual([
+      [{ ...EMPTY_INVITATION_DRAFT, role: GroupRole.VIEWER }],
+      [{ ...EMPTY_INVITATION_DRAFT, role: GroupRole.VIEWER }],
+    ])
+  })
+
   it("reports what the person fills in and creates through the app's callback", async () => {
     const drafts = spy<[InvitationDraft]>()
     const create = spy<[]>()

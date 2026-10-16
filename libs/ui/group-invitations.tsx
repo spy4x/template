@@ -145,11 +145,13 @@ export function InviteForm(
 
   const roles = invitableRolesOnPlan(actorRole, memberRoles)
   // A draft role the plan does not allow (the default editor on a free plan) becomes the first one
-  // it does, so the picker and the app's draft agree.
+  // it does, so the picker and the app's draft agree. It checks after every render, not only when
+  // the role changes: an app that resets its draft in the same moment as the move would otherwise
+  // keep the default, and send a role the plan refuses.
   const role = roles.includes(draft.role) ? draft.role : roles[0]
   useEffect(() => {
     if (role !== undefined && role !== draft.role) onDraftChange?.({ ...draft, role })
-  }, [role, draft.role])
+  })
   const change = (patch: Partial<InvitationDraft>) => onDraftChange?.({ ...draft, ...patch })
 
   if (created) {
