@@ -46,7 +46,7 @@ function SwitcherMark({ group }: { group: PickerGroup }): JSX.Element {
 /**
  * The current group in the header: a button showing its mark and name that opens a short menu of
  * the person's groups. The current one is checked (`menuitemradio`), each names the person's role
- * there, and the menu ends with links to every group and to create one.
+ * there, and the menu ends with a link to all groups.
  */
 export function GroupPicker(
   { groups, selectedId, onSelect, navigate }: GroupPickerData & { navigate?: Navigate },
