@@ -123,12 +123,24 @@ interface GroupRowRaw {
   deletedAt: Date | null
 }
 
+/** How many members the group `g` has. */
+function memberCount(sql: postgres.Sql) {
+  return sql`(SELECT COUNT(*)::int FROM group_members m WHERE m.group_id = g.id)`
+}
+
+/** When the newest audit event of the group `g` happened, or null. */
+function lastActivityAt(sql: postgres.Sql) {
+  return sql`(
+    SELECT a.created_at FROM audit_events a WHERE a.group_id = g.id ORDER BY a.id DESC LIMIT 1
+  )`
+}
+
 /** The columns of {@link AdminGroupRow} over `groups g` joined to its owner `o`. */
 function groupColumns(sql: postgres.Sql) {
   return sql`
     g.id, g.name, g.emoji, g.color, g.created_at, g.deleted_at,
     ${personColumns(sql, `o`, `owner`)},
-    (SELECT COUNT(*)::int FROM group_members m WHERE m.group_id = g.id) AS member_count,
+    ${memberCount(sql)} AS member_count,
     (
       SELECT COUNT(*)::int FROM notes n WHERE n.group_id = g.id AND n.deleted_at IS NULL
     ) AS note_count,
@@ -141,12 +153,7 @@ function groupColumns(sql: postgres.Sql) {
       ),
       ${FREE_PLAN_ID}
     ) AS plan_id,
-    (
-      SELECT a.created_at FROM audit_events a
-      WHERE a.group_id = g.id
-      ORDER BY a.id DESC
-      LIMIT 1
-    ) AS last_activity_at
+    ${lastActivityAt(sql)} AS last_activity_at
   `
 }
 
@@ -188,9 +195,14 @@ function sortColumn(sql: postgres.Sql, rule: SortRule<AdminGroupSortKey>) {
   }
 }
 
+/** The rules a list sorts by: `sort`, or newest first when it is empty. */
+function sortRules(sort: readonly SortRule<AdminGroupSortKey>[]) {
+  return sort.length > 0 ? sort : ADMIN_GROUP_DEFAULT_SORT
+}
+
 /** Each rule of `sort` in turn (newest first when empty), then the id, so pages never overlap. */
 function orderBy(sql: postgres.Sql, sort: readonly SortRule<AdminGroupSortKey>[]) {
-  const rules = sort.length > 0 ? sort : ADMIN_GROUP_DEFAULT_SORT
+  const rules = sortRules(sort)
   let clause = sortColumn(sql, rules[0])
   for (const rule of rules.slice(1)) clause = sql`${clause}, ${sortColumn(sql, rule)}`
   return rules[0].direction === `desc` ? sql`${clause}, r.id DESC` : sql`${clause}, r.id ASC`
@@ -233,14 +245,26 @@ export async function listAdminGroups(
     FROM groups g JOIN users o ON o.id = g.owner_user_id
     WHERE ${where}
   `
+  // The page is chosen first, reading only the columns its sort needs; the figures of a row (its
+  // owner's address, notes, plan) are read for the page's rows alone, not for every match (#462).
+  const keys = new Set(sortRules(filter.sort).map((rule) => rule.key))
   const rows = await sql<GroupRowRaw[]>`
+    WITH page AS (
+      SELECT r.id FROM (
+        SELECT g.id, g.name, g.created_at
+          ${keys.has(`memberCount`) ? sql`, ${memberCount(sql)} AS member_count` : sql``}
+          ${keys.has(`lastActivityAt`) ? sql`, ${lastActivityAt(sql)} AS last_activity_at` : sql``}
+        FROM groups g JOIN users o ON o.id = g.owner_user_id
+        WHERE ${where}
+      ) r
+      ORDER BY ${orderBy(sql, filter.sort)}
+      LIMIT ${pageSize} OFFSET ${(filter.page - 1) * pageSize}
+    )
     SELECT * FROM (
       SELECT ${groupColumns(sql)}
-      FROM groups g JOIN users o ON o.id = g.owner_user_id
-      WHERE ${where}
+      FROM page p JOIN groups g ON g.id = p.id JOIN users o ON o.id = g.owner_user_id
     ) r
     ORDER BY ${orderBy(sql, filter.sort)}
-    LIMIT ${pageSize} OFFSET ${(filter.page - 1) * pageSize}
   `
   return { groups: rows.map(toGroupRow), total }
 }
