@@ -17,9 +17,7 @@ import {
 import type { AdminAuditPageKey } from "@server/auth/admin-audit.ts"
 import type { APIContext } from "../../_types.ts"
 import type { AdminApiModule } from "./module.ts"
-
-/** The refusal of an export another site started, or one sent with no `Sec-Fetch-Site`. */
-export const ADMIN_AUDIT_EXPORT_CROSS_SITE = "The export opens only from the operator area"
+import { ADMIN_EXPORT_CROSS_SITE } from "./users.ts"
 
 export const ADMIN_AUDIT_BAD_CURSOR =
   "This page of the audit log is no longer valid. Start again from the newest entries."
@@ -194,7 +192,7 @@ export function createAdminAuditRoutes(
       // A GET the mutation guards let through, yet it reads the log and writes an audit row in the
       // operator's name. The admin app's download link is same-origin; a missing header is refused.
       if (c.req.header(`sec-fetch-site`) !== `same-origin`) {
-        return c.json({ error: ADMIN_AUDIT_EXPORT_CROSS_SITE }, 403)
+        return c.json({ error: ADMIN_EXPORT_CROSS_SITE }, 403)
       }
       const filter = parseAdminAuditFilter(new URL(c.req.url).searchParams)
       const { entries } = await audit.list(filter, ADMIN_AUDIT_EXPORT_MAX, null)
