@@ -79,7 +79,7 @@ test.describe("the admin app", () => {
       const row = ops.locator("[data-e2e=admin-users-list] a")
       await expect(row).toHaveCount(1)
       // Opened from a list scrolled down on a short screen, the person's page starts at its top.
-      await ops.setViewportSize({ width: 390, height: 360 })
+      await ops.setViewportSize({ width: 390, height: 200 })
       // On a phone the person's column keeps its width, so the name does not wrap letter by letter.
       const cell = await row.locator("xpath=ancestor::td").boundingBox()
       expect(cell?.width ?? 0).toBeGreaterThanOrEqual(192)
