@@ -22,6 +22,7 @@ import {
 import { createAdminRoute } from "./+routes.ts"
 import {
   ADMIN_AUDIT_BAD_CURSOR,
+  ADMIN_AUDIT_EXPORT_CROSS_SITE,
   auditEventName,
   createAdminAuditCursor,
   createAdminAuditRoutes,
@@ -211,6 +212,27 @@ describe("audit log routes", () => {
       ["recordExport", 7, 1, "req-test-1"],
     ])
   })
+
+  for (
+    const [name, headers] of [
+      ["a link on another site", {
+        cookie: sameOriginHeaders.cookie,
+        "sec-fetch-site": "cross-site",
+        "sec-fetch-mode": "navigate",
+      }],
+      ["a request with no Sec-Fetch-Site", { cookie: sameOriginHeaders.cookie }],
+    ] as const
+  ) {
+    it(`refuses an export started by ${name} before it reads or records anything`, async () => {
+      const { app, calls } = buildApp()
+      const response = await app.request(`${API_URL}/admin/audit/export.csv`, { headers })
+
+      expect(response.status).toBe(403)
+      expect((await response.json()).error).toBe(ADMIN_AUDIT_EXPORT_CROSS_SITE)
+      // The service lists and writes the audit row, so no call means no read and no export row.
+      expect(calls).toEqual([])
+    })
+  }
 
   it("guards every text cell of the export against spreadsheet formulas", async () => {
     const { app } = buildApp({
