@@ -493,7 +493,8 @@ export function InvitationScreen(
       <Card>
         <EmptyState
           headingLevel={1}
-          class="border-0"
+          // TODO(#433): use EmptyState's in-card option (preact-components 3.27.0).
+          class="max-w-none border-none px-4 py-6 sm:px-6"
           title={loading ? "Opening the invitation..." : "This invitation cannot be used"}
           description={loading ? undefined : error ?? undefined}
           action={!loading && (

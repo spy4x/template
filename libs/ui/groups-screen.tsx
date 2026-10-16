@@ -94,8 +94,8 @@ export const ROLE_TEXT: Record<GroupRole, string> = {
 /**
  * The groups page: one row per group with the person's role, the members' avatars and a quiet mark
  * on the current group. A row opens the group's notes; its cog opens the group's settings. "New
- * group" in the header, and a link to `NEW_GROUP_PATH`, open a dialog with the name field. Deleted groups the person can still
- * restore are listed under the groups, each with a Restore button.
+ * group" in the header, and a link to `NEW_GROUP_PATH`, open a dialog with the name field. Deleted
+ * groups the person can still restore are listed under the groups, each with a Restore button.
  */
 export function GroupsScreen(
   {
@@ -158,7 +158,8 @@ export function GroupsScreen(
           <Card>
             <EmptyState
               headingLevel={2}
-              class="border-0"
+              // TODO(#433): use EmptyState's in-card option (preact-components 3.27.0).
+              class="max-w-none border-none px-4 py-6 sm:px-6"
               title={loading ? "Loading groups..." : "No groups yet."}
               description={loading
                 ? undefined
