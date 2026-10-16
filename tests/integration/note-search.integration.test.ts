@@ -83,8 +83,9 @@ Deno.test("the note search against Postgres", async (t) => {
 
     await t.step("a title match ranks above a body match", async () => {
       const { groupId, owner } = await team(sql)
-      await write(groupId, owner, "Notes", "the budget is due")
+      // The body match is the newer note, so only the rank can put the title match first.
       await write(groupId, owner, "Budget", "")
+      await write(groupId, owner, "Notes", "the budget is due")
 
       expect(await titles(owner, "budget")).toEqual(["Budget", "Notes"])
     })
