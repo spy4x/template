@@ -80,6 +80,9 @@ test.describe("the admin app", () => {
       await expect(row).toHaveCount(1)
       // Opened from a list scrolled down on a short screen, the person's page starts at its top.
       await ops.setViewportSize({ width: 390, height: 360 })
+      // On a phone the person's column keeps its width, so the name does not wrap letter by letter.
+      const cell = await row.locator("xpath=ancestor::td").boundingBox()
+      expect(cell?.width ?? 0).toBeGreaterThanOrEqual(192)
       await ops.evaluate(() => globalThis.scrollTo(0, document.body.scrollHeight))
       await expect.poll(() => ops.evaluate(() => globalThis.scrollY)).toBeGreaterThan(0)
       await row.click()
