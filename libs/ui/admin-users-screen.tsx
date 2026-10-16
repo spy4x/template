@@ -315,7 +315,9 @@ function PersonCell(
   { user, navigate }: { user: AdminUserRow; navigate?: Navigate },
 ): JSX.Element {
   return (
-    <div class="flex min-w-0 items-center gap-3">
+    // At least 12rem wide: on a phone the table scrolls sideways instead of squeezing the name
+    // into a column a few letters wide.
+    <div class="flex min-w-48 items-center gap-3">
       <Avatar name={adminUserName(user)} size="sm" />
       <div class="flex min-w-0 flex-col">
         <Link
