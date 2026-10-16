@@ -68,8 +68,8 @@ export async function saveAndAnnounce(
   if (!await groups.save(groupId)) return false
   const saved = groups.groups.value.find((candidate) => candidate.id === groupId)
   notices.success({
-    title: "Saved",
-    body: `Your changes to "${saved?.name ?? "the group"}" are saved.`,
+    title: "Group saved",
+    body: saved ? `"${saved.name}" saved.` : "The group is saved.",
     dataE2E: "group-saved",
   })
   return true

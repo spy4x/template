@@ -363,8 +363,8 @@ describe("saveAndAnnounce", () => {
 
     expect(done).toBe(true)
     expect(notices).toEqual([{
-      title: "Saved",
-      body: `Your changes to "Crew" are saved.`,
+      title: "Group saved",
+      body: `"Crew" saved.`,
       dataE2E: "group-saved",
     }])
   })
