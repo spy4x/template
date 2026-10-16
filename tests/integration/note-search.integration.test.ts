@@ -115,7 +115,7 @@ Deno.test("the note search against Postgres", async (t) => {
     await t.step("a search of only symbols finds nothing and does not fail", async () => {
       const { owner } = await team(sql)
 
-      expect(await titles(owner, "!& |")).toEqual([])
+      expect(await titles(owner, "!& | ( ' :")).toEqual([])
     })
   })
 })
