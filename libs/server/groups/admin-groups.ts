@@ -84,6 +84,8 @@ export enum AdminGroupActOutcome {
   LastGroup = 9,
   /** The group's subscription still renews, so its owner cancels it before a transfer. */
   SubscriptionRenews = 10,
+  /** The member to hand the group to is blocked: they could not sign in to run it. */
+  RecipientBlocked = 11,
 }
 
 /** The columns of a person, read from the `users` row aliased `alias`. */
@@ -592,7 +594,8 @@ export async function removeMemberAsOperator(
  * Hands the group to the member `userId` the way its owner does: the old owner becomes an admin,
  * the subscription's customer is handed over (a subscription that still renews refuses it), the
  * new owner gets a notice, and the old owner's admin invitations are revoked. Only a supervisor or
- * an admin of the product does this, and never when either owner is the operator or outranks them.
+ * an admin of the product does this, and never when either owner is the operator or outranks them,
+ * nor to a blocked member.
  */
 export async function transferOwnershipAsOperator(
   sql: postgres.Sql,
@@ -628,6 +631,10 @@ export async function transferOwnershipAsOperator(
       if (userRole >= operator.role || (ownerRole ?? 0) >= operator.role) {
         return AdminGroupActOutcome.Outranked
       }
+      const [blocked] = await tx`
+        SELECT 1 FROM users WHERE id = ${userId} AND blocked_at IS NOT NULL
+      `
+      if (blocked) return AdminGroupActOutcome.RecipientBlocked
       await handOverBilling(tx, groupId)
       await tx`
         UPDATE group_members SET role = ${GroupRole.ADMIN}, updated_at = CURRENT_TIMESTAMP
