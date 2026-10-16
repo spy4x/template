@@ -54,6 +54,7 @@ const AUDIT_TONES: Record<AuthAuditEventType, TimelineTone> = {
   [AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN]: "warning",
   [AuthAuditEventType.USER_BLOCKED]: "danger",
   [AuthAuditEventType.USER_UNBLOCKED]: "success",
+  [AuthAuditEventType.PUSH_DEVICE_REMOVED]: "warning",
 }
 
 /** An audit event's tone on the Activity timeline; an event this page does not know is neutral. */
@@ -80,6 +81,7 @@ const AUDIT_EVENTS: Record<AuthAuditEventType, string> = {
   [AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN]: "Unconfirmed address taken over",
   [AuthAuditEventType.USER_BLOCKED]: "Blocked by an operator",
   [AuthAuditEventType.USER_UNBLOCKED]: "Unblocked by an operator",
+  [AuthAuditEventType.PUSH_DEVICE_REMOVED]: "Push device removed by an operator",
 }
 
 /** Each action's dialog: its title, what it does, and its button. */
