@@ -6,8 +6,8 @@
 -- silently.
 --
 -- `first_time_zone` and `first_locale` are what the first device the person used reported. They
--- are not preferences: the server falls back to them when it writes something without a device,
--- such as a mail, while the person's own choice is automatic. The row goes with the account.
+-- are not preferences: they are the zone and format the person signed up with, which operators
+-- see on the person's account. The row goes with the account.
 CREATE TABLE user_preferences (
     user_id INT4 PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     value JSONB DEFAULT '{}'::jsonb NOT NULL,

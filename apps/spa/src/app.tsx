@@ -254,7 +254,7 @@ export function App() {
     // The calls port, the device copy, and what triggers the pull: the socket's hints, or without
     // the socket the page's own events and a timer (`modules.ts`).
     startModules(userId, { pull: createPull(reads), check: createChangeCheck(reads) })
-    // After the calls port exists: the first device's zone is kept for mail.
+    // After the calls port exists: the server keeps the first device's zone, as the sign-up one.
     preferencesState.start()
     return () => stopChanges()
   }, [

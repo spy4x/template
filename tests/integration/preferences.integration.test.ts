@@ -135,7 +135,7 @@ Deno.test(`preferences: one person's save never changes another person's row`, a
   })
 })
 
-Deno.test(`preferences: the first device is kept for mail, a later one changes nothing`, async () => {
+Deno.test(`preferences: the first device is kept, a later one changes nothing`, async () => {
   await withSchema(async (sql) => {
     const userId = await insertUser(sql)
 

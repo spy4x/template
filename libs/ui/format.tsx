@@ -10,13 +10,14 @@ import {
 import { timeAgo } from "@spy4x/platform/universal/time"
 
 /**
- * The one formatter of every date, time and number the SPA and the admin app show (#163). It reads
+ * The one formatter of every date and time the SPA and the admin app show (#163). It reads
  * the person's own region format, time zone and clock, so a date looks the same on every screen and
  * every device. `tests/no-direct-date-format.test.ts` fails on a direct `toLocale*String()` or
  * `new Intl.DateTimeFormat` anywhere else in the apps and in `libs/ui`.
  *
  * The words around a date stay English ("5 minutes ago"): the region format changes how dates and
- * numbers are written, never the language of the app.
+ * times are written, never the language of the app. Numbers are not covered yet: the admin charts
+ * write them with `Intl.NumberFormat` on their own.
  *
  * @module
  */

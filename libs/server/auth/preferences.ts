@@ -75,9 +75,9 @@ export function preferencesStore(sql: postgres.Sql): SettingsStore {
 }
 
 /**
- * Keeps the zone and region format of the first device that reports them, the server's fallback
- * for a mail while the person's own choice is automatic. A later device changes nothing, so this is
- * the zone the person signed up in. A zone this runtime does not know, or a format outside the
+ * Keeps the zone and region format of the first device that reports them, which operators see on
+ * the person's account. A later device changes nothing, so this is the zone the person signed up
+ * in. A zone this runtime does not know, or a format outside the
  * picker's list, is kept as `NULL`.
  */
 export async function recordFirstDevice(

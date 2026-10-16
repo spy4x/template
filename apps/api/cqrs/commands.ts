@@ -69,7 +69,7 @@ export interface PreferencesDevicePayload {
   idempotencyKey?: string
 }
 
-/** The page tells the zone and region format of its device; the first one is kept for mail. */
+/** The page tells the zone and region format of its device; the first one is kept. */
 export class PreferencesDeviceCommand implements Command<PreferencesDevicePayload, void> {
   __resultType?: void
   constructor(public data: PreferencesDevicePayload) {}

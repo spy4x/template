@@ -1,6 +1,6 @@
 /// <reference lib="deno.ns" />
 /**
- * Every date, time and number the apps and `libs/ui` show goes through the one formatter in
+ * Every date and time the apps and `libs/ui` show goes through the one formatter in
  * `libs/ui/format.tsx` (#163), so it follows the person's region format, time zone and clock. A
  * direct `toLocaleString()`, `toLocaleDateString()`, `toLocaleTimeString()` or
  * `new Intl.DateTimeFormat` ignores them and shows the device's instead. This test walks `apps/`
@@ -14,7 +14,7 @@ import { fromFileUrl, relative } from "@std/path"
 
 const ROOT = fromFileUrl(new URL("../", import.meta.url))
 
-/** The calls that format a date or a number on their own. */
+/** The calls that format a date or a time on their own (`toLocaleString()` too, on any value). */
 export const FORBIDDEN = /\.toLocale(?:Date|Time)?String\s*\(|\bIntl\.DateTimeFormat\s*\(/
 
 /** The one file that may make them: the formatter itself. */
@@ -43,7 +43,7 @@ Deno.test(`directCalls finds each call that bypasses the formatter`, () => {
   expect(directCalls(`format.date(at)`)).toEqual([])
 })
 
-Deno.test(`no screen formats a date or a number outside libs/ui/format.tsx`, async () => {
+Deno.test(`no screen formats a date or a time outside libs/ui/format.tsx`, async () => {
   const seen: string[] = []
   const found: string[] = []
   for (const directory of [`apps`, `libs/ui`]) {

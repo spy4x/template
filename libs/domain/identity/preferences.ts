@@ -68,7 +68,7 @@ export interface AdminUserPreferences {
   version: number
   /** When the person last saved, or `null` when they never did. */
   updatedAt: string | null
-  /** The zone of the first device the person used, the fallback for mail. */
+  /** The zone of the first device the person used: the one they signed up with. */
   firstTimeZone: string | null
 }
 

@@ -364,7 +364,7 @@ export class AppDbBase extends DbServiceBase {
     return {
       /** The versioned record, keyed by the person's id; the write is a compare-and-set. */
       store: preferencesStore(sql),
-      /** Keeps the first device's zone and region format, the fallback for mail. */
+      /** Keeps the first device's zone and region format: the ones the person signed up with. */
       recordFirstDevice: (userId: number, device: PreferencesDevice): Promise<void> =>
         recordFirstDevice(sql, userId, device),
     }
