@@ -18,6 +18,7 @@ import { TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
 import { GROUP_PATHS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { type ProviderProof, ProviderProofNotice } from "./provider-proof.tsx"
 import { SettingRow } from "@spy4x/preact-ui/setting-row"
+import { type AppFormat, useFormat } from "./format.tsx"
 
 /** What the person has typed into the deletion dialog. */
 export interface AccountDeleteValues {
@@ -32,17 +33,21 @@ export interface AccountDeleteErrors {
   form: string | null
 }
 
-/** What a blocker asks the person to do, shown under the group's name. */
-export function blockerHint(blocker: AccountDeletionBlocker): string {
+/**
+ * What a blocker asks the person to do, shown under the group's name. A date is written in the
+ * person's own format.
+ */
+export function blockerHint(
+  blocker: AccountDeletionBlocker,
+  format: Pick<AppFormat, "date">,
+): string {
   switch (blocker.reason) {
     case AccountDeletionBlockReason.Members:
       return "Other people still use it. Hand it over or remove them."
     case AccountDeletionBlockReason.Subscription:
       return "Its plan is still paid. Cancel the plan first."
     case AccountDeletionBlockReason.PlanEnding: {
-      const day = blocker.endsAt
-        ? new Date(blocker.endsAt).toLocaleDateString(undefined, { dateStyle: "long" })
-        : "the end of its period"
+      const day = blocker.endsAt ? format.date(blocker.endsAt, "long") : "the end of its period"
       return `Its plan is cancelled and runs until ${day}. Wait until the plan ends.`
     }
   }
@@ -245,6 +250,7 @@ function BlockerList(
     onClose: () => void
   },
 ): JSX.Element {
+  const format = useFormat()
   return (
     <Stack>
       <p class="text-sm text-muted">
@@ -261,7 +267,7 @@ function BlockerList(
             >
               {blocker.name}
             </Link>
-            <span class="text-sm text-muted">{blockerHint(blocker)}</span>
+            <span class="text-sm text-muted">{blockerHint(blocker, format)}</span>
           </li>
         ))}
       </ul>
