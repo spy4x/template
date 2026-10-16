@@ -5,7 +5,7 @@ import {
   type Page,
 } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
-import { gotoApp, signIn, submitAuthForm } from "./fixtures/app.ts"
+import { gotoApp, signIn } from "./fixtures/app.ts"
 import { TagsPage } from "./fixtures/tags.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
 import {
@@ -14,6 +14,7 @@ import {
   openGroups,
   openNotes,
 } from "./fixtures/groups.ts"
+import { signUpInPage, signUpWithCode } from "./fixtures/sign-up.ts"
 
 /**
  * The local-data module as a swappable part (ADR 003, sections 1, 4 and 5), in a real browser with
@@ -35,7 +36,7 @@ async function cleanup(request: APIRequestContext, email: string): Promise<void>
 }
 
 async function signUp(request: APIRequestContext, email: string): Promise<void> {
-  const response = await request.post(`${apiBase}/api/auth/password/sign-up`, {
+  const response = await signUpWithCode(request, `${apiBase}/api/auth/password/sign-up`, {
     headers,
     data: { email, password },
   })
@@ -151,10 +152,7 @@ test.describe("the app with the local-data module switched off", () => {
     await cleanup(request, email)
     const { context, page } = await configured(browser, { offline: false })
     try {
-      await gotoApp(page, "/sign-up", page.locator("[data-e2e=auth-form-login]"))
-      await page.locator("[data-e2e=auth-form-login]").fill(email)
-      await page.locator("[data-e2e=auth-form-password]").fill(password)
-      await submitAuthForm(page, "/", online(page))
+      await signUpInPage(page, email, password, online(page))
       await expect(online(page)).toHaveText("Online")
       await signOut(page)
       await signIn(page, email, password)
@@ -176,7 +174,9 @@ test.describe("the app with the local-data module switched off", () => {
       await page.locator("[data-e2e=note-title]").fill("Groceries for Friday")
       await page.locator("[data-e2e=note-save]").click()
       await expect(page).toHaveURL("/notes")
-      await page.reload()
+      // Through `gotoApp`, as every online load: a plain reload that a network change breaks
+      // leaves the page blank and the list empty, with nothing in the report saying why.
+      await gotoApp(page, "/notes", titles.first(), () => page.reload())
       await expect(titles).toHaveText(["Groceries for Friday"])
 
       // The other list screens read from the server.
@@ -249,10 +249,10 @@ test.describe("the app with no network, after one visit online", () => {
       await expect(groupNames.filter({ hasText: /^(Kept|Their) team$/ })).toHaveCount(2)
 
       await gotoApp(page, `/groups/${groupId}`, page.locator("[data-e2e=group-general-name]"))
-      await page.getByRole("button", { name: "Invite people" }).click()
-      const inviting = page.getByRole("dialog", { name: "Invite people" })
-      await inviting.locator("[data-e2e=invitation-create]").click()
-      await inviting.locator("[data-e2e=invitation-done]").click()
+      await page.getByRole("link", { name: "Invite people" }).click()
+      await page.locator("[data-e2e=invitation-create]").click()
+      await page.locator("[data-e2e=invitation-done]").click()
+      await expect(page).toHaveURL(`/groups/${groupId}`)
       const invitations = page.locator("[data-e2e=group-section-invitations] [data-e2e=invitation]")
       await expect(invitations).toHaveCount(1)
       await expect(page.locator("[data-e2e=group-member]")).toHaveCount(1)
@@ -276,6 +276,7 @@ test.describe("the app with no network, after one visit online", () => {
       await page.locator("[data-e2e=api-token-password]").fill(password)
       await page.locator("[data-e2e=api-token-create]").click()
       await page.locator("[data-e2e=api-token-done]").click()
+      await expect(page).toHaveURL("/")
       const tokens = page.locator("[data-e2e=api-token-details]")
       await expect(tokens).toHaveCount(1)
       // Once more, so the copy on the device holds the token just made.

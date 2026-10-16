@@ -8,6 +8,8 @@ export const SPA_ROUTES = {
   "/sign-up": { open: true },
   // The question after a provider sign-in that nobody here is known by.
   "/sign-up/confirm": { open: true },
+  // The code mailed to the address a sign-up gave, before the account is created (#142).
+  "/sign-up/code": { open: true },
   "/sign-in": { open: true },
   "/totp": { open: true },
   "/forgot-password": { open: true },
@@ -19,6 +21,8 @@ export const SPA_ROUTES = {
   "/groups": { open: false },
   // Before `/groups/:groupId`, which would take "new" for a group's id.
   "/groups/new": { open: false },
+  // A group's create-only invitation page, matched before the group's own routes.
+  "/groups/:groupId/invitations/new": { open: false },
   "/groups/:groupId": { open: false },
   "/groups/:groupId/activity": { open: false },
   "/groups/:groupId/pricing": { open: false },
@@ -34,6 +38,9 @@ export const SPA_ROUTES = {
   "/notes": { open: false },
   "/notes/new": { open: false },
   "/notes/:noteId": { open: false },
+  // The create-only API token page. Not `/api-tokens/new`: the proxy sends every address that
+  // starts with `/api` to the API, so a reload there would never reach the SPA.
+  "/tokens/new": { open: false },
   // The profile says "sign in" to a signed-out visitor instead of sending them away.
   "/": { open: true },
 } as const satisfies Record<string, { open: boolean }>

@@ -3,6 +3,7 @@ import { expect, test } from "./fixtures/stack.ts"
 import { signIn } from "./fixtures/app.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
 import { openNotes } from "./fixtures/groups.ts"
+import { signUpWithCode } from "./fixtures/sign-up.ts"
 
 const apiBase = "http://app.localhost"
 const headers = { origin: apiBase, "sec-fetch-site": "same-origin" }
@@ -18,7 +19,7 @@ async function cleanup(request: APIRequestContext, email: string): Promise<void>
 }
 
 async function signUp(request: APIRequestContext, email: string): Promise<void> {
-  const response = await request.post(`${apiBase}/api/auth/password/sign-up`, {
+  const response = await signUpWithCode(request, `${apiBase}/api/auth/password/sign-up`, {
     headers,
     data: { email, password },
   })
@@ -79,7 +80,7 @@ test.describe("moving notes to another group", () => {
       const sourceTitles = sourcePage.locator("[data-e2e=note-item-title]")
       const targetTitles = targetPage.locator("[data-e2e=note-item-title]")
       await expect(sourceTitles).toHaveCount(4)
-      await expect(targetPage.getByText("No notes yet.")).toBeVisible()
+      await expect(targetPage.getByText("No notes yet")).toBeVisible()
 
       await openNotes(ownerPage, "Source")
       const ownerTitles = ownerPage.locator("[data-e2e=note-item-title]")
@@ -119,9 +120,9 @@ test.describe("moving notes to another group", () => {
       await expect(ownerPage.getByText("2 selected")).toBeVisible()
       await ownerPage.locator("[data-e2e=notes-move-to]").selectOption({ label: "Target" })
       await ownerPage.locator("[data-e2e=notes-move-submit]").click()
-      await expect(ownerPage.getByText("No notes yet.")).toBeVisible()
+      await expect(ownerPage.getByText("No notes yet")).toBeVisible()
       await expect(targetTitles).toHaveCount(4, { timeout: 5_000 })
-      await expect(sourcePage.getByText("No notes yet.")).toBeVisible({ timeout: 5_000 })
+      await expect(sourcePage.getByText("No notes yet")).toBeVisible({ timeout: 5_000 })
 
       // Delete from a row's menu asks first; the members of the group see it go.
       await openNotes(ownerPage, "Target")
@@ -130,7 +131,7 @@ test.describe("moving notes to another group", () => {
       await ownerPage.getByRole("menuitem", { name: "Delete" }).click()
       const dialog = ownerPage.locator("[data-e2e=note-delete-dialog]")
       await expect(dialog).toContainText(`"One" will be deleted for everyone in Target.`)
-      await dialog.getByRole("button", { name: "Delete", exact: true }).click()
+      await dialog.getByRole("button", { name: "Delete note", exact: true }).click()
       await expect(ownerTitles).toHaveCount(3)
       await expect(ownerPage.getByRole("link", { name: "One", exact: true })).toHaveCount(0)
       await expect(targetTitles).toHaveCount(3, { timeout: 5_000 })
