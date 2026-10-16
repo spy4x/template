@@ -17,6 +17,7 @@ import {
   AdminBillingClaimOutcome,
   type AdminBillingRecord,
 } from "@server/billing/admin-billing.ts"
+import { readSiteUrl, readSubscribersSetup } from "@server/subscribers/subscribers.ts"
 import type { APIContext } from "../../_types.ts"
 import { buildAuthData } from "../../_testing/fake-auth.ts"
 import {
@@ -422,16 +423,20 @@ describe(`operator billing routes`, () => {
     expect((await response.json()).pricingUrl).toBe(`https://www.example.com/pricing`)
   })
 
-  it(`finds the pricing page on the public website, and none without a website`, () => {
-    const context = (siteUrl?: string) =>
-      ({
-        subscribers: siteUrl === undefined ? null : { siteUrl },
+  it(`links the website's pricing page whenever MPA_DOMAIN is set, with the newsletter off too`, () => {
+    // Built as apps/api/index.ts builds it, in production without SUBSCRIBERS_SECRET.
+    const context = (vars: Record<string, string>) => {
+      const env = { get: (name: string) => vars[name] }
+      return {
+        subscribers: readSubscribersSetup(env, `prod`),
+        siteUrl: readSiteUrl(env, `prod`),
         billing: { provider: {}, graceDays: 7, dashboardUrl: null },
-      }) as unknown as AdminModuleContext
+      } as unknown as AdminModuleContext
+    }
 
-    expect(adminBillingSettings(context(`https://www.example.com`))?.pricingUrl).toBe(
+    expect(adminBillingSettings(context({ MPA_DOMAIN: `www.example.com` }))?.pricingUrl).toBe(
       `https://www.example.com/pricing`,
     )
-    expect(adminBillingSettings(context())?.pricingUrl).toBe(null)
+    expect(adminBillingSettings(context({}))?.pricingUrl).toBe(null)
   })
 })

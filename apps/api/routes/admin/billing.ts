@@ -68,7 +68,7 @@ export interface AdminBillingSettings {
   graceDays: number
   /** The provider's dashboard, for the link on a customer's page, or `null`. */
   dashboardUrl: string | null
-  /** The public website's pricing page, or `null` while the website is not deployed. */
+  /** The public website's pricing page, or `null` while `MPA_DOMAIN` is unset. */
   pricingUrl: string | null
 }
 
@@ -449,7 +449,7 @@ export function adminBillingSettings(context: AdminModuleContext): AdminBillingS
     provider: billing.provider,
     graceDays: billing.graceDays,
     dashboardUrl: billing.dashboardUrl,
-    pricingUrl: context.subscribers?.siteUrl ? `${context.subscribers.siteUrl}/pricing` : null,
+    pricingUrl: context.siteUrl === null ? null : `${context.siteUrl}/pricing`,
   }
 }
 

@@ -30,6 +30,11 @@ export interface AdminModuleContext {
   cacheConnected(): Promise<boolean>
   /** The release tag and commit the API was built from, or `null` each for a local build (#429). */
   build: { version: string | null; commit: string | null }
+  /**
+   * The public website's address from `MPA_DOMAIN` (`readSiteUrl`), or `null` while it is not
+   * deployed. Read on its own, so it holds while the newsletter is off.
+   */
+  siteUrl: string | null
   /** The payment provider for the billing module (#196); `provider` is `null` while billing is off. */
   billing: {
     provider: Required<BillingProvider> | null
