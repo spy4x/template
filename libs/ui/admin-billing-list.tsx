@@ -206,7 +206,7 @@ export function AdminBillingListScreen(props: AdminBillingListScreenProps): JSX.
   const header = (
     <PageHeader
       title="Billing"
-      subtitle="Who pays, what they pay, and what you earn. Open a group to refund, give time at no charge or cancel."
+      subtitle="Who pays, what they pay, and what you earn."
       titleDataE2E="admin-billing-title"
     />
   )
@@ -453,7 +453,8 @@ function Figures(
  * The table's layout on top of preact-ui's `DataTable`, which takes no class per column:
  *
  * - The library's table box keeps 300px of height even under a single row; here it fits its rows.
- * - Cells are padded 1rem on each side, 0.75rem on a phone.
+ * - Cells are padded 1rem on each side, 0.75rem on a phone, where they wrap so a long address
+ *   never pushes the amount off the screen.
  * - Below 640px the owner, the status and the next charge go: the group's cell then shows the
  *   status line and the owner's address under the name, and the amount stays beside it.
  *
@@ -463,6 +464,7 @@ const TABLE_CLASS = [
   `[&>div:first-child]:min-h-0`,
   `[&_:is(th,td)]:px-4`,
   `max-sm:[&_:is(th,td)]:px-3`,
+  `max-sm:[&_td]:whitespace-normal`,
   `max-sm:[&_:is(th,td):nth-child(2)]:hidden`,
   `max-sm:[&_:is(th,td):nth-child(3)]:hidden`,
   `max-sm:[&_:is(th,td):nth-child(5)]:hidden`,
@@ -591,7 +593,7 @@ function GroupCell(
       </div>
       <div class="flex flex-col gap-1 sm:hidden" data-e2e="admin-billing-phone">
         <BillingStatusLine view={view} />
-        <span class="truncate text-xs text-muted" title={owner}>{owner}</span>
+        <span class="text-xs text-muted wrap-anywhere">{owner}</span>
       </div>
     </div>
   )
