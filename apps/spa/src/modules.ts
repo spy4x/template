@@ -1,6 +1,6 @@
 import { ConnectionLostError, type GapReport } from "@spy4x/realtime"
 import { type CallPort, type RetryOptions, sendCommand, sendQuery } from "@spy4x/realtime/calls"
-import { signal } from "@preact/signals"
+import { createOnlineStatus } from "@spy4x/preact-signals/online"
 import { createSignedInHint } from "@spy4x/platform/browser/signed-in-hint"
 import { createLocalReads, type LocalReads } from "@spy4x/realtime/read-cache"
 import { createSyncRunner, type SyncRunner } from "@spy4x/realtime/sync-runner"
@@ -215,16 +215,12 @@ export function startModules(userId: number, reads: ChangeReads, options: StartO
     opened.full = true
     void runner.kick()
   }
-  const network = () => browserOnline.value = navigator.onLine !== false
-  network()
+  const stopNetwork = network.watch(globalThis)
   addEventListener("online", wake)
-  addEventListener("online", network)
-  addEventListener("offline", network)
   document.addEventListener("visibilitychange", wake)
   opened.stopEvents = () => {
     removeEventListener("online", wake)
-    removeEventListener("online", network)
-    removeEventListener("offline", network)
+    stopNetwork()
     document.removeEventListener("visibilitychange", wake)
   }
   /** Starts the runner (it runs once at once, then on its timer), or stops it. */
@@ -279,7 +275,7 @@ export function advanceGroupCursor(groupId: string, sequence: number): void {
 }
 
 /** Whether the browser has a network: what a page with no socket shows as its connection. */
-const browserOnline = signal(navigator.onLine !== false)
+const network = createOnlineStatus()
 
 /**
  * What the connection indicator shows. A page with no socket shows the browser's network: its
@@ -289,7 +285,7 @@ export function connectionDisplay(
   state: Pick<SessionState, "wsStatus" | "wsResume">,
 ): ReturnType<typeof socketDisplay> {
   if (switches.realtime) return socketDisplay(state)
-  return browserOnline.value ? "open" : "closed"
+  return network.online.value ? "open" : "closed"
 }
 
 // --- Local data --------------------------------------------------------------------------------
