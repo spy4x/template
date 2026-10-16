@@ -5,12 +5,15 @@ import {
   ADMIN_AUDIT_EXPORTED_KIND,
   ADMIN_AUDIT_NO_FILTER,
   ADMIN_JOB_RETRIED_KIND,
+  ADMIN_NO_FILTER,
   type AdminAuditFilter,
   AuthAuditEventType,
   UserRole,
 } from "@domain/identity"
 import { type AdminAuditPageKey, listAdminAudit } from "@server/auth/admin-audit.ts"
+import { roleChangeIdentifier } from "@server/auth/admin-users.ts"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
+import { exportIdentifier, operatorIdentifier } from "../../apps/api/services/admin.ts"
 import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
@@ -225,6 +228,54 @@ Deno.test("audit log: filters by operator, finding only what that operator did",
       `account:${AuthAuditEventType.USER_BLOCKED}`,
     ])
     expect(nobody.entries).toEqual([])
+  })
+})
+
+Deno.test("audit log: names the operator of a row whose note goes on after their mark, and finds it by them", async () => {
+  await withSchema(async (sql) => {
+    const { ada, op } = await seed(sql)
+    const sessionId = uuidV7()
+    // After every seeded entry, so these rows come first.
+    const T4 = "2026-10-15T10:00:00Z"
+    // The notes the operator area writes, from the functions that write them.
+    await sql`
+      INSERT INTO auth_audits (user_id, event_type, identifier, created_at) VALUES
+        (${ada}, ${AuthAuditEventType.USER_ROLE_CHANGED},
+          ${
+      roleChangeIdentifier(operatorIdentifier(op), UserRole.VIEWER, UserRole.OPERATOR)
+    }, ${T4}),
+        (${ada}, ${AuthAuditEventType.SESSIONS_ENDED},
+          ${`${operatorIdentifier(op)} session ${sessionId}`}, ${T4}),
+        (${op}, ${AuthAuditEventType.USERS_EXPORTED},
+          ${exportIdentifier(op, { ...ADMIN_NO_FILTER, query: "ada" })}, ${T4}),
+        (${ada}, ${AuthAuditEventType.USER_BLOCKED}, ${`operator:${op}5 from viewer`}, ${T4})
+    `
+    const theirs = await listAdminAudit(sql, filter({ operator: op }), 50, null)
+    const noted = theirs.entries.filter((entry) =>
+      [
+        AuthAuditEventType.USER_ROLE_CHANGED,
+        AuthAuditEventType.SESSIONS_ENDED,
+        AuthAuditEventType.USERS_EXPORTED,
+      ].some((type) => entry.event === `account:${type}`)
+    )
+
+    expect(noted.map((entry) => [entry.actor?.id, entry.byOperator, entry.identifier]).sort())
+      .toEqual([
+        [op, true, "from viewer to operator"],
+        [op, true, `session ${sessionId}`],
+        [op, true, "q=ada"],
+      ].sort())
+    // Another operator's id that merely starts with the same digits is not theirs.
+    expect(theirs.entries.map((entry) => entry.event)).toEqual([
+      ...noted.map((entry) => entry.event),
+      `activity:${ADMIN_JOB_RETRIED_KIND}`,
+      `account:${AuthAuditEventType.USER_BLOCKED}`,
+    ])
+    // The person filter finds the operator's actions by their mark too.
+    const byPerson = await listAdminAudit(sql, filter({ person: String(op) }), 50, null)
+    expect(byPerson.entries.map((entry) => entry.key)).toEqual(
+      expect.arrayContaining(noted.map((entry) => entry.key)),
+    )
   })
 })
 

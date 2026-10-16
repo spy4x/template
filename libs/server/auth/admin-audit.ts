@@ -29,8 +29,12 @@ import { containsPattern } from "./admin-users.ts"
 /** The password method's name in `auth_keys`, as `@spy4x/server/auth/password` stores it. */
 const PASSWORD_METHOD = "password"
 
-/** The `identifier` an operator's action leaves on the person's row, as the API writes it. */
-const OPERATOR_IDENTIFIER = /^operator:([1-9]\d{0,9})$/
+/**
+ * The `identifier` an operator's action leaves on the person's row, as the API writes it:
+ * `operator:<id>`, alone or followed by a space and a note such as `from viewer to operator`,
+ * `session 5` or `q=ada`.
+ */
+const OPERATOR_IDENTIFIER = /^operator:([1-9]\d{0,9})(?: (.*))?$/s
 
 /**
  * Where the next page starts: after this entry. `at` is the entry's time to the microsecond, as
@@ -132,13 +136,16 @@ function accountBranch(
   if (event?.source === "account") where = sql`${where} AND event_type = ${event.eventType}`
   if (filter.ip) where = sql`${where} AND ip LIKE ${`${filter.ip}%`}`
   if (filter.operator !== null) {
-    where = sql`${where} AND identifier = ${`operator:${filter.operator}`}`
+    // `filter.operator` is an int4-checked number, so the mark holds digits only.
+    const mark = `operator:${filter.operator}`
+    where = sql`${where} AND (identifier = ${mark} OR starts_with(identifier, ${`${mark} `}))`
   }
   if (filter.person) {
     const people = personIds(sql, filter.person)
     // The person the row is about, or the operator who acted on them.
-    where = sql`${where} AND (user_id IN (${people}) OR identifier IN (
-      SELECT 'operator:' || p.id FROM (${people}) p
+    where = sql`${where} AND (user_id IN (${people}) OR EXISTS (
+      SELECT 1 FROM (${people}) p
+      WHERE identifier = 'operator:' || p.id OR starts_with(identifier, 'operator:' || p.id || ' ')
     ))`
   }
   return sql`(
@@ -223,11 +230,16 @@ export async function listAdminAudit(
   }
 }
 
-/** The operator who acted, from a person's row: `null` unless an operator wrote it. */
-function operatorOf(row: Pick<EntryRaw, "source" | "identifier">): number | null {
+/**
+ * The operator who acted, from a person's row, and the rest of its note: `null` unless an
+ * operator wrote it.
+ */
+function operatorOf(
+  row: Pick<EntryRaw, "source" | "identifier">,
+): { id: number; note: string | null } | null {
   if (row.source !== "account" || !row.identifier) return null
   const match = OPERATOR_IDENTIFIER.exec(row.identifier)
-  return match ? Number(match[1]) : null
+  return match ? { id: Number(match[1]), note: match[2] || null } : null
 }
 
 /** Every person `rows` name, by id. */
@@ -237,7 +249,7 @@ function readPeople(sql: postgres.Sql, rows: EntryRaw[]): Promise<Map<number, Ad
     if (row.personId !== null) ids.add(row.personId)
     if (row.actorId !== null) ids.add(row.actorId)
     const operator = operatorOf(row)
-    if (operator !== null) ids.add(operator)
+    if (operator !== null) ids.add(operator.id)
   }
   return readPeopleByIds(sql, [...ids])
 }
@@ -281,11 +293,11 @@ function toEntry(row: EntryRaw, people: Map<number, AdminAuditPerson>): AdminAud
       at: row.createdAt.toISOString(),
       person,
       // A person's own row: they did it. An operator's row names the operator instead.
-      actor: operator === null ? person : people.get(operator) ?? null,
+      actor: operator === null ? person : people.get(operator.id) ?? null,
       byOperator: operator !== null,
       group: null,
-      // The operator's mark says who acted, which `actor` already shows.
-      identifier: operator === null ? row.identifier : null,
+      // The operator's mark says who acted, which `actor` already shows; the note after it stays.
+      identifier: operator === null ? row.identifier : operator.note,
       ip: row.ip,
       userAgent: row.userAgent,
       jobKind: null,
