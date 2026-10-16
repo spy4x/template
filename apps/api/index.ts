@@ -190,6 +190,7 @@ app.route(
       sql,
       subscribers: subscribersSetup,
       limit: rateLimits.normal,
+      resetByAddress: rateLimits.resetByAddress,
       emit,
       now: () => new Date(),
       cursorSecret: config.authCookieSecret,
