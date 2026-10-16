@@ -34,7 +34,7 @@ import { EmailView } from "./views/EmailView.tsx"
 import { ForgotPasswordView, ResetPasswordView } from "./views/PasswordResetView.tsx"
 import { GroupsView } from "./views/GroupsView.tsx"
 import { SubscribeView, SubscriptionConfirmView, UnsubscribeView } from "./views/SubscribeViews.tsx"
-import { GroupSettingsView } from "./views/GroupSettingsView.tsx"
+import { GroupEditorView } from "./views/GroupEditorView.tsx"
 import { NotificationsView } from "./views/NotificationsView.tsx"
 import { GroupActivityView } from "./views/GroupActivityView.tsx"
 import { InstallOffer } from "./views/InstallOffer.tsx"
@@ -95,7 +95,8 @@ const PAGES: {
   "/subscribe/confirm": () => <SubscriptionConfirmView />,
   "/unsubscribe": () => <UnsubscribeView />,
   "/groups": () => <GroupsView />,
-  "/groups/:groupId": (params) => <GroupSettingsView groupId={params.groupId} />,
+  "/groups/new": () => <GroupEditorView key="new" />,
+  "/groups/:groupId": (params) => <GroupEditorView key={params.groupId} groupId={params.groupId} />,
   "/groups/:groupId/activity": (params) => <GroupActivityView groupId={params.groupId} />,
   "/groups/:groupId/pricing": (params) => <PricingView groupId={params.groupId} />,
   "/groups/:groupId/notes": (params) => <OpenIfSelected groupId={params.groupId} />,
