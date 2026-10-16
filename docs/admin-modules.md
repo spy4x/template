@@ -15,8 +15,8 @@ each side holds them to that (`apps/admin/src/modules/registry.test.ts`,
 | ------------ | ------------- | ------------------------- | ----------------------------------- | ----------------------- |
 | `dashboard`  | Dashboard     | `/`                       |                                     | `GET /api/admin/stats`  |
 | `users`      | Users         | `/users`, `/users/:id`    | (the page's own five)               | `/api/admin/users/*`    |
-| `groups`     | Groups        | `/groups`                 |                                     | none yet                |
-| `newsletter` | Newsletter    | `/newsletter`             |                                     | none yet                |
+| `groups`     | Groups        | `/groups`, `/groups/:id`  |                                     | `/api/admin/groups/*`   |
+| `newsletter` | Newsletter    | `/newsletter`             |                                     | `/api/admin/newsletter/*` |
 | `audit`      | Audit log     | `/audit`                  |                                     | `/api/admin/audit*`     |
 | `system`     | System        | `/system`                 |                                     | `/api/admin/system*`    |
 | `api-tokens` | API tokens    | `/api-tokens`             | API tokens, Devices, Notifications  | `/api/admin/api-tokens*` |
