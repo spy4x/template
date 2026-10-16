@@ -137,12 +137,19 @@ function DashboardBody({ stats }: { stats: AdminStats }): JSX.Element {
           title="Sign-ups per day"
           series="Sign-ups"
           days={stats.signUpsPerDay}
+          summary={`${
+            NUMBER.format(sum(stats.signUpsPerDay))
+          } in ${stats.signUpsPerDay.length} days`}
           dataE2E="admin-chart-sign-ups"
         />
         <DailyChart
           title="Active people per day"
           series="Active people"
           days={stats.activePerDay}
+          // One person active on many days counts once a day, so a sum would count them again.
+          summary={`Busiest day: ${
+            NUMBER.format(Math.max(0, ...stats.activePerDay.map((day) => day.count)))
+          }`}
           dataE2E="admin-chart-active"
         />
       </div>
@@ -150,24 +157,27 @@ function DashboardBody({ stats }: { stats: AdminStats }): JSX.Element {
   )
 }
 
-/** One 30-day chart in a card, with the period's total in its header. */
+/** The sum of a run of daily counts. */
+function sum(days: readonly AdminDailyCount[]): number {
+  return days.reduce((total, day) => total + day.count, 0)
+}
+
+/** One 30-day chart in a card, with a one-line summary of the period in its header. */
 function DailyChart(
-  { title, series, days, dataE2E }: {
+  { title, series, days, summary, dataE2E }: {
     title: string
     series: string
     days: readonly AdminDailyCount[]
+    summary: string
     dataE2E: string
   },
 ): JSX.Element {
-  const total = days.reduce((sum, day) => sum + day.count, 0)
   return (
     <Card data-e2e={dataE2E}>
       <CardHeader
         title={title}
         headingLevel={2}
-        action={
-          <span class="text-sm text-muted">{NUMBER.format(total)} in {days.length} days</span>
-        }
+        action={<span class="text-sm text-muted">{summary}</span>}
       />
       <CardBody>
         <LineChart

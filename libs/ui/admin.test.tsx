@@ -466,7 +466,7 @@ const stats: AdminStats = {
   groups: 77,
   notes: 5678,
   signUpsPerDay: days((index) => index % 3),
-  activePerDay: days(() => 40),
+  activePerDay: days((index) => index === 7 ? 45 : 40),
 }
 
 describe("the admin dashboard", () => {
@@ -503,7 +503,7 @@ describe("the admin dashboard", () => {
     expect(axis(`admin-chart-active`)).toEqual([`0`, `10`, `20`, `30`, `40`, `50`])
   })
 
-  it("shows every stat card with its number and both 30-day charts", async () => {
+  it("shows every stat card, the sign-ups total and the busiest day of active people", async () => {
     await mount(<AdminDashboardScreen stats={stats} error={null} onRetry={() => {}} />)
 
     const cards = find("[data-e2e=admin-dashboard-stats]").textContent
@@ -511,7 +511,10 @@ describe("the admin dashboard", () => {
       expect(cards).toContain(text)
     }
     expect(find("[data-e2e=admin-chart-sign-ups]").textContent).toContain("30 in 30 days")
-    expect(find("[data-e2e=admin-chart-active]").textContent).toContain("1,200 in 30 days")
+    // Active people are no sum: the same person is active on many days.
+    const active = find("[data-e2e=admin-chart-active]").textContent
+    expect(active).toContain("Busiest day: 45")
+    expect(active).not.toContain("in 30 days")
     expect(has("[data-e2e=admin-chart-active] svg")).toBe(true)
   })
 
