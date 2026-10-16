@@ -397,7 +397,7 @@ function SubscribersTab(props: AdminNewsletterScreenProps): JSX.Element {
   )
 }
 
-/** The table's columns: the address, its status, its dates and its actions. */
+/** The table's columns: the address with its actions, its status and its dates. */
 function subscriberColumns(
   onOpenDialog: (dialog: AdminSubscriberDialog) => void,
 ): DataTableColumn<AdminSubscriberRow, never>[] {
@@ -405,12 +405,37 @@ function subscriberColumns(
     {
       id: "email",
       header: "Address",
-      render: ({ email }) => (
-        // At least 12rem wide: on a phone the table scrolls sideways instead of squeezing the
-        // address into a column a few letters wide.
-        <span class="block min-w-48 font-medium wrap-anywhere" data-e2e="admin-subscriber-email">
-          {email}
-        </span>
+      // The actions sit under the address, so a phone shows them without scrolling sideways.
+      render: ({ email, status }) => (
+        <Stack gap="xs" class="min-w-48 items-start">
+          {
+            /* At least 12rem wide: on a phone the table scrolls sideways instead of squeezing the
+              address into a column a few letters wide. */
+          }
+          <span class="font-medium wrap-anywhere" data-e2e="admin-subscriber-email">{email}</span>
+          <Cluster gap="xs" class="-ml-2">
+            {status === "pending" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`Resend the confirm mail to ${email}`}
+                data-e2e="admin-subscriber-resend"
+                onClick={() => onOpenDialog({ action: "resend", email })}
+              >
+                Resend
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`Remove ${email}`}
+              data-e2e="admin-subscriber-remove"
+              onClick={() => onOpenDialog({ action: "remove", email })}
+            >
+              Remove
+            </Button>
+          </Cluster>
+        </Stack>
       ),
     },
     {
@@ -437,35 +462,6 @@ function subscriberColumns(
           </time>
         )
       },
-    },
-    {
-      id: "actions",
-      header: "Actions",
-      align: "right",
-      render: ({ email, status }) => (
-        <Cluster justify="end" class="flex-nowrap">
-          {status === "pending" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label={`Resend the confirm mail to ${email}`}
-              data-e2e="admin-subscriber-resend"
-              onClick={() => onOpenDialog({ action: "resend", email })}
-            >
-              Resend
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={`Remove ${email}`}
-            data-e2e="admin-subscriber-remove"
-            onClick={() => onOpenDialog({ action: "remove", email })}
-          >
-            Remove
-          </Button>
-        </Cluster>
-      ),
     },
   ]
 }
