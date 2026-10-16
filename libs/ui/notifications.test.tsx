@@ -99,6 +99,14 @@ describe("notifications screen", () => {
     expect(root.innerHTML).not.toMatch(/\bmax-w-|\bmx-auto\b/)
   })
 
+  it("draws a row's keyboard focus as the library's ring inside the row, which the card cannot clip", () => {
+    const root = document.createElement("div")
+    root.innerHTML = renderToString(screen({ notifications: [row(1)], unreadCount: 1 }))
+    const classes = root.querySelector("[data-e2e=notification-link]")!.className.split(" ")
+    expect(classes).toContain("focus-visible:ring-2")
+    expect(classes).toContain("focus-visible:ring-inset")
+  })
+
   it("offers Mark all as read only while something is unread", () => {
     expect(renderToString(screen({ notifications: [row(1)], unreadCount: 1 })))
       .toContain(`data-e2e="notifications-read-all"`)

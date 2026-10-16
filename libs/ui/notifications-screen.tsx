@@ -145,7 +145,7 @@ function NotificationItem(
     <li data-e2e={`notification-${notification.id}`} data-unread={unread ? "true" : "false"}>
       <a
         href={notification.link}
-        class="flex min-h-14 items-start gap-3 px-4 py-3 hover:bg-hover sm:px-6"
+        class="flex min-h-14 items-start gap-3 px-4 py-3 hover:bg-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset sm:px-6"
         data-e2e="notification-link"
         onClick={(event) => {
           // The page is opened by the browser or the router; the read is told either way.
