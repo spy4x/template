@@ -57,8 +57,8 @@ import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 /**
  * An old `/groups/:groupId/notes…` link. It selects nothing: a link must not change the selection,
  * or another site could switch a person's group by linking here. When that group is already the
- * selected one it opens the notes at their new address; otherwise it opens the groups page, which
- * has an "Open notes" button for each group. It waits for the selection to be known.
+ * selected one it opens the notes at their new address; otherwise it opens the groups page, where
+ * each group's page offers "Switch to this group". It waits for the selection to be known.
  */
 function OpenIfSelected({ groupId, noteId }: { groupId: string; noteId?: string }) {
   const [, navigate] = useLocation()
