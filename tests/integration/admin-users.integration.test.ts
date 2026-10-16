@@ -190,6 +190,10 @@ Deno.test("the user list sorts on the server by any column, ties kept in one ord
     // Everyone has the same role: the id decides, in the rule's direction.
     expect(await order([{ key: "role", direction: "asc" }])).toEqual([ada.id, grace.id, linus.id])
     expect(await order([{ key: "role", direction: "desc" }])).toEqual([linus.id, grace.id, ada.id])
+    // A higher role sorts after the lower ones, and first when the rule is descending.
+    await sql`UPDATE users SET role = ${UserRole.OPERATOR} WHERE id = ${grace.id}`
+    expect(await order([{ key: "role", direction: "asc" }])).toEqual([ada.id, linus.id, grace.id])
+    expect(await order([{ key: "role", direction: "desc" }])).toEqual([grace.id, linus.id, ada.id])
   })
 })
 
