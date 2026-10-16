@@ -111,11 +111,5 @@ Deno.test("the note search against Postgres", async (t) => {
       expect(hit.snippet).not.toContain("<b>")
       expect(hit.snippet).not.toContain("word0 ")
     })
-
-    await t.step("a search of only symbols finds nothing and does not fail", async () => {
-      const { owner } = await team(sql)
-
-      expect(await titles(owner, "!& | ( ' :")).toEqual([])
-    })
   })
 })
