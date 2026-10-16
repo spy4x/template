@@ -374,6 +374,16 @@ export enum AuthAuditEventType {
   USER_BLOCKED = 16,
   /** An operator unblocked the person. `identifier` names the operator, as for `USER_BLOCKED`. */
   USER_UNBLOCKED = 17,
+  /**
+   * An operator removed an address from a mailing list (#428). The row is on the operator; its
+   * `identifier` is the list and the masked address (`news:j***@example.com`), never the address
+   * itself, which the removal erased.
+   */
+  NEWSLETTER_SUBSCRIBER_REMOVED = 18,
+  /** An operator mailed a pending address its confirm link again; `identifier` as for 18. */
+  NEWSLETTER_CONFIRMATION_RESENT = 19,
+  /** An operator downloaded a list's addresses; `identifier` is the list and how many rows. */
+  NEWSLETTER_SUBSCRIBERS_EXPORTED = 20,
 }
 
 export const authAuditBaseSchema = type({
@@ -396,6 +406,9 @@ export const authAuditBaseSchema = type({
     AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
     AuthAuditEventType.USER_BLOCKED,
     AuthAuditEventType.USER_UNBLOCKED,
+    AuthAuditEventType.NEWSLETTER_SUBSCRIBER_REMOVED,
+    AuthAuditEventType.NEWSLETTER_CONFIRMATION_RESENT,
+    AuthAuditEventType.NEWSLETTER_SUBSCRIBERS_EXPORTED,
   ),
   identifier: "string <= 320 | null = null",
   ip: "string <= 45 | null = null",
