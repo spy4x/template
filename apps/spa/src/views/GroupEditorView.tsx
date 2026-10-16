@@ -1,5 +1,6 @@
 import { useEffect } from "preact/hooks"
 import { useLocation } from "wouter-preact"
+import { createOnlineStatus } from "@spy4x/preact-signals/online"
 import { GroupEditorScreen } from "@ui/group-editor-screen.tsx"
 import { InviteForm, PendingInvitations } from "@ui/group-invitations.tsx"
 import { GroupTransferForm } from "@ui/group-transfer.tsx"
@@ -18,6 +19,14 @@ import { SeatPriceConfirm } from "@ui/billing-screen.tsx"
 import { GroupBillingCard } from "./BillingViews.tsx"
 import { toasts } from "../state/toasts.ts"
 import { isSpaPath } from "./spa-paths.ts"
+import { currentLayer } from "../modules.ts"
+
+const network = createOnlineStatus()
+
+/** Whether the app has no network while a device copy is on: the editor says writing waits. */
+function offlineNow(): boolean {
+  return !network.online.value && currentLayer() !== null
+}
 
 /**
  * Hands the open group over. When it worked, the groups are read again: this person is an admin
@@ -160,6 +169,7 @@ export function GroupEditorView({ groupId = null }: { groupId?: string | null })
   const [, navigate] = useLocation()
   const store = groupsStore
   useEffect(() => store.openEditor(groupId), [groupId])
+  useEffect(() => network.watch(), [])
   return (
     <>
       {groupId === null ? <NewGroup /> : <ExistingGroup groupId={groupId} />}
@@ -197,6 +207,7 @@ function NewGroup() {
       onChange={(value) => store.edit(null, value)}
       errors={store.editorErrors.value}
       saving={store.creating.value}
+      offline={offlineNow()}
       onSave={() => void createAndOpen(store, selectionStore, navigate, toasts)}
       navigate={navigate}
     />
@@ -247,6 +258,7 @@ function ExistingGroup({ groupId }: { groupId: string }) {
       errors={store.editorErrors.value}
       dirty={store.unsaved(groupId)}
       saving={working?.groupId === groupId && working.action === "save"}
+      offline={offlineNow()}
       onSave={() => void saveAndAnnounce(store, groupId, toasts)}
       onDiscard={() => store.discard()}
       isLastGroup={store.groups.value.length <= 1}

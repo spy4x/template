@@ -12,6 +12,7 @@ import { Input, Textarea } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { LoadingSkeleton } from "@spy4x/preact-ui/loading-skeleton"
 import { Modal } from "@spy4x/preact-ui/modal"
+import { Notice } from "@spy4x/preact-ui/notice"
 import { RadioGroup } from "@spy4x/preact-ui/radio"
 import {
   canDelete,
@@ -78,6 +79,11 @@ export interface GroupEditorScreenProps {
    * A field differs from what is saved. On an existing group the footer with Discard and Save
    * shows only then.
    */
+  /**
+   * The device has no network. Writing a group needs a connection, so the page says so before the
+   * person fills anything in.
+   */
+  offline?: boolean
   dirty?: boolean
   /** A create or a save is in flight. */
   saving?: boolean
@@ -558,6 +564,7 @@ function GroupForm(
     onDiscard,
     navigate,
     group,
+    offline = false,
   }: GroupEditorScreenProps,
 ): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
@@ -593,100 +600,113 @@ function GroupForm(
   const change = (patch: Partial<GroupDraft>) => onChange?.({ ...value, ...patch })
   const optional = <span class="ml-2 font-normal text-muted">Optional</span>
   return (
-    <ScreenForm pending={saving} onSubmit={onSave}>
-      <div ref={box} class={FORM_WIDTH}>
-        <Stack>
-          <Field id="group-name" label="Name" error={errors.name} required>
-            <Input
-              data-e2e="group-name"
-              name="name"
-              autocomplete="off"
-              maxLength={100}
-              value={value.name}
-              onInput={(e) => change({ name: e.currentTarget.value })}
-              required
+    <>
+      {offline && (
+        <div data-e2e="group-offline" class={FORM_WIDTH}>
+          <Notice title="You are offline">
+            {creating
+              ? "You can fill this in now. Creating the group needs a connection."
+              : "This is the copy saved on this device. Saving changes needs a connection."}
+          </Notice>
+        </div>
+      )}
+      <ScreenForm pending={saving} onSubmit={onSave}>
+        <div ref={box} class={FORM_WIDTH}>
+          <Stack>
+            <Field id="group-name" label="Name" error={errors.name} required>
+              <Input
+                data-e2e="group-name"
+                name="name"
+                autocomplete="off"
+                maxLength={100}
+                value={value.name}
+                onInput={(e) => change({ name: e.currentTarget.value })}
+                required
+              />
+            </Field>
+            <Field
+              id="group-description"
+              label={<>Description {optional}</>}
+              error={errors.description}
+              hint={`${
+                Array.from(value.description).length
+              } of ${GROUP_DESCRIPTION_MAX} characters`}
+            >
+              <Textarea
+                data-e2e="group-description"
+                name="description"
+                rows={3}
+                placeholder="What is this group for?"
+                value={value.description}
+                onInput={(e) => change({ description: e.currentTarget.value })}
+              />
+            </Field>
+            <Field
+              id="group-emoji"
+              label={<>Emoji {optional}</>}
+              error={errors.emoji}
+              hint="Shown before the group's name."
+            >
+              <Input
+                data-e2e="group-emoji"
+                name="emoji"
+                autocomplete="off"
+                placeholder="🏕️"
+                class="w-24"
+                value={value.emoji}
+                onInput={(e) => change({ emoji: e.currentTarget.value })}
+              />
+            </Field>
+            <ColorChoice
+              value={value.color}
+              onChange={(color) => change({ color })}
+              optional={optional}
             />
-          </Field>
-          <Field
-            id="group-description"
-            label={<>Description {optional}</>}
-            error={errors.description}
-            hint={`${Array.from(value.description).length} of ${GROUP_DESCRIPTION_MAX} characters`}
-          >
-            <Textarea
-              data-e2e="group-description"
-              name="description"
-              rows={3}
-              placeholder="What is this group for?"
-              value={value.description}
-              onInput={(e) => change({ description: e.currentTarget.value })}
-            />
-          </Field>
-          <Field
-            id="group-emoji"
-            label={<>Emoji {optional}</>}
-            error={errors.emoji}
-            hint="Shown before the group's name."
-          >
-            <Input
-              data-e2e="group-emoji"
-              name="emoji"
-              autocomplete="off"
-              placeholder="🏕️"
-              class="w-24"
-              value={value.emoji}
-              onInput={(e) => change({ emoji: e.currentTarget.value })}
-            />
-          </Field>
-          <ColorChoice
-            value={value.color}
-            onChange={(color) => change({ color })}
-            optional={optional}
-          />
-          <Preview value={value} />
-          <ErrorState focusOnAppear message={errors.form ?? null} dataE2E="group-form-error" />
-          {showFooter && (
-            // On a phone the primary button is on top at full width; from `sm` up the two are a
-            // row at the right, the primary last.
-            <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              {creating
-                ? (
-                  <Button
-                    href={SCREEN_PATHS.groups}
-                    navigate={navigate}
-                    variant="ghost"
-                    class="min-h-11 w-full sm:min-h-9 sm:w-auto"
-                    data-e2e="group-cancel"
-                  >
-                    Cancel
-                  </Button>
-                )
-                : (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    class="min-h-11 w-full sm:min-h-9 sm:w-auto"
-                    data-e2e="group-discard"
-                    disabled={saving}
-                    onClick={onDiscard}
-                  >
-                    Discard
-                  </Button>
-                )}
-              <Button
-                type="submit"
-                class="min-h-11 w-full sm:min-h-9 sm:w-auto"
-                data-e2e={creating ? "group-create" : "group-save"}
-                busy={saving}
-                busyLabel={creating ? "Creating…" : "Saving…"}
-              >
-                {creating ? "Create group" : "Save group"}
-              </Button>
-            </div>
-          )}
-        </Stack>
-      </div>
-    </ScreenForm>
+            <Preview value={value} />
+            <ErrorState focusOnAppear message={errors.form ?? null} dataE2E="group-form-error" />
+            {showFooter && (
+              // On a phone the primary button is on top at full width; from `sm` up the two are a
+              // row at the right, the primary last.
+              <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                {creating
+                  ? (
+                    <Button
+                      href={SCREEN_PATHS.groups}
+                      navigate={navigate}
+                      variant="ghost"
+                      class="min-h-11 w-full sm:min-h-9 sm:w-auto"
+                      data-e2e="group-cancel"
+                    >
+                      Cancel
+                    </Button>
+                  )
+                  : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      class="min-h-11 w-full sm:min-h-9 sm:w-auto"
+                      data-e2e="group-discard"
+                      disabled={saving}
+                      onClick={onDiscard}
+                    >
+                      Discard
+                    </Button>
+                  )}
+                <Button
+                  type="submit"
+                  class="min-h-11 w-full sm:min-h-9 sm:w-auto"
+                  data-e2e={creating ? "group-create" : "group-save"}
+                  busy={saving}
+                  busyLabel={creating ? "Creating…" : "Saving…"}
+                >
+                  {creating ? "Create group" : "Save group"}
+                </Button>
+              </div>
+            )}
+          </Stack>
+        </div>
+      </ScreenForm>
+    </>
   )
 }
 

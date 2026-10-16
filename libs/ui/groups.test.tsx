@@ -1474,6 +1474,20 @@ describe("GroupEditorScreen form", () => {
     expect(column!.contains(find("[data-e2e=group-save]"))).toBe(true)
   })
 
+  it("says writing a group needs a connection while offline, in the words of each mode", async () => {
+    await mount(<GroupEditorScreen {...settings} />)
+    expect(has("[data-e2e=group-offline]")).toBe(false)
+    await rerender(<GroupEditorScreen {...settings} offline />)
+    expect(find("[data-e2e=group-offline]").textContent).toContain("You are offline")
+    expect(find("[data-e2e=group-offline]").textContent).toContain(
+      "This is the copy saved on this device. Saving changes needs a connection.",
+    )
+    await rerender(<GroupEditorScreen {...creating} offline />)
+    expect(find("[data-e2e=group-offline]").textContent).toContain(
+      "You can fill this in now. Creating the group needs a connection.",
+    )
+  })
+
   it("moves focus to the name field when Discard takes the footer away", async () => {
     await mount(<GroupEditorScreen {...settings} value={{ ...saved, name: "Crew" }} dirty />)
     find("[data-e2e=group-discard]").focus()
