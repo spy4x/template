@@ -359,6 +359,22 @@ describe("one person in the admin app", () => {
     expect(find("[role=tabpanel]").textContent).toContain("ada@example.com")
   })
 
+  it("shows the person's language and region read-only on the Overview, with their time now", async () => {
+    const now = new Date("2026-10-17T12:05:00.000Z")
+    await mount(<AdminUserScreen {...userProps([], { now })} />)
+
+    const panel = find("[role=tabpanel]")
+    expect(panel.textContent).toContain("Language and region")
+    expect(find("[data-e2e=admin-user-preferences-theme]").textContent).toContain("Dark")
+    expect(find("[data-e2e=admin-user-preferences-time-zone]").textContent).toContain(
+      "Berlin, Europe · GMT+2",
+    )
+    expect(find("[data-e2e=admin-user-preferences-time-zone]").textContent).toMatch(
+      /(14:05|2:05\spm) there now/i,
+    )
+    expect(panel.querySelector("[data-e2e=admin-user-preferences-time-zone] button")).toBeNull()
+  })
+
   it("shows each tab's own content: sign-in methods, sessions, groups and activity", async () => {
     const shown = async (tab: string, selector: string) => {
       await mount(<AdminUserScreen {...userProps([], { tab })} />)
