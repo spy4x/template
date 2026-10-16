@@ -93,6 +93,29 @@ describe("tags store", () => {
     expect(store.form.value?.name).toBe("Draft")
   })
 
+  it("keeps the create form when the group changes, and creates the tag in the new group", async () => {
+    const { store, calls } = harness()
+    await store.open(groupId)
+    store.startCreate()
+    store.change({ ...store.form.value!, name: "Errands" })
+    await store.open("g-2")
+    expect(store.form.value).toMatchObject({ id: null, name: "Errands" })
+    store.change({ ...store.form.value!, color: "green" })
+    expect((await store.save())?.name).toBe("Errands")
+    expect(calls).toEqual([{
+      name: "create",
+      input: { groupId: "g-2", id: "new-1", name: "Errands", color: "green" },
+    }])
+  })
+
+  it("drops an edited tag's form when the group changes, since the tag is in the old group", async () => {
+    const { store } = harness()
+    await store.open(groupId)
+    store.startEdit("b")
+    await store.open("g-2")
+    expect(store.form.value).toBeNull()
+  })
+
   it("counts a changed name or colour as unsaved, and puts the saved values back on revert", async () => {
     const { store } = harness()
     await store.open(groupId)

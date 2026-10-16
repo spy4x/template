@@ -285,7 +285,10 @@ export function createTagsStore(dependencies: TagsDependencies) {
     tags.value = []
     loading.value = false
     listError.value = null
-    form.value = null
+    // A tag being created belongs to no group yet: what the person typed stays when the group
+    // changes under the create page (a switch, or the server's selection replacing the cached
+    // one), and the tag is created in the group now shown. An edited tag belongs to the old group.
+    if (form.value?.id !== null) form.value = null
     formErrors.value = NO_ERRORS
     saving.value = false
     deleting.value = null
