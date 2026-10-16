@@ -14,7 +14,10 @@ export enum UserRole {
   SUPERVISOR = 3,
   ADMIN = 4,
 }
-export const userRoleValues = Object.values(UserRole) as UserRole[]
+/** Every role's number. `Object.values` of a numeric enum also holds its names, left out here. */
+export const userRoleValues = Object.values(UserRole).filter((value) =>
+  typeof value === "number"
+) as UserRole[]
 
 /** What each role is called on a page and on the command line. */
 export const USER_ROLE_NAMES: Record<UserRole, string> = {
@@ -27,10 +30,7 @@ export const USER_ROLE_NAMES: Record<UserRole, string> = {
 /** The role named `name` (`operator`), or `null` for a name no role has. */
 export function userRoleNamed(name: string): UserRole | null {
   const wanted = name.trim().toLowerCase()
-  const found = userRoleValues.find((role) =>
-    typeof role === "number" && USER_ROLE_NAMES[role] === wanted
-  )
-  return found ?? null
+  return userRoleValues.find((role) => USER_ROLE_NAMES[role] === wanted) ?? null
 }
 
 export enum UserMFAStatus {
