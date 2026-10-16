@@ -448,7 +448,9 @@ describe("TagEditorScreen", () => {
     expect(find("h1").textContent).toBe("Tag")
     expect(document.body.textContent).not.toContain("Loading the tag…")
     expect(count("form")).toBe(0)
-    await act(() => new Promise((resolve) => setTimeout(resolve, 350)))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200)))
+    expect(document.body.textContent).not.toContain("Loading the tag…")
+    await act(() => new Promise((resolve) => setTimeout(resolve, 150)))
     expect(document.body.textContent).toContain("Loading the tag…")
   })
 
