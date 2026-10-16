@@ -52,6 +52,43 @@ test.describe("group list and settings pages", () => {
     }
   })
 
+  test("the create page says creating a group needs a connection while the browser is offline", async ({ page, request }) => {
+    const email = "e2e_groups_pages_offline@example.com"
+    const password = "Passw0rd!"
+    const cleanup = async ({ soft = false } = {}) => {
+      const response = await request.post(`${apiBase}/api/test/cleanup-user`, {
+        data: { login: email },
+      })
+      ;(soft ? expect.soft : expect)(response.status(), await response.text()).toBe(200)
+    }
+
+    await cleanup()
+    try {
+      const signUp = await request.post(`${apiBase}/api/auth/password/sign-up`, {
+        headers,
+        data: { email, password },
+      })
+      expect(signUp.ok()).toBe(true)
+      await signIn(page, email, password)
+      await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
+      await gotoApp(page, "/groups/new", page.locator("[data-e2e=group-name]"))
+      await expect(page.locator("[data-e2e=group-offline]")).toHaveCount(0)
+
+      await page.context().setOffline(true)
+      await expect(page.locator("[data-e2e=group-offline]")).toContainText(
+        "You can fill this in now. Creating the group needs a connection.",
+      )
+      await page.locator("[data-e2e=group-name]").fill("Trip")
+
+      await page.context().setOffline(false)
+      await expect(page.locator("[data-e2e=group-offline]")).toHaveCount(0)
+      await expect(page.locator("[data-e2e=group-name]")).toHaveValue("Trip")
+    } finally {
+      await page.context().setOffline(false)
+      await cleanup({ soft: true })
+    }
+  })
+
   test("neither page scrolls sideways at 375 px", async ({ page, request }) => {
     const email = "e2e_groups_pages_narrow@example.com"
     const password = "Passw0rd!"
