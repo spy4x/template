@@ -322,6 +322,12 @@ const detail: AdminUserDetail = {
     ip: "203.0.113.9",
     createdAt: "2026-10-13T10:00:00.000Z",
   }],
+  preferences: {
+    value: { theme: "dark", locale: "en-GB", timeZone: "Europe/Berlin", hourCycle: null },
+    version: 3,
+    updatedAt: "2026-10-12T10:00:00.000Z",
+    firstTimeZone: "Europe/Berlin",
+  },
 }
 
 const operator = { id: 7, role: UserRole.OPERATOR }
