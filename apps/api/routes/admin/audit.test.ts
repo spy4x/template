@@ -220,6 +220,11 @@ describe("audit log routes", () => {
         "sec-fetch-site": "cross-site",
         "sec-fetch-mode": "navigate",
       }],
+      ["a page on a sibling subdomain", {
+        cookie: sameOriginHeaders.cookie,
+        "sec-fetch-site": "same-site",
+        "sec-fetch-mode": "navigate",
+      }],
       ["a request with no Sec-Fetch-Site", { cookie: sameOriginHeaders.cookie }],
     ] as const
   ) {
