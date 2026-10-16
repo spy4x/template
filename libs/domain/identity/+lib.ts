@@ -375,21 +375,27 @@ export enum AuthAuditEventType {
   /** An operator unblocked the person. `identifier` names the operator, as for `USER_BLOCKED`. */
   USER_UNBLOCKED = 17,
   /**
+   * An operator removed one of the person's push devices (#427). `identifier` names the operator
+   * and the device's row: `operator:<id> device=<row id>`. An operator revoking a token writes
+   * {@link API_TOKEN_REVOKED} with `reason=operator:<id>`.
+   */
+  PUSH_DEVICE_REMOVED = 18,
+  /**
    * The person's role changed (#425). `identifier` names who changed it and both roles:
    * `operator:<id> from viewer to operator` from the admin app, `cli:user-role from …` from
    * `deno task user:role`.
    */
-  USER_ROLE_CHANGED = 18,
+  USER_ROLE_CHANGED = 22,
   /**
    * An operator sent the person a password-reset link, the same mail "Forgot password" sends.
    * `identifier` names the operator (`operator:<id>`).
    */
-  PASSWORD_RESET_SENT = 19,
+  PASSWORD_RESET_SENT = 23,
   /**
    * The operator exported the user list as CSV. Written on the operator's own trail, since the file
    * holds many people; `identifier` names the operator and the filter (`operator:<id> q=ada`).
    */
-  USERS_EXPORTED = 20,
+  USERS_EXPORTED = 24,
 }
 
 export const authAuditBaseSchema = type({
@@ -412,6 +418,7 @@ export const authAuditBaseSchema = type({
     AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
     AuthAuditEventType.USER_BLOCKED,
     AuthAuditEventType.USER_UNBLOCKED,
+    AuthAuditEventType.PUSH_DEVICE_REMOVED,
     AuthAuditEventType.USER_ROLE_CHANGED,
     AuthAuditEventType.PASSWORD_RESET_SENT,
     AuthAuditEventType.USERS_EXPORTED,
@@ -907,4 +914,24 @@ export function canChangeRoles(operatorRole: UserRole): boolean {
 export function adminUsersExportPath(filter: AdminUserFilter): string {
   const query = adminUserFilterQuery({ ...filter, page: 1 })
   return `/api/admin/users/export.csv${query ? `?${query}` : ""}`
+}
+
+/**
+ * One push device of a person, as the operator area shows it (#427): never the endpoint or the
+ * keys, which let anyone who holds them push to the device.
+ */
+export interface AdminPushDevice {
+  /** The row's id: what the operator's remove names. */
+  id: number
+  /** The device id's last eight characters, as the person's own profile names the device. */
+  label: string
+  /** ISO 8601: when the device was first registered. */
+  createdAt: string
+  /** ISO 8601: when the browser last renewed its subscription. */
+  updatedAt: string
+}
+
+/** The answer of `GET /api/admin/users/:id/devices`: the live devices, newest first. */
+export interface AdminPushDevicesResponse {
+  devices: AdminPushDevice[]
 }
