@@ -132,12 +132,12 @@ function resultUnknown(error: BillingError): boolean {
 /** The answer to a failed provider call: `unknown` when it may have acted, else `refused`. */
 function providerFailure(c: Context<APIContext>, error: BillingError) {
   if (resultUnknown(error)) {
-    return c.json({ error: ADMIN_BILLING_UNKNOWN, outcome: `unknown` as const }, 502)
+    return c.json({ error: ADMIN_BILLING_UNKNOWN, code: `result_unknown` as const }, 502)
   }
   const reason = error.message.replace(/[.\s]+$/, ``)
   return c.json({
     error: `Stripe refused this: ${reason}. Nothing changed.`,
-    outcome: `refused` as const,
+    code: `provider_refused` as const,
   }, 502)
 }
 
@@ -334,7 +334,7 @@ export function createAdminBillingRoutes(
             if (claimed) await store.release(body.idempotencyKey)
             return c.json({
               error: `Stripe did not give the last payment, so nothing was refunded. Try again.`,
-              outcome: `refused`,
+              code: `provider_refused`,
             }, 502)
           }
           const payment = read.value

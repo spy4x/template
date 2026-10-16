@@ -300,7 +300,7 @@ describe(`operator billing routes`, () => {
     const answer = await response.json()
 
     expect(response.status).toBe(502)
-    expect(answer).toEqual({ error: ADMIN_BILLING_UNKNOWN, outcome: `unknown` })
+    expect(answer).toEqual({ error: ADMIN_BILLING_UNKNOWN, code: `result_unknown` })
     expect(answer.error).not.toContain(`Nothing changed`)
     expect(audits).toEqual([])
   })
@@ -312,7 +312,7 @@ describe(`operator billing routes`, () => {
     })
     const response = await post(app, `undo-cancel`, { idempotencyKey: uuidV7() })
 
-    expect((await response.json()).outcome).toBe(`unknown`)
+    expect((await response.json()).code).toBe(`result_unknown`)
   })
 
   it(`says nothing changed when Stripe refuses the request`, async () => {
@@ -329,7 +329,7 @@ describe(`operator billing routes`, () => {
 
     expect(await response.json()).toEqual({
       error: `Stripe refused this: Stripe answered 400: No such sub. Nothing changed.`,
-      outcome: `refused`,
+      code: `provider_refused`,
     })
   })
 
