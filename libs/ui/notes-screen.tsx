@@ -503,13 +503,22 @@ function ListPage(
 /** A list row's title: up to two lines, so a phone shows a long title instead of cutting it. */
 const ROW_TITLE = "line-clamp-2 break-words text-sm font-medium"
 
-/** A list: one card, its rows split by a quiet line. */
+/**
+ * A list: one card, its rows split by a quiet line. The card never clips (`overflow-hidden`), so a
+ * row's menu opens over the rows below it instead of being cut off; the first and last rows round
+ * their own corners so a hover background still follows the card's.
+ */
 export function ListCard(
   { children, dataE2E }: { children?: ComponentChildren; dataE2E: string },
 ): JSX.Element {
   return (
-    <Card class="overflow-hidden">
-      <ul class="divide-y divide-subtle" data-e2e={dataE2E}>{children}</ul>
+    <Card>
+      <ul
+        class="divide-y divide-subtle *:first:rounded-t-[var(--radius-primary,0.5rem)] *:last:rounded-b-[var(--radius-primary,0.5rem)]"
+        data-e2e={dataE2E}
+      >
+        {children}
+      </ul>
     </Card>
   )
 }

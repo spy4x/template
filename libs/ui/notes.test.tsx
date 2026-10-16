@@ -196,6 +196,13 @@ describe("NotesScreen", () => {
     expect(html).toContain(`aria-label="Actions for Groceries"`)
   })
 
+  it("never clips the list card, so a row's menu opens in full over the rows below", async () => {
+    await mount(<NotesScreen {...listDefaults} />)
+
+    const card = find(`[data-e2e=note-list]`).parentElement as HTMLElement
+    expect(card.className.split(" ")).not.toContain("overflow-hidden")
+  })
+
   it("shows an empty list as an empty state whose one action is New note", () => {
     const html = renderToString(<NotesScreen {...listDefaults} notes={[]} />)
 
