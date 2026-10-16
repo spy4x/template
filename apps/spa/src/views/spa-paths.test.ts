@@ -61,6 +61,7 @@ describe("isMembersOnlyPath", () => {
     expect(open).toEqual([
       "/sign-up",
       "/sign-up/confirm",
+      "/sign-up/code",
       "/sign-in",
       "/totp",
       "/forgot-password",

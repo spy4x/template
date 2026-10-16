@@ -29,14 +29,13 @@ import { DEFAULT_CODE_MAX_ATTEMPTS, EMAIL_CODE_BYTES } from "@spy4x/server/auth/
 import { PASSWORD_METHOD } from "@spy4x/server/auth/password"
 import { randomBase64Url, sha256Hex } from "@spy4x/platform/tokens"
 import { UUID_PATTERN } from "@spy4x/platform/universal/uuid"
-import { type OAuthProviderId, oauthProviderId } from "@domain/identity"
-import { EMAIL_CODE_TTL_MINUTES } from "./email-verification.ts"
+import { type OAuthProviderId, oauthProviderId, SIGN_UP_CODE_MINUTES } from "@domain/identity"
 
 /** The challenge purpose of a sign-up code. Not the package's own: its codes belong to a user. */
 export const SIGN_UP_PURPOSE = "app.sign-up"
 
 /** How long a waiting sign-up and its code work, in minutes. A new code starts it again. */
-export const SIGN_UP_TTL_MINUTES = EMAIL_CODE_TTL_MINUTES
+export const SIGN_UP_TTL_MINUTES = SIGN_UP_CODE_MINUTES
 
 /** Guesses one waiting sign-up allows, over all its codes together. */
 export const SIGN_UP_MAX_GUESSES = DEFAULT_CODE_MAX_ATTEMPTS

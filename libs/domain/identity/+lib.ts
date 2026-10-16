@@ -500,6 +500,26 @@ export const OAUTH_PROVIDER_NAMES: Record<OAuthProviderId, string> = {
   github: "GitHub",
 }
 
+/**
+ * The only origins a provider's picture of a person is shown from: Google's and GitHub's image
+ * hosts. The SPA's `img-src` allows exactly these (docs/security-headers.md); a picture from any
+ * other host is dropped before it reaches the page, and the page shows initials instead.
+ */
+export const PROVIDER_AVATAR_ORIGINS = [
+  "https://lh3.googleusercontent.com",
+  "https://avatars.githubusercontent.com",
+] as const
+
+/** `url` when it is an `https:` address on one of {@link PROVIDER_AVATAR_ORIGINS}, else `null`. */
+export function providerAvatarUrl(url: unknown): string | null {
+  if (typeof url !== "string" || !URL.canParse(url)) return null
+  const parsed = new URL(url)
+  const allowed: readonly string[] = PROVIDER_AVATAR_ORIGINS
+  return allowed.includes(parsed.origin) && parsed.username === "" && parsed.password === ""
+    ? parsed.href
+    : null
+}
+
 /** `value` as a provider id, or `null` when it names none. */
 export function oauthProviderId(value: unknown): OAuthProviderId | null {
   return OAUTH_PROVIDERS.find((id) => id === value) ?? null
@@ -518,6 +538,13 @@ export interface PendingSignUp {
   provider: OAuthProviderId
   /** The address the provider reported, vouched for or not; `null` when it shared none. */
   email: string | null
+  /** The person's name as the provider shows it; `null` when it shared none. */
+  name: string | null
+  /**
+   * The provider's picture of the person, an `https:` address on one of
+   * {@link PROVIDER_AVATAR_ORIGINS}; `null` when it shared none, or one from anywhere else.
+   */
+  avatarUrl: string | null
   /** ISO 8601. After this the sign-up can no longer be confirmed. */
   expiresAt: string
   /**
@@ -527,6 +554,9 @@ export interface PendingSignUp {
    */
   unconfirmedAccount: boolean
 }
+
+/** How long a sign-up and its mailed code work, in minutes (#142). A new code starts it again. */
+export const SIGN_UP_CODE_MINUTES = 10
 
 /**
  * A sign-up with an address and a password that waits for the code mailed to the address (#142),

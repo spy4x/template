@@ -644,6 +644,8 @@ export function createOAuthOperations(
       return {
         provider: waiting.provider,
         email: waiting.email,
+        name: null,
+        avatarUrl: null,
         expiresAt: waiting.expiresAt,
         unconfirmedAccount: await unconfirmedClaim(db.authStore, waiting) !== null,
       }
