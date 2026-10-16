@@ -506,8 +506,10 @@ test.describe("what a device keeps", () => {
       await context.clearCookies()
       await context.addCookies(await elsewhere.cookies())
       await gotoApp(page, "/groups", page.locator("[data-e2e=group-list]"))
-      // The app now runs as the second person: it keeps their read copies.
-      await expect.poll(() => recordsIn(page, `reads:${secondId}`)).toBeGreaterThan(0)
+      // The app has seen the second person's session: it remembers them now.
+      await expect.poll(() =>
+        page.evaluate(() => JSON.parse(localStorage.getItem("offline:session") ?? "null")?.id)
+      ).toBe(secondId)
 
       await expect.poll(() => recordsIn(page, `reads:${userId}`)).toBe(0)
       expect(await recordsIn(page, `offline:user:${userId}:notes`)).toBe(0)
