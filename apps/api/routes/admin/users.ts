@@ -41,6 +41,7 @@ export const ADMIN_SAME_ROLE = "This user already has that role"
 export const ADMIN_NOT_ADMINISTRATOR = "Only an administrator can change a role"
 export const ADMIN_ROLE_TOO_HIGH = "You can only give a role below your own"
 export const ADMIN_SESSION_NOT_FOUND = "Session not found"
+export const ADMIN_EXPORT_CROSS_SITE = "The export opens only from the operator area"
 export const ADMIN_NO_PASSWORD =
   "This user has no password with an address, so no reset link can reach them"
 
@@ -112,7 +113,9 @@ function serialIdOf(raw: string): number | null {
  *   `sort` is `key:direction` rules, such as `name:asc,createdAt:desc` (#424).
  * - `GET /users/:id` is one person: `{ user, methods, sessions, groups, audits }`.
  * - `GET /users/export.csv?q=&role=&blocked=&sort=` is every person the filter matches, on all its
- *   pages, as CSV, read in batches and streamed (#425). It writes an audit row on the operator.
+ *   pages, as CSV, read in batches and streamed (#425). It writes an audit row on the operator, so
+ *   it answers 403 unless `Sec-Fetch-Site` is `same-origin`: the session cookie is `SameSite=Lax`,
+ *   which another site's link or top-level navigation still carries.
  * - `POST /users/:id/block`, `/unblock`, `/sessions/end` and `/password-reset` take no body and
  *   answer `{ user }`. `/sessions/:sessionId/end` ends one session. `/role` takes `{ role }`.
  *   They ask for no fresh password or code: the owner chose the audit trail over a confirmation
@@ -157,6 +160,11 @@ export function createAdminUsersRoutes(
     })
     // Before `/users/:id`, which would otherwise take `export.csv` as an id.
     .get(`/users/export.csv`, dependencies.limit, async (c) => {
+      // A GET the mutation guards let through, yet it writes an audit row in the operator's name.
+      // The admin app's download link is same-origin; a missing header is refused too.
+      if (c.req.header(`sec-fetch-site`) !== `same-origin`) {
+        return c.json({ error: ADMIN_EXPORT_CROSS_SITE }, 403)
+      }
       const filter = parseAdminUserFilter(new URL(c.req.url).searchParams)
       const batches = await admin.export(c, c.get("auth")!, filter)
       const encoder = new TextEncoder()

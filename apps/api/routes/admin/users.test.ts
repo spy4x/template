@@ -21,6 +21,7 @@ import {
 } from "../../_testing/mutation-requests.ts"
 import { createAdminRoute } from "./+routes.ts"
 import {
+  ADMIN_EXPORT_CROSS_SITE,
   ADMIN_NO_PASSWORD,
   ADMIN_NOT_ADMINISTRATOR,
   ADMIN_ROLE_TOO_HIGH,
@@ -231,6 +232,28 @@ describe("the people actions of the operator area", () => {
         "42,Ada,Lovelace,ada@example.com,viewer,active,2026-10-01T10:00:00.000Z,,\r\n" +
         "43,Grace,Hopper,,viewer,active,2026-10-01T10:00:00.000Z,,\r\n",
     )
+  })
+
+  it("refuses an export another site starts, or one with no Sec-Fetch-Site, before it is audited", async () => {
+    const { "sec-fetch-site": _, ...noFetchSite } = sameOriginHeaders
+    for (const headers of [crossSiteHeaders, noFetchSite]) {
+      const { app, calls } = buildApp()
+      const response = await send(app, ROUTES[3], headers)
+
+      expect(response.status).toBe(403)
+      expect((await response.json()).error).toBe(ADMIN_EXPORT_CROSS_SITE)
+      // The service writes the audit row, so no call means no row.
+      expect(calls).toEqual([])
+    }
+  })
+
+  it("keeps the export out of every cache", async () => {
+    const { app } = buildApp()
+    const response = await send(app, ROUTES[3])
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("cache-control")).toBe("no-store")
+    await response.body?.cancel()
   })
 
   it("writes a cell that would open as a formula as text, with a quote before it", async () => {
