@@ -284,7 +284,8 @@ function SubscribersTab(props: AdminNewsletterScreenProps): JSX.Element {
     <Stack>
       <Notice tone="info" title="Unsubscribed addresses are not kept">
         An address that unsubscribes, or that you remove, is erased at once. The list keeps only a
-        keyed mark that names no address, so nobody who left can be listed or mailed again.
+        keyed mark that names no address, so no earlier confirm link can add them back. They can
+        still subscribe again from the website.
       </Notice>
       <div class="flex flex-col gap-4 rounded-xl border border-subtle bg-surface p-4">
         <ScreenForm
