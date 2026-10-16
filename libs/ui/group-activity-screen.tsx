@@ -59,8 +59,7 @@ export function GroupActivityScreen(props: GroupActivityScreenProps): JSX.Elemen
           <Card>
             <EmptyState
               headingLevel={2}
-              // TODO(#433): use EmptyState's in-card option (preact-components 3.27.0).
-              class="max-w-none border-none px-4 py-6 sm:px-6"
+              inset
               title={props.loading ? "Loading the group..." : "This group was not found."}
               action={!props.loading && (
                 <Button
@@ -80,8 +79,7 @@ export function GroupActivityScreen(props: GroupActivityScreenProps): JSX.Elemen
           <Card data-e2e="activity-forbidden">
             <EmptyState
               headingLevel={2}
-              // TODO(#433): use EmptyState's in-card option (preact-components 3.27.0).
-              class="max-w-none border-none px-4 py-6 sm:px-6"
+              inset
               title="Only admins and the owner can see the activity."
               description="Ask an admin if you need to know what changed."
             />
@@ -96,8 +94,7 @@ export function GroupActivityScreen(props: GroupActivityScreenProps): JSX.Elemen
                   <Card>
                     <EmptyState
                       headingLevel={2}
-                      // TODO(#433): use EmptyState's in-card option (preact-components 3.27.0).
-                      class="max-w-none border-none px-4 py-6 sm:px-6"
+                      inset
                       title={props.loading
                         ? "Loading the activity..."
                         : "Nothing has happened yet."}

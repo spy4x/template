@@ -210,8 +210,7 @@ export function GroupSettingsScreen(
         {error ? <ErrorState message={error} /> : (
           <Card>
             <EmptyState
-              // TODO(#433): use EmptyState's in-card option (preact-components 3.27.0).
-              class="max-w-none border-none px-4 py-6 sm:px-6"
+              inset
               title={loading ? "Loading the group..." : "This group does not exist."}
               description={loading
                 ? undefined
