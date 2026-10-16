@@ -2,6 +2,7 @@ import type { APIRequestContext, BrowserContext, Page } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
 import { signIn } from "./fixtures/app.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
+import { signUpWithCode } from "./fixtures/sign-up.ts"
 
 /**
  * Display preferences follow the person to every device (#163): a theme picked on the laptop paints
@@ -36,7 +37,7 @@ test.describe("preferences across devices", () => {
     let laptop: BrowserContext | null = null
     let phone: BrowserContext | null = null
     try {
-      const signUp = await request.post(`${appBase}/api/auth/password/sign-up`, {
+      const signUp = await signUpWithCode(request, `${appBase}/api/auth/password/sign-up`, {
         headers,
         data: { email, password },
       })
