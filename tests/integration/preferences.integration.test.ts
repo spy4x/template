@@ -70,7 +70,24 @@ Deno.test(`preferences: a save writes the next version, and one on an older vers
       value: { ...berlin, theme: `light` },
     })
     expect(stale).toEqual({ ok: false, reason: `conflict`, current: { version: 1, value: berlin } })
-    expect(await store.read(String(userId))).toEqual({ version: 1, value: berlin })
+
+    // Past the first save, the same holds: a save on version 1 after version 2 landed is refused.
+    const light = { ...berlin, theme: `light` as const }
+    const second = await saveSettings(preferencesDefinition, store, String(userId), {
+      version: 1,
+      value: light,
+    })
+    expect(second).toEqual({ ok: true, settings: { version: 2, value: light } })
+    const staleAgain = await saveSettings(preferencesDefinition, store, String(userId), {
+      version: 1,
+      value: berlin,
+    })
+    expect(staleAgain).toEqual({
+      ok: false,
+      reason: `conflict`,
+      current: { version: 2, value: light },
+    })
+    expect(await store.read(String(userId))).toEqual({ version: 2, value: light })
   })
 })
 
@@ -86,6 +103,16 @@ Deno.test(`preferences: of two saves on the same version at once, exactly one la
 
     expect([a, b].filter(Boolean)).toHaveLength(1)
     expect((await store.read(String(userId)))?.version).toBe(1)
+
+    // The same on an existing row: two writes that both read version 1.
+    const [c, d] = await Promise.all([
+      store.write(String(userId), 1, { version: 2, value: berlin }),
+      store.write(String(userId), 1, { version: 2, value: { ...berlin, theme: `system` } }),
+    ])
+    expect([c, d].filter(Boolean)).toHaveLength(1)
+    // A write on a version already passed changes nothing.
+    expect(await store.write(String(userId), 1, { version: 2, value: DEFAULT_PREFERENCES }))
+      .toBe(false)
   })
 })
 
@@ -96,8 +123,15 @@ Deno.test(`preferences: one person's save never changes another person's row`, a
     const store = preferencesStore(sql)
 
     await saveSettings(preferencesDefinition, store, String(ann), { version: 0, value: berlin })
-
     expect(await store.read(String(bob))).toBeNull()
+
+    // Both now hold version 1; Ann's next save changes her row only.
+    await saveSettings(preferencesDefinition, store, String(bob), { version: 0, value: berlin })
+    await saveSettings(preferencesDefinition, store, String(ann), {
+      version: 1,
+      value: { ...berlin, theme: `light` },
+    })
+    expect(await store.read(String(bob))).toEqual({ version: 1, value: berlin })
   })
 })
 
