@@ -895,6 +895,15 @@ describe("deleting the account from the profile", () => {
     expect(document.querySelector("[data-e2e=danger-zone]")).toBeNull()
   })
 
+  it("sets the danger zone apart as a card with a danger-coloured border", async () => {
+    await mount(withDeletion())
+
+    const zone = find("[data-e2e=danger-zone]")
+    expect(zone.classList.contains("pc-card")).toBe(true)
+    expect(zone.classList.contains("border-danger")).toBe(true)
+    expect(zone.querySelector(".pc-card")).toBeNull()
+  })
+
   it("names the delete button for a screen reader and gives it a 44 px touch target", async () => {
     await mount(withDeletion())
 
