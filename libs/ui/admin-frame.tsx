@@ -12,7 +12,7 @@ import { PageHeader } from "@spy4x/preact-ui/page-header"
 import { Tooltip } from "@spy4x/preact-ui/tooltip"
 import { AuthCard } from "./auth-screen.tsx"
 import type { FrameTheme } from "./frame.tsx"
-import { placeHook } from "./group-picker.tsx"
+import { MENU_TOOLTIP_CLASS, placeHook } from "./group-picker.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
 
 /**
@@ -123,6 +123,7 @@ export function AdminShell(
               placement="right"
               focusable={false}
               class="flex w-full justify-center"
+              contentClass={MENU_TOOLTIP_CLASS}
             >
               {account(place)}
             </Tooltip>

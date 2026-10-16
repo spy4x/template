@@ -19,7 +19,13 @@ import { Button } from "@spy4x/preact-ui/button"
 import { Page } from "@spy4x/preact-ui/layout"
 import { followLinkClick, Link } from "@spy4x/preact-ui/link"
 import { Tooltip } from "@spy4x/preact-ui/tooltip"
-import { GroupPicker, type GroupPickerData, GroupSheet, placeHook } from "./group-picker.tsx"
+import {
+  GroupPicker,
+  type GroupPickerData,
+  GroupSheet,
+  MENU_TOOLTIP_CLASS,
+  placeHook,
+} from "./group-picker.tsx"
 import {
   GROUP_PATHS,
   type Navigate,
@@ -291,6 +297,7 @@ function AccountEntry(
       placement="right"
       focusable={false}
       class="flex w-full justify-center"
+      contentClass={MENU_TOOLTIP_CLASS}
     >
       {menu}
     </Tooltip>

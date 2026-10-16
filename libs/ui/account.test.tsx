@@ -27,6 +27,7 @@ import {
   EmailUnavailable,
 } from "./email-screen.tsx"
 import { AppFrame, navKey, PublicFrame } from "./frame.tsx"
+import { MENU_TOOLTIP_CLASS } from "./group-picker.tsx"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
 import { GROUP_PATHS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 import { TwoFactorProof } from "./two-factor.ts"
@@ -504,6 +505,25 @@ describe("AppFrame", () => {
       "Account: Ada Lovelace",
     )
     expect(tip("[data-e2e=shell-user-menu-button-rail]")).toBe("Account: Ada Lovelace")
+  })
+
+  it("gives the rail menus' tooltips the class that hides them while their menu is open", async () => {
+    await mount(
+      <AppFrame
+        user={ada}
+        onSignOut={() => {}}
+        unreadCount={2}
+        groupPicker={{ groups, selectedId: "g-1", onSelect: () => {} }}
+      >
+        page
+      </AppFrame>,
+    )
+    const surface = (selector: string) =>
+      find(selector).closest("[role=group]")!.querySelector("[role=tooltip]")!.className
+    expect(surface("[data-e2e=group-picker-rail]")).toContain(MENU_TOOLTIP_CLASS)
+    expect(surface("[data-e2e=shell-user-menu-button-rail]")).toContain(MENU_TOOLTIP_CLASS)
+    // The bell opens no menu, so its tooltip stays.
+    expect(surface("[data-e2e=shell-bell-rail]")).not.toContain(MENU_TOOLTIP_CLASS)
   })
 
   it("switches group from the keyboard: the arrow keys move through the groups, the checked one is current", async () => {

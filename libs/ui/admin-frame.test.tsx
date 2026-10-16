@@ -18,6 +18,7 @@ import {
   IconUsers,
 } from "@spy4x/preact-icons"
 import { AdminShell } from "./admin-frame.tsx"
+import { MENU_TOOLTIP_CLASS } from "./group-picker.tsx"
 
 const window = new Window({ url: "http://admin.localhost/" })
 const own = {
@@ -187,7 +188,7 @@ describe("AdminShell", () => {
     expect(signedOut).toEqual([true])
   })
 
-  it("names the operator's avatar in the rail and shows the same words as its tooltip", async () => {
+  it("names the operator's avatar in the rail and shows the same words as its tooltip, hidden while the menu is open", async () => {
     await mount(
       <AdminShell navItems={modules} currentPath="/" operator={operator} onSignOut={() => {}}>
         page
@@ -198,5 +199,8 @@ describe("AdminShell", () => {
     expect(trigger.closest("[role=group]")?.querySelector("[role=tooltip]")?.textContent).toBe(
       "Account: Olga Ops",
     )
+    // The tooltip hides while the operator's menu is open, so it never sits beside it.
+    expect(trigger.closest("[role=group]")!.querySelector("[role=tooltip]")!.className)
+      .toContain(MENU_TOOLTIP_CLASS)
   })
 })

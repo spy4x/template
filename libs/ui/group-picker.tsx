@@ -38,6 +38,12 @@ export function placeHook(name: string, place: RailShellSidebarPlace): string {
 }
 
 /**
+ * `contentClass` for a rail tooltip around a menu's trigger: hides the tooltip while the menu is
+ * open, so it does not sit beside the open menu (the tooltip shows while focus is inside it).
+ */
+export const MENU_TOOLTIP_CLASS = "group-has-[[aria-expanded=true]]:invisible!"
+
+/**
  * The group's mark in the switcher: its own colour and emoji, or its initial on a quiet tile when
  * it has neither, so every group has a mark and the names line up.
  */
@@ -144,7 +150,14 @@ export function GroupPicker(
   )
   if (!rail) return menu
   return (
-    <Tooltip label={label} content={label} placement="right" focusable={false} class="flex w-full">
+    <Tooltip
+      label={label}
+      content={label}
+      placement="right"
+      focusable={false}
+      class="flex w-full"
+      contentClass={MENU_TOOLTIP_CLASS}
+    >
       {menu}
     </Tooltip>
   )
