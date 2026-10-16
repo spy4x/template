@@ -338,6 +338,8 @@ export interface AdminBillingClaim {
   action: string
   groupId: string
   operatorId: number
+  /** For time at no charge: the new trial end this try computed. */
+  until?: Date
 }
 
 /** What claiming a key found. */
@@ -352,28 +354,49 @@ export enum AdminBillingClaimOutcome {
 
 /**
  * Claims the key for this action before the provider is called. A retry of the same request finds
- * its own claim and goes on; the provider acts once for the key. A key reused for anything else is
- * refused, so it never acts without an audit row.
+ * its own claim and goes on with the trial end the first try stored, so the provider gets the same
+ * request and acts once for the key. A key reused for anything else is refused, so it never acts
+ * without an audit row.
  */
 export async function claimAdminBillingAction(
   sql: postgres.Sql,
   claim: AdminBillingClaim,
-): Promise<AdminBillingClaimOutcome> {
+): Promise<{ outcome: AdminBillingClaimOutcome; until: Date | null }> {
+  const until = claim.until ?? null
   const inserted = await sql`
-    INSERT INTO admin_billing_actions (idempotency_key, action, group_id, operator_id)
-    VALUES (${claim.idempotencyKey}, ${claim.action}, ${claim.groupId}, ${claim.operatorId})
+    INSERT INTO admin_billing_actions (idempotency_key, action, group_id, operator_id, until)
+    VALUES (
+      ${claim.idempotencyKey}, ${claim.action}, ${claim.groupId}, ${claim.operatorId}, ${until}
+    )
     ON CONFLICT (idempotency_key) DO NOTHING
     RETURNING idempotency_key
   `
-  if (inserted.length > 0) return AdminBillingClaimOutcome.Claimed
-  const [existing] = await sql<{ action: string; groupId: string; operatorId: number }[]>`
-    SELECT action, group_id, operator_id FROM admin_billing_actions
+  if (inserted.length > 0) return { outcome: AdminBillingClaimOutcome.Claimed, until }
+  const [existing] = await sql<
+    { action: string; groupId: string; operatorId: number; until: Date | null }[]
+  >`
+    SELECT action, group_id, operator_id, until FROM admin_billing_actions
     WHERE idempotency_key = ${claim.idempotencyKey}
   `
-  return existing && existing.action === claim.action && existing.groupId === claim.groupId &&
-      existing.operatorId === claim.operatorId
-    ? AdminBillingClaimOutcome.Retry
-    : AdminBillingClaimOutcome.Conflict
+  const same = existing !== undefined && existing.action === claim.action &&
+    existing.groupId === claim.groupId && existing.operatorId === claim.operatorId
+  return same
+    ? { outcome: AdminBillingClaimOutcome.Retry, until: existing.until }
+    : { outcome: AdminBillingClaimOutcome.Conflict, until: null }
+}
+
+/**
+ * Gives a claimed key back when the action was refused before the provider was called, so nothing
+ * of it stays. A key whose action was audited is kept.
+ */
+export async function releaseAdminBillingAction(
+  sql: postgres.Sql,
+  idempotencyKey: string,
+): Promise<void> {
+  await sql`
+    DELETE FROM admin_billing_actions
+    WHERE idempotency_key = ${idempotencyKey} AND audited_at IS NULL
+  `
 }
 
 /** The audit row of an action, as `auth_audits` stores it on the operator's own trail. */

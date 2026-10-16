@@ -18,6 +18,7 @@ import {
   listAdminBillingCustomers,
   readAdminBillingFigures,
   readAdminBillingRecord,
+  releaseAdminBillingAction,
 } from "@server/billing/admin-billing.ts"
 import { insertUser, team, withSchema } from "./group-team.ts"
 
@@ -160,6 +161,23 @@ Deno.test(`admin billing: the list shows paying customers past due first, and co
   })
 })
 
+Deno.test(`admin billing: a retry keeps the trial end the first try computed`, async () => {
+  await withSchema(async (sql) => {
+    const { groupId } = await team(sql)
+    const operator = await insertUser(sql)
+    const claim = { idempotencyKey: uuidV7(), action: `time`, groupId, operatorId: operator }
+    const first = new Date(`2026-11-30T00:00:00.000Z`)
+
+    await claimAdminBillingAction(sql, { ...claim, until: first })
+    const retry = await claimAdminBillingAction(sql, {
+      ...claim,
+      until: new Date(`2027-01-30T00:00:00.000Z`),
+    })
+
+    expect(retry).toEqual({ outcome: AdminBillingClaimOutcome.Retry, until: first })
+  })
+})
+
 Deno.test(`admin billing: a key acts and audits once, and is refused for another group`, async () => {
   await withSchema(async (sql) => {
     const { groupId, owner, stranger, viewer } = await team(sql)
@@ -184,14 +202,17 @@ Deno.test(`admin billing: a key acts and audits once, and is refused for another
       userAgent: null,
     }
 
-    expect(await claimAdminBillingAction(sql, claim)).toBe(AdminBillingClaimOutcome.Claimed)
-    expect(await claimAdminBillingAction(sql, claim)).toBe(AdminBillingClaimOutcome.Retry)
-    expect(await claimAdminBillingAction(sql, { ...claim, groupId: uuidV7() })).toBe(
+    expect((await claimAdminBillingAction(sql, claim)).outcome).toBe(
+      AdminBillingClaimOutcome.Claimed,
+    )
+    expect((await claimAdminBillingAction(sql, claim)).outcome).toBe(
+      AdminBillingClaimOutcome.Retry,
+    )
+    expect((await claimAdminBillingAction(sql, { ...claim, groupId: uuidV7() })).outcome).toBe(
       AdminBillingClaimOutcome.Conflict,
     )
-    expect(await claimAdminBillingAction(sql, { ...claim, operatorId: stranger })).toBe(
-      AdminBillingClaimOutcome.Conflict,
-    )
+    expect((await claimAdminBillingAction(sql, { ...claim, operatorId: stranger })).outcome)
+      .toBe(AdminBillingClaimOutcome.Conflict)
     expect(await auditAdminBillingAction(sql, key, row)).toBe(true)
     expect(await auditAdminBillingAction(sql, key, row)).toBe(false)
 
@@ -203,6 +224,18 @@ Deno.test(`admin billing: a key acts and audits once, and is refused for another
       amount: { amount: 900, currency: `EUR`, decimals: 2 },
       note: `asked by mail`,
     })
+
+    // A key refused before the provider was called is given back; an audited one is kept.
+    await releaseAdminBillingAction(sql, key)
+    expect((await claimAdminBillingAction(sql, claim)).outcome).toBe(
+      AdminBillingClaimOutcome.Retry,
+    )
+    const refused = { ...claim, idempotencyKey: uuidV7() }
+    await claimAdminBillingAction(sql, refused)
+    await releaseAdminBillingAction(sql, refused.idempotencyKey)
+    expect((await claimAdminBillingAction(sql, refused)).outcome).toBe(
+      AdminBillingClaimOutcome.Claimed,
+    )
 
     expect(await isOwnerOrMember(sql, groupId, owner)).toBe(true)
     expect(await isOwnerOrMember(sql, groupId, viewer)).toBe(true)

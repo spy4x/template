@@ -22,6 +22,9 @@ CREATE TABLE admin_billing_actions (
     action VARCHAR(32) NOT NULL,
     group_id UUID NOT NULL,
     operator_id INT4 NOT NULL,
+    -- The new trial end the first try computed for time at no charge, so a retry sends the provider
+    -- the same request; `NULL` for the other actions.
+    until TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     audited_at TIMESTAMPTZ
 );
