@@ -2,6 +2,7 @@ import { expect, test } from "./fixtures/stack.ts"
 import { gotoApp, submitAuthForm } from "./fixtures/app.ts"
 import { currentStep, totpCode } from "./fixtures/totp.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
+import { signUpWithCode } from "./fixtures/sign-up.ts"
 
 const apiBase = "http://app.localhost"
 
@@ -23,7 +24,7 @@ test.describe("two-factor sign-in", () => {
 
     await cleanup()
     try {
-      const signUp = await page.request.post(`${apiBase}/api/auth/password/sign-up`, {
+      const signUp = await signUpWithCode(page.request, `${apiBase}/api/auth/password/sign-up`, {
         headers,
         data: { email, password },
       })

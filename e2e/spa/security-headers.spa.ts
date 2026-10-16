@@ -2,6 +2,7 @@ import { type APIResponse, expect, test } from "@playwright/test"
 import { gotoApp, signIn } from "../fixtures/app.ts"
 import { refusalSource, watchCspViolations } from "../fixtures/csp.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
+import { signUpWithCode } from "../fixtures/sign-up.ts"
 
 const TRACKER = Deno.env.get("ERROR_TRACKER_ORIGIN")
 if (!TRACKER) throw new Error("ERROR_TRACKER_ORIGIN is required: e2e/spa/run.sh sets it")
@@ -138,7 +139,7 @@ test("a signed-in walk through the app meets no refusal under the content securi
   }
   await cleanup()
   try {
-    const signUp = await request.post("/api/auth/password/sign-up", {
+    const signUp = await signUpWithCode(request, "/api/auth/password/sign-up", {
       headers,
       data: { email, password },
     })

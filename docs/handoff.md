@@ -239,6 +239,10 @@ These cost real time to find. Do not rediscover them.
    waiting sign-up back for a reload, `/resend` and `/cancel` give a new code or forget it. The
    nightly cleanup deletes expired ones. `signIn.signUp`, which creates an unproven account at once,
    is no longer reachable from a route; the seed script and the integration tests still use it.
+   The e2e specs sign up through `e2e/fixtures/sign-up.ts`, which reads the code from
+   `/api/test/last-mail` and enters it. Every sign-up spends one of the address's three code mails
+   an hour, so `POST /api/test/cleanup-user` also forgets that budget for the address it is given:
+   a spec with a fixed address can run again on a dev stack within the hour.
 
    **Proving an address (#140).** An address change, and an account made before #142, prove their
    address with the `auth.email-code-mail` job

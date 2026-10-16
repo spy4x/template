@@ -1,6 +1,7 @@
 import type { APIRequestContext, BrowserContext } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
+import { signUpWithCode } from "./fixtures/sign-up.ts"
 
 /**
  * The admin app's System page (#429): an operator sees the database, the cache and the migrations
@@ -26,7 +27,7 @@ test.describe("the admin System page", () => {
     const operatorEmail = `e2e-system-ops-${uuidV7().slice(-8)}@example.com`
     let admin: BrowserContext | null = null
     try {
-      const signedUp = await request.post(`${appBase}/api/auth/password/sign-up`, {
+      const signedUp = await signUpWithCode(request, `${appBase}/api/auth/password/sign-up`, {
         headers,
         data: { email: operatorEmail, password },
       })
