@@ -153,11 +153,13 @@ function NotificationItem(
           followLinkClick(event, { href: notification.link, navigate })
         }}
       >
-        <span
-          aria-hidden="true"
-          class={`mt-2 size-2 shrink-0 rounded-full ${unread ? "bg-primary" : ""}`}
-          data-e2e="notification-dot"
-        />
+        {/* A box one line of text tall centres the dot on the sentence's first line. */}
+        <span aria-hidden="true" class="flex h-5 shrink-0 items-center">
+          <span
+            class={`size-2 rounded-full ${unread ? "bg-selected" : ""}`}
+            data-e2e="notification-dot"
+          />
+        </span>
         <span class="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-4">
           <span
             class={`line-clamp-2 min-w-0 flex-1 text-sm ${unread ? "font-medium" : "text-muted"}`}

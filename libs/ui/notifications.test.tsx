@@ -71,11 +71,13 @@ describe("notifications screen", () => {
     const [unread, read] = [...root.querySelectorAll("li")]
     expect(unread.getAttribute("data-unread")).toBe("true")
     expect(unread.querySelector(".sr-only")?.textContent).toBe("Unread:")
-    expect(unread.querySelector("[data-e2e=notification-dot]")?.className).toContain("bg-primary")
+    expect(unread.querySelector("[data-e2e=notification-dot]")?.className).toContain("bg-selected")
     expect(unread.querySelector("[data-e2e=notification-text]")?.className).toContain("font-medium")
     expect(read.getAttribute("data-unread")).toBe("false")
     expect(read.querySelector(".sr-only")).toBe(null)
-    expect(read.querySelector("[data-e2e=notification-dot]")?.className).not.toContain("bg-primary")
+    expect(read.querySelector("[data-e2e=notification-dot]")?.className).not.toContain(
+      "bg-selected",
+    )
     expect(read.querySelector("[data-e2e=notification-text]")?.className).not.toContain(
       "font-medium",
     )
