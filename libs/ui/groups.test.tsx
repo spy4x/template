@@ -1486,7 +1486,7 @@ describe("GroupEditorScreen form", () => {
     const changed = { ...saved, name: "Crew" }
     await mount(<GroupEditorScreen {...settings} value={changed} dirty />)
     find("[data-e2e=group-save]").focus()
-    await rerender(<GroupEditorScreen {...settings} value={changed} dirty saving />)
+    await rerender(<GroupEditorScreen {...settings} value={changed} saving />)
     expect(focused()).not.toBe("group-name")
     await rerender(<GroupEditorScreen {...settings} value={changed} />)
     expect(focused()).toBe("group-name")
