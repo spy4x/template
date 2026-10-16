@@ -309,6 +309,8 @@
       "integrity": "b86f5c38da805ff5c43f16e6bfe2582bcf0f321fad2d4e8fc51694265064820b",
       "dependencies": [
         "jsr:@spy4x/platform@1.59.0",
+        "jsr:@spy4x/validation@1.59.0",
+        "npm:arktype",
         "npm:preact@^10.29.8"
       ]
     },
