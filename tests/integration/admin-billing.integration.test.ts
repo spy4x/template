@@ -74,21 +74,22 @@ Deno.test(`admin billing: monthly revenue and counts match a hand count of the s
     const repository = new PostgresGroupRepository(sql)
     const owner = await insertUser(sql)
     // Hand count, Pro at 900 cents per seat a month:
-    //   Active ×3 seats            2700  paying
+    //   Active ×3 seats, twice     5400  paying (two groups, same price and seats)
     //   Past due, no quantity       900  paying, past due (one seat)
     //   Trial ×5, ends in 3 days      0  trial ending soon
     //   Trial, ends in 20 days        0  trial
-    //   Cancelled ×2                  0
+    //   Cancelled ×2, cancel pending  0  not ending: already over
     //   Active on an unknown price    –  paying, no revenue counted
     //   Active ×2, ending           1800  paying, ending
-    // Total 5400 EUR cents; 4 paying, 1 past due, 2 trials, 1 ending soon, 1 ending.
+    // Total 8100 EUR cents; 5 paying, 1 past due, 2 trials, 1 ending soon, 1 ending.
     for (
       const seed of [
         { name: `A`, status: BillingStatus.Active, quantity: 3 },
+        { name: `A2`, status: BillingStatus.Active, quantity: 3 },
         { name: `B`, status: BillingStatus.PastDue, quantity: null },
         { name: `C`, status: BillingStatus.Trialing, quantity: 5, trialEndInDays: 3 },
         { name: `D`, status: BillingStatus.Trialing, trialEndInDays: 20 },
-        { name: `E`, status: BillingStatus.Canceled, quantity: 2 },
+        { name: `E`, status: BillingStatus.Canceled, quantity: 2, cancelAtPeriodEnd: true },
         { name: `F`, status: BillingStatus.Active, planId: null, quantity: 9 },
         { name: `G`, status: BillingStatus.Active, quantity: 2, cancelAtPeriodEnd: true },
       ] satisfies Seed[]
@@ -100,8 +101,8 @@ Deno.test(`admin billing: monthly revenue and counts match a hand count of the s
     const figures = await readAdminBillingFigures(sql, NOW)
 
     expect(figures).toEqual({
-      monthlyRevenue: [{ amount: 5400, currency: `EUR` }],
-      paying: 4,
+      monthlyRevenue: [{ amount: 8100, currency: `EUR` }],
+      paying: 5,
       pastDue: 1,
       trials: 2,
       trialsEndingSoon: 1,
