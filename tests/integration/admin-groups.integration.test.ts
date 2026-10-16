@@ -81,7 +81,7 @@ async function auditRows(sql: postgres.Sql, groupId: string, kind: string) {
 Deno.test(`the group list searches names and owners, sorts, pages and counts`, async () => {
   await withSchema(async (sql) => {
     const { groupId, owner, editor } = await team(sql)
-    await name(sql, owner, `Ada`, `ada@example.com`)
+    await name(sql, owner, `Ada`, `countess@example.com`)
     await sql`
       INSERT INTO notes (id, group_id, title, body, change_sequence) VALUES
         (${uuidV7()}, ${groupId}, 'one', '', 1),
@@ -98,10 +98,16 @@ Deno.test(`the group list searches names and owners, sorts, pages and counts`, a
     // The owner's Home and Team, and one group of each of the other four members.
     expect(all.total).toBe(6)
 
-    const byOwner = await rows.list({ ...ADMIN_GROUP_NO_FILTER, query: `ADA@example team` }, 25)
+    // Each word matches the group name, the owner's name or one of the owner's addresses.
+    const byName = await rows.list({ ...ADMIN_GROUP_NO_FILTER, query: `ADA team` }, 25)
+    expect(byName.groups.map((group) => group.id)).toEqual([groupId])
+    const byOwner = await rows.list(
+      { ...ADMIN_GROUP_NO_FILTER, query: `COUNTESS@example team` },
+      25,
+    )
     expect(byOwner.groups.map((group) => group.id)).toEqual([groupId])
     const [found] = byOwner.groups
-    expect(found.owner).toEqual({ id: owner, name: `Ada`, email: `ada@example.com` })
+    expect(found.owner).toEqual({ id: owner, name: `Ada`, email: `countess@example.com` })
     expect(found.memberCount).toBe(5)
     expect(found.noteCount).toBe(2)
     expect(found.planId).toBe(`pro`)
