@@ -497,13 +497,17 @@ test.describe("what a device keeps", () => {
       await signUp(request, second)
       const other = await elsewhere.newPage()
       await signIn(other, second, password)
+      const me = await other.request.get(`${apiBase}/api/auth/me`)
+      expect(me.ok(), await me.text()).toBe(true)
+      const secondId = (await me.json() as { id: number }).id
 
       // The provider's callback sets the second person's session cookie and redirects to the app,
       // which this browser still remembers as the first person's. No sign-out happens in between.
       await context.clearCookies()
       await context.addCookies(await elsewhere.cookies())
       await gotoApp(page, "/groups", page.locator("[data-e2e=group-list]"))
-      await expect.poll(() => userIdOnDevice(page)).not.toBe(userId)
+      // The app now runs as the second person: it keeps their read copies.
+      await expect.poll(() => recordsIn(page, `reads:${secondId}`)).toBeGreaterThan(0)
 
       await expect.poll(() => recordsIn(page, `reads:${userId}`)).toBe(0)
       expect(await recordsIn(page, `offline:user:${userId}:notes`)).toBe(0)
