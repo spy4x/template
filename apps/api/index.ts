@@ -181,7 +181,15 @@ app.route(
   createAdminRoute({
     auth: signIn.auth,
     mutationGuards,
-    modules: adminModuleRoutes({ db, limit: rateLimits.normal, emit, now: () => new Date() }),
+    modules: adminModuleRoutes({
+      db,
+      limit: rateLimits.normal,
+      emit,
+      now: () => new Date(),
+      cursorSecret: config.authCookieSecret,
+      cacheConnected: isCacheConnected,
+      build: config.build,
+    }),
   }),
 )
 // The only routes that accept a token, and they accept nothing else.

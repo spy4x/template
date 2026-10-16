@@ -856,3 +856,7 @@ export interface AdminStats {
   /** Active people per UTC day, oldest first, the same days. */
   activePerDay: AdminDailyCount[]
 }
+
+// #429: the audit log and the System page of the operator area.
+export * from "./admin-audit.ts"
+export * from "./admin-system.ts"
