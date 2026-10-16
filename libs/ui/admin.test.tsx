@@ -272,6 +272,13 @@ describe("the admin user list", () => {
     expect(focused()).toBe("admin-users-count")
   })
 
+  it("leaves focus where it was when the first page arrives after loading", async () => {
+    await mount(<AdminUsersScreen {...listProps([], { list: null })} />)
+    find("[data-e2e=admin-users-search]").focus()
+    await mount(<AdminUsersScreen {...listProps([])} />)
+    expect(focused()).toBe("admin-users-search")
+  })
+
   it("says so when nobody matches", async () => {
     await mount(
       <AdminUsersScreen
@@ -477,11 +484,21 @@ describe("the admin dashboard", () => {
     expect(changeTone({ current: 1, previous: 1 })).toBe("neutral")
   })
 
-  it("starts a count chart's axis at 0 and ends it on a multiple of 4, at least 4", () => {
-    expect(countAxisTop([])).toBe(4)
-    expect(countAxisTop([0, 1, 2])).toBe(4)
-    expect(countAxisTop([0, 9, 3])).toBe(12)
-    expect(countAxisTop([12])).toBe(12)
+  it("ends a count chart's axis on a round top, also for a count that is no number", () => {
+    expect([[], [0, 1, 2], [5], [6, 3], [9], [11], [40], [51], [1_200]].map(countAxisTop))
+      .toEqual([5, 5, 5, 10, 10, 20, 50, 100, 2_000])
+    expect(countAxisTop([Number.NaN])).toBe(5)
+  })
+
+  it("labels both charts' axes with whole numbers from 0 to the round top", async () => {
+    await mount(<AdminDashboardScreen stats={stats} error={null} onRetry={() => {}} />)
+
+    const axis = (chart: string) =>
+      [...document.querySelectorAll(`[data-e2e=${chart}] [aria-hidden=true] > span`)]
+        .map((label) => label.textContent ?? ``)
+        .filter((label) => /^[\d,.]+$/.test(label))
+    expect(axis(`admin-chart-sign-ups`)).toEqual([`0`, `1`, `2`, `3`, `4`, `5`])
+    expect(axis(`admin-chart-active`)).toEqual([`0`, `10`, `20`, `30`, `40`, `50`])
   })
 
   it("shows every stat card with its number and both 30-day charts", async () => {
