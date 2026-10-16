@@ -330,7 +330,7 @@ function InvitationList(
   return (
     <section
       aria-labelledby="group-invitations"
-      class="flex flex-col gap-3"
+      class="mt-3 flex flex-col gap-3"
       data-e2e="group-section-invitations"
     >
       <h3 id="group-invitations" class="text-sm font-semibold text-foreground">
