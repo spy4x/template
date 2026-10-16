@@ -142,9 +142,12 @@ function accountBranch(
   if (event?.source === "account") where = sql`${where} AND event_type = ${event.eventType}`
   if (filter.ip) where = sql`${where} AND ip LIKE ${`${filter.ip}%`}`
   if (filter.operator !== null) {
-    // `filter.operator` is an int4-checked number, so the mark holds digits only.
+    // `filter.operator` is an int4-checked number, so the mark holds digits only. The literal
+    // `LIKE 'operator:%'` lets Postgres read the partial index `idx_auth_audits_operator`, built
+    // over exactly those rows; it must stay text in the query, never a parameter.
     const mark = `operator:${filter.operator}`
-    where = sql`${where} AND (identifier = ${mark} OR starts_with(identifier, ${`${mark} `}))`
+    where = sql`${where} AND identifier LIKE 'operator:%'
+      AND (identifier = ${mark} OR starts_with(identifier, ${`${mark} `}))`
   }
   if (filter.person) {
     const people = personIds(sql, filter.person)
