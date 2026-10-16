@@ -164,7 +164,7 @@ describe("ApiTokens", () => {
     const empty = find("[data-e2e=api-tokens] [role=status]")
     expect(empty.textContent).toContain("No API tokens")
     expect(empty.closest(".pc-card")).not.toBeNull()
-    expect(document.querySelector(".border-dashed")).toBeNull()
+    expect(document.querySelectorAll(".border-dashed").length).toBe(0)
   })
 
   it("says that changing or resetting the password revokes every token", async () => {

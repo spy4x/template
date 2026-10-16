@@ -566,7 +566,7 @@ describe("ProfileScreen", () => {
     const empty = find("#push-devices [role=status]")
     expect(empty.textContent).toContain("No devices yet")
     expect(empty.closest(".pc-card")).not.toBeNull()
-    expect(document.querySelector(".border-dashed")).toBeNull()
+    expect(document.querySelectorAll(".border-dashed").length).toBe(0)
   })
 
   it("names each settings group by its own h2, under the page's one h1", async () => {
