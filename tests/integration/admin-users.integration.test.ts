@@ -13,6 +13,9 @@ import { buildPostgresOptions } from "@spy4x/server/db/postgres"
 import { requireDbConnection } from "@spy4x/server/db/testing"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
 import { USER_ROLE_ACTOR } from "../../apps/worker/user-role.ts"
+import { createKvStore } from "@spy4x/platform/rate-limit"
+import { createAuthRateLimits } from "../../apps/api/middlewares/auth-rate-limits.ts"
+import { readAdminStats } from "@server/auth/admin-stats.ts"
 import { applyMigrations } from "./migrations.ts"
 
 /**
@@ -269,6 +272,33 @@ Deno.test("the dashboard counts people, sign-ups and activity, and carries no co
     for (const text of ["Secret", "butter", "Deleted text", "Plans", "example.com"]) {
       expect(answer).not.toContain(text)
     }
+  })
+})
+
+Deno.test("the dashboard estimates a large table's live rows from the planner and says so", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql)
+    for (const name of ["ada", "grace", "linus", "alan"]) await signUp(app, `${name}@example.com`)
+    await sql`UPDATE users SET deleted_at = now() WHERE id IN (
+      SELECT id FROM users ORDER BY id LIMIT 1
+    )`
+    const now = new Date()
+
+    const counted = await readAdminStats(sql, now)
+    expect(counted.approximate).toBe(false)
+    expect(counted.people).toBe(3)
+
+    // A table never analyzed is counted whatever its size: the planner has no figure for it.
+    expect((await readAdminStats(sql, now, { exactBelow: 0 })).approximate).toBe(false)
+
+    // Once analyzed, every table counts as large here: each figure is the planner's.
+    await sql`ANALYZE users, groups, notes`
+    const estimated = await readAdminStats(sql, now, { exactBelow: 0 })
+    expect(estimated.approximate).toBe(true)
+    // An ANALYZE of a table this small reads every row: the estimate leaves the deleted one out.
+    expect(estimated.people).toBe(3)
+    expect(estimated.groups).toBe(counted.groups)
+    expect(estimated.notes).toBe(counted.notes)
   })
 })
 

@@ -876,6 +876,11 @@ export const ADMIN_STATS_DAYS = 30
 export interface AdminStats {
   /** When the numbers were read. ISO 8601. */
   generatedAt: string
+  /**
+   * True when `people`, `groups` or `notes` is the database's estimate rather than a count: a table
+   * that large is not counted on every load (#462). Absent means counted.
+   */
+  approximate?: boolean
   /** People with an account that is not deleted. */
   people: number
   /** Blocked people among them. */
