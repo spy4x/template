@@ -77,12 +77,13 @@ function group(overrides: Partial<PreferencesGroupProps> = {}) {
     systemTheme: `light`,
     otherZone: null,
     conflict: null,
+    version: 0,
     pending: false,
     error: null,
     announcement: ``,
     now: NOW,
     onTheme: (theme) => calls.push([`theme`, theme]),
-    onSave: (next) => calls.push([`save`, next]),
+    onSave: (next, base) => calls.push([`save`, next, base]),
     onUseDeviceZone: () => calls.push([`use`]),
     onKeepZone: () => calls.push([`keep`]),
     onCloseDialog: () => calls.push([`close`]),
@@ -102,10 +103,10 @@ describe(`PreferencesGroup`, () => {
     await mount(group().node)
 
     expect($(`[data-e2e="preferences-formats"]`)?.textContent).toContain(
-      `Automatic: same as this device (English (United Kingdom))`,
+      `Automatic: same as this device — English (United Kingdom)`,
     )
     expect($(`[data-e2e="preferences-time-zone"]`)?.textContent).toContain(
-      `Automatic: same as this device (Berlin, Europe · GMT+2)`,
+      `Automatic: same as this device — Berlin, Europe · GMT+2`,
     )
     expect($(`[data-e2e="preferences-theme"]`)?.textContent).toContain(
       `System (light on this device)`,
@@ -140,7 +141,7 @@ describe(`PreferencesGroup`, () => {
     expect($(`[data-e2e="preferences-preview"]`)?.textContent).toMatch(/2:05\s?pm/i)
     await click(`[data-e2e="preferences-save"]`)
 
-    expect(calls).toEqual([[`save`, { locale: null, timeZone: null, hourCycle: `h12` }]])
+    expect(calls).toEqual([[`save`, { locale: null, timeZone: null, hourCycle: `h12` }, 0]])
   })
 
   it(`shows the values that won and says why when another device saved first`, async () => {
@@ -155,12 +156,53 @@ describe(`PreferencesGroup`, () => {
     )
 
     const won: Preferences = { ...DEFAULT_PREFERENCES, hourCycle: `h23`, timeZone: `Asia/Tokyo` }
-    await rerender(group({ conflict: won, value: won }).node)
+    await rerender(group({ conflict: { version: 1, value: won }, value: won, version: 1 }).node)
 
     expect($(`[data-e2e="preferences-conflict"]`)?.textContent).toContain(
       `These changed on another device while you were editing.`,
     )
     expect($<HTMLSelectElement>(`[data-e2e="preferences-clock-select"]`)?.value).toBe(`h23`)
+  })
+
+  it(`saves again on the version that won after a refused save`, async () => {
+    await mount(group().node)
+    await click(`[data-e2e="preferences-change-clock"]`)
+    const won: Preferences = { ...DEFAULT_PREFERENCES, hourCycle: `h23` }
+    const refused = group({ conflict: { version: 4, value: won }, value: won, version: 4 })
+    await rerender(refused.node)
+
+    await click(`[data-e2e="preferences-save"]`)
+
+    expect(refused.calls).toEqual([[`save`, { locale: null, timeZone: null, hourCycle: `h23` }, 4]])
+  })
+
+  it(`saves an edited draft on the version it was made on, though another device saved since`, async () => {
+    const first = group()
+    await mount(first.node)
+    await click(`[data-e2e="preferences-change-clock"]`)
+    const select = $<HTMLSelectElement>(`[data-e2e="preferences-clock-select"]`)!
+    select.value = `h12`
+    await act(() =>
+      void select.dispatchEvent(new window.Event(`change`, { bubbles: true }) as never)
+    )
+
+    // Another device saved Formats; this draft was made on version 0 and stays so.
+    const later = group({ value: { ...DEFAULT_PREFERENCES, locale: `it-IT` }, version: 1 })
+    await rerender(later.node)
+    await click(`[data-e2e="preferences-save"]`)
+
+    expect(later.calls).toEqual([[`save`, { locale: null, timeZone: null, hourCycle: `h12` }, 0]])
+  })
+
+  it(`follows another device's save while nothing is edited, and saves on its version`, async () => {
+    await mount(group().node)
+    await click(`[data-e2e="preferences-change-clock"]`)
+
+    const later = group({ value: { ...DEFAULT_PREFERENCES, locale: `it-IT` }, version: 1 })
+    await rerender(later.node)
+    await click(`[data-e2e="preferences-save"]`)
+
+    expect(later.calls).toEqual([[`save`, { locale: `it-IT`, timeZone: null, hourCycle: null }, 1]])
   })
 
   it(`offers this device's zone when the person picked another, and reports either answer`, async () => {
@@ -176,8 +218,13 @@ describe(`PreferencesGroup`, () => {
     )
     expect($(`[data-e2e="preferences-use-device-zone"]`)?.textContent).toBe(`Use Tokyo time`)
     expect($(`[data-e2e="preferences-keep-zone"]`)?.textContent).toBe(`Keep Berlin time`)
+    const change = $(`[data-e2e="preferences-change-timeZone"]`)
     await click(`[data-e2e="preferences-use-device-zone"]`)
+    // Both buttons remove themselves; the focus lands on the row's own button, not the page.
+    expect(document.activeElement).toBe(change)
+    $(`[data-e2e="preferences-keep-zone"]`)!.focus()
     await click(`[data-e2e="preferences-keep-zone"]`)
+    expect(document.activeElement).toBe(change)
 
     expect(calls).toEqual([[`use`], [`keep`]])
   })

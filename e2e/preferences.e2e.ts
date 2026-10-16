@@ -48,7 +48,7 @@ test.describe("preferences across devices", () => {
       const onLaptop = await openProfile(laptop, email)
       const onPhone = await openProfile(phone, email)
       await expect(onPhone.locator("[data-e2e=preferences-time-zone]")).toContainText(
-        "Automatic: same as this device (Tokyo, Asia",
+        "Automatic: same as this device — Tokyo, Asia",
       )
 
       // The theme changes at once from its row's menu, here and on the other device.
@@ -78,6 +78,22 @@ test.describe("preferences across devices", () => {
       await expect(other).toContainText("This device is on Berlin time")
       await onLaptop.locator("[data-e2e=preferences-keep-zone]").click()
       await expect(other).toBeHidden()
+      await expect(onLaptop.locator("[data-e2e=preferences-change-timeZone]")).toBeFocused()
+
+      // Two devices edit different fields at once: the second save is refused with a notice, and
+      // the first device's change is not overwritten.
+      await onLaptop.locator("[data-e2e=preferences-change-clock]").click()
+      await onLaptop.locator("[data-e2e=preferences-clock-select]").selectOption("h12")
+      await onPhone.locator("[data-e2e=preferences-change-formats]").click()
+      await onPhone.getByRole("combobox", { name: "Formats" }).fill("Italian")
+      await onPhone.getByRole("option", { name: /Italian \(Italy\)/ }).click()
+      await onPhone.locator("[data-e2e=preferences-save]").click()
+      await expect(onPhone.locator("[data-e2e=preferences-dialog]")).toBeHidden()
+      await expect(onLaptop.locator("[data-e2e=preferences-formats]")).toContainText("Italian")
+      await onLaptop.locator("[data-e2e=preferences-save]").click()
+      await expect(onLaptop.locator("[data-e2e=preferences-conflict]")).toBeVisible()
+      await expect(onPhone.locator("[data-e2e=preferences-formats]")).toContainText("Italian")
+      await expect(onPhone.locator("[data-e2e=preferences-clock]")).not.toContainText("12-hour")
     } finally {
       await laptop?.close()
       await phone?.close()

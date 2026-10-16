@@ -18,7 +18,7 @@ const AT = Date.UTC(2026, 9, 17, 12, 5) // 17 Oct 2026, 12:05 UTC
  * hint it sends every open device after an accepted save. A device that is offline gets a rejected
  * call, like the socket's.
  */
-function server() {
+function server({ lateHints = false } = {}) {
   let row: StoredSettings | null = null
   const store: SettingsStore = {
     read: () => Promise.resolve(row),
@@ -42,7 +42,11 @@ function server() {
       if (name === `preferences.get`) return row
       if (name === `preferences.save`) {
         const result = await saveSettings(preferencesDefinition, store, `7`, payload)
-        if (result.ok) await hint()
+        // A late hint reaches the devices after the saving one has its answer.
+        if (result.ok) {
+          if (lateHints) setTimeout(() => void hint(), 0)
+          else await hint()
+        }
         return result
       }
       if (name === `preferences.device`) {
@@ -75,6 +79,7 @@ function device(backend: ReturnType<typeof server>, here: DeviceFormat = BERLIN)
     theme,
     device: () => here,
     keptZone: { read: () => kept, write: (zone) => void (kept = zone) },
+    online: () => online.value,
   })
   backend.devices.push(state)
   return { state, theme, online, kept: () => kept }
@@ -159,6 +164,87 @@ describe(`preferences across devices`, () => {
   })
 })
 
+describe(`saving from the dialog`, () => {
+  it(`refuses a draft made before another device saved a different field, and shows the record that won`, async () => {
+    const backend = server()
+    const laptop = device(backend)
+    const phone = device(backend)
+    await open(laptop)
+    await open(phone)
+    // Both open the dialog on version 0; the phone saves Formats first.
+    const laptopBase = laptop.state.version.value
+    const phoneSaved = await phone.state.saveDraft(phone.state.version.value, {
+      locale: `it-IT`,
+      timeZone: null,
+      hourCycle: null,
+    })
+    expect(phoneSaved.ok).toBe(true)
+    expect(laptop.state.value.value.locale).toBe(`it-IT`)
+
+    const outcome = await laptop.state.saveDraft(laptopBase, {
+      locale: null,
+      timeZone: null,
+      hourCycle: `h12`,
+    })
+
+    expect(outcome.ok).toBe(false)
+    expect(laptop.state.conflict.value?.value.locale).toBe(`it-IT`)
+    expect(backend.row?.value).toEqual({ ...DEFAULT_PREFERENCES, locale: `it-IT` })
+  })
+
+  it(`saves a draft made on the version held, and announces nothing on the saving device`, async () => {
+    const backend = server({ lateHints: true })
+    const laptop = device(backend)
+    const phone = device(backend)
+    await open(laptop)
+    await open(phone)
+
+    const outcome = await laptop.state.saveDraft(laptop.state.version.value, {
+      locale: `de-DE`,
+      timeZone: `Europe/Berlin`,
+      hourCycle: null,
+    })
+    await settle()
+    await settle()
+
+    expect(outcome.ok).toBe(true)
+    expect(backend.row?.version).toBe(1)
+    expect(laptop.state.announcement.value).toBe(``)
+    expect(phone.state.announcement.value).toBe(PREFERENCES_UPDATED_ELSEWHERE)
+  })
+
+  it(`announces nothing after this device's own "Use Tokyo time"`, async () => {
+    const backend = server({ lateHints: true })
+    const traveller = device(backend, { locale: `en-GB`, timeZone: `Asia/Bangkok` })
+    await open(traveller)
+    await traveller.state.saveDraft(0, { locale: null, timeZone: `Europe/Berlin`, hourCycle: null })
+    await settle()
+
+    await traveller.state.useDeviceZone()
+    await settle()
+    await settle()
+
+    expect((backend.row?.value as { timeZone?: string })?.timeZone).toBe(`Asia/Bangkok`)
+    expect(traveller.state.announcement.value).toBe(``)
+  })
+
+  it(`refuses at once without a connection, and sends nothing`, async () => {
+    const backend = server()
+    const phone = device(backend)
+    await open(phone)
+    phone.online.value = false
+
+    const outcome = await phone.state.saveDraft(0, {
+      locale: `de-DE`,
+      timeZone: null,
+      hourCycle: null,
+    })
+
+    expect(outcome).toEqual({ ok: false, reason: `offline` })
+    expect(backend.row).toBeNull()
+  })
+})
+
 describe(`the device's own zone`, () => {
   it(`is offered when the person pinned another zone, and not once they keep theirs`, async () => {
     const backend = server()
@@ -188,7 +274,7 @@ describe(`the device's own zone`, () => {
 })
 
 describe(`starting a session`, () => {
-  it(`tells the server this device's zone and region format, for mail`, async () => {
+  it(`tells the server this device's zone and region format`, async () => {
     const backend = server()
     const phone = device(backend, { locale: `th-TH`, timeZone: `Asia/Bangkok` })
 

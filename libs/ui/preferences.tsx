@@ -39,7 +39,9 @@ export interface PreferencesGroupProps {
    * The record that won when this device's save was refused: another device saved first. The
    * dialog then shows its values and says why.
    */
-  conflict: Preferences | null
+  conflict: { version: number; value: Preferences } | null
+  /** The version of {@link value}: a draft is saved on the version it was made on. */
+  version: number
   /** A save of the dialog is on its way. */
   pending: boolean
   /** Why the last save of the dialog failed, shown under its form; `null` when it did not. */
@@ -49,7 +51,11 @@ export interface PreferencesGroupProps {
   /** The moment the examples and the zones' offsets are read at. */
   now: Date
   onTheme(theme: ThemePreference): void
-  onSave(next: RegionPreferences): void
+  /**
+   * Save the dialog's values on `baseVersion`, the version they were made on, so a change another
+   * device saved meanwhile is refused instead of overwritten.
+   */
+  onSave(next: RegionPreferences, baseVersion: number): void
   /** "Use Tokyo time": this device's zone becomes the person's zone. */
   onUseDeviceZone(): void
   /** "Keep Berlin time": stop offering this device's zone. */
@@ -60,7 +66,8 @@ export interface PreferencesGroupProps {
 
 /** The messages the view shows when a save of the dialog did not go through. */
 export const PREFERENCES_FAILURES = {
-  network: `Could not save your preferences. Check your connection and try again.`,
+  network: `We could not save your preferences. Check your connection and try again.`,
+  offline: `You are offline, so nothing was saved. Save again when you are back online.`,
   invalid: `Pick each value from its list, then save again.`,
 } as const
 
@@ -112,10 +119,10 @@ export function preferenceValues(
   const locale = value.locale ?? device.locale
   return {
     formats: value.locale === null
-      ? `Automatic: same as ${whose} (${regionName(device.locale)})`
+      ? `Automatic: same as ${whose} — ${regionName(device.locale)}`
       : regionName(value.locale),
     timeZone: value.timeZone === null
-      ? `Automatic: same as ${whose} (${zoneLabel(device.timeZone, now)})`
+      ? `Automatic: same as ${whose} — ${zoneLabel(device.timeZone, now)}`
       : zoneLabel(value.timeZone, now),
     clock: value.hourCycle === null
       ? `As in ${whose === `this device` ? `your` : `their`} region format (${
@@ -159,6 +166,10 @@ export function PreferencesGroup(props: PreferencesGroupProps): JSX.Element {
   const { value, device, systemTheme, otherZone, now, onTheme } = props
   const format = useFormat()
   const [editing, setEditing] = useState<DialogField | null>(null)
+  const group = useRef<HTMLDivElement>(null)
+  // "Use" and "Keep" remove themselves; the focus goes to the row's own button, not the page.
+  const focusZoneChange = () =>
+    group.current?.querySelector<HTMLElement>(`[data-e2e="preferences-change-timeZone"]`)?.focus()
   const values = preferenceValues(value, device, now)
 
   const change = (field: DialogField, object: string) => (
@@ -175,12 +186,12 @@ export function PreferencesGroup(props: PreferencesGroupProps): JSX.Element {
   )
 
   return (
-    <div data-e2e="preferences">
+    <div ref={group} data-e2e="preferences">
       <SettingGroup
         title="Language and region"
         description={
           <span data-e2e="preferences-example">
-            Dates and times look like this: {format.dateTime(now)}.
+            Dates and times look like this: {format.dateTime(now, `full`)}.
           </span>
         }
       >
@@ -231,8 +242,14 @@ export function PreferencesGroup(props: PreferencesGroupProps): JSX.Element {
                     chosen={value.timeZone}
                     here={otherZone}
                     now={now}
-                    onUse={props.onUseDeviceZone}
-                    onKeep={props.onKeepZone}
+                    onUse={() => {
+                      props.onUseDeviceZone()
+                      focusZoneChange()
+                    }}
+                    onKeep={() => {
+                      props.onKeepZone()
+                      focusZoneChange()
+                    }}
                   />
                 )}
               </span>
@@ -308,9 +325,12 @@ function OtherZone(
 function RegionDialog(
   props: PreferencesGroupProps & { field: DialogField | null; onClose: () => void },
 ): JSX.Element {
-  const { value, device, conflict, pending, error, now, field, onClose, onSave } = props
+  const { value, version, device, conflict, pending, error, now, field, onClose, onSave } = props
   const open = field !== null
   const [draft, setDraft] = useState<RegionPreferences>(pick(value))
+  // The version the draft was made on. A save goes out on it, so a change another device saved
+  // after the person started editing is refused, never overwritten.
+  const [base, setBase] = useState(version)
   const [touched, setTouched] = useState(false)
   const body = useRef<HTMLDivElement>(null)
   const notice = useRef<HTMLDivElement>(null)
@@ -319,19 +339,23 @@ function RegionDialog(
   useEffect(() => {
     if (!open) return
     setDraft(pick(value))
+    setBase(version)
     setTouched(false)
     body.current?.querySelector<HTMLElement>(`#${FIELD_IDS[field]}`)?.focus()
   }, [open, field])
 
   // Another device saved while the dialog is open: untouched fields follow it.
   useEffect(() => {
-    if (open && !touched) setDraft(pick(value))
-  }, [value.locale, value.timeZone, value.hourCycle])
+    if (!open || touched) return
+    setDraft(pick(value))
+    setBase(version)
+  }, [value.locale, value.timeZone, value.hourCycle, version])
 
   // A refused save: the dialog shows the values that won, and says why.
   useEffect(() => {
     if (!conflict) return
-    setDraft(pick(conflict))
+    setDraft(pick(conflict.value))
+    setBase(conflict.version)
     setTouched(false)
     notice.current?.focus()
   }, [conflict])
@@ -346,7 +370,7 @@ function RegionDialog(
   const regionItems = useMemo<RegionItem[]>(() => [
     {
       value: null,
-      label: `Automatic: same as this device (${regionName(device.locale)})`,
+      label: `Automatic: same as this device — ${regionName(device.locale)}`,
       searchText: `automatic device ${regionName(device.locale)}`.toLowerCase(),
     },
     ...regions().map((option) => ({
@@ -361,7 +385,7 @@ function RegionDialog(
       ? [
         {
           value: null,
-          label: `Automatic: same as this device (${zoneLabel(device.timeZone, now)})`,
+          label: `Automatic: same as this device — ${zoneLabel(device.timeZone, now)}`,
           searchText: `automatic device ${device.timeZone.replaceAll(`_`, ` `)}`.toLowerCase(),
         },
         ...timeZoneOptions(now).map((option) => ({
@@ -379,7 +403,7 @@ function RegionDialog(
     setDraft({ ...draft, ...patch })
   }
   const resolvedClock = clockLabel(regionHourCycle(draft.locale ?? device.locale))
-  const example = appFormat(draft, { device }).dateTime(now)
+  const example = appFormat(draft, { device }).dateTime(now, `full`)
 
   return (
     <Modal
@@ -389,7 +413,7 @@ function RegionDialog(
       cancelLabel="Close"
       dataE2E="preferences-dialog"
     >
-      <ScreenForm pending={pending} onSubmit={() => onSave(draft)}>
+      <ScreenForm pending={pending} onSubmit={() => onSave(draft, base)}>
         <div ref={body}>
           <Stack>
             {conflict && (
@@ -417,6 +441,7 @@ function RegionDialog(
                   filter={(items, query) => matching(items, query)}
                   onChange={(item) => item && set({ locale: item.value })}
                   showClearButton={false}
+                  listboxClass="max-h-40 sm:max-h-60"
                   emptyMessage={(query) => `No formats match "${query}".`}
                 />
               )}
@@ -438,6 +463,7 @@ function RegionDialog(
                   filter={(items, query) => matching(items, query)}
                   onChange={(item) => item && set({ timeZone: item.value })}
                   showClearButton={false}
+                  listboxClass="max-h-40 sm:max-h-60"
                   emptyMessage={(query) =>
                     `No time zones match "${query}". Try a city or an offset such as GMT+2.`}
                 />
@@ -463,17 +489,29 @@ function RegionDialog(
               Example: {example}
             </p>
             <ErrorState message={error} />
-            <Cluster justify="end">
-              <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            {
+              // On a phone Save is on top at full width, Cancel under it; from `sm` up they are a
+              // row at the right, Save last.
+            }
+            <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="ghost"
+                class="min-h-11 w-full sm:min-h-9 sm:w-auto"
+                onClick={onClose}
+              >
+                Cancel
+              </Button>
               <Button
                 type="submit"
+                class="min-h-11 w-full sm:min-h-9 sm:w-auto"
                 data-e2e="preferences-save"
                 busy={pending}
-                busyLabel="Saving..."
+                busyLabel="Saving…"
               >
                 Save
               </Button>
-            </Cluster>
+            </div>
           </Stack>
         </div>
       </ScreenForm>

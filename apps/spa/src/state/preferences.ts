@@ -1,7 +1,11 @@
-import { computed, signal } from "@preact/signals"
+import { computed, effect, signal } from "@preact/signals"
 import { createSettingsStore, type SettingsSaveOutcome } from "@spy4x/preact-signals/settings"
 import { syncThemeWithSettings, type ThemeStore } from "@spy4x/preact-signals/theme"
-import type { SettingsSaveResult, StoredSettings } from "@spy4x/platform/universal/settings"
+import type {
+  SettingsSaveResult,
+  StoredSettings,
+  VersionedSettings,
+} from "@spy4x/platform/universal/settings"
 import { type DeviceFormat, deviceFormat } from "@spy4x/time/format"
 import { type Preferences, preferencesDefinition } from "@domain/identity"
 import { appFormat } from "@ui/format.tsx"
@@ -10,6 +14,19 @@ import { themeStore } from "./theme.ts"
 
 /** What a screen reader hears when another device changed the preferences on screen. */
 export const PREFERENCES_UPDATED_ELSEWHERE = `Preferences updated from another device.`
+
+/** The fields the "Language and region" dialog saves together. */
+export type RegionDraft = Pick<Preferences, `locale` | `timeZone` | `hourCycle`>
+
+/**
+ * What a save from the dialog came to. `offline`: the device has no connection, so nothing was
+ * sent. `failed`: the server could not be reached in time; the save may still arrive, and it lands
+ * only on the version it was based on.
+ */
+export type DraftSaveOutcome =
+  | { ok: true }
+  | { ok: false; reason: `conflict`; current: VersionedSettings<Preferences> }
+  | { ok: false; reason: `invalid` | `offline` | `failed` }
 
 /** What the preferences store needs from the outside. Injected so tests need no socket. */
 export interface PreferencesDependencies {
@@ -24,6 +41,8 @@ export interface PreferencesDependencies {
    * until the device moves to yet another zone. Kept on this device only, and cleared on sign-out.
    */
   keptZone: { read(): string | null; write(zone: string | null): void }
+  /** Whether the device has a connection now; a dialog save is refused at once without one. */
+  online(): boolean
 }
 
 /**
@@ -46,6 +65,22 @@ export function createPreferencesState(dependencies: PreferencesDependencies) {
   const device = signal<DeviceFormat>(dependencies.device())
   const kept = signal<string | null>(dependencies.keptZone.read())
   const announcement = signal(``)
+  /** The record that won when a dialog save was refused: its draft was made on an older one. */
+  const draftConflict = signal<VersionedSettings<Preferences> | null>(null)
+  /**
+   * The versions this device saved. A hint for one of them is this device's own change, whatever
+   * order the hint and the save's answer arrive in, so it is never announced.
+   */
+  const own = new Set<number>()
+  /** Dialog saves on their way: a record read meanwhile may be one of them. */
+  let drafting = 0
+  let wasSaving = false
+  // Every save of the store (the theme, "Use Tokyo time") ends with the version it made held.
+  effect(() => {
+    const saving = store.saving.value
+    if (wasSaving && !saving) own.add(store.record.peek().version)
+    wasSaving = saving
+  })
 
   /** Every date, time and number on screen, in the person's settings. */
   const format = computed(() => appFormat(store.value.value, { device: device.value }))
@@ -75,16 +110,17 @@ export function createPreferencesState(dependencies: PreferencesDependencies) {
     device.value = dependencies.device()
     await store.load()
     if (signedIn !== person) return
-    // A save of this device's own answers before or right after its hint; only a newer record
-    // that arrived while nothing of this device was waiting came from another device.
-    if (wasLoaded && store.record.peek().version > before && !store.saving.peek()) {
+    // Only a newer record this device did not make, read while nothing of it was waiting, came
+    // from another device.
+    const now = store.record.peek().version
+    if (wasLoaded && now > before && !own.has(now) && !store.saving.peek() && drafting === 0) {
       announcement.value = PREFERENCES_UPDATED_ELSEWHERE
     }
   }
 
   /**
    * The person signed in: tell the server this device's zone, which it keeps from the first device
-   * only (the sign-up device), for mail. The pull that follows the start reads the record.
+   * only (the sign-up device), to show operators. The pull that follows the start reads the record.
    */
   function start(): void {
     void dependencies.command(`preferences.device`, dependencies.device()).catch(() => {})
@@ -94,6 +130,46 @@ export function createPreferencesState(dependencies: PreferencesDependencies) {
   function save(patch: Partial<Preferences>): Promise<SettingsSaveOutcome<Preferences>> {
     announcement.value = ``
     return store.save(patch)
+  }
+
+  /**
+   * Saves the dialog's draft on the version it was made on, so a change another device saved
+   * meanwhile is never overwritten: the server refuses it, and {@link conflict} holds the record
+   * that won. Without a connection nothing is sent.
+   */
+  async function saveDraft(baseVersion: number, draft: RegionDraft): Promise<DraftSaveOutcome> {
+    announcement.value = ``
+    draftConflict.value = null
+    if (!dependencies.online()) return { ok: false, reason: `offline` }
+    const signedIn = person
+    const checked = preferencesDefinition.parse({ ...store.value.peek(), ...draft })
+    if (!checked.ok) return { ok: false, reason: `invalid` }
+    let answer: SettingsSaveResult<unknown>
+    drafting++
+    try {
+      answer = await dependencies.command<SettingsSaveResult<unknown>>(`preferences.save`, {
+        version: baseVersion,
+        value: checked.value,
+      })
+    } catch (_error) {
+      return { ok: false, reason: `failed` }
+    } finally {
+      drafting--
+    }
+    if (signedIn !== person) return { ok: false, reason: `failed` }
+    if (answer.ok) {
+      const saved = preferencesDefinition.resolve(answer.settings)
+      own.add(saved.version)
+      store.apply(answer.settings)
+      return { ok: true }
+    }
+    if (answer.reason === `conflict`) {
+      const current = preferencesDefinition.resolve(answer.current)
+      store.apply(answer.current)
+      draftConflict.value = current
+      return { ok: false, reason: `conflict`, current }
+    }
+    return { ok: false, reason: `invalid` }
   }
 
   /** "Use Tokyo time": this device's zone becomes the person's zone on every device. */
@@ -111,6 +187,8 @@ export function createPreferencesState(dependencies: PreferencesDependencies) {
   function reset(): void {
     person++
     store.reset()
+    own.clear()
+    draftConflict.value = null
     announcement.value = ``
     kept.value = null
     dependencies.keptZone.write(null)
@@ -121,9 +199,14 @@ export function createPreferencesState(dependencies: PreferencesDependencies) {
     value: computed(() => store.value.value),
     loaded: store.loaded,
     saving: store.saving,
+    /** The version the shown record has; a dialog's draft is saved on it. */
+    version: computed(() => store.record.value.version),
     /** The record that won when this device's save was refused; cleared by the next save. */
-    conflict: store.conflict,
-    dismissConflict: store.dismissConflict,
+    conflict: computed(() => draftConflict.value ?? store.conflict.value),
+    dismissConflict: () => {
+      draftConflict.value = null
+      store.dismissConflict()
+    },
     device,
     otherZone,
     format,
@@ -131,6 +214,7 @@ export function createPreferencesState(dependencies: PreferencesDependencies) {
     start,
     refresh,
     save,
+    saveDraft,
     useDeviceZone,
     keepZone,
     reset,
@@ -167,4 +251,5 @@ export const preferencesState = createPreferencesState({
   theme: themeStore,
   device: deviceFormat,
   keptZone: browserKeptZone,
+  online: () => globalThis.navigator?.onLine !== false,
 })
