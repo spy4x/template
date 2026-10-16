@@ -88,6 +88,18 @@ test.describe("the admin app", () => {
       await row.click()
       await expect(ops.locator("[data-e2e=admin-user-title]")).toContainText(targetEmail)
       await expect.poll(() => ops.evaluate(() => globalThis.scrollY)).toBe(0)
+      // On a phone the person's tabs stay in one row that scrolls sideways, and the keyboard still
+      // reaches the last one and scrolls it into view.
+      const tabs = ops.getByRole("tab")
+      const tops = await tabs.evaluateAll((all) =>
+        all.map((tab) => Math.round(tab.getBoundingClientRect().top))
+      )
+      expect(tops.length).toBeGreaterThan(5)
+      expect(new Set(tops).size).toBe(1)
+      await tabs.first().focus()
+      await ops.keyboard.press("End")
+      await expect(tabs.last()).toBeFocused()
+      await expect(tabs.last()).toBeInViewport({ ratio: 0.9 })
       await ops.setViewportSize({ width: 1280, height: 720 })
       await ops.getByRole("tab", { name: /Sessions/ }).click()
       await expect(ops).toHaveURL(/\?tab=sessions$/)

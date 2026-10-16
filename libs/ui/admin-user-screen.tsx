@@ -244,13 +244,20 @@ export function AdminUserScreen(props: AdminUserScreenProps): JSX.Element {
         )}
       </div>
 
+      {
+        /*
+        One row that scrolls sideways: eight tabs wrapped onto three rows on a phone. The arrow keys
+        still move between them, and focus scrolls the chosen tab into view. The bottom padding keeps
+        the active tab's underline inside the scroll box.
+      */
+      }
       <Tabs
         tabs={tabs}
         active={active}
         onChange={props.onTab}
         lazy
         label="About this person"
-        listClass="overflow-x-auto"
+        listClass="flex-nowrap overflow-x-auto pb-px"
         panelClass="pt-4"
         tabDataE2E="admin-user-tab"
       />
