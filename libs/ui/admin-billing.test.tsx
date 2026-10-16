@@ -180,7 +180,8 @@ describe(`the admin billing list`, () => {
 
   it(`shows each chip's count and filters by a pressed chip on page 1`, async () => {
     const calls: unknown[][] = []
-    await mount(<AdminBillingListScreen {...listProps(calls)} />)
+    const third = { ...ADMIN_BILLING_NO_FILTER, page: 3 }
+    await mount(<AdminBillingListScreen {...listProps(calls, { filter: third })} />)
     await press(`[data-e2e=admin-billing-status]`, `Past due 3`)
     find<HTMLInputElement>(`[data-e2e=admin-billing-search]`).value = `  ada  `
     await submit(`[data-e2e=admin-billing-submit]`)
