@@ -115,8 +115,8 @@ export interface GroupSummary {
   emoji: string | null
   role: GroupRole
   /**
-   * How many members the group has, and the first few of them in the order they joined: what the
-   * groups list draws as a stack of avatars. Only the list read fills these two.
+   * How many members the group has, which the groups list shows on each row, and the first few of
+   * them in the order they joined. Only the list read fills these two.
    */
   memberCount?: number
   members?: GroupMemberPreview[]

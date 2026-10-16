@@ -387,10 +387,11 @@ function ExistingGroup(props: GroupEditorScreenProps & { group: GroupRow }): JSX
         />
       </div>
 
-      <section aria-labelledby="group-details" class="flex flex-col gap-3">
-        <h2 id="group-details" class="text-sm font-semibold text-foreground">Details</h2>
-        {canRename(group.role) ? <GroupForm {...props} /> : <GroupDetailsText group={group} />}
-      </section>
+      {
+        /* The fields follow the header with no heading of their own, as on the create page: the
+        group's page is its editor, and the sections below it are the ones that need a name. */
+      }
+      {canRename(group.role) ? <GroupForm {...props} /> : <GroupDetailsText group={group} />}
 
       <GroupMembersSection
         groupId={group.id}
@@ -559,7 +560,7 @@ function GroupForm(
     if (first) box.current?.querySelector<HTMLElement>(`[name=${first}]`)?.focus()
   }, [errors])
   const change = (patch: Partial<GroupDraft>) => onChange?.({ ...value, ...patch })
-  const optional = <span class="font-normal text-muted">Optional</span>
+  const optional = <span class="ml-2 font-normal text-muted">Optional</span>
   return (
     <ScreenForm pending={saving} onSubmit={onSave}>
       <div ref={box}>

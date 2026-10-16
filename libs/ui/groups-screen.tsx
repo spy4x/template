@@ -1,6 +1,6 @@
 import type { ComponentChildren, JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
-import { IconPlus } from "@spy4x/preact-icons"
+import { IconChevronDown, IconChevronRight, IconPlus } from "@spy4x/preact-icons"
 import { Button } from "@spy4x/preact-ui/button"
 import { Card } from "@spy4x/preact-ui/card"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
@@ -150,8 +150,13 @@ export function GroupsScreen(
 
       {(deleted.length > 0 || restoreError) && (
         <details ref={disclosure} class="group/deleted" data-e2e="deleted-groups">
+          {/* The chevron stands in for the marker a flex summary loses, and turns when it opens. */}
           <summary class="flex min-h-11 cursor-pointer items-center gap-2 rounded-md text-sm font-semibold text-foreground">
             Deleted groups ({deleted.length})
+            <IconChevronDown
+              aria-hidden="true"
+              class="size-4 shrink-0 transition-transform group-open/deleted:rotate-180"
+            />
           </summary>
           <Stack gap="sm" class="mt-2">
             <p class="text-sm text-muted">
@@ -211,9 +216,14 @@ export function GroupsScreen(
   )
 }
 
+/** How many people a group has, for its row: "Only you" for a group of one. */
+function membersText(count: number): string {
+  return count === 1 ? "Only you" : `${count} members`
+}
+
 /**
- * One group's row: its mark, its name and "Current" on the current group, its role and
- * description. The name is a link stretched over the whole row, so a tap anywhere opens the group's
+ * One group's row: its mark, its name and "Current" on the current group, its role, how many
+ * members it has and its description. The name is a link stretched over the whole row, so a tap anywhere opens the group's
  * page, and a screen reader hears one link per group.
  */
 function GroupItem(
@@ -243,11 +253,15 @@ function GroupItem(
           </span>
           <span class="line-clamp-2 max-w-full text-sm text-muted">
             {ROLE_TEXT[group.role]}
+            {group.memberCount !== undefined && (
+              <span data-e2e="group-item-members">{` · ${membersText(group.memberCount)}`}</span>
+            )}
             {group.description && (
               <span data-e2e="group-item-description">{` · ${group.description}`}</span>
             )}
           </span>
         </div>
+        <IconChevronRight aria-hidden="true" class="size-4 shrink-0 text-muted" />
       </div>
     </li>
   )

@@ -192,6 +192,7 @@ describe("GroupsScreen", () => {
     groups: [
       { ...team, memberCount: 3, members: [{ name: "Ann Lee" }, { name: "Bo Kim" }] },
       { id: "g-2", name: "Family", role: GroupRole.VIEWER },
+      { id: "g-3", name: "Solo", role: GroupRole.OWNER, memberCount: 1 },
     ],
     selectedId: groupId,
     loading: false,
@@ -200,7 +201,7 @@ describe("GroupsScreen", () => {
 
   it("makes each whole row one link to its group's page, with the role and no other control", async () => {
     await mount(<GroupsScreen {...defaults} />)
-    expect(texts("[data-e2e=group-item-name]")).toEqual(["Team", "Family"])
+    expect(texts("[data-e2e=group-item-name]")).toEqual(["Team", "Family", "Solo"])
     expect(find(`[data-e2e=group-${groupId}]`).textContent).toContain("Owner")
     expect(find("[data-e2e=group-g-2]").textContent).toContain("Viewer")
     const link = find("[data-e2e=group-g-2] [data-e2e=group-open]")
@@ -215,6 +216,15 @@ describe("GroupsScreen", () => {
     }
     expect(has("[data-e2e=group-settings]")).toBe(false)
     expect(has(`[aria-label^="Members of"]`)).toBe(false)
+  })
+
+  it("counts each group's members on its row, says Only you for one, and nothing while unknown", async () => {
+    await mount(<GroupsScreen {...defaults} />)
+    expect(find(`[data-e2e=group-${groupId}] [data-e2e=group-item-members]`).textContent)
+      .toBe(" · 3 members")
+    expect(find("[data-e2e=group-g-3] [data-e2e=group-item-members]").textContent)
+      .toBe(" · Only you")
+    expect(has("[data-e2e=group-g-2] [data-e2e=group-item-members]")).toBe(false)
   })
 
   it("follows a row's link through the app's navigate, without a page load", async () => {
