@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises"
-import type { APIRequestContext, BrowserContext } from "@playwright/test"
+import type { APIRequestContext, BrowserContext, Page } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
 import { gotoApp } from "./fixtures/app.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
@@ -34,9 +34,24 @@ async function mailedLink(request: APIRequestContext, email: string, subject: st
   return link.pathname + link.search
 }
 
+/** Subscribes `email` on the website and confirms it; answers the confirm link it was mailed. */
+async function subscribeAndConfirm(page: Page, request: APIRequestContext, email: string) {
+  await gotoApp(page, "/subscribe", page.locator("[data-e2e=subscribe-email]"))
+  await page.locator("[data-e2e=subscribe-email]").fill(email)
+  await page.locator("[data-e2e=subscribe-submit]").click()
+  await expect(page.locator("[data-e2e=subscribe-sent]")).toBeVisible()
+  const confirmLink = await mailedLink(request, email, "Confirm your subscription")
+  await gotoApp(page, confirmLink, page.locator("[data-e2e=subscription-confirm-submit]"))
+  await page.locator("[data-e2e=subscription-confirm-submit]").click()
+  await expect(page.locator("[data-e2e=subscription-confirm-done]")).toBeVisible()
+  return confirmLink
+}
+
 test("an operator finds a subscriber, exports the list and removes them", async ({ browser, page, request }) => {
   const operatorEmail = address("ops")
   const subscriber = address("sub")
+  // A second address on the list, so the search has something to leave out.
+  const decoy = address("decoy")
   let admin: BrowserContext | null = null
   try {
     // The operator's account, promoted.
@@ -51,15 +66,9 @@ test("an operator finds a subscriber, exports the list and removes them", async 
     })
     expect(promoted.ok(), await promoted.text()).toBe(true)
 
-    // A visitor subscribes and confirms on the website.
-    await gotoApp(page, "/subscribe", page.locator("[data-e2e=subscribe-email]"))
-    await page.locator("[data-e2e=subscribe-email]").fill(subscriber)
-    await page.locator("[data-e2e=subscribe-submit]").click()
-    await expect(page.locator("[data-e2e=subscribe-sent]")).toBeVisible()
-    const confirmLink = await mailedLink(request, subscriber, "Confirm your subscription")
-    await gotoApp(page, confirmLink, page.locator("[data-e2e=subscription-confirm-submit]"))
-    await page.locator("[data-e2e=subscription-confirm-submit]").click()
-    await expect(page.locator("[data-e2e=subscription-confirm-done]")).toBeVisible()
+    // Two visitors subscribe and confirm on the website.
+    const confirmLink = await subscribeAndConfirm(page, request, subscriber)
+    await subscribeAndConfirm(page, request, decoy)
 
     // The operator signs in on the admin host and opens the newsletter from the sidebar.
     admin = await browser.newContext({ baseURL: adminBase, acceptDownloads: true })
@@ -84,6 +93,7 @@ test("an operator finds a subscriber, exports the list and removes them", async 
     await expect(rows).toHaveCount(1)
     await expect(rows.first()).toContainText(subscriber)
     await expect(rows.first()).toContainText("Confirmed")
+    await expect(ops.locator("[data-e2e=admin-newsletter-count]")).toHaveText("1 address")
 
     // The export downloads a CSV that holds the address.
     const [download] = await Promise.all([
@@ -114,6 +124,15 @@ test("an operator finds a subscriber, exports the list and removes them", async 
     await expect(ops).toHaveURL(/tab=sends/)
     await expect(ops.locator("[data-e2e=admin-newsletter-sends]")).toBeVisible()
   } finally {
+    // The decoy leaves the list the way an operator removes it.
+    const removed = await admin?.request.post(
+      `${adminBase}/api/admin/newsletter/subscribers/remove`,
+      {
+        headers: { origin: adminBase, "sec-fetch-site": "same-origin" },
+        data: { email: decoy },
+      },
+    )
+    if (removed) expect.soft(removed.status(), await removed.text()).toBe(200)
     await admin?.close()
     const cleaned = await request.post(`${appBase}/api/test/cleanup-user`, {
       data: { login: operatorEmail },
