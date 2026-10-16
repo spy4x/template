@@ -144,7 +144,7 @@ export function ApiTokens(props: ApiTokensProps): JSX.Element {
               icon={<IconKey class="size-6" />}
               title="No API tokens"
               headingLevel={3}
-              class="max-w-none border-none px-4 py-6 sm:px-6"
+              inset
               description="A token acts as you in one group, read only or read and write."
               action={createButton || undefined}
             />

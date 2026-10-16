@@ -454,7 +454,7 @@ export function ProfileScreen(
                   icon={<IconBell class="size-6" />}
                   title="No devices yet"
                   headingLevel={3}
-                  class="max-w-none border-none px-4 py-6 sm:px-6"
+                  inset
                   description="Add this browser to get notifications on it."
                   action={onRegisterPush && (
                     <AddDevice
