@@ -4,8 +4,8 @@
 -- nothing else: no stemming and no stop words, because a product built on this template is not
 -- English-only, and one language's stemming gives wrong matches in the others.
 --
--- Adding a stored generated column rewrites the table once, under a lock that holds writes to
--- notes until it is done.
+-- Adding a stored generated column rewrites the table once, under an exclusive lock: every read
+-- and write of notes waits until it is done.
 ALTER TABLE notes ADD COLUMN search_vector tsvector GENERATED ALWAYS AS (
     setweight(to_tsvector('simple'::regconfig, title), 'A')
     || setweight(to_tsvector('simple'::regconfig, body), 'B')

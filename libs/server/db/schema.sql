@@ -333,7 +333,7 @@ CREATE INDEX idx_notes_group_updated_id_deleted
     ON notes (group_id, updated_at DESC, id)
     WHERE deleted_at IS NOT NULL;
 CREATE INDEX idx_notes_deleted_at ON notes (deleted_at) WHERE deleted_at IS NOT NULL;
--- Search over live notes (#299). See migration 2026_11_17_0001.
+-- Search over live notes (#299). See migration 2026_11_17_0003.
 CREATE INDEX idx_notes_search_vector_active ON notes USING GIN (search_vector)
     WHERE deleted_at IS NULL;
 
