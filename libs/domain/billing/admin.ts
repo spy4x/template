@@ -152,6 +152,8 @@ export type AdminBillingListResponse =
     counts: AdminBillingCounts
     /** The days a past-due group keeps its plan, for the status line's date. */
     graceDays: number
+    /** The public website's pricing page, for the empty list's action; `null` without a website. */
+    pricingUrl: string | null
   }
 
 /** The figures above the list (decision 2 of #196). */

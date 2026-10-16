@@ -36,9 +36,11 @@ import {
   ADMIN_BILLING_PAYMENT_CHANGED,
   ADMIN_BILLING_SUPERVISOR,
   ADMIN_BILLING_UNKNOWN,
+  adminBillingSettings,
   type AdminBillingStore,
   createAdminBillingRoutes,
 } from "./billing.ts"
+import type { AdminModuleContext } from "./module.ts"
 
 const GROUP = `0199f0a0-0000-7000-8000-000000000001`
 const NOW = new Date(`2026-10-17T12:00:00.000Z`)
@@ -97,7 +99,12 @@ function buildApp(setup: Setup = {}, auth?: APIContext["Variables"]["auth"]) {
   const claims: AdminBillingClaim[] = []
   const store: AdminBillingStore = {
     figures: () => Promise.reject(new Error(`not used`)),
-    list: () => Promise.reject(new Error(`not used`)),
+    list: () =>
+      Promise.resolve({
+        customers: [],
+        total: 0,
+        counts: { paying: 0, trial: 0, past_due: 0, ending: 0, cancelled: 0, all: 0 },
+      }),
     record: (groupId) => Promise.resolve(groupId === GROUP ? setup.stored ?? record : null),
     isOwnerOrMember: () => Promise.resolve(setup.member ?? false),
     claim: (claim) => {
@@ -167,9 +174,12 @@ function buildApp(setup: Setup = {}, auth?: APIContext["Variables"]["auth"]) {
       createAdminBillingRoutes({
         limit: passThrough,
         store,
-        billing: setup.billingOn === false
-          ? null
-          : { provider, graceDays: 7, dashboardUrl: `https://dashboard.stripe.com/test` },
+        billing: setup.billingOn === false ? null : {
+          provider,
+          graceDays: 7,
+          dashboardUrl: `https://dashboard.stripe.com/test`,
+          pricingUrl: `https://www.example.com/pricing`,
+        },
         now: () => NOW,
       }),
     ],
@@ -400,5 +410,28 @@ describe(`operator billing routes`, () => {
     expect((await response.json()).providerUrl).toBe(
       `https://dashboard.stripe.com/test/customers/cus_acme`,
     )
+  })
+
+  it(`sends the website's pricing page with the list, for the action of an empty list`, async () => {
+    const { app } = buildApp()
+    const response = await app.request(`${API_URL}/admin/billing/customers`, {
+      headers: { ...sameOriginHeaders },
+    })
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).pricingUrl).toBe(`https://www.example.com/pricing`)
+  })
+
+  it(`finds the pricing page on the public website, and none without a website`, () => {
+    const context = (siteUrl?: string) =>
+      ({
+        subscribers: siteUrl === undefined ? null : { siteUrl },
+        billing: { provider: {}, graceDays: 7, dashboardUrl: null },
+      }) as unknown as AdminModuleContext
+
+    expect(adminBillingSettings(context(`https://www.example.com`))?.pricingUrl).toBe(
+      `https://www.example.com/pricing`,
+    )
+    expect(adminBillingSettings(context())?.pricingUrl).toBe(null)
   })
 })

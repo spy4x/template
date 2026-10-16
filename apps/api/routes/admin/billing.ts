@@ -68,6 +68,8 @@ export interface AdminBillingSettings {
   graceDays: number
   /** The provider's dashboard, for the link on a customer's page, or `null`. */
   dashboardUrl: string | null
+  /** The public website's pricing page, or `null` while the website is not deployed. */
+  pricingUrl: string | null
 }
 
 /** What the routes read and write, over the app's database. Tests pass a fake. */
@@ -294,6 +296,7 @@ export function createAdminBillingRoutes(
         pageSize: ADMIN_BILLING_PAGE_SIZE,
         counts,
         graceDays: billing.graceDays,
+        pricingUrl: billing.pricingUrl,
       })
     })
     .get(`/billing/:groupId`, limit, async (c) => {
@@ -439,13 +442,14 @@ export function createAdminBillingRoutes(
 }
 
 /** The billing settings of the module context, or `null` while billing is off. */
-function settingsOf(context: AdminModuleContext): AdminBillingSettings | null {
+export function adminBillingSettings(context: AdminModuleContext): AdminBillingSettings | null {
   const billing = context.billing
   if (!billing || billing.provider === null) return null
   return {
     provider: billing.provider,
     graceDays: billing.graceDays,
     dashboardUrl: billing.dashboardUrl,
+    pricingUrl: context.subscribers?.siteUrl ? `${context.subscribers.siteUrl}/pricing` : null,
   }
 }
 
@@ -456,7 +460,7 @@ export const billingAdminModule: AdminApiModule = {
     createAdminBillingRoutes({
       limit: context.limit,
       store: createAdminBillingStore(context.sql),
-      billing: settingsOf(context),
+      billing: adminBillingSettings(context),
       now: context.now,
     }),
 }
