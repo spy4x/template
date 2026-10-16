@@ -322,10 +322,15 @@ describe("AppFrame", () => {
         <p id="page">page</p>
       </AppFrame>
     )
+    const atTop = () => {
+      const column = find("#page").parentElement!
+      expect(column.closest("main")).not.toBeNull()
+      expect(column.firstElementChild?.id).toBe("banner")
+    }
     await mount(frame(SCREEN_PATHS.profile))
-    expect(find("#banner").parentElement).toBe(find("#page").parentElement)
+    atTop()
     await rerender(frame(NOTE_PATHS.list))
-    expect(find("#banner").parentElement).toBe(find("#page").parentElement)
+    atTop()
   })
 
   it("names the account menu after the person and shows their name and address in it", async () => {
