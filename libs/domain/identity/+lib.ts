@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { BaseModelSchema, dateSchema } from "@spy4x/platform/model"
+import { BaseModelSchema, dateSchema, PUSH_SUBSCRIPTION_LIMITS } from "@spy4x/platform/model"
 import type { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { hasUnstorableTextCharacters } from "@spy4x/platform/universal/text"
 import { parseSort, serializeSort, type SortRule } from "@spy4x/platform/universal/sort"
@@ -286,26 +286,17 @@ export interface AccountDeletionStatus {
   blockers: AccountDeletionBlocker[]
 }
 
-/**
- * The longest value, in characters, of each text field of a push device. Three places must agree
- * on these: the request check (`pushSubscribeRequestSchema` in `@spy4x/platform/model`), the row
- * schema below and the columns of `user_push_tokens`. A request that passes the check and does not
- * fit the column is a server error (#355). `push-token-limits.test.ts` holds the request check to
- * these numbers, and `tests/integration/web-push.integration.test.ts` holds the columns to them.
- */
-export const PUSH_TOKEN_LIMITS = {
-  deviceId: 256,
-  endpoint: 2048,
-  auth: 256,
-  p256dh: 256,
-} as const
-
+// The longest value, in characters, of each text field of a push device: the library's own
+// `PUSH_SUBSCRIPTION_LIMITS`, which its request check (`pushSubscribeRequestSchema`) enforces. The
+// row schema below and the columns of `user_push_tokens` must agree with it, or a request that
+// passes the check does not fit the column (#355). `push-token-limits.test.ts` holds the row schema
+// to these numbers, and `tests/integration/web-push.integration.test.ts` holds the columns to them.
 export const userPushTokenSchemaBase = type({
   userId: "number = 0",
-  deviceId: `string <= ${PUSH_TOKEN_LIMITS.deviceId} = ''`,
-  endpoint: `string <= ${PUSH_TOKEN_LIMITS.endpoint} = ''`,
-  auth: `string <= ${PUSH_TOKEN_LIMITS.auth} = ''`,
-  p256dh: `string <= ${PUSH_TOKEN_LIMITS.p256dh} = ''`,
+  deviceId: `string <= ${PUSH_SUBSCRIPTION_LIMITS.deviceId} = ''`,
+  endpoint: `string <= ${PUSH_SUBSCRIPTION_LIMITS.endpoint} = ''`,
+  auth: `string <= ${PUSH_SUBSCRIPTION_LIMITS.auth} = ''`,
+  p256dh: `string <= ${PUSH_SUBSCRIPTION_LIMITS.p256dh} = ''`,
 })
 export type UserPushTokenBase = typeof userPushTokenSchemaBase.infer
 

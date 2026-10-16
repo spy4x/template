@@ -196,8 +196,9 @@ CREATE TABLE user_push_tokens (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMPTZ,
-    -- The limits of `PUSH_TOKEN_LIMITS` (libs/domain/identity). `endpoint` has no index, and must
-    -- never get a btree one: 2048 characters can be 8192 bytes, past what an index row holds.
+    -- The limits of `PUSH_SUBSCRIPTION_LIMITS` (`@spy4x/platform/model`). `endpoint` has no index,
+    -- and must never get a btree one: 2048 characters can be 8192 bytes, past what an index row
+    -- holds.
     CONSTRAINT user_push_tokens_endpoint_check CHECK (length(endpoint) <= 2048)
 );
 
