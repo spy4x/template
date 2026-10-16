@@ -383,10 +383,9 @@ These cost real time to find. Do not rediscover them.
        sudo rm -rf .volumes/prometheus .volumes/minio/loki-data .volumes/minio/loki-ruler
        ```
        `deno task compose ps --all` then lists no `loki`, `prometheus`, `promtail` or
-       `minio-configure`, and in the external mode no `grafana`. Postgres, Valkey and MinIO keep
-       running, and their data (`.volumes/postgres18`, `.volumes/kv`, the rest of `.volumes/minio`)
-       is not touched; MinIO's container restarts once during the deploy, because its start
-       command changed.
+       `minio-configure`, and in the external mode no `grafana`. Postgres and Valkey keep
+       running, and their data (`.volumes/postgres18`, `.volumes/kv`) is not touched. The same
+       command removes MinIO too (item 13).
     4. In Grafana, delete the Loki and Prometheus data sources if someone added them by hand:
        they are stored in `.volumes/grafana`, which the deploy keeps, and they no longer answer.
        The VictoriaMetrics and VictoriaLogs data sources come from
@@ -397,6 +396,17 @@ These cost real time to find. Do not rediscover them.
     answer (`apps/api/middlewares/admin-host.ts`). The gate reads the decoded path the router
     matches (`c.req.path`), never the raw URL: `/api/%61dmin` is the operator area too. The host is compared with its port, so a test
     against `admin.localhost:<port>` sets `ADMIN_DOMAIN` with that port, as `e2e:local` does.
+13. **MinIO is gone (#158).** Nothing in the template stored files in it; its last user, Loki, went
+    with item 11. The template bundles no file store now: the first feature that keeps files
+    (#148, #157, #145) adds one. A deploy does not remove the old container by itself, because it
+    runs `up -d` without `--remove-orphans`. **Deploy step**, once, on a server deployed before
+    this change, in `PATH_ON_SERVER`:
+    ```sh
+    deno task compose up -d --remove-orphans
+    ```
+    `deno task compose ps --all` then lists no `minio`. Its data stays in `.volumes/minio`; delete
+    that directory by hand once you are sure nothing there is wanted. The `MINIO_*` lines in the
+    env file are no longer read and can go.
 
 ## Running it
 
@@ -571,10 +581,12 @@ hint with `profileStore.refresh()`, so a second tab follows without a reload.
    `/groups`. It never selects, because a link another site controls must not switch a person's
    group (the API refuses a select that is not a post from the app's own page). The create form
    names the group on screen.
-   `/groups` lists the groups as cards (the person's role, a "Selected" badge, a settings link
-   and an "Open notes" form). `/groups/:groupId` is the settings page: `GroupSettingsScreen` in
-   `libs/ui`, one `<section>` per concern. General shows the name and the role, and a rename form
-   for an admin or the owner (`PATCH /api/groups/:id`, `group.rename`). A "Delete group"
+   `/groups` lists the groups, each row one link to the group's page, with the person's role and
+   "Current" on the current group. `/groups/new` and `/groups/:groupId` are the same editor:
+   `GroupEditorScreen` in `libs/ui`. Its form holds the name, description, emoji and colour; a
+   create sends them in one `group.create`, and a save sends a rename (`PATCH /api/groups/:id`,
+   `group.rename`) and the details (`group.updateDetails`), each only when it changed. An editor or
+   a viewer sees the details as text. A "Delete group"
    section, for the owner only, holds the confirmation text and the delete
    (`DELETE /api/groups/:id`, `group.delete`). Each later issue (members, roles and leaving #130;
    invitations #131; ownership #132; moving notes #133; moving all of a group's data #260; the extra fields #134) adds its own section

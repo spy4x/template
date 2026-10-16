@@ -6,7 +6,14 @@ import {
 } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
 import { gotoApp, signIn, submitAuthForm } from "./fixtures/app.ts"
+import { TagsPage } from "./fixtures/tags.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
+import {
+  createGroup as createGroupInBrowser,
+  openGroup,
+  openGroups,
+  openNotes,
+} from "./fixtures/groups.ts"
 
 /**
  * The local-data module as a swappable part (ADR 003, sections 1, 4 and 5), in a real browser with
@@ -155,16 +162,10 @@ test.describe("the app with the local-data module switched off", () => {
       // A group.
       await page.getByRole("navigation", { name: "Main navigation" })
         .getByRole("link", { name: "Groups" }).click()
-      await page.locator("[data-e2e=group-new]").click()
-      await page.locator("[data-e2e=group-name]").fill("Online-only team")
-      await page.locator("[data-e2e=group-create]").click()
-      await expect(
-        page.locator("[data-e2e=group-item-name]").filter({ hasText: "Online-only team" }),
-      ).toHaveCount(1)
+      await createGroupInBrowser(page, "Online-only team")
 
       // A note: created, edited, and read again after a reload.
-      await page.getByRole("button", { name: "Open notes in Online-only team" }).click()
-      await expect(page.locator("[data-e2e=notes-group]")).toHaveText("Online-only team")
+      await openNotes(page, "Online-only team")
       const titles = page.locator("[data-e2e=note-item-title]")
       await page.locator("[data-e2e=note-new]").click()
       await page.locator("[data-e2e=note-title]").fill("Groceries")
@@ -179,16 +180,15 @@ test.describe("the app with the local-data module switched off", () => {
       await expect(titles).toHaveText(["Groceries for Friday"])
 
       // The other list screens read from the server.
-      await page.getByRole("navigation", { name: "Main navigation" })
-        .getByRole("link", { name: "Groups" }).click()
-      await page.getByRole("link", { name: "Settings of Online-only team" }).click()
+      await openGroups(page)
+      await openGroup(page, "Online-only team")
       await expect(page.locator("[data-e2e=group-member]")).toHaveCount(1)
       await expect(page.locator("[data-e2e=billing-plan]")).toBeVisible()
       const groupPath = new URL(page.url()).pathname
       await gotoApp(page, `${groupPath}/activity`, page.locator("[data-e2e=activity-list]"))
       await gotoApp(page, "/notifications", page.getByRole("heading", { level: 1 }))
       await gotoApp(page, "/", page.locator("[data-e2e=session-current]"))
-      await expect(page.locator("[data-e2e=sessions-saved-copy]")).toHaveCount(0)
+      await expect(page.locator("[data-e2e=sessions-saved-copy]")).toBeEmpty()
 
       expect(await databases(page)).toEqual([])
       await signOut(page)
@@ -280,8 +280,8 @@ test.describe("the app with no network, after one visit online", () => {
       await expect(tokens).toHaveCount(1)
       // Once more, so the copy on the device holds the token just made.
       await gotoApp(page, "/", tokens)
-      await expect(page.locator("[data-e2e=sessions-saved-copy]")).toHaveCount(0)
-      await expect(page.locator("[data-e2e=api-tokens-saved-copy]")).toHaveCount(0)
+      await expect(page.locator("[data-e2e=sessions-saved-copy]")).toBeEmpty()
+      await expect(page.locator("[data-e2e=api-tokens-saved-copy]")).toBeEmpty()
       const name = await page.locator("[data-e2e=profile-name]").textContent()
 
       await context.setOffline(true)
@@ -306,9 +306,15 @@ test.describe("the app with no network, after one visit online", () => {
       await openOffline(page, "/")
       await expect(page.locator("[data-e2e=profile-name]")).toHaveText(name ?? "")
       await expect(page.locator("[data-e2e=session-current]")).toBeVisible()
-      await expect(page.locator("[data-e2e=sessions-saved-copy] time")).toBeVisible()
+      await expect(page.locator("[data-e2e=sessions-saved-copy]")).toHaveAttribute(
+        "data-saved-at",
+        /^\d{4}-/,
+      )
       await expect(page.locator("[data-e2e=api-tokens]")).toContainText("Kept token")
-      await expect(page.locator("[data-e2e=api-tokens-saved-copy] time")).toBeVisible()
+      await expect(page.locator("[data-e2e=api-tokens-saved-copy]")).toHaveAttribute(
+        "data-saved-at",
+        /^\d{4}-/,
+      )
     } finally {
       await context.close()
       await otherContext.close()
@@ -473,6 +479,51 @@ test.describe("what a device keeps", () => {
     } finally {
       await context.close()
       await cleanup(request, user)
+    }
+  })
+
+  test("a start with another person's session, as a provider sign-in's redirect brings it, deletes the copies of the person the browser remembered", async ({ browser, request }) => {
+    const first = "e2e_local_data_switch_first@example.com"
+    const second = "e2e_local_data_switch_second@example.com"
+    await cleanup(request, first)
+    await cleanup(request, second)
+    const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    const elsewhere = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    try {
+      const { page, userId } = await deviceWithNote(context, request, first)
+      await gotoApp(page, "/groups", page.locator("[data-e2e=group-list]"))
+      await expect.poll(() => recordsIn(page, `reads:${userId}`)).toBeGreaterThan(0)
+      await expect.poll(() => recordsIn(page, `offline:user:${userId}:notes`)).toBeGreaterThan(0)
+      // A tag, so the tags copy holds something to delete.
+      const tags = new TagsPage(page)
+      await tags.open()
+      await tags.create("Urgent")
+      await expect.poll(() => recordsIn(page, `offline:user:${userId}:tags`)).toBeGreaterThan(0)
+      await signUp(request, second)
+      const other = await elsewhere.newPage()
+      await signIn(other, second, password)
+      const me = await other.request.get(`${apiBase}/api/auth/me`)
+      expect(me.ok(), await me.text()).toBe(true)
+      const secondId = (await me.json() as { id: number }).id
+
+      // The provider's callback sets the second person's session cookie and redirects to the app,
+      // which this browser still remembers as the first person's. No sign-out happens in between.
+      await context.clearCookies()
+      await context.addCookies(await elsewhere.cookies())
+      await gotoApp(page, "/groups", page.locator("[data-e2e=group-list]"))
+      // The app has seen the second person's session: it remembers them now.
+      await expect.poll(() =>
+        page.evaluate(() => JSON.parse(localStorage.getItem("offline:session") ?? "null")?.id)
+      ).toBe(secondId)
+
+      await expect.poll(() => recordsIn(page, `reads:${userId}`)).toBe(0)
+      expect(await recordsIn(page, `offline:user:${userId}:notes`)).toBe(0)
+      expect(await recordsIn(page, `offline:user:${userId}:tags`)).toBe(0)
+    } finally {
+      await elsewhere.close()
+      await context.close()
+      await cleanup(request, first)
+      await cleanup(request, second)
     }
   })
 
