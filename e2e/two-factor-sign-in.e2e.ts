@@ -30,17 +30,8 @@ test.describe("two-factor sign-in", () => {
       })
       expect(signUp.ok()).toBe(true)
 
-      // Two-factor auth needs a proven address: enter the code sign-up mailed.
-      let code = ""
-      await expect.poll(async () => {
-        const response = await request.post(`${apiBase}/api/test/last-mail`, { data: { email } })
-        if (!response.ok()) return response.status()
-        code = ((await response.json()) as { text: string }).text.split("\n\n")[1].trim()
-        return response.status()
-      }, { timeout: 20_000, message: "the worker mails the code" }).toBe(200)
-      await gotoApp(page, "/email", page.locator("[data-e2e=email-code]"))
-      await page.locator("[data-e2e=email-code]").fill(code)
-      await page.locator("[data-e2e=email-verify]").click()
+      // Two-factor auth needs a proven address; the sign-up code proved it.
+      await gotoApp(page, "/email", page.locator("[data-e2e=email-state]"))
       await expect(page.locator("[data-e2e=email-state]")).toHaveText("Verified")
 
       // Turn two-factor auth on through the profile screen and read the secret it shows.

@@ -169,18 +169,9 @@ test("a signed-in walk through the app meets no refusal under the content securi
     await gotoApp(page, "/notes", page.locator("[data-e2e=note-new]"))
     await gotoApp(page, `/notes/${noteId}`, page.locator("[data-e2e=note-title]"))
 
-    // Prove the address with the mailed code, so the profile offers two-factor auth: its QR code
-    // is the one image the app builds as a `data:` address.
-    let code = ""
-    await expect.poll(async () => {
-      const response = await request.post("/api/test/last-mail", { data: { email } })
-      if (!response.ok()) return response.status()
-      code = ((await response.json()) as { text: string }).text.split("\n\n")[1].trim()
-      return response.status()
-    }, { timeout: 20_000, message: "the worker mails the code" }).toBe(200)
-    await gotoApp(page, "/email", page.locator("[data-e2e=email-code]"))
-    await page.locator("[data-e2e=email-code]").fill(code)
-    await page.locator("[data-e2e=email-verify]").click()
+    // The sign-up code proved the address, so the profile offers two-factor auth: its QR code is
+    // the one image the app builds as a `data:` address.
+    await gotoApp(page, "/email", page.locator("[data-e2e=email-state]"))
     await expect(page.locator("[data-e2e=email-state]")).toHaveText("Verified")
     await gotoApp(page, "/", page.locator("[data-e2e=totp-start]"))
     await page.locator("[data-e2e=totp-start]").click()
