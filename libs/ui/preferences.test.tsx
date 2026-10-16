@@ -147,7 +147,12 @@ describe(`PreferencesGroup`, () => {
     const first = group()
     await mount(first.node)
     await click(`[data-e2e="preferences-change-clock"]`)
-    await rerender(first.node)
+    // The person picks 12-hour here while another device saves 24-hour and Tokyo.
+    const select = $<HTMLSelectElement>(`[data-e2e="preferences-clock-select"]`)!
+    select.value = `h12`
+    await act(() =>
+      void select.dispatchEvent(new window.Event(`change`, { bubbles: true }) as never)
+    )
 
     const won: Preferences = { ...DEFAULT_PREFERENCES, hourCycle: `h23`, timeZone: `Asia/Tokyo` }
     await rerender(group({ conflict: won, value: won }).node)

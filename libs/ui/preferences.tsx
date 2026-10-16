@@ -409,6 +409,7 @@ function RegionDialog(
                 <Combobox<RegionItem>
                   id={wiring.id}
                   ariaLabel="Formats"
+                  placeholder="Search by language or country"
                   aria-describedby={wiring["aria-describedby"]}
                   items={regionItems}
                   value={region}
@@ -429,6 +430,7 @@ function RegionDialog(
                 <Combobox<ZoneItem>
                   id={wiring.id}
                   ariaLabel="Time zone"
+                  placeholder="Search by city"
                   aria-describedby={wiring["aria-describedby"]}
                   items={zoneItems}
                   value={zone}
