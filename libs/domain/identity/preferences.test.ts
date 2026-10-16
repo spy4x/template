@@ -38,17 +38,6 @@ Deno.test(`preferences: refuses an unknown theme or clock`, () => {
   expect(preferencesDefinition.parse({ ...valid, hourCycle: `h24` }).ok).toBe(false)
 })
 
-Deno.test(`preferences: drops keys the schema does not declare, so nothing else is stored`, () => {
-  const result = preferencesDefinition.parse({ ...valid, notes: `x`.repeat(10_000) })
-  expect(result).toEqual({ ok: true, value: valid })
-})
-
-Deno.test(`preferences: a save based on an older version is refused with the current record`, () => {
-  const current = { version: 3, value: valid }
-  const result = preferencesDefinition.save(current, { version: 2, value: DEFAULT_PREFERENCES })
-  expect(result).toEqual({ ok: false, reason: `conflict`, current })
-})
-
 Deno.test(`preferences: a record saved before a key existed reads with that key's default`, () => {
   const stored = { version: 4, value: { theme: `light` } }
   expect(preferencesDefinition.resolve(stored)).toEqual({

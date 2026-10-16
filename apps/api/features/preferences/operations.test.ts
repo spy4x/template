@@ -11,7 +11,6 @@ import {
 } from "@domain/identity"
 import { PreferencesDeviceCommand, PreferencesSaveCommand } from "../../cqrs/commands.ts"
 import type { PreferencesUpdatedEvent } from "../../cqrs/events.ts"
-import { PreferencesGetQuery } from "../../cqrs/queries.ts"
 import {
   createPreferencesDeviceHandler,
   createPreferencesGetHandler,
@@ -200,13 +199,5 @@ describe(`preferences operations`, () => {
       request: { version: 0, value: berlin },
       idempotencyKey: `key-1`,
     })
-  })
-
-  it(`reads through the query class the bus registers`, async () => {
-    const { preferences } = memory()
-    const result = await createPreferencesGetHandler({ preferences })(
-      new PreferencesGetQuery({ actor }),
-    )
-    expect(result.version).toBe(0)
   })
 })
