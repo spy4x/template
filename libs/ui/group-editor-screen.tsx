@@ -10,6 +10,7 @@ import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Field } from "@spy4x/preact-ui/field"
 import { Input, Textarea } from "@spy4x/preact-ui/input"
 import { Stack } from "@spy4x/preact-ui/layout"
+import { LoadingSkeleton } from "@spy4x/preact-ui/loading-skeleton"
 import { Modal } from "@spy4x/preact-ui/modal"
 import { RadioGroup } from "@spy4x/preact-ui/radio"
 import {
@@ -36,6 +37,7 @@ import type { PlanRefusal } from "@domain/billing"
 import { GroupMoveAllForm, type MoveAllResult } from "./group-move-all.tsx"
 import { type MoveTarget, NavigateItem } from "./notes-screen.tsx"
 import { GROUP_PATHS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
+import { FORM_WIDTH, useWaited } from "./tag-editor-screen.tsx"
 
 /** What the editor's fields hold. The emoji is the text typed, an empty string for none. */
 export interface GroupDraft {
@@ -178,6 +180,7 @@ const BACK = { href: SCREEN_PATHS.groups, label: "Back to groups" }
  */
 export function GroupEditorScreen(props: GroupEditorScreenProps): JSX.Element {
   const { group, navigate } = props
+  const waited = useWaited(props.loading && !group)
   if (props.creating) {
     return (
       <Stack gap="xl">
@@ -195,23 +198,31 @@ export function GroupEditorScreen(props: GroupEditorScreenProps): JSX.Element {
     return (
       <Stack gap="xl">
         <PageHeader title="Group" back={BACK} navigate={navigate} />
-        {props.error ? <ErrorState message={props.error} /> : (
-          <Card>
-            <EmptyState
-              inset
-              headingLevel={2}
-              title={props.loading ? "Loading the group…" : "This group does not exist."}
-              description={props.loading
-                ? undefined
-                : "It may have been deleted, or you are not a member."}
-              action={!props.loading && (
-                <Button href={SCREEN_PATHS.groups} navigate={navigate} variant="outline">
-                  Back to groups
-                </Button>
-              )}
-            />
-          </Card>
-        )}
+        {props.error ? <ErrorState message={props.error} /> : props.loading
+          ? (
+            // Nothing for a short read, so a fast one does not flash; a placeholder after that.
+            waited && (
+              <div data-e2e="group-loading">
+                <p role="status" class="sr-only">Loading the group…</p>
+                <LoadingSkeleton rows={1} class={FORM_WIDTH} />
+              </div>
+            )
+          )
+          : (
+            <Card>
+              <EmptyState
+                inset
+                headingLevel={2}
+                title="This group does not exist."
+                description="It may have been deleted, or you are not a member."
+                action={
+                  <Button href={SCREEN_PATHS.groups} navigate={navigate} variant="outline">
+                    Back to groups
+                  </Button>
+                }
+              />
+            </Card>
+          )}
       </Stack>
     )
   }
@@ -546,6 +557,7 @@ function GroupForm(
     onSave,
     onDiscard,
     navigate,
+    group,
   }: GroupEditorScreenProps,
 ): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
@@ -559,11 +571,30 @@ function GroupForm(
       : null
     if (first) box.current?.querySelector<HTMLElement>(`[name=${first}]`)?.focus()
   }, [errors])
+  // When an existing group's footer goes away (Discard, or a save that went through), the button
+  // that held focus goes with it, and the browser drops focus to the page. Focus moves to the name
+  // field instead, once the save has finished and the fields are enabled again. Focus the person
+  // put in the fields themselves stays where it is.
+  const showFooter = creating || dirty
+  const shown = useRef({ footer: showFooter, groupId: group?.id })
+  const refocus = useRef(false)
+  useEffect(() => {
+    const before = shown.current
+    if (before.footer && !showFooter && group && before.groupId === group.id) {
+      refocus.current = true
+    }
+    shown.current = { footer: showFooter, groupId: group?.id }
+    if (!refocus.current || saving) return
+    refocus.current = false
+    const active = box.current?.ownerDocument.activeElement
+    if (active && box.current?.contains(active)) return
+    box.current?.querySelector<HTMLElement>("[name=name]")?.focus()
+  }, [showFooter, saving, group?.id])
   const change = (patch: Partial<GroupDraft>) => onChange?.({ ...value, ...patch })
   const optional = <span class="ml-2 font-normal text-muted">Optional</span>
   return (
     <ScreenForm pending={saving} onSubmit={onSave}>
-      <div ref={box}>
+      <div ref={box} class={FORM_WIDTH}>
         <Stack>
           <Field id="group-name" label="Name" error={errors.name} required>
             <Input
@@ -614,7 +645,7 @@ function GroupForm(
           />
           <Preview value={value} />
           <ErrorState focusOnAppear message={errors.form ?? null} dataE2E="group-form-error" />
-          {(creating || dirty) && (
+          {showFooter && (
             // On a phone the primary button is on top at full width; from `sm` up the two are a
             // row at the right, the primary last.
             <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

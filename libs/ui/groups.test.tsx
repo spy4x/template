@@ -812,9 +812,19 @@ describe("GroupEditorScreen header", () => {
     expect(has("[data-e2e=group-name]")).toBe(false)
   })
 
-  it("says the group is loading, not missing, while it is read", async () => {
+  it("draws a placeholder only after 300 ms while the group is read, says it is loading, and never says it is missing", async () => {
     await mount(<GroupEditorScreen {...defaults} group={null} loading />)
-    expect(root!.textContent).toContain("Loading the group…")
+    expect(find("h1").textContent).toBe("Group")
+    expect(has("[data-e2e=group-loading]")).toBe(false)
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200)))
+    expect(has("[data-e2e=group-loading]")).toBe(false)
+    await act(() => new Promise((resolve) => setTimeout(resolve, 150)))
+    expect(find("[data-e2e=group-loading] [role=status]").textContent).toBe("Loading the group…")
+    // The placeholder is the library's skeleton, which a screen reader skips.
+    expect(
+      root!.querySelectorAll("[data-e2e=group-loading] [aria-hidden=true] .animate-pulse").length,
+    )
+      .toBeGreaterThan(0)
     expect(root!.textContent).not.toContain("does not exist")
   })
 })
@@ -1455,6 +1465,38 @@ describe("GroupEditorScreen form", () => {
     expect(discards.calls).toHaveLength(1)
     expect(await submit("[data-e2e=group-save]")).toBe(true)
     expect(saves.calls).toHaveLength(1)
+  })
+
+  it("keeps the fields and the footer in one narrow column, so they do not stretch across a wide page", async () => {
+    await mount(<GroupEditorScreen {...settings} dirty />)
+    const column = find("[data-e2e=group-name]").closest(".max-w-md")
+    expect(column).not.toBe(null)
+    expect(column!.contains(find("[data-e2e=group-save]"))).toBe(true)
+  })
+
+  it("moves focus to the name field when Discard takes the footer away", async () => {
+    await mount(<GroupEditorScreen {...settings} value={{ ...saved, name: "Crew" }} dirty />)
+    find("[data-e2e=group-discard]").focus()
+    await rerender(<GroupEditorScreen {...settings} />)
+    expect(has("[data-e2e=group-discard]")).toBe(false)
+    expect(focused()).toBe("group-name")
+  })
+
+  it("moves focus to the name field once a save went through, not while it is still running", async () => {
+    const changed = { ...saved, name: "Crew" }
+    await mount(<GroupEditorScreen {...settings} value={changed} dirty />)
+    find("[data-e2e=group-save]").focus()
+    await rerender(<GroupEditorScreen {...settings} value={changed} dirty saving />)
+    expect(focused()).not.toBe("group-name")
+    await rerender(<GroupEditorScreen {...settings} value={changed} />)
+    expect(focused()).toBe("group-name")
+  })
+
+  it("leaves focus in the fields when typing puts the saved value back", async () => {
+    await mount(<GroupEditorScreen {...settings} value={{ ...saved, name: "Crew" }} dirty />)
+    find("[data-e2e=group-description]").focus()
+    await rerender(<GroupEditorScreen {...settings} />)
+    expect(focused()).toBe("group-description")
   })
 
   it("counts the description's characters as the server does, one per emoji", async () => {
