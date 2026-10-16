@@ -20,7 +20,6 @@ each side holds them to that (`apps/admin/src/modules/registry.test.ts`,
 | `audit`      | Audit log     | `/audit`                  |                                     | none yet                |
 | `system`     | System        | `/system`                 |                                     | none yet                |
 | `api-tokens` | API tokens    | `/api-tokens`             | API tokens, Devices, Notifications  | none yet                |
-| `billing`    | Billing       | `/billing`                |                                     | none yet                |
 
 A module marked "none yet" is registered with a "coming soon" page (and tabs), so the sidebar shows
 the whole plan. Its own lane fills it in.

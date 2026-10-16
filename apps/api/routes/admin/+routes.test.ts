@@ -229,7 +229,6 @@ describe("operator area routes", () => {
       "audit",
       "system",
       "api-tokens",
-      "billing",
     ])
   })
 

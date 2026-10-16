@@ -8,7 +8,6 @@ import { newsletterAdminModule } from "./newsletter.ts"
 import { auditAdminModule } from "./audit.ts"
 import { systemAdminModule } from "./system.ts"
 import { apiTokensAdminModule } from "./api-tokens.ts"
-import { billingAdminModule } from "./billing.ts"
 
 /**
  * Every module of the operator area's API, in the admin app's sidebar order. A new module is one
@@ -22,7 +21,6 @@ export const ADMIN_API_MODULES: readonly AdminApiModule[] = [
   auditAdminModule,
   systemAdminModule,
   apiTokensAdminModule,
-  billingAdminModule,
 ]
 
 /** The routes of every registered module, built over `context`. */
