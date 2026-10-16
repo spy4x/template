@@ -76,7 +76,7 @@ const operator = () => buildAuthData({ user: { id: 7, role: UserRole.OPERATOR } 
 /** The operator area with the newsletter module over a fake service that records every call. */
 function buildApp(
   auth: APIContext["Variables"]["auth"] = operator(),
-  { enabled = true, rows = [confirmed, pending] } = {},
+  { enabled = true, rows = [confirmed, pending], removeFails = false } = {},
 ) {
   const calls: unknown[][] = []
   const audits: AuthAuditBase[] = []
@@ -93,7 +93,10 @@ function buildApp(
     ) => (calls.push([`find`, email]),
       Promise.resolve(rows.find((row) => row.email === email) ?? null)),
     all: () => (calls.push([`all`]), Promise.resolve(rows)),
-    remove: (email) => (calls.push([`remove`, email]), Promise.resolve()),
+    remove: (
+      email,
+    ) => (calls.push([`remove`, email]),
+      removeFails ? Promise.reject(new Error(`database is down`)) : Promise.resolve()),
     resend: (email) => (calls.push([`resend`, email]), Promise.resolve()),
     audit: (row) => (audits.push(row), Promise.resolve()),
   }
@@ -222,6 +225,17 @@ describe(`operator area: newsletter routes`, () => {
       ip: null,
       userAgent: null,
     }])
+  })
+
+  it(`keeps the audit row when the removal itself throws`, async () => {
+    const { app, calls, audits } = buildApp(operator(), { removeFails: true })
+    const response = await post(app, `remove`, { email: pending.email })
+
+    expect(response.status).toBe(500)
+    expect(calls).toEqual([[`find`, pending.email], [`remove`, pending.email]])
+    expect(audits.map((row) => [row.userId, row.eventType, row.identifier])).toEqual([
+      [7, AuthAuditEventType.NEWSLETTER_SUBSCRIBER_REMOVED, `news:b***@example.com`],
+    ])
   })
 
   it(`answers 404 to removing an address that is not on the list, writing nothing`, async () => {
