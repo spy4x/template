@@ -35,13 +35,15 @@ export function TagEditorView({ tagId = null }: { tagId?: string | null }) {
     : undefined
   const canWrite = membership ? canMutateNotes(membership.role) : false
   const tag = tagId === null ? undefined : store.byId.value.get(tagId)
-  // The editor follows the tag as the list holds it until the person changes a field.
+  const form = store.form.value
+  // The editor follows the tag as the list holds it until the person changes a field, and is
+  // built again whenever the store has none (after a group change or a discard), so the page
+  // never shows fields that ignore typing.
   useEffect(() => {
     if (tagId === null) store.startCreate()
     else if (tag) store.startEdit(tag.id)
-  }, [tagId, tag])
+  }, [tagId, tag, form === null])
 
-  const form = store.form.value
   const editing = tagId !== null && form?.id === tagId ? form : null
   const creating = tagId === null && form?.id === null ? form : null
   const value = editing ?? creating ?? tag ?? { name: "", color: DEFAULT_TAG_COLOR }
