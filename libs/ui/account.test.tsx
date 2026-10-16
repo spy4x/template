@@ -541,6 +541,15 @@ describe("ProfileScreen", () => {
     }
   })
 
+  it("shows an empty push device list inside the section's own card, not in a dashed box", async () => {
+    await mount(<ProfileScreen {...profileDefaults} pushDevices={[]} onRegisterPush={() => {}} />)
+
+    const empty = find("#push-devices [role=status]")
+    expect(empty.textContent).toContain("No devices yet")
+    expect(empty.closest(".pc-card")).not.toBeNull()
+    expect(document.querySelector(".border-dashed")).toBeNull()
+  })
+
   it("names each settings group by its own h2, under the page's one h1", async () => {
     await mount(<ProfileScreen {...profileDefaults} />)
 
