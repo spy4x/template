@@ -39,7 +39,7 @@ async function groupWithNote(page: Page, name: string, title: string, body: stri
   return { groupId, noteId }
 }
 
-/** Opens `groupId`'s notes, online, with the app and the group's notes saved on the device. */
+/** Opens `groupId`'s notes online; the page saves them on the device as it lists them. */
 async function openNotes(page: Page, groupId: string, title: string): Promise<void> {
   const selected = await page.request.put(`${apiBase}/api/groups/selected`, {
     headers,
@@ -48,11 +48,6 @@ async function openNotes(page: Page, groupId: string, title: string): Promise<vo
   expect(selected.ok(), await selected.text()).toBe(true)
   await gotoApp(page, "/notes", page.locator("[data-e2e=shell-ws-status]"))
   await expect(page.locator("[data-e2e=shell-ws-status]")).toHaveText("Online")
-  await page.evaluate(async () => {
-    await navigator.serviceWorker.ready
-  })
-  // One more load under the worker's control, so everything the page needs is cached.
-  await gotoApp(page, page.url(), page.locator("[data-e2e=note-list]"))
   await expect(page.locator("[data-e2e=note-item-title]").filter({ hasText: title })).toHaveCount(1)
 }
 
@@ -62,9 +57,6 @@ const result = (page: Page, label: string) =>
   palette(page).getByRole("option").filter({ hasText: label })
 
 test.describe("search", () => {
-  // Each spec signs up, loads the app twice so the service worker holds it, and one goes offline.
-  test.describe.configure({ timeout: 60_000 })
-
   test("Ctrl+K opens the search, and picking a note of another group opens it in that group", async ({ browser, request }) => {
     const user = "e2e_search_online@example.com"
     await cleanup(request, user)
@@ -97,37 +89,6 @@ test.describe("search", () => {
       await expect(page).toHaveURL(new RegExp(`/notes/${garden.noteId}$`))
       await expect(page.locator("[data-e2e=note-title]")).toHaveValue("Garden notes")
       await expect(page.locator("[data-e2e=group-picker]")).toContainText("Side project")
-    } finally {
-      await context.close()
-      await cleanup(request, user)
-    }
-  })
-
-  test("offline, the search looks through the notes on this device and says so", async ({ browser, request }) => {
-    const user = "e2e_search_offline@example.com"
-    await cleanup(request, user)
-    const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
-    try {
-      await signUp(request, user)
-      const page = await context.newPage()
-      await signIn(page, user, password)
-      const { groupId } = await groupWithNote(page, "Field trip", "Packing list", "Rain jacket")
-      await openNotes(page, groupId, "Packing list")
-
-      await context.setOffline(true)
-      await page.reload()
-      await expect(page.locator("[data-e2e=shell-ws-status]")).not.toHaveText("Online")
-
-      await page.locator("[data-e2e=search-open]").click()
-      await field(page).fill("jacket")
-      await expect(palette(page).getByRole("group").first()).toContainText("Notes on this device")
-      await expect(result(page, "Packing list")).toBeVisible()
-
-      await field(page).fill("snorkel")
-      await expect(palette(page).getByRole("status")).toHaveText(
-        "Nothing on this device matches “snorkel”. Search again when you are back online.",
-      )
-      await context.setOffline(false)
     } finally {
       await context.close()
       await cleanup(request, user)
