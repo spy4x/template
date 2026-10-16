@@ -24,7 +24,10 @@ function expectSecurityHeaders(response: APIResponse) {
   expect(directives).toContain("base-uri 'self'")
   expect(directives).toContain("form-action 'self'")
   expect(directives).toContain("frame-ancestors 'none'")
-  expect(directives).toContain("img-src 'self' data:")
+  // The provider's picture on "Create a new account?": Google's and GitHub's image hosts only.
+  expect(directives).toContain(
+    "img-src 'self' data: https://lh3.googleusercontent.com https://avatars.githubusercontent.com",
+  )
   expect(directives).toContain("font-src 'self' https://fonts.gstatic.com")
   // The origin of the container's SPA_ERROR_REPORT_DSN, and nothing else beyond the app itself.
   expect(directives).toContain(`connect-src 'self' ${TRACKER}`)
