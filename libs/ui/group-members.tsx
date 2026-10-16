@@ -113,7 +113,8 @@ export function GroupMembersSection(
     {
       earlier: false,
       fallback: () =>
-        header.current?.querySelector("button") ?? header.current?.querySelector("h2"),
+        header.current?.querySelector<HTMLElement>("a[href], button") ??
+          header.current?.querySelector("h2"),
     },
   )
   return (
