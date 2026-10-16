@@ -209,7 +209,7 @@ const TIERS: readonly Tier[] = [
         facts: [
           `An IndexedDB copy of each list and a write queue with idempotency keys`,
           `“Keep mine” or “Use the server's” for each conflict`,
-          `All of it in one folder you can delete for an online-only app`,
+          `Turned off with one setting, or removed by deleting one folder and following a written list`,
         ],
         code: { label: `Read docs/offline.md`, href: source(`docs/offline.md`) },
         visual: <OfflinePair />,
@@ -322,7 +322,7 @@ const TIERS: readonly Tier[] = [
           `Traefik in front, with automatic certificates`,
           `Postgres, Valkey and MinIO beside the apps`,
           `VictoriaMetrics, VictoriaLogs and Grafana, with alerts`,
-          `A daily encrypted restic backup of the database, and a written restore`,
+          `An opt-in daily encrypted restic backup of the database, and a written restore`,
           `Release images published from CI when you push a version tag`,
         ],
         notYet: [{
@@ -352,9 +352,8 @@ const TIERS: readonly Tier[] = [
         nav: `Tests`,
         eyebrow: `Quality`,
         title: `Tested where it matters`,
-        lead:
-          `Counted on 16 October 2026: 34 browser test suites for the app and 232 test files, ` +
-          `run in CI. Every change goes through a pull request and a review before it merges.`,
+        lead: `Counted on 16 October 2026: 34 browser test suites for the app, plus unit and ` +
+          `screen tests, all run in CI. Every change goes through a pull request and a review before it merges.`,
         facts: [
           `Browser tests with Playwright, against the real API and database`,
           `Unit and screen tests next to the code they test`,
