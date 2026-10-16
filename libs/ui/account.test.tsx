@@ -1049,6 +1049,14 @@ describe("EmailScreen", () => {
     expect(verify.calls).toHaveLength(1)
   })
 
+  it("puts the code entry and the new-code request in one card under the section's heading", async () => {
+    await mount(<EmailScreen {...emailDefaults} />)
+
+    const card = find("[data-e2e=email-verify-card] .pc-card")
+    expect(card.querySelector("[data-e2e=email-code]")).not.toBeNull()
+    expect(card.querySelector("[data-e2e=email-send]")).not.toBeNull()
+  })
+
   it("refuses a second check while the first is pending", async () => {
     const verify = spy<[]>()
     const pending = { ...emailDefaults.pending, verify: true }
