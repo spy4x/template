@@ -2,6 +2,7 @@
  * The "API tokens" section, driven in a browser DOM (happy-dom): what the list shows, what asks
  * first, what the app receives and where focus goes.
  */
+import { formatTime } from "@spy4x/platform/universal/time"
 import { expect } from "@std/expect"
 import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd"
 import { Window } from "happy-dom"
@@ -321,7 +322,9 @@ describe("ApiTokens", () => {
     const notice = find("[data-e2e=api-tokens-saved-copy]")
     expect(notice.getAttribute("role")).toBe("status")
     expect(notice.textContent).toContain("Saved copy of your API tokens")
-    expect(notice.textContent).toContain("saved on this device: 10/10/2026")
+    // Worded in the machine's own zone, as the library does, so the test holds in every zone.
+    const worded = formatTime(new Date(savedAt), { full: true })
+    expect(notice.textContent).toContain(`saved on this device: ${worded}`)
     expect(notice.getAttribute("data-saved-at")).toBe("2026-10-10T08:30:00.000Z")
   })
 
