@@ -178,10 +178,11 @@
 
     // client
     // spy4x/preact-components 3.22.1. Every package is published at one version together, so all
-    // five move in one change, and so does the npm copy of `@spy4x/preact-system` further down
+    // six move in one change, and so does the npm copy of `@spy4x/preact-system` further down
     // (the Playwright config imports it under that name). They take preact and the signals packages as caret ranges, so the
     // versions below are the one copy that loads. wouter-preact must stay on the version they pin,
     // or two copies load.
+    "@spy4x/preact-charts": "jsr:@spy4x/preact-charts@3.22.1",
     "@spy4x/preact-icons": "jsr:@spy4x/preact-icons@3.22.1",
     "@spy4x/preact-signals": "jsr:@spy4x/preact-signals@3.22.1",
     "@spy4x/preact-system": "jsr:@spy4x/preact-system@3.22.1",
@@ -202,7 +203,7 @@
     "@std/yaml": "jsr:@std/yaml@1.3.0",
     "@playwright/test": "npm:@playwright/test@1.57.0",
     "playwright": "npm:playwright@1.57.0",
-    // The npm name of `@spy4x/preact-system` above, for Playwright's loader; it moves with the five.
+    // The npm name of `@spy4x/preact-system` above, for Playwright's loader; it moves with the six.
     "@jsr/spy4x__preact-system": "npm:@jsr/spy4x__preact-system@3.22.1",
     // The npm name of `@spy4x/platform` above, for the same reason: every e2e spec takes `uuidV7`
     // from it. It moves with the `@spy4x/*` packages.

@@ -27,6 +27,7 @@
     "jsr:@spy4x/platform@1.59.0": "1.59.0",
     "jsr:@spy4x/platform@1.68.0": "1.68.0",
     "jsr:@spy4x/platform@^1.68.0": "1.68.0",
+    "jsr:@spy4x/preact-charts@3.22.1": "3.22.1",
     "jsr:@spy4x/preact-cn@^3.22.1": "3.22.1",
     "jsr:@spy4x/preact-icons@3.22.1": "3.22.1",
     "jsr:@spy4x/preact-icons@^3.22.1": "3.22.1",
@@ -302,6 +303,13 @@
         "jsr:@std/ulid",
         "jsr:@std/uuid@1.1.2",
         "npm:arktype"
+      ]
+    },
+    "@spy4x/preact-charts@3.22.1": {
+      "integrity": "b86f5c38da805ff5c43f16e6bfe2582bcf0f321fad2d4e8fc51694265064820b",
+      "dependencies": [
+        "jsr:@spy4x/platform@1.59.0",
+        "npm:preact@^10.29.8"
       ]
     },
     "@spy4x/preact-cn@3.22.1": {
@@ -2604,6 +2612,7 @@
       "jsr:@spy4x/integrations@1.68.0",
       "jsr:@spy4x/net@1.68.0",
       "jsr:@spy4x/platform@1.68.0",
+      "jsr:@spy4x/preact-charts@3.22.1",
       "jsr:@spy4x/preact-icons@3.22.1",
       "jsr:@spy4x/preact-signals@3.22.1",
       "jsr:@spy4x/preact-system@3.22.1",
