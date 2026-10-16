@@ -19,7 +19,12 @@ import {
   PRO_PLAN_ID,
 } from "@domain/billing"
 import { UserRole } from "@domain/identity"
-import { AdminBillingListScreen, type AdminBillingListScreenProps } from "./admin-billing-list.tsx"
+import {
+  ADMIN_BILLING_LIST_ERROR,
+  ADMIN_BILLING_SETUP_URL,
+  AdminBillingListScreen,
+  type AdminBillingListScreenProps,
+} from "./admin-billing-list.tsx"
 import {
   AdminBillingCustomerScreen,
   type AdminBillingCustomerScreenProps,
@@ -138,7 +143,9 @@ const figures: AdminBillingFigures = {
 
 const counts = { paying: 38, trial: 7, past_due: 3, ending: 2, cancelled: 9, all: 56 }
 
-function page(customers: AdminBillingCustomer[]): AdminBillingListResponse {
+function page(
+  customers: AdminBillingCustomer[],
+): Extract<AdminBillingListResponse, { enabled: true }> {
   return {
     enabled: true,
     customers,
@@ -147,6 +154,7 @@ function page(customers: AdminBillingCustomer[]): AdminBillingListResponse {
     pageSize: 25,
     counts,
     graceDays: 7,
+    pricingUrl: `https://www.example.com/pricing`,
   }
 }
 
@@ -225,6 +233,9 @@ describe(`the admin billing list`, () => {
   it(`says billing is off instead of showing an empty table`, async () => {
     await mount(<AdminBillingListScreen {...listProps([], { list: { enabled: false } })} />)
     expect(find(`[data-e2e=admin-billing-off]`).textContent).toContain(`Billing is off`)
+    const setup = find(`[data-e2e=admin-billing-setup]`)
+    expect(setup.getAttribute(`href`)).toBe(ADMIN_BILLING_SETUP_URL)
+    expect(setup.getAttribute(`target`)).toBe(`_blank`)
     expect(has(`[data-e2e=admin-billing-search]`)).toBe(false)
     expect(has(`[data-e2e=admin-billing-figures]`)).toBe(false)
   })
@@ -234,18 +245,26 @@ describe(`the admin billing list`, () => {
     await mount(<AdminBillingListScreen {...listProps([], { list: none })} />)
     expect(find(`[data-e2e=admin-billing-none]`).textContent).toContain(`No paid groups yet`)
     expect(has(`[data-e2e=admin-billing-search]`)).toBe(false)
+    const pricing = find(`[data-e2e=admin-billing-pricing]`)
+    expect(pricing.getAttribute(`href`)).toBe(`https://www.example.com/pricing`)
+    expect(pricing.getAttribute(`target`)).toBe(`_blank`)
+
+    await mount(
+      <AdminBillingListScreen {...listProps([], { list: { ...none, pricingUrl: null } })} />,
+    )
+    expect(has(`[data-e2e=admin-billing-pricing]`)).toBe(false)
   })
 
-  it(`shows a failed count and a failed list apart, each with a retry`, async () => {
+  it(`shows a failed count and a failed list apart in plain words, each with a retry`, async () => {
     const calls: unknown[][] = []
     await mount(
       <AdminBillingListScreen
         {...listProps(calls, { figures: null, figuresError: `Server error.` })}
       />,
     )
-    expect(find(`[data-e2e=admin-billing-figures-error]`).textContent).toContain(
-      `Could not count revenue.`,
-    )
+    const figuresError = find(`[data-e2e=admin-billing-figures-error]`).textContent
+    expect(figuresError).toContain(`Could not count revenue.`)
+    expect(figuresError).not.toContain(`Server error.`)
     expect(has(`[data-e2e=admin-billing-list]`)).toBe(true)
     await press(`[data-e2e=admin-billing-figures-error]`, `Try again`)
 
@@ -253,8 +272,42 @@ describe(`the admin billing list`, () => {
       <AdminBillingListScreen {...listProps(calls, { list: null, error: `Server error.` })} />,
     )
     expect(has(`[data-e2e=admin-billing-figures]`)).toBe(true)
-    expect(find(`[data-e2e=admin-billing-error]`).textContent).toContain(`Server error.`)
+    const listError = find(`[data-e2e=admin-billing-error]`).textContent
+    expect(listError).toContain(ADMIN_BILLING_LIST_ERROR)
+    expect(listError).not.toContain(`Server error.`)
+    expect(has(`[data-e2e=admin-billing-count]`)).toBe(false)
     expect(calls).toEqual([[`retry`]])
+  })
+
+  it(`says "Searching..." only while its own search runs, not while the first list loads`, async () => {
+    const calls: unknown[][] = []
+    await mount(<AdminBillingListScreen {...listProps(calls, { list: null, pending: true })} />)
+    const button = () => find(`[data-e2e=admin-billing-submit]`).textContent?.trim()
+    expect(button()).toBe(`Search`)
+
+    await mount(<AdminBillingListScreen {...listProps(calls)} />)
+    await submit(`[data-e2e=admin-billing-submit]`)
+    await mount(<AdminBillingListScreen {...listProps(calls, { pending: true })} />)
+    expect(button()).toBe(`Searching...`)
+  })
+
+  it(`moves focus to the count once the list of a search, a chip or a page arrives`, async () => {
+    const calls: unknown[][] = []
+    const count = () => find(`[data-e2e=admin-billing-count]`)
+    await mount(<AdminBillingListScreen {...listProps(calls, { list: null, pending: true })} />)
+    await mount(<AdminBillingListScreen {...listProps(calls)} />)
+    expect(document.activeElement === count()).toBe(false)
+
+    await submit(`[data-e2e=admin-billing-submit]`)
+    await mount(<AdminBillingListScreen {...listProps(calls, { pending: true })} />)
+    await mount(<AdminBillingListScreen {...listProps(calls, { list: page([]) })} />)
+    expect(document.activeElement === count()).toBe(true)
+    expect(count().textContent).toBe(`0 groups`)
+
+    find<HTMLElement>(`[data-e2e=admin-billing-search]`).focus()
+    await press(`[data-e2e=admin-billing-status]`, `Trial 7`)
+    await mount(<AdminBillingListScreen {...listProps(calls, { list: page([customer()]) })} />)
+    expect(document.activeElement === count()).toBe(true)
   })
 })
 

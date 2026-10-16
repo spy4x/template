@@ -1,11 +1,12 @@
 import type { JSX } from "preact"
-import { useEffect, useRef } from "preact/hooks"
+import { useEffect, useRef, useState } from "preact/hooks"
 import { formatMoney } from "@spy4x/platform/universal/money"
 import { timeAgo } from "@spy4x/platform/universal/time"
 import { Kpi, KpiGrid } from "@spy4x/preact-charts/kpi"
-import { IconCreditCard } from "@spy4x/preact-icons"
+import { IconCreditCard, IconExternalLink } from "@spy4x/preact-icons"
 import { Badge, type BadgeColor } from "@spy4x/preact-ui/badge"
-import { Button } from "@spy4x/preact-ui/button"
+import { Button, buttonClasses } from "@spy4x/preact-ui/button"
+import { Card } from "@spy4x/preact-ui/card"
 import { DataTable, type DataTableColumn } from "@spy4x/preact-ui/data-table"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
@@ -44,9 +45,16 @@ export const ADMIN_BILLING_PATHS = {
   customer: (groupId: string) => `/billing/${encodeURIComponent(groupId)}`,
 } as const
 
+/** Where the billing setup is described, for the action of the "Billing is off" state. */
+export const ADMIN_BILLING_SETUP_URL = `https://github.com/spy4x/template/blob/main/docs/billing.md`
+
+/** The list's message when it could not be read, whatever the cause. */
+export const ADMIN_BILLING_LIST_ERROR =
+  `Could not load customers. Check your connection and try again.`
+
 /** What the module says while billing is off (decision 10 of #196). */
 export const ADMIN_BILLING_OFF_TEXT =
-  `Every group is on the Free plan. To turn billing on, add the Stripe settings described in docs/billing.md.`
+  `Every group is on the Free plan. To turn billing on, add the Stripe settings.`
 
 /** What each billing action is called in the audit log and on the person page. */
 export const BILLING_AUDIT_LABELS: Record<BillingAuditEvent, string> = {
@@ -169,12 +177,12 @@ export interface AdminBillingListScreenProps {
   filter: AdminBillingFilter
   /** The four figures, or `null` while they load or when they failed. */
   figures: AdminBillingFigures | null
-  /** Why the figures could not be read, or `null`. */
+  /** Set when the figures could not be read, or `null`. The screen says so in its own words. */
   figuresError: string | null
   /** The page of customers, or `null` while it loads or when it failed. */
   list: AdminBillingListResponse | null
   pending: boolean
-  /** Why the list could not be read, or `null`. */
+  /** Set when the list could not be read, or `null`. The screen says so in its own words. */
   error: string | null
   /** The time the dates are read against: past due or on Free. */
   now: Date
@@ -194,14 +202,25 @@ export function AdminBillingListScreen(props: AdminBillingListScreenProps): JSX.
   const { filter, list, pending, error, onSearch, onPage, navigate } = props
   const heading = useRef<HTMLHeadingElement>(null)
 
-  // After a page change the list is new: the reader starts again at its heading.
-  const page = list?.enabled ? list.page : undefined
-  const shown = useRef<number | undefined>(undefined)
+  // After a search, a chip or a page change the list is new: once it arrives, the reader starts
+  // again at its count. The first list is no change, so focus stays where it was.
+  const asked = useRef(false)
+  // Whether the search form sent the pending request, so only a search says "Searching...".
+  const [searching, setSearching] = useState(false)
   useEffect(() => {
-    if (page === undefined) return
-    if (shown.current !== undefined && shown.current !== page) heading.current?.focus()
-    shown.current = page
-  }, [page])
+    if (pending) return
+    setSearching(false)
+    if (asked.current && list !== null) heading.current?.focus()
+    asked.current = false
+  }, [pending, list])
+  const search = (next: AdminBillingFilter) => {
+    asked.current = true
+    onSearch(next)
+  }
+  const turnPage = (next: number) => {
+    asked.current = true
+    onPage(next)
+  }
 
   const header = (
     <PageHeader
@@ -215,13 +234,19 @@ export function AdminBillingListScreen(props: AdminBillingListScreenProps): JSX.
     return (
       <Stack>
         {header}
-        <div class="rounded-xl border border-subtle bg-surface" data-e2e="admin-billing-off">
+        <Card data-e2e="admin-billing-off">
           <EmptyState
+            inset
             icon={<IconCreditCard class="size-8" aria-hidden="true" />}
             title="Billing is off"
             description={ADMIN_BILLING_OFF_TEXT}
+            action={
+              <ExternalButton href={ADMIN_BILLING_SETUP_URL} data-e2e="admin-billing-setup">
+                Read the billing setup
+              </ExternalButton>
+            }
           />
-        </div>
+        </Card>
       </Stack>
     )
   }
@@ -237,20 +262,28 @@ export function AdminBillingListScreen(props: AdminBillingListScreenProps): JSX.
 
       {none
         ? (
-          <div class="rounded-xl border border-subtle bg-surface" data-e2e="admin-billing-none">
+          <Card data-e2e="admin-billing-none">
             <EmptyState
+              inset
               icon={<IconCreditCard class="size-8" aria-hidden="true" />}
               title="No paid groups yet"
               description="A group shows here once its owner checks out a paid plan, trial included."
+              action={list?.enabled && list.pricingUrl && (
+                <ExternalButton href={list.pricingUrl} data-e2e="admin-billing-pricing">
+                  Open the pricing page
+                </ExternalButton>
+              )}
             />
-          </div>
+          </Card>
         )
         : (
           <>
             <ScreenForm
               pending={pending}
-              onSubmit={(data) =>
-                onSearch({ ...filter, query: String(data.get(`q`) ?? ``).trim(), page: 1 })}
+              onSubmit={(data) => {
+                setSearching(true)
+                search({ ...filter, query: String(data.get(`q`) ?? ``).trim(), page: 1 })
+              }}
             >
               {/* Keyed by the query, so going back in history shows the search that page had. */}
               <div key={filter.query} class="flex flex-wrap items-end gap-3" role="search">
@@ -269,7 +302,7 @@ export function AdminBillingListScreen(props: AdminBillingListScreenProps): JSX.
                 <Button
                   type="submit"
                   data-e2e="admin-billing-submit"
-                  busy={pending}
+                  busy={pending && searching}
                   busyLabel="Searching..."
                 >
                   Search
@@ -295,7 +328,7 @@ export function AdminBillingListScreen(props: AdminBillingListScreenProps): JSX.
                   }))}
                   value={filter.status}
                   onChange={(value) =>
-                    onSearch({
+                    search({
                       ...filter,
                       status: (value ?? `all`) as AdminBillingStatusFilter,
                       page: 1,
@@ -307,7 +340,7 @@ export function AdminBillingListScreen(props: AdminBillingListScreenProps): JSX.
                   variant="ghost"
                   size="sm"
                   data-e2e="admin-billing-clear"
-                  onClick={() => onSearch({ query: ``, status: `paying`, page: 1 })}
+                  onClick={() => search({ query: ``, status: `paying`, page: 1 })}
                 >
                   Clear filters
                 </Button>
@@ -315,22 +348,24 @@ export function AdminBillingListScreen(props: AdminBillingListScreenProps): JSX.
             </div>
 
             {error && (
-              <div class="flex flex-col items-start gap-3" data-e2e="admin-billing-error">
-                <ErrorState message={error} />
+              <div class="flex flex-col items-center gap-3" data-e2e="admin-billing-error">
+                <ErrorState message={ADMIN_BILLING_LIST_ERROR} />
                 <Button variant="secondary" onClick={props.onRetry}>Try again</Button>
               </div>
             )}
 
-            <h2
-              ref={heading}
-              tabIndex={-1}
-              class="text-sm text-muted"
-              data-e2e="admin-billing-count"
-            >
-              {list?.enabled
-                ? `${NUMBER.format(list.total)} ${list.total === 1 ? `group` : `groups`}`
-                : `Loading customers`}
-            </h2>
+            {(list !== null || !error) && (
+              <h2
+                ref={heading}
+                tabIndex={-1}
+                class="text-sm text-muted"
+                data-e2e="admin-billing-count"
+              >
+                {list?.enabled
+                  ? `${NUMBER.format(list.total)} ${list.total === 1 ? `group` : `groups`}`
+                  : `Loading customers`}
+              </h2>
+            )}
             {list === null
               ? !error && (
                 <div role="status" aria-label="Loading customers">
@@ -356,7 +391,7 @@ export function AdminBillingListScreen(props: AdminBillingListScreenProps): JSX.
                         action={
                           <Button
                             variant="ghost"
-                            onClick={() => onSearch({ query: ``, status: `paying`, page: 1 })}
+                            onClick={() => search({ query: ``, status: `paying`, page: 1 })}
                           >
                             Clear filters
                           </Button>
@@ -367,7 +402,7 @@ export function AdminBillingListScreen(props: AdminBillingListScreenProps): JSX.
                       page: list.page,
                       pageSize: list.pageSize,
                       total: list.total,
-                      onChange: onPage,
+                      onChange: turnPage,
                       label: `Pages of customers`,
                     }}
                   />
@@ -388,8 +423,8 @@ function Figures(
 ): JSX.Element {
   if (figuresError) {
     return (
-      <div class="flex flex-col items-start gap-3" data-e2e="admin-billing-figures-error">
-        <ErrorState message={`Could not count revenue. ${figuresError}`} />
+      <div class="flex flex-col items-center gap-3" data-e2e="admin-billing-figures-error">
+        <ErrorState message="Could not count revenue." />
         <Button variant="secondary" onClick={onRetry}>Try again</Button>
       </div>
     )
@@ -403,8 +438,10 @@ function Figures(
   }
   return (
     <section aria-label="Key numbers" class="flex flex-col gap-2" data-e2e="admin-billing-figures">
-      <KpiGrid minWidth="11rem">
+      {/* Two columns fit a 390px phone; a revenue in several currencies wraps inside its card. */}
+      <KpiGrid minWidth="9rem">
         <Kpi
+          class="min-w-0 wrap-anywhere"
           label="Monthly recurring revenue"
           value={revenueText(figures.monthlyRevenue)}
           sub="Active and past-due subscriptions at list price. Trials count as 0."
@@ -596,5 +633,24 @@ function GroupCell(
         <span class="text-xs text-muted wrap-anywhere">{owner}</span>
       </div>
     </div>
+  )
+}
+
+/** A secondary button that opens `href` in a new tab and says so to a screen reader. */
+function ExternalButton(
+  { href, children, ...rest }: { href: string; children: string; "data-e2e"?: string },
+): JSX.Element {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      class={buttonClasses(`secondary`, `md`)}
+      aria-label={`${children} (opens a new tab)`}
+      {...rest}
+    >
+      <IconExternalLink class="size-4" aria-hidden="true" />
+      {children}
+    </a>
   )
 }
