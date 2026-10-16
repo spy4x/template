@@ -111,9 +111,10 @@ const FAQ = [
   {
     id: `faq-production`,
     question: `Is it production-ready?`,
-    answerText: `The parts listed under "Works today" are tested in CI with browser tests on ` +
-      `every pull request. Seed as a whole is still a work in progress; read the status list ` +
-      `before you rely on a part.`,
+    answerText: `The parts listed under "Works today" have browser tests: every pull request ` +
+      `runs the sign-in, profile, notes and groups tests, and the full suite runs after each ` +
+      `merge. Seed as a whole is still a work in progress; read the status list before you ` +
+      `rely on a part.`,
   },
 ] as const
 
@@ -210,7 +211,7 @@ function Features(): JSX.Element {
           id="features-title"
           eyebrow="What you get"
           title="Everything before your first feature"
-          lead="Each part below works today, is tested in CI and runs in the live demo."
+          lead="Each part below works today and is tested in CI. Google and GitHub sign-in and Stripe billing need your own keys, so they are off in the demo."
         />
         <div class="grid gap-6 lg:grid-cols-3">
           <FeatureCard
