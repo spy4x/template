@@ -374,6 +374,22 @@ export enum AuthAuditEventType {
   USER_BLOCKED = 16,
   /** An operator unblocked the person. `identifier` names the operator, as for `USER_BLOCKED`. */
   USER_UNBLOCKED = 17,
+  /**
+   * The person's role changed (#425). `identifier` names who changed it and both roles:
+   * `operator:<id> from viewer to operator` from the admin app, `cli:user-role from …` from
+   * `deno task user:role`.
+   */
+  USER_ROLE_CHANGED = 18,
+  /**
+   * An operator sent the person a password-reset link, the same mail "Forgot password" sends.
+   * `identifier` names the operator (`operator:<id>`).
+   */
+  PASSWORD_RESET_SENT = 19,
+  /**
+   * The operator exported the user list as CSV. Written on the operator's own trail, since the file
+   * holds many people; `identifier` names the operator and the filter (`operator:<id> q=ada`).
+   */
+  USERS_EXPORTED = 20,
 }
 
 export const authAuditBaseSchema = type({
@@ -396,6 +412,9 @@ export const authAuditBaseSchema = type({
     AuthAuditEventType.UNCONFIRMED_ADDRESS_TAKEN,
     AuthAuditEventType.USER_BLOCKED,
     AuthAuditEventType.USER_UNBLOCKED,
+    AuthAuditEventType.USER_ROLE_CHANGED,
+    AuthAuditEventType.PASSWORD_RESET_SENT,
+    AuthAuditEventType.USERS_EXPORTED,
   ),
   identifier: "string <= 320 | null = null",
   ip: "string <= 45 | null = null",
@@ -855,4 +874,37 @@ export interface AdminStats {
   signUpsPerDay: AdminDailyCount[]
   /** Active people per UTC day, oldest first, the same days. */
   activePerDay: AdminDailyCount[]
+}
+
+/** The roles an operator-area page may pick from, lowest first. */
+export const ADMIN_ROLE_CHOICES: readonly UserRole[] = [
+  UserRole.VIEWER,
+  UserRole.OPERATOR,
+  UserRole.SUPERVISOR,
+  UserRole.ADMIN,
+]
+
+/**
+ * The body of `POST /api/admin/users/:id/role` (#425): the new role, as its number. Only a number
+ * that names a role passes; a role name or any other value is refused.
+ */
+export const adminUserRoleSchema = type({
+  role: type.enumerated(UserRole.VIEWER, UserRole.OPERATOR, UserRole.SUPERVISOR, UserRole.ADMIN),
+})
+export type AdminUserRoleBody = typeof adminUserRoleSchema.infer
+
+/** The roles `operatorRole` may give: every role below its own (#425). */
+export function adminGrantableRoles(operatorRole: UserRole): UserRole[] {
+  return ADMIN_ROLE_CHOICES.filter((role) => role < operatorRole)
+}
+
+/** Only an administrator changes a role, and only to one below their own (#425). */
+export function canChangeRoles(operatorRole: UserRole): boolean {
+  return operatorRole === UserRole.ADMIN
+}
+
+/** The address of the CSV of every person `filter` matches, on all its pages, in its sort. */
+export function adminUsersExportPath(filter: AdminUserFilter): string {
+  const query = adminUserFilterQuery({ ...filter, page: 1 })
+  return `/api/admin/users/export.csv${query ? `?${query}` : ""}`
 }
