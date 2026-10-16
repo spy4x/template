@@ -28,11 +28,12 @@ const fail = <T>(status: number, message: string) =>
 
 type Answer = (path: string, init?: RequestInit) => Promise<AdminApiResult<unknown>> | undefined
 
-/** A `request` that answers from `answer` (or a plain success) and records each call. */
+/** A `request` that answers from `answer` (or a plain success) and records each call and body. */
 function fakeRequest(answer: Answer = () => undefined) {
   const calls: string[] = []
   const request = ((path: string, init?: RequestInit) => {
-    calls.push(`${init?.method ?? "GET"} ${path}`)
+    const body = init?.body === undefined ? "" : ` ${init.body}`
+    calls.push(`${init?.method ?? "GET"} ${path}${body}`)
     const fallback = path.endsWith(`/users/42`)
       ? ok(detail)
       : path.startsWith(`/api/admin/users?`) || path === `/api/admin/users`
