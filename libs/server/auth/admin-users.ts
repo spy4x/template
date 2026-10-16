@@ -84,8 +84,6 @@ function sortColumn(sql: postgres.Sql, rule: SortRule<AdminUserSortKey>) {
       return desc
         ? sql`lower(concat_ws(' ', u.first_name, u.last_name)) DESC`
         : sql`lower(concat_ws(' ', u.first_name, u.last_name)) ASC`
-    case "email":
-      return desc ? sql`email DESC NULLS LAST` : sql`email ASC NULLS LAST`
     case "role":
       return desc ? sql`u.role DESC` : sql`u.role ASC`
     case "lastSeenAt":

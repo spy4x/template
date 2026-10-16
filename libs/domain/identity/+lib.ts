@@ -737,12 +737,11 @@ export const ADMIN_AUDIT_LIMIT = 50
 export type AdminBlockedFilter = "any" | "blocked" | "active"
 
 /** A column the user list sorts by, on the server. */
-export type AdminUserSortKey = "name" | "email" | "role" | "lastSeenAt" | "createdAt"
+export type AdminUserSortKey = "name" | "role" | "lastSeenAt" | "createdAt"
 
 /** Every {@link AdminUserSortKey}, in the order the list's columns show them. */
 export const ADMIN_USER_SORT_KEYS: readonly AdminUserSortKey[] = [
   "name",
-  "email",
   "role",
   "lastSeenAt",
   "createdAt",
@@ -797,8 +796,8 @@ export function parseAdminUserFilter(params: URLSearchParams): AdminUserFilter {
   const page = Number.isInteger(pageNumber) && pageNumber >= 1 && pageNumber <= 100_000
     ? pageNumber
     : 1
-  const parsed = parseSort(params.get("sort"), ADMIN_USER_SORT_KEYS, ADMIN_DEFAULT_SORT)
-  const sort = parsed.length > 0 ? parsed : ADMIN_DEFAULT_SORT
+  // `none` reads as no rules: the operator turned every column's sort off.
+  const sort = parseSort(params.get("sort"), ADMIN_USER_SORT_KEYS, ADMIN_DEFAULT_SORT)
   return { query, role, blocked, sort, page }
 }
 
@@ -809,7 +808,7 @@ export function adminUserFilterQuery(filter: AdminUserFilter): string {
   if (filter.role !== null) params.set("role", String(filter.role))
   if (filter.blocked !== "any") params.set("blocked", filter.blocked)
   const sort = serializeSort(filter.sort)
-  if (filter.sort.length > 0 && sort !== serializeSort(ADMIN_DEFAULT_SORT)) params.set("sort", sort)
+  if (sort !== serializeSort(ADMIN_DEFAULT_SORT)) params.set("sort", sort)
   if (filter.page > 1) params.set("page", String(filter.page))
   return params.toString()
 }

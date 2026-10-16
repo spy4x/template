@@ -19,17 +19,24 @@ describe("admin user filter sort", () => {
   })
 
   it("falls back to newest first for a missing, empty or unknown sort", () => {
-    for (const query of ["", "sort=", "sort=none", "sort=password:asc"]) {
+    for (const query of ["", "sort=", "sort=password:asc", "sort=name:sideways"]) {
       expect(parseAdminUserFilter(new URLSearchParams(query)).sort).toEqual(ADMIN_DEFAULT_SORT)
     }
   })
 
+  it("keeps a sort the operator turned off, so the address says so", () => {
+    const filter = parseAdminUserFilter(new URLSearchParams("sort=none"))
+
+    expect(filter.sort).toEqual([])
+    expect(adminUserFilterQuery(filter)).toBe("sort=none")
+  })
+
   it("writes a sort into the address only when it is not the default, and reads it back", () => {
     expect(adminUserFilterQuery(ADMIN_NO_FILTER)).toBe("")
-    const sort: AdminUserFilter["sort"] = [{ key: "email", direction: "asc" }]
+    const sort: AdminUserFilter["sort"] = [{ key: "role", direction: "asc" }]
     const query = adminUserFilterQuery({ ...ADMIN_NO_FILTER, sort })
 
-    expect(query).toBe("sort=email%3Aasc")
+    expect(query).toBe("sort=role%3Aasc")
     expect(parseAdminUserFilter(new URLSearchParams(query)).sort).toEqual(sort)
   })
 })
