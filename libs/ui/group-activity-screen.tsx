@@ -60,7 +60,7 @@ export function GroupActivityScreen(props: GroupActivityScreenProps): JSX.Elemen
             <EmptyState
               headingLevel={2}
               inset
-              title={props.loading ? "Loading the group…" : "This group was not found."}
+              title={props.loading ? "Loading the group…" : "This group does not exist."}
               action={!props.loading && (
                 <Button
                   href={SCREEN_PATHS.groups}
@@ -95,9 +95,7 @@ export function GroupActivityScreen(props: GroupActivityScreenProps): JSX.Elemen
                     <EmptyState
                       headingLevel={2}
                       inset
-                      title={props.loading
-                        ? "Loading the activity…"
-                        : "Nothing has happened yet."}
+                      title={props.loading ? "Loading the activity…" : "Nothing has happened yet."}
                       description={props.loading
                         ? undefined
                         : "Changes to the group and its notes show up here."}
