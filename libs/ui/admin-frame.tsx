@@ -34,14 +34,14 @@ function AdminBrand({ navigate }: { navigate?: Navigate }): JSX.Element {
       class="flex shrink-0 items-center gap-2 rounded-md"
     >
       <span
-        class="flex size-8 items-center justify-center rounded-lg bg-selected text-sm font-semibold text-selected-foreground"
+        class="flex size-7 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground"
         aria-hidden="true"
       >
         S
       </span>
       <span class="text-base font-semibold">Seed</span>
       <span data-e2e="admin-mark">
-        <Badge text="Admin" color="blue" />
+        <Badge text="Admin" />
       </span>
     </Link>
   )
