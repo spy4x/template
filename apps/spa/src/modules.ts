@@ -2,7 +2,7 @@ import { ConnectionLostError, type GapReport } from "@spy4x/realtime"
 import { type CallPort, type RetryOptions, sendCommand, sendQuery } from "@spy4x/realtime/calls"
 import { signal } from "@preact/signals"
 import { createSignedInHint } from "@spy4x/platform/browser/signed-in-hint"
-import { cachedRead, type ReadCache, readCopy, type ReadResult } from "@spy4x/realtime/read-cache"
+import { createLocalReads, type LocalReads } from "@spy4x/realtime/read-cache"
 import { createSyncRunner, type SyncRunner } from "@spy4x/realtime/sync-runner"
 import {
   advanceGroupCursor as advanceSocketCursor,
@@ -27,7 +27,6 @@ import { offlineTags as tagsOverLayer } from "./offline/tags-collection.ts"
 import { OfflineStatus as OfflineStatusLine } from "./offline/OfflineStatus.tsx"
 import type { RuntimeConfig } from "./runtime-config.ts"
 import { canCallAs, createAppCallPort } from "./state/realtime-call.ts"
-import { isProxyAnswer, isRefusal } from "./state/read-keys.ts"
 import type { SessionState, SessionUser } from "./state/session.ts"
 
 /**
@@ -306,77 +305,11 @@ export function flushOutbox(): Promise<void> {
 }
 
 /**
- * The read copies of the offline-readable lists (ADR 003, level 2). A store reads its list
- * `through` a key: the answer replaces the device's copy, and when the server is unreachable the
- * copy answers instead (`fresh: false`, with the time it was taken). `copy` is the copy alone, for
- * a screen to show before the server has answered.
+ * The read copies of the offline-readable lists (ADR 003, level 2): `LocalReads` and
+ * `createLocalReads` from `@spy4x/realtime/read-cache`, re-exported so the stores take this port
+ * from the composition root.
  */
-export interface LocalReads {
-  /**
-   * Rejects as `read` does, except when the server is unreachable and a copy exists. Unreachable
-   * is no connection, and also an answer the library's `isForeignAnswer` takes for a proxy's: a
-   * 5xx, a 404 or a 429 without an error code, as while the API is replaced. `early` is
-   * given the copy when the device has one before the server has answered, so a screen with
-   * nothing to show paints it first; it is never given a copy after the answer. When the server
-   * then refuses the read, `early` is called once more with `undefined`: the screen takes back
-   * what it painted, so a refusal is never read next to a list the person may no longer see. A
-   * screen that did not paint the copy (it had a list already) returns `false`, and is not asked
-   * to take anything back.
-   */
-  through<T>(
-    key: string,
-    read: () => Promise<T>,
-    early?: (copy: ReadResult<T> | undefined) => boolean | void,
-  ): Promise<ReadResult<T>>
-  /** The copy under `key`, or `undefined`. Never rejects. */
-  copy<T>(key: string): Promise<ReadResult<T> | undefined>
-}
-
-/** Deletes the saved copy of a list the server refused, so it is not shown again offline. */
-async function dropCopy(cache: ReadCache, key: string): Promise<void> {
-  try {
-    await cache.delete(key)
-  } catch {
-    // The device cannot delete; the refusal is still what the caller sees.
-  }
-}
-
-/** {@link LocalReads} over the cache `current` names at the moment of each read, or over none. */
-export function createLocalReads(current: () => ReadCache | undefined): LocalReads {
-  return {
-    async through<T>(
-      key: string,
-      read: () => Promise<T>,
-      early?: (copy: ReadResult<T> | undefined) => boolean | void,
-    ) {
-      const cache = current()
-      let answered = false
-      let painted = false
-      if (early && cache) {
-        void readCopy<T>(cache, key).then((copy) => {
-          if (!copy || answered) return
-          painted = early(copy) !== false
-        })
-      }
-      try {
-        return await cachedRead(cache, key, read)
-      } catch (refusal) {
-        // A proxy's answer is an unreachable server too: the copy answers it, when there is one.
-        if (cache && isProxyAnswer(refusal)) {
-          const copy = await readCopy<T>(cache, key)
-          if (copy) return copy
-        }
-        // An unreachable server is answered by the copy, so this is the server saying no.
-        if (painted) early?.(undefined)
-        if (cache && isRefusal(refusal)) await dropCopy(cache, key)
-        throw refusal
-      } finally {
-        answered = true
-      }
-    },
-    copy: (key) => readCopy(current(), key),
-  }
-}
+export { createLocalReads, type LocalReads }
 
 /** Reads with no device behind them: every read goes to the server and nothing is kept. */
 export const noLocalReads: LocalReads = createLocalReads(() => undefined)

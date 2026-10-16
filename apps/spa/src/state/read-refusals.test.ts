@@ -11,7 +11,7 @@ import { createGroupsStore, groupsOnDevice, onlineGroups } from "./groups.ts"
 import { createInvitationsStore } from "./invitations.ts"
 import { createMembersStore, membersHttp } from "./members.ts"
 import { memoryReads } from "./memory-reads.ts"
-import { ReadRefused } from "./read-keys.ts"
+import { ReadRefused } from "@spy4x/realtime/read-cache"
 import { createNotificationsStore, notificationsHttp } from "./notifications.ts"
 import { sessionState } from "./session.ts"
 
