@@ -51,8 +51,9 @@ export function AuthView({ screen }: { screen: AuthScreenKind }) {
     if (!field) return
     field.value = email
     const password = field.form?.querySelector<HTMLInputElement>(`input[type="password"]`)
-    if (screen === "sign-in") password?.focus()
-    else field.focus()
+    // After the app's route announcer, whose effect runs after this one in the same flush and
+    // moves focus to the page's heading on every route change.
+    queueMicrotask(() => (screen === "sign-in" ? password : field)?.focus())
   }, [screen])
   useEffect(() => {
     if (screen === "one-time-code") return
