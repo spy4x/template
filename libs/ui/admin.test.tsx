@@ -9,7 +9,9 @@ import { render, type VNode } from "preact"
 import { act } from "preact/test-utils"
 import {
   ADMIN_NO_FILTER,
+  type AdminStats,
   type AdminUserDetail,
+  type AdminUserFilter,
   type AdminUserRow,
   AuthAuditEventType,
   UserRole,
@@ -17,6 +19,12 @@ import {
 import { ADMIN_PATHS, AdminSignInScreen } from "./admin-frame.tsx"
 import { AdminUsersScreen, type AdminUsersScreenProps } from "./admin-users-screen.tsx"
 import { AdminUserScreen, type AdminUserScreenProps } from "./admin-user-screen.tsx"
+import {
+  AdminDashboardScreen,
+  changeText,
+  changeTone,
+  countAxisTop,
+} from "./admin-dashboard-screen.tsx"
 
 const window = new Window({ url: "http://admin.localhost/" })
 const own = {
@@ -82,11 +90,15 @@ async function type(selector: string, value: string): Promise<void> {
   })
 }
 
-async function choose(selector: string, value: string): Promise<void> {
-  const select = find<HTMLSelectElement>(selector)
-  select.value = value
+/** Presses the button whose text is `text` inside `scope`. */
+async function press(scope: string, text: string): Promise<void> {
+  const button = [...find(scope).querySelectorAll("button")]
+    .find((candidate) => candidate.textContent?.trim() === text)
+  if (!button) throw new Error(`no button "${text}" in ${scope}`)
   await act(() => {
-    select.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event)
+    button.dispatchEvent(
+      new window.MouseEvent("click", { bubbles: true, cancelable: true }) as unknown as Event,
+    )
   })
 }
 
@@ -138,30 +150,97 @@ function listProps(calls: unknown[][], props: Partial<AdminUsersScreenProps> = {
 }
 
 describe("the admin user list", () => {
-  it("sends the typed words, the role and the blocked filter, back on page 1", async () => {
+  it("sends the typed words back on page 1, keeping the filters and the sort", async () => {
+    const calls: unknown[][] = []
+    const filter = { ...ADMIN_NO_FILTER, role: UserRole.OPERATOR, blocked: "blocked", page: 2 }
+    await mount(
+      <AdminUsersScreen {...listProps(calls, { filter: filter as AdminUserFilter })} />,
+    )
+    await type("[data-e2e=admin-users-search]", "  ada love ")
+    await submit("[data-e2e=admin-users-submit]")
+
+    expect(calls).toEqual([["search", { ...filter, query: "ada love", page: 1 }]])
+  })
+
+  it("filters at once when a status or role chip is pressed, back on page 1", async () => {
+    const calls: unknown[][] = []
+    await mount(
+      <AdminUsersScreen {...listProps(calls, { filter: { ...ADMIN_NO_FILTER, page: 3 } })} />,
+    )
+    await press("[data-e2e=admin-users-blocked]", "Blocked")
+    await press("[data-e2e=admin-users-role]", "Operator")
+
+    expect(calls).toEqual([
+      ["search", { ...ADMIN_NO_FILTER, blocked: "blocked", page: 1 }],
+      ["search", { ...ADMIN_NO_FILTER, role: UserRole.OPERATOR, page: 1 }],
+    ])
+  })
+
+  it("drops a chip's filter when its pressed chip is pressed again", async () => {
+    const calls: unknown[][] = []
+    const filter: AdminUserFilter = { ...ADMIN_NO_FILTER, role: UserRole.OPERATOR }
+    await mount(<AdminUsersScreen {...listProps(calls, { filter })} />)
+    expect(find("[data-e2e=admin-users-role] [aria-pressed=true]").textContent).toBe("Operator")
+    await press("[data-e2e=admin-users-role]", "Operator")
+
+    expect(calls).toEqual([["search", { ...filter, role: null, page: 1 }]])
+  })
+
+  it("clears every filter but keeps the sort, and offers Clear only while one is set", async () => {
+    const calls: unknown[][] = []
+    await mount(<AdminUsersScreen {...listProps(calls)} />)
+    expect(has("[data-e2e=admin-users-clear]")).toBe(false)
+
+    const filter: AdminUserFilter = {
+      ...ADMIN_NO_FILTER,
+      query: "ada",
+      blocked: "active",
+      sort: [{ key: "role", direction: "asc" }],
+    }
+    await mount(<AdminUsersScreen {...listProps(calls, { filter })} />)
+    await click("[data-e2e=admin-users-clear]")
+
+    expect(calls).toEqual([["search", {
+      ...ADMIN_NO_FILTER,
+      sort: [{ key: "role", direction: "asc" }],
+    }]])
+  })
+
+  it("sorts by a pressed column alone while the list is in its default order, on page 1", async () => {
     const calls: unknown[][] = []
     await mount(
       <AdminUsersScreen {...listProps(calls, { filter: { ...ADMIN_NO_FILTER, page: 2 } })} />,
     )
-    await type("[data-e2e=admin-users-search]", "  ada love ")
-    await choose("[data-e2e=admin-users-role]", String(UserRole.OPERATOR))
-    await choose("[data-e2e=admin-users-blocked]", "blocked")
-    await submit("[data-e2e=admin-users-submit]")
+    expect(find("th[aria-sort]").textContent).toBe("Created")
+    await press("[data-e2e=admin-users-list] thead", "Last seen")
 
     expect(calls).toEqual([["search", {
-      query: "ada love",
-      role: UserRole.OPERATOR,
-      blocked: "blocked",
+      ...ADMIN_NO_FILTER,
+      sort: [{ key: "lastSeenAt", direction: "asc" }],
       page: 1,
     }]])
   })
 
-  it("sends no role when any role is chosen", async () => {
+  it("adds a pressed column after a sort the operator chose, as the least significant", async () => {
     const calls: unknown[][] = []
-    await mount(<AdminUsersScreen {...listProps(calls)} />)
-    await submit("[data-e2e=admin-users-submit]")
+    const filter: AdminUserFilter = {
+      ...ADMIN_NO_FILTER,
+      sort: [{ key: "role", direction: "asc" }],
+    }
+    await mount(<AdminUsersScreen {...listProps(calls, { filter })} />)
+    await press("[data-e2e=admin-users-list] thead", "Last seen")
 
-    expect(calls).toEqual([["search", { query: "", role: null, blocked: "any", page: 1 }]])
+    expect(calls).toEqual([["search", {
+      ...filter,
+      sort: [{ key: "role", direction: "asc" }, { key: "lastSeenAt", direction: "asc" }],
+    }]])
+  })
+
+  it("offers no sorting by status, which the server cannot sort by", async () => {
+    await mount(<AdminUsersScreen {...listProps([])} />)
+    const status = [...document.querySelectorAll("th")]
+      .find((th) => th.textContent?.trim() === "Status")
+    expect(status?.querySelector("button")).toBe(null)
   })
 
   it("links each person to their page and marks who is blocked", async () => {
@@ -169,8 +248,9 @@ describe("the admin user list", () => {
 
     expect(find("[data-e2e=admin-user-42]").getAttribute("href")).toBe(ADMIN_PATHS.user(42))
     expect(find("[data-e2e=admin-user-42]").textContent).toBe("Ada Lovelace")
-    expect(find("[data-e2e=admin-user-43]").closest("li")!.textContent).toContain("Blocked")
-    expect(find("[data-e2e=admin-user-42]").closest("li")!.textContent).not.toContain("Blocked")
+    const row = (id: number) => find(`[data-e2e=admin-user-${id}]`).closest("tr")!
+    expect(row(43).querySelector("[data-e2e=admin-user-blocked]")).not.toBe(null)
+    expect(row(42).querySelector("[data-e2e=admin-user-blocked]")).toBe(null)
   })
 
   it("asks the app for the next page and then moves focus to the list's heading", async () => {
@@ -198,8 +278,17 @@ describe("the admin user list", () => {
         {...listProps([], { list: { users: [], total: 0, page: 1, pageSize: 25 } })}
       />,
     )
-    expect(document.body.textContent).toContain("Nobody matches")
-    expect(has("[data-e2e=admin-users-list]")).toBe(false)
+    expect(find("[data-e2e=admin-users-list]").textContent).toContain("Nobody matches")
+    expect(has("[data-e2e^=admin-user-4]")).toBe(false)
+  })
+
+  it("shows a loading state until the list comes, and the API's message when it fails", async () => {
+    await mount(<AdminUsersScreen {...listProps([], { list: null })} />)
+    expect(has("[role=status][aria-label='Loading people']")).toBe(true)
+
+    await mount(<AdminUsersScreen {...listProps([], { list: null, error: "The list is down" })} />)
+    expect(has("[role=status][aria-label='Loading people']")).toBe(false)
+    expect(document.body.textContent).toContain("The list is down")
   })
 })
 
@@ -235,6 +324,8 @@ function userProps(calls: unknown[][], props: Partial<AdminUserScreenProps> = {}
     detail,
     error: null,
     operator,
+    tab: "overview",
+    onTab: (tab) => void calls.push(["tab", tab]),
     dialog: null,
     onOpenDialog: (action) => void calls.push(["open", action]),
     onCloseDialog: () => void calls.push(["close"]),
@@ -246,15 +337,50 @@ function userProps(calls: unknown[][], props: Partial<AdminUserScreenProps> = {}
 }
 
 describe("one person in the admin app", () => {
-  it("shows the account, sign-in methods, sessions, groups and audit trail", async () => {
+  it("shows the person in a header card and their account on the Overview tab", async () => {
     await mount(<AdminUserScreen {...userProps([])} />)
 
     expect(find("[data-e2e=admin-user-title]").textContent).toBe("Ada Lovelace")
-    expect(find("[data-e2e=admin-user-methods]").textContent).toContain("Password")
-    expect(find("[data-e2e=admin-user-sessions]").textContent).toContain("Firefox on Linux")
-    expect(find("[data-e2e=admin-user-groups]").textContent).toContain("Owner")
-    expect(find("[data-e2e=admin-user-audits]").textContent).toContain("Unblocked by an operator")
-    expect(find("[data-e2e=admin-user-audits]").textContent).toContain("operator:7")
+    expect(find("[data-e2e=admin-user-card]").textContent).toContain("Viewer")
+    expect(find("[role=tab][aria-selected=true]").textContent).toBe("Overview")
+    expect(find("[role=tabpanel]").textContent).toContain("ada@example.com")
+  })
+
+  it("shows each tab's own content: sign-in methods, sessions, groups and activity", async () => {
+    const shown = async (tab: string, selector: string) => {
+      await mount(<AdminUserScreen {...userProps([], { tab })} />)
+      return find(`[role=tabpanel] ${selector}`).textContent
+    }
+    expect(await shown("methods", "[data-e2e=admin-user-methods]")).toContain("Password")
+    expect(await shown("sessions", "[data-e2e=admin-user-sessions]")).toContain(
+      "Firefox on Linux",
+    )
+    expect(await shown("groups", "[data-e2e=admin-user-groups]")).toContain("Owner")
+    const activity = await shown("activity", "[data-e2e=admin-user-audits]")
+    expect(activity).toContain("Unblocked by an operator")
+    expect(activity).toContain("operator:7")
+  })
+
+  it("asks the app to open a tab when it is pressed", async () => {
+    const calls: unknown[][] = []
+    await mount(<AdminUserScreen {...userProps(calls)} />)
+    await press("[role=tablist]", "Activity")
+
+    expect(calls).toEqual([["tab", "activity"]])
+  })
+
+  it("adds a module's tab after the page's own and opens it from the address", async () => {
+    const extraTabs = [{ id: "devices", label: "Devices", content: <p>Two phones</p> }]
+    await mount(<AdminUserScreen {...userProps([], { extraTabs, tab: "devices" })} />)
+
+    const labels = [...document.querySelectorAll("[role=tab]")].map((tab) => tab.textContent)
+    expect(labels.at(-1)).toBe("Devices")
+    expect(find("[role=tabpanel]").textContent).toBe("Two phones")
+  })
+
+  it("opens the Overview for a tab the page does not have", async () => {
+    await mount(<AdminUserScreen {...userProps([], { tab: "no-such-tab" })} />)
+    expect(find("[role=tab][aria-selected=true]").textContent).toBe("Overview")
   })
 
   it("offers Block and End all sessions for a lower role, and opens the chosen dialog", async () => {
@@ -312,6 +438,80 @@ describe("one person in the admin app", () => {
       <AdminUserScreen {...userProps([], { dialog: "end-sessions", actionError: message })} />,
     )
     expect(find("[data-e2e=admin-action-dialog]").textContent).toContain(message)
+  })
+})
+
+const days = (count: (index: number) => number) =>
+  Array.from({ length: 30 }, (_, index) => ({
+    day: `2026-09-${String(index + 1).padStart(2, "0")}`,
+    count: count(index),
+  }))
+
+const stats: AdminStats = {
+  generatedAt: "2026-09-30T12:00:00.000Z",
+  people: 1234,
+  blocked: 3,
+  newThisWeek: { current: 12, previous: 9 },
+  activeToday: { current: 40, previous: 41 },
+  activeThisWeek: { current: 300, previous: 300 },
+  groups: 77,
+  notes: 5678,
+  signUpsPerDay: days((index) => index % 3),
+  activePerDay: days(() => 40),
+}
+
+describe("the admin dashboard", () => {
+  it("says a change as its sign and size against the period before", () => {
+    expect(changeText({ current: 12, previous: 9 }, "previous 7 days")).toBe(
+      "+3 vs previous 7 days",
+    )
+    expect(changeText({ current: 1040, previous: 2041 }, "yesterday")).toBe(
+      "−1,001 vs yesterday",
+    )
+    expect(changeText({ current: 5, previous: 5 }, "yesterday")).toBe("No change vs yesterday")
+  })
+
+  it("colours growth as good, a drop as a warning and no change as neutral", () => {
+    expect(changeTone({ current: 2, previous: 1 })).toBe("positive")
+    expect(changeTone({ current: 1, previous: 2 })).toBe("warning")
+    expect(changeTone({ current: 1, previous: 1 })).toBe("neutral")
+  })
+
+  it("starts a count chart's axis at 0 and ends it on a multiple of 4, at least 4", () => {
+    expect(countAxisTop([])).toBe(4)
+    expect(countAxisTop([0, 1, 2])).toBe(4)
+    expect(countAxisTop([0, 9, 3])).toBe(12)
+    expect(countAxisTop([12])).toBe(12)
+  })
+
+  it("shows every stat card with its number and both 30-day charts", async () => {
+    await mount(<AdminDashboardScreen stats={stats} error={null} onRetry={() => {}} />)
+
+    const cards = find("[data-e2e=admin-dashboard-stats]").textContent
+    for (const text of ["1,234", "3 blocked", "+3 vs previous 7 days", "5,678", "77"]) {
+      expect(cards).toContain(text)
+    }
+    expect(find("[data-e2e=admin-chart-sign-ups]").textContent).toContain("30 in 30 days")
+    expect(find("[data-e2e=admin-chart-active]").textContent).toContain("1,200 in 30 days")
+    expect(has("[data-e2e=admin-chart-active] svg")).toBe(true)
+  })
+
+  it("shows a loading state, then the API's message with a Try again that reads again", async () => {
+    const calls: string[] = []
+    await mount(<AdminDashboardScreen stats={null} error={null} onRetry={() => {}} />)
+    expect(has("[data-e2e=admin-dashboard-loading]")).toBe(true)
+
+    await mount(
+      <AdminDashboardScreen
+        stats={null}
+        error="The numbers are down"
+        onRetry={() => void calls.push("retry")}
+      />,
+    )
+    expect(has("[data-e2e=admin-dashboard-loading]")).toBe(false)
+    expect(find("[data-e2e=admin-dashboard-error]").textContent).toContain("The numbers are down")
+    await press("main, body", "Try again")
+    expect(calls).toEqual(["retry"])
   })
 })
 
