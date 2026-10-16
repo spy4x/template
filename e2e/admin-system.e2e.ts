@@ -58,7 +58,7 @@ test.describe("the admin System page", () => {
       await expect(badge("admin-system-migrations")).toHaveAttribute("data-health", "ok")
       await expect(ops.locator("[data-e2e=admin-system-database]")).toContainText("Postgres 18")
       await expect(ops.locator("[data-e2e=admin-system-migrations]")).toContainText(
-        "2026_11_14_0001_backup_status",
+        "2026_11_17_0001_sign_up_requests",
       )
       await expect(ops.locator("[data-e2e=admin-system-queue]")).toContainText("Due now")
       await expect(ops.locator("[data-e2e=admin-system-build]")).toContainText("Runtime")
