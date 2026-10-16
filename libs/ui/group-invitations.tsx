@@ -498,7 +498,12 @@ export function InvitationScreen(
           title={loading ? "Opening the invitation..." : "This invitation cannot be used"}
           description={loading ? undefined : error ?? undefined}
           action={!loading && (
-            <Button href={SCREEN_PATHS.groups} navigate={navigate} variant="outline">
+            <Button
+              href={SCREEN_PATHS.groups}
+              navigate={navigate}
+              variant="outline"
+              class="min-h-11 sm:min-h-9"
+            >
               Go to your groups
             </Button>
           )}
@@ -534,7 +539,7 @@ export function InvitationScreen(
               <div class="flex w-full flex-col gap-2 sm:flex-row sm:justify-center">
                 <Button
                   type="button"
-                  class="w-full justify-center sm:w-auto"
+                  class="min-h-11 w-full justify-center sm:min-h-9 sm:w-auto"
                   data-e2e="invitation-accept"
                   busy={answering}
                   busyLabel="Joining..."
@@ -545,7 +550,7 @@ export function InvitationScreen(
                 <Button
                   type="button"
                   variant="ghost"
-                  class="w-full justify-center sm:w-auto"
+                  class="min-h-11 w-full justify-center sm:min-h-9 sm:w-auto"
                   data-e2e="invitation-decline"
                   disabled={answering}
                   onClick={onDecline}

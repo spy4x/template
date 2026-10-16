@@ -119,9 +119,8 @@ export function GroupsScreen(
   }: GroupsScreenProps,
 ): JSX.Element {
   const [creatingOpen, setCreatingOpen] = useState(createOpen)
-  useEffect(() => {
-    if (createOpen) setCreatingOpen(true)
-  }, [createOpen])
+  // The address opens and closes the dialog: `?new` dropped by Back closes it too.
+  useEffect(() => setCreatingOpen(createOpen), [createOpen])
   const closeCreate = () => {
     setCreatingOpen(false)
     onCreateClose?.()

@@ -257,6 +257,13 @@ describe("GroupsScreen", () => {
     expect(has("[data-e2e=group-new-dialog] [data-e2e=group-name]")).toBe(true)
   })
 
+  it("closes the new-group dialog when the address drops `?new`, as browser Back does", async () => {
+    await mount(<GroupsScreen {...defaults} createOpen />)
+    expect(has("[data-e2e=group-new-dialog]")).toBe(true)
+    await rerender(<GroupsScreen {...defaults} />)
+    expect(has("[data-e2e=group-new-dialog]")).toBe(false)
+  })
+
   it("reports the dialog closed once a create worked", async () => {
     const closed = spy<[]>()
     await mount(<GroupsScreen {...defaults} name="Book club" onCreateClose={closed.fn} />)

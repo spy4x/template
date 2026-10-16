@@ -63,7 +63,12 @@ export function GroupActivityScreen(props: GroupActivityScreenProps): JSX.Elemen
               class="max-w-none border-none px-4 py-6 sm:px-6"
               title={props.loading ? "Loading the group..." : "This group was not found."}
               action={!props.loading && (
-                <Button href={SCREEN_PATHS.groups} navigate={navigate} variant="outline">
+                <Button
+                  href={SCREEN_PATHS.groups}
+                  navigate={navigate}
+                  variant="outline"
+                  class="min-h-11 sm:min-h-9"
+                >
                   Back to groups
                 </Button>
               )}
