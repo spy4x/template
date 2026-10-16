@@ -141,8 +141,9 @@ test.describe("group screens in the shared column", () => {
       ]
       // Tall enough that no row sits under the phone's fixed tab bar: axe-core's target-size
       // rule counts a control the bar covers as too small, wherever the page happens to scroll.
+      // A group's page holds its whole editor above Members and Plan, so it needs the most.
       for (const width of [375, 1280]) {
-        await page.setViewportSize({ width, height: 1600 })
+        await page.setViewportSize({ width, height: 2400 })
         for (const { path, ready } of screens) {
           await gotoApp(page, path, ready)
           await expect(ready).toBeVisible()
