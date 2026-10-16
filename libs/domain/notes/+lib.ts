@@ -483,6 +483,29 @@ export class NoteLocateQuery implements Query<NoteLocatePayload, { groupId: stri
   __resultType?: { groupId: string }
   constructor(public data: NoteLocatePayload) {}
 }
+/** The longest snippet of a search hit, in characters, "…" included. */
+export const NOTE_SNIPPET_MAX_LENGTH = 120
+
+/**
+ * A search hit's snippet: `text` with its whitespace folded, cut to {@link NOTE_SNIPPET_MAX_LENGTH}
+ * characters on a word boundary, with "…" where it does not reach an end of the body. The server
+ * passes the words around the match; the device, which searches its own copy, the body's start.
+ */
+export function trimNoteSnippet(text: string, startsBody: boolean, endsBody: boolean): string {
+  const folded = text.replace(/\s+/g, " ").trim()
+  if (folded === "") return ""
+  const characters = Array.from(folded)
+  let cut = folded
+  let cutEnd = !endsBody
+  if (characters.length > NOTE_SNIPPET_MAX_LENGTH - 2) {
+    const head = characters.slice(0, NOTE_SNIPPET_MAX_LENGTH - 2).join("")
+    const space = head.lastIndexOf(" ")
+    cut = space > 0 ? head.slice(0, space) : head
+    cutEnd = true
+  }
+  return `${startsBody ? "" : "…"}${cut}${cutEnd ? "…" : ""}`
+}
+
 /** One note a search found: enough to list it and open it, never its whole body. */
 export interface NoteSearchHit {
   id: string

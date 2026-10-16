@@ -1,11 +1,8 @@
 import type postgres from "postgres"
-import type { NoteSearchHit } from "@domain/notes"
+import { type NoteSearchHit, trimNoteSnippet } from "@domain/notes"
 
 /** The most words of a search that reach the query; the rest are dropped. */
 const MAX_WORDS = 8
-
-/** The longest snippet sent, in characters, "…" included. */
-export const SNIPPET_MAX_LENGTH = 120
 
 /**
  * `ts_headline`'s options: one short fragment around the first match, as plain text. Without
@@ -24,24 +21,6 @@ const HEADLINE_OPTIONS = `MaxFragments=1, MaxWords=14, MinWords=6, ShortWord=1, 
 export function prefixQuery(text: string): string | null {
   const words = (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).slice(0, MAX_WORDS)
   return words.length === 0 ? null : words.map((word) => `${word}:*`).join(" & ")
-}
-
-/**
- * Cuts a snippet to {@link SNIPPET_MAX_LENGTH} characters on a word boundary, with "…" where it
- * does not reach an end of the body.
- */
-export function trimSnippet(snippet: string, startsBody: boolean, endsBody: boolean): string {
-  const text = snippet.replace(/\s+/g, " ").trim()
-  if (text === "") return ""
-  let cut = text
-  let cutEnd = !endsBody
-  if (Array.from(cut).length > SNIPPET_MAX_LENGTH - 2) {
-    const head = Array.from(cut).slice(0, SNIPPET_MAX_LENGTH - 2).join("")
-    const space = head.lastIndexOf(" ")
-    cut = space > 0 ? head.slice(0, space) : head
-    cutEnd = true
-  }
-  return `${startsBody ? "" : "…"}${cut}${cutEnd ? "…" : ""}`
 }
 
 /** A row of the search query: the hit, and where its snippet sits in the body. */
@@ -117,6 +96,6 @@ export async function searchNotesForMember(
     groupId: row.groupId,
     title: row.title,
     updatedAt: row.updatedAt,
-    snippet: trimSnippet(row.snippet, row.startsBody, row.endsBody),
+    snippet: trimNoteSnippet(row.snippet, row.startsBody, row.endsBody),
   }))
 }
