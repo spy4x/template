@@ -18,7 +18,7 @@ const AT = Date.UTC(2026, 9, 17, 12, 5) // 17 Oct 2026, 12:05 UTC
  * hint it sends every open device after an accepted save. A device that is offline gets a rejected
  * call, like the socket's.
  */
-function server({ lateHints = false } = {}) {
+function server({ lateHints = false, racingHints = false } = {}) {
   let row: StoredSettings | null = null
   const store: SettingsStore = {
     read: () => Promise.resolve(row),
@@ -39,12 +39,17 @@ function server({ lateHints = false } = {}) {
       return row
     },
     async call(name: string, payload: unknown): Promise<unknown> {
-      if (name === `preferences.get`) return row
+      if (name === `preferences.get`) {
+        // A racing hint's read leaves before the save's answer and comes back after it.
+        if (racingHints) await new Promise((resolve) => setTimeout(resolve, 0))
+        return row
+      }
       if (name === `preferences.save`) {
         const result = await saveSettings(preferencesDefinition, store, `7`, payload)
         // A late hint reaches the devices after the saving one has its answer.
         if (result.ok) {
-          if (lateHints) setTimeout(() => void hint(), 0)
+          if (racingHints) void hint()
+          else if (lateHints) setTimeout(() => void hint(), 0)
           else await hint()
         }
         return result
@@ -226,6 +231,30 @@ describe(`saving from the dialog`, () => {
 
     expect((backend.row?.value as { timeZone?: string })?.timeZone).toBe(`Asia/Bangkok`)
     expect(traveller.state.announcement.value).toBe(``)
+  })
+
+  it(`announces nothing when a hint's read returns after this device's own saves`, async () => {
+    const backend = server({ racingHints: true })
+    const laptop = device(backend)
+    const phone = device(backend)
+    await open(laptop)
+    await open(phone)
+
+    await laptop.state.saveDraft(0, { locale: `de-DE`, timeZone: null, hourCycle: null })
+    await settle()
+    await settle()
+    expect(backend.row?.version).toBe(1)
+    expect(laptop.state.announcement.value).toBe(``)
+    expect(phone.state.announcement.value).toBe(PREFERENCES_UPDATED_ELSEWHERE)
+
+    phone.state.announcement.value = ``
+    laptop.theme.set(ThemeValue.DARK)
+    await settle()
+    await settle()
+    await settle()
+    expect(backend.row?.version).toBe(2)
+    expect(laptop.state.announcement.value).toBe(``)
+    expect(phone.state.announcement.value).toBe(PREFERENCES_UPDATED_ELSEWHERE)
   })
 
   it(`refuses at once without a connection, and sends nothing`, async () => {
