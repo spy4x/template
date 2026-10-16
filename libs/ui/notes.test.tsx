@@ -846,7 +846,8 @@ describe("NoteEditorScreen in the browser", () => {
 
     const save = find("[data-e2e=note-save]")
     const footer = save.parentElement!
-    expect(footer.lastElementChild).toBe(save)
+    expect([...footer.children].map((child) => child.getAttribute("data-e2e")))
+      .toEqual(["note-cancel", "note-save"])
     expect(save.className.split(" ")).toEqual(expect.arrayContaining(["w-full", "sm:w-auto"]))
     expect(footer.className.split(" ")).toEqual(
       expect.arrayContaining(["flex-col-reverse", "sm:flex-row", "sm:justify-end"]),
