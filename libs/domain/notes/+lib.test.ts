@@ -283,7 +283,8 @@ describe(`trimNoteSnippet`, () => {
   })
 
   it(`answers an empty snippet for an empty body`, () => {
-    expect(trimNoteSnippet(``, true, true)).toBe(``)
+    expect(trimNoteSnippet(``, false, false)).toBe(``)
+    expect(trimNoteSnippet(` \n `, false, false)).toBe(``)
   })
 })
 
@@ -309,6 +310,7 @@ describe(`parseNoteSearchRequest`, () => {
 
   it(`counts an emoji as one character`, () => {
     expect(parseNoteSearchRequest({ q: `🙂🙂` })).toEqual({ q: `🙂🙂` })
+    expect(() => parseNoteSearchRequest({ q: `🙂` })).toThrow(NoteError)
   })
 
   it(`refuses a payload with any field but q`, () => {
