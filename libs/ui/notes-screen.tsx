@@ -541,7 +541,7 @@ export function ListEmpty(
         title={title}
         description={description}
         action={action}
-        class="max-w-none border-0 bg-transparent py-8"
+        inset
       />
     </Card>
   )
@@ -549,7 +549,9 @@ export function ListEmpty(
 
 /**
  * The bar under the list while notes are being ticked: how many are ticked, and once any are, the
- * group to move them to and the button that does. Sticky, so it stays in reach on a long list.
+ * group to move them to and the button that does. From `md` up it is sticky, so it stays in reach on
+ * a long list. Below `md` it stays in the flow: the phone tab bar is pinned to the same bottom edge
+ * and would cover a sticky bar.
  */
 function SelectionBar(
   { count, moveTargets, moving, moveError, onCancel }: {
@@ -562,7 +564,7 @@ function SelectionBar(
 ): JSX.Element {
   return (
     <div
-      class="sticky bottom-0 flex flex-col gap-3 rounded-lg border border-subtle bg-surface p-3 shadow-sm"
+      class="flex flex-col gap-3 md:sticky md:bottom-0 rounded-lg border border-subtle bg-surface p-3 shadow-sm"
       data-e2e="notes-move"
     >
       <div class="flex flex-wrap items-center gap-x-3 gap-y-2">

@@ -232,7 +232,7 @@ describe("NotesScreen", () => {
       .find((element) => element.textContent?.includes("No notes yet."))
     if (!empty) throw new Error("no status says No notes yet.")
     expect(empty.closest(".pc-card")).not.toBeNull()
-    expect(empty.className.split(" ")).toContain("border-0")
+    expect(empty.className.split(" ")).not.toContain("border-dashed")
   })
 
   it("sets no width of its own, so it fills the column the app's frame gives it", () => {
@@ -328,6 +328,15 @@ describe("NotesScreen in the browser", () => {
     expect(find("[data-e2e=notes-move]").textContent).toContain("Tick the notes to move")
     // Nothing ticked yet: nothing to move, so no group to pick and no move button.
     expect(count("[data-e2e=notes-move-submit]")).toBe(0)
+  })
+
+  it("pins the move bar to the bottom only from md up, where no tab bar covers it", async () => {
+    await mount(<NotesScreen {...listDefaults} />)
+    await click("[data-e2e=notes-menu]")
+    await click("[data-e2e=notes-select]")
+    const classes = find("[data-e2e=notes-move]").className.split(" ")
+    expect(classes).not.toContain("sticky")
+    expect(classes).toContain("md:sticky")
   })
 
   it("moves the ticked notes to the chosen group, and cancels the native post", async () => {

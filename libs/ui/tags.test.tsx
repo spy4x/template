@@ -194,7 +194,7 @@ describe("TagsScreen", () => {
     const empty = find("[role=status]")
     expect(empty.textContent).toContain("No tags yet.")
     expect(empty.closest(".pc-card")).not.toBeNull()
-    expect(empty.className.split(" ")).toContain("border-0")
+    expect(empty.className.split(" ")).not.toContain("border-dashed")
   })
 
   it("lists the tags, with New tag in the header, and a viewer gets the tags and no controls", async () => {
