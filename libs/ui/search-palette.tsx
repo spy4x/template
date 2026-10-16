@@ -129,7 +129,8 @@ export function SearchPalette(props: SearchPaletteProps): JSX.Element {
     const answer = asksNotes
       ? await latest.current.searchNotes(text, signal)
       : { notes: [], onDevice: false }
-    const several = groups.length > 1
+    // The recent notes are all the current group's, so only a query's rows name their group.
+    const namesGroup = text !== "" && groups.length > 1
     const groupName = new Map(groups.map((group) => [group.id, group.name]))
     const notesHeading = answer.onDevice ? HEADINGS.notesOnDevice : HEADINGS.notes
     const notes = answer.notes.slice(0, text === "" ? RECENT_NOTES : undefined).map((
@@ -137,7 +138,7 @@ export function SearchPalette(props: SearchPaletteProps): JSX.Element {
     ): SearchOption => ({
       id: `note-${note.id}`,
       label: note.title.trim() || "Untitled note",
-      detail: noteDetail(note, several ? groupName.get(note.groupId) : undefined),
+      detail: noteDetail(note, namesGroup ? groupName.get(note.groupId) : undefined),
       group: notesHeading,
       choice: { kind: "note", noteId: note.id, groupId: note.groupId },
     }))
@@ -165,6 +166,9 @@ export function SearchPalette(props: SearchPaletteProps): JSX.Element {
       hotkeys={["mod+k", "/"]}
       labels={{ ...LABELS, empty }}
       dataE2E="search"
+      // The library's fixed widths wrap "Search notes and groups" beside the hotkey hint: the
+      // trigger takes the width of its words instead, and the group switcher gives way.
+      class="whitespace-nowrap sm:w-auto lg:w-auto"
     />
   )
 }

@@ -152,8 +152,8 @@ describe("SearchPalette", () => {
     expect(asked).toEqual([""])
     expect(listed()).toEqual([
       "# Notes",
-      "Weekly plan | Home · …call the bank…",
-      "Untitled note | Acme Studio",
+      "Weekly plan | …call the bank…",
+      "Untitled note",
       "# Actions",
       "New note | In Home",
       "New tag | In Home",
@@ -163,8 +163,8 @@ describe("SearchPalette", () => {
     ])
   })
 
-  it("lists matching notes, then groups, then actions, with the role and the current group", async () => {
-    await mount({}, () => ({ notes: [PLAN], onDevice: false }))
+  it("lists matching notes with their group, then groups, then actions, with the role and the current group", async () => {
+    await mount()
     await open()
 
     await type("  ho ")
@@ -172,6 +172,7 @@ describe("SearchPalette", () => {
     expect(listed()).toEqual([
       "# Notes",
       "Weekly plan | Home · …call the bank…",
+      "Untitled note | Acme Studio",
       "# Groups",
       "Home | Owner | Current",
       "# Actions",
@@ -180,10 +181,11 @@ describe("SearchPalette", () => {
     ])
   })
 
-  it("names no group in a note row when the person has one group", async () => {
+  it("names no group in a found note's row when the person has one group", async () => {
     await mount({ groups: [HOME] })
-
     await open()
+
+    await type("plan")
 
     expect(listed()[1]).toBe("Weekly plan | …call the bank…")
   })
