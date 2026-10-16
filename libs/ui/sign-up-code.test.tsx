@@ -220,6 +220,6 @@ describe("SignUpCodeScreen", () => {
       .toContain("It took longer than 10 minutes, or the code was tried too many times.")
     const start = find<HTMLAnchorElement>("[data-e2e=sign-up-expired] a")
     expect(start.getAttribute("href")).toBe("/sign-up?next=%2Fnotes")
-    expect(document.activeElement).toBe(start)
+    expect(document.activeElement === start).toBe(true)
   })
 })

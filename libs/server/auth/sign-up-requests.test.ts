@@ -30,8 +30,8 @@ describe("sign-up codes", () => {
 
   it("refuses a code issued for another sign-up of the same address", async () => {
     const store = new MemoryAuthStore()
-    const code = await issueSignUpCode(store, OTHER, NOW)
     await issueSignUpCode(store, REQUEST, NOW)
+    const code = await issueSignUpCode(store, OTHER, NOW)
 
     expect(await attemptSignUpCode(store, REQUEST, code, NOW)).toBe(ChallengeOutcome.WrongGuess)
   })
