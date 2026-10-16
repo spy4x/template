@@ -65,7 +65,7 @@ export function GroupPicker(
       triggerDataE2E="group-picker"
       triggerClasses="flex h-11 max-w-56 min-w-0 items-center gap-2 rounded-md px-2 text-sm font-medium text-foreground hover:bg-hover sm:h-9"
       containerClasses="relative flex min-w-0 text-left"
-      panelClasses="w-72"
+      panelClasses="w-72 max-w-[calc(100vw-5rem)]"
       horizontal="left"
       menuLabel="Switch group"
     >
