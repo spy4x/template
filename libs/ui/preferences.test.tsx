@@ -164,9 +164,15 @@ describe(`PreferencesGroup`, () => {
     expect($<HTMLSelectElement>(`[data-e2e="preferences-clock-select"]`)?.value).toBe(`h23`)
   })
 
-  it(`saves again on the version that won after a refused save`, async () => {
+  it(`saves again on the version that won after a refused edited save`, async () => {
     await mount(group().node)
     await click(`[data-e2e="preferences-change-clock"]`)
+    // An edited draft does not follow the record; only the refusal moves it to the winner.
+    const select = $<HTMLSelectElement>(`[data-e2e="preferences-clock-select"]`)!
+    select.value = `h12`
+    await act(() =>
+      void select.dispatchEvent(new window.Event(`change`, { bubbles: true }) as never)
+    )
     const won: Preferences = { ...DEFAULT_PREFERENCES, hourCycle: `h23` }
     const refused = group({ conflict: { version: 4, value: won }, value: won, version: 4 })
     await rerender(refused.node)
