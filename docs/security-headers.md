@@ -24,10 +24,9 @@ is not affected.
 
 | Directive         | Allows                                                                                       | Why                                                                                                   |
 | ----------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `default-src`     | `'self'`                                                                                     | Anything not named below comes from the app's own origin: the web manifest, for one.                   |
+| `default-src`     | `'self'`                                                                                     | Anything not named below comes from the app's own origin: the web manifest and the fonts (Geist, in `/fonts/`), for two.                   |
 | `script-src`      | `'self'` and one `'sha256-…'`                                                                | The built files under `/assets/`, the service worker `/sw.js`, and the inline script that paints the stored theme before the first frame. No `'unsafe-inline'`, no `'unsafe-eval'`. |
-| `style-src`       | `'self'`, one `'sha256-…'`, `https://fonts.googleapis.com`                                   | The built stylesheet, the inline `<style>` of `index.html`, and the Google Fonts stylesheet it links. |
-| `font-src`        | `'self'`, `https://fonts.gstatic.com`                                                        | The font files that stylesheet names.                                                                 |
+| `style-src`       | `'self'`, one `'sha256-…'`                                                                | The built stylesheet and the inline `<style>` of `index.html`.                                        |
 | `img-src`         | `'self'`, `data:`                                                                            | The icons, and the two-factor QR code, which the profile screen builds as a `data:` address.          |
 | `connect-src`     | `'self'`, and the origin of `SPA_ERROR_REPORT_DSN` when it is set                            | The API and its WebSocket (`/api`, on the app's origin), `/config.json`, and the error tracker.       |
 | `object-src`      | `'none'`                                                                                     | No plugins.                                                                                           |
