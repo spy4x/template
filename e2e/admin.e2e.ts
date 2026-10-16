@@ -4,8 +4,8 @@ import { gotoApp, signIn } from "./fixtures/app.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
 
 /**
- * The admin app (#146) on its own host: an operator signs in there, finds a person and blocks
- * them. The person's open page signs out, their session is gone and their password no longer
+ * The admin app (#146, #424) on its own host: an operator signs in there, lands on the dashboard,
+ * finds a person and blocks them. The person's open page signs out, their session is gone and their password no longer
  * signs in.
  */
 
@@ -61,6 +61,15 @@ test.describe("the admin app", () => {
       await ops.locator("[data-e2e=auth-form-login]").fill(operatorEmail)
       await ops.locator("[data-e2e=auth-form-password]").fill(password)
       await ops.locator("[data-e2e=auth-form-submit]").click()
+      await expect(ops).toHaveURL(`${adminBase}/`)
+      await expect(ops.locator("[data-e2e=admin-dashboard-title]")).toBeVisible()
+      await expect(ops.locator("[data-e2e=admin-dashboard-stats]")).toContainText("People")
+      await expect(ops.locator("[data-e2e=admin-chart-sign-ups] svg").first()).toBeVisible()
+
+      // The sidebar opens the people.
+      await ops.getByRole("navigation", { name: "Admin sections" })
+        .getByRole("link", { name: "Users" }).click()
+      await expect(ops).toHaveURL(`${adminBase}/users`)
       await expect(ops.locator("[data-e2e=admin-users-title]")).toBeVisible()
 
       // Finds the person by address and opens their page.
@@ -70,14 +79,19 @@ test.describe("the admin app", () => {
       const row = ops.locator("[data-e2e=admin-users-list] a")
       await expect(row).toHaveCount(1)
       await row.click()
+      await expect(ops.locator("[data-e2e=admin-user-card]")).toContainText(targetEmail)
+      await ops.getByRole("tab", { name: /Sessions/ }).click()
+      await expect(ops).toHaveURL(/\?tab=sessions$/)
       await expect(ops.locator("[data-e2e=admin-user-sessions] li")).toHaveCount(1)
 
       // Blocks them: the dialog only confirms, it asks for no password.
       await ops.locator("[data-e2e=admin-user-menu]").click()
       await ops.locator("[data-e2e=admin-block-open]").click()
       await ops.locator("[data-e2e=admin-action-submit]").click()
+      await expect(ops.locator("[data-e2e=toasts]")).toContainText("is blocked")
       await expect(ops.locator("[data-e2e=admin-user-blocked-notice]")).toBeVisible()
       await expect(ops.locator("[data-e2e=admin-user-sessions] li")).toHaveCount(0)
+      await ops.getByRole("tab", { name: "Activity" }).click()
       await expect(ops.locator("[data-e2e=admin-user-audits]")).toContainText(
         "Blocked by an operator",
       )
