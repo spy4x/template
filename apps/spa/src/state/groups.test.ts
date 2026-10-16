@@ -266,7 +266,7 @@ describe("groups store", () => {
       color: "blue",
       emoji: "",
     })
-    store.edit("a", { ...store.draft("a"), name: "Home  " })
+    store.edit("a", { ...store.draft("a"), name: "Home  ", emoji: " " })
     expect(store.unsaved("a")).toBe(false)
     store.edit("a", { ...store.draft("a"), color: "red" })
     expect(store.unsaved("a")).toBe(true)
@@ -365,6 +365,7 @@ describe("groups store", () => {
 
     expect(await store.save("a")).toBe(false)
     expect(store.editorErrors.value.name).toBe(GROUP_MESSAGES.nameRequired)
+    store.edit("other", { ...store.draft("a"), name: "Other" })
     expect(await store.save("other")).toBe(false)
 
     expect(sent).toBe(0)

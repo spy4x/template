@@ -1497,6 +1497,7 @@ describe("GroupEditorScreen form", () => {
     expect(find("[data-e2e=group-preview]").textContent).toContain("Trip")
     expect(find("[data-e2e=group-preview] [data-e2e=group-mark]").getAttribute("data-color"))
       .toBe("blue")
+    expect(find("[data-e2e=group-preview] [data-e2e=group-mark]").textContent).toBe("🏕️")
     await rerender(<GroupEditorScreen {...creating} />)
     expect(find("[data-e2e=group-preview]").textContent).toContain("Your group's name")
     expect(has("[data-e2e=group-preview] [data-e2e=group-mark]")).toBe(false)
@@ -1583,8 +1584,11 @@ describe("GroupEditorScreen form", () => {
   it("draws no mark without a colour or an emoji, and a grey one for an emoji alone", async () => {
     await mount(<GroupMark />)
     expect(has("[data-e2e=group-mark]")).toBe(false)
+    await rerender(<GroupMark color="gray" emoji="🏠" />)
+    const grey = find("[data-e2e=group-mark]").className
     await rerender(<GroupMark emoji="🏠" />)
     expect(find("[data-e2e=group-mark]").hasAttribute("data-color")).toBe(false)
+    expect(find("[data-e2e=group-mark]").className).toBe(grey)
     await rerender(<GroupMark color="red" />)
     expect(find("[data-e2e=group-mark]").getAttribute("data-color")).toBe("red")
     expect(groupLabel({ name: "Team", emoji: "🏠" })).toBe("🏠 Team")
