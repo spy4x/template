@@ -100,7 +100,7 @@ export function AdminApiTokensScreen(props: AdminApiTokensScreenProps): JSX.Elem
     <Stack>
       <PageHeader
         title="API tokens"
-        subtitle="Every API token, whose it is and when it was last used. Revoke one that should no longer work."
+        subtitle="Every API token, whose it is and when it was last used."
         titleDataE2E="admin-api-tokens-title"
       />
       <div
@@ -168,8 +168,9 @@ export function AdminApiTokensScreen(props: AdminApiTokensScreenProps): JSX.Elem
 }
 
 /**
- * The columns of a token table: the owner (on the page, not on a person's tab), the name, the group
- * and access, the state, the dates and the revoke button.
+ * The columns of a token table: the owner (on the page, not on a person's tab), the name with its
+ * group, access and creation day, the state, when it was last used and expires, and the revoke
+ * button.
  */
 export function tokenColumns(
   { operatorId, onAsk, navigate, withOwner }: {
@@ -192,6 +193,9 @@ export function tokenColumns(
             <span class="wrap-anywhere">{token.groupName ?? "Deleted group"}</span>
             <AccessBadge access={token.access} />
           </span>
+          <span class="text-sm text-muted">
+            Created <Day at={token.createdAt} />
+          </span>
         </span>
       ),
     },
@@ -199,11 +203,6 @@ export function tokenColumns(
       id: "state",
       header: "State",
       render: (token) => <StateBadge state={token.state} />,
-    },
-    {
-      id: "createdAt",
-      header: "Created",
-      render: (token) => <Day at={token.createdAt} />,
     },
     {
       id: "lastUsedAt",
@@ -374,7 +373,8 @@ function OwnerCell(
         >
           {name}
         </Link>
-        {token.owner.email && (
+        {/* A person with no name is shown by their address already. */}
+        {token.owner.email && token.owner.email !== name && (
           <span class="text-sm text-muted wrap-anywhere">{token.owner.email}</span>
         )}
       </div>
