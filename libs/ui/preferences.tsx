@@ -427,7 +427,7 @@ function RegionDialog(
             <Field
               id={FIELD_IDS.formats}
               label="Formats"
-              hint="How dates, times and numbers are written. The app stays in English."
+              hint="How dates and times are written. The app stays in English."
             >
               {(wiring) => (
                 <Combobox<RegionItem>
