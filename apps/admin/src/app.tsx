@@ -1,6 +1,6 @@
 import "./app.css"
 import type { JSX } from "preact"
-import { useMemo } from "preact/hooks"
+import { useEffect, useMemo } from "preact/hooks"
 import { LoadingSpinner } from "@spy4x/preact-ui/loading-spinner"
 import { ThemeToggle } from "@spy4x/preact-ui/theme-toggle"
 import { Toastr } from "@spy4x/preact-ui/toastr"
@@ -38,6 +38,10 @@ export function App(
   const session = store.session.value
   const [path, navigate] = useLocation()
   useRouteAnnouncer({ path })
+  // A new page starts at its top; the router keeps the old page's scroll, so a person opened from
+  // far down the list would show with their header under the top bar. A tab change (`?tab=`) keeps
+  // the path and so the scroll.
+  useEffect(() => globalThis.scrollTo?.(0, 0), [path])
   const user = session.step === "signed-in" ? session.user : null
 
   // One context per signed-in session, so a module's state starts empty for the next one.
