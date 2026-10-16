@@ -63,7 +63,7 @@ const ROWS: readonly ComparisonRow[] = [
   },
   {
     capability: `Magic links`,
-    values: [`no`, `yes`, `yes`, `no`, `no`, `no`],
+    values: [`no`, `yes`, `yes`, `yes`, `no`, `no`],
   },
   {
     capability: `Social sign-in`,
@@ -76,7 +76,7 @@ const ROWS: readonly ComparisonRow[] = [
   },
   {
     capability: `Passkeys`,
-    values: [`no`, `no`, `yes`, `no`, `no`, `no`],
+    values: [`no`, `no`, `yes`, `yes`, `no`, `no`],
   },
   {
     capability: `Teams with roles`,
@@ -158,8 +158,8 @@ const ALTERNATIVES: readonly Alternative[] = [
     licence: `Paid; no redistribution without the author's permission`,
     stack: `Next.js, Nuxt or TanStack Start; Prisma or Drizzle`,
     hosting: `Vercel and serverless, or Docker`,
-    pickWhen: `you need passkeys, translations, file uploads or a payment provider other than ` +
-      `Stripe now, and want paid support.`,
+    pickWhen: `you need translations, file uploads or a payment provider other than Stripe ` +
+      `now, and want paid support.`,
     sources: [
       { label: `Sales page`, href: `https://supastarter.dev/` },
       { label: `Licence`, href: `https://supastarter.dev/legal/license` },
@@ -168,11 +168,12 @@ const ALTERNATIVES: readonly Alternative[] = [
   {
     id: `makerkit`,
     name: `Makerkit`,
-    price: `$349 or $649 one-time (cards also show $299 and $599); free Lite kit`,
+    price: `$299 or $599 one-time today (list price $349 and $649); free Lite kit`,
     licence: `Paid kits; each client of a freelancer needs a licence. Lite is MIT`,
     stack: `Next.js, React Router or TanStack Start; Supabase, Drizzle or Prisma`,
     hosting: `Not stated on the pages read`,
-    pickWhen: `you want a team-ready kit on Supabase or Next.js with translations and a CMS, ` +
+    pickWhen:
+      `you want a team-ready kit on Supabase or Next.js with passkeys, translations and a CMS, ` +
       `and you are happy with a paid licence.`,
     sources: [
       { label: `Pricing`, href: `https://makerkit.dev/pricing` },
