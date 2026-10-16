@@ -107,15 +107,14 @@ export function AdminUsersScreen(
 ): JSX.Element {
   const heading = useRef<HTMLHeadingElement>(null)
 
-  // After a page change the list is new: the reader starts again at its heading.
+  // After a page change the list is new: the reader starts again at its heading. The first page
+  // that arrives is no change, so focus stays where it was.
   const page = list?.page
-  const first = useRef(true)
+  const shown = useRef<number | undefined>(undefined)
   useEffect(() => {
-    if (first.current) {
-      first.current = false
-      return
-    }
-    heading.current?.focus()
+    if (page === undefined) return
+    if (shown.current !== undefined && shown.current !== page) heading.current?.focus()
+    shown.current = page
   }, [page])
 
   const rows: UserTableRow[] = (list?.users ?? []).map((user) => ({
