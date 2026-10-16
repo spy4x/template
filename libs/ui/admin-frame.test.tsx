@@ -115,6 +115,18 @@ describe("AdminShell", () => {
     expect(find("#page").parentElement!.className).toContain("max-w-6xl")
   })
 
+  it("tops the phone's More sheet with the Admin badge and the product's name, as a heading row", async () => {
+    await mount(
+      <AdminShell navItems={modules} currentPath="/" operator={operator} onSignOut={() => {}}>
+        page
+      </AdminShell>,
+    )
+    const top = find("[data-e2e=rail-shell-dialog] [data-e2e=rail-shell-overlay-top]")
+    expect(top.querySelector("[data-e2e=admin-mark-overlay]")?.textContent).toBe("Admin")
+    expect(top.textContent).toBe("AdminSeed")
+    expect(top.querySelector("a")?.outerHTML).toBe(undefined)
+  })
+
   it("lists every module under Admin sections and marks the one whose page is shown", async () => {
     await mount(
       <AdminShell

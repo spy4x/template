@@ -30,12 +30,24 @@ export const ADMIN_PATHS = {
 
 /**
  * The admin app's brand: the "Admin" badge, which tells an operator at once that this is not the
- * product, and the product's name in muted text. The 72 px rail has room for the badge alone.
+ * product, and the product's name in muted text. The 72 px rail has room for the badge alone. In
+ * the phone's More sheet it is a plain heading row, not a link: the Dashboard tab already leads home,
+ * and a link there would leave the sheet open over the new page.
  */
 function AdminBrand(
   { navigate, place = "sidebar" }: { navigate?: Navigate; place?: RailShellSidebarPlace },
 ): JSX.Element {
   const rail = place === "rail"
+  if (place === "overlay") {
+    return (
+      <div class="flex min-h-11 items-center gap-2 px-2">
+        <span data-e2e={placeHook("admin-mark", place)}>
+          <Badge text="Admin" color="blue" />
+        </span>
+        <span class="text-base font-semibold text-muted">Seed</span>
+      </div>
+    )
+  }
   return (
     <Link
       href={ADMIN_PATHS.dashboard}
@@ -70,7 +82,7 @@ export interface AdminNavItem {
  * The signed-in admin app's frame (#424, #453), the same shell as the product's: a labelled sidebar
  * from `lg`, a 72 px icon rail from `md` and a bottom tab bar below that, with no header.
  *
- * - The top of the column is the brand with its "Admin" badge.
+ * - The top of the column, and of the phone's More sheet, is the brand with its "Admin" badge.
  * - The middle is one entry per module.
  * - The bottom is the operator's account menu: the theme and Sign out.
  *
@@ -112,8 +124,7 @@ export function AdminShell(
       items={navItems.map(({ name, href, Icon }) => ({ key: href, label: name, href, Icon }))}
       currentKey={adminNavPath(navItems, currentPath)}
       navigateLink={navigate && ((_key, href) => navigate(href))}
-      sidebarTop={(place) =>
-        place === "overlay" ? null : <AdminBrand navigate={navigate} place={place} />}
+      sidebarTop={(place) => <AdminBrand navigate={navigate} place={place} />}
       sidebarBottom={(place) =>
         place === "rail"
           ? (
