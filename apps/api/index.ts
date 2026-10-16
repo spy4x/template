@@ -142,7 +142,6 @@ app.route(
     requestPasswordReset: (email) => enqueuePasswordResetMail(sql, email),
     emailCodeFailures: createEmailCodeFailures({ sql }),
     requestEmailCode: (userId, email) => enqueueEmailCodeMail(sql, userId, email),
-    logError: (message, error) => log(message, error),
   }),
 )
 app.route(

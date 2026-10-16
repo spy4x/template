@@ -528,6 +528,39 @@ export interface PendingSignUp {
   unconfirmedAccount: boolean
 }
 
+/**
+ * A sign-up with an address and a password that waits for the code mailed to the address (#142),
+ * as `GET /api/auth/password/sign-up` answers it.
+ */
+export interface WaitingPasswordSignUp {
+  /** The address the person typed and the code went to. */
+  email: string
+  /** ISO 8601. After this the sign-up no longer works. */
+  expiresAt: string
+}
+
+/** What `GET /api/auth/password/sign-up` answers: the sign-up that waits, or `null`. */
+export interface WaitingPasswordSignUpResponse {
+  pending: WaitingPasswordSignUp | null
+}
+
+/**
+ * How an account that already uses the address signs in, as `POST /api/auth/password/sign-up/verify`
+ * answers the right code for such an address. Told only to the person who proved the mailbox.
+ */
+export interface ExistingAccountAnswer {
+  email: string
+  /** The account has a password, so "Sign in instead" works. */
+  password: boolean
+  /** The providers it signs in with, in the order they were linked. */
+  providers: OAuthProviderId[]
+}
+
+/** The answer of the verify route when an account already uses the address: nothing was created. */
+export interface SignUpAccountExistsResponse {
+  accountExists: ExistingAccountAnswer
+}
+
 /** What `GET /auth/sign-up/pending` answers: the sign-up that waits, or `null` when none does. */
 export interface PendingSignUpResponse {
   pending: PendingSignUp | null
