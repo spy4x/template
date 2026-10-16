@@ -195,6 +195,7 @@ app.route(
       cursorSecret: config.authCookieSecret,
       cacheConnected: isCacheConnected,
       build: config.build,
+      billing: billingSetup,
     }),
   }),
 )

@@ -1,5 +1,6 @@
 import type { Hono, MiddlewareHandler } from "hono"
 import type postgres from "postgres"
+import type { BillingProvider } from "@spy4x/billing"
 import type { PushDevicesUpdatedEvent, UserSignedOutEvent } from "@api/cqrs/events.ts"
 import type { AppDbBase } from "@api/services/db-base.ts"
 import type { SubscribersSetup } from "@server/subscribers/subscribers.ts"
@@ -29,6 +30,12 @@ export interface AdminModuleContext {
   cacheConnected(): Promise<boolean>
   /** The release tag and commit the API was built from, or `null` each for a local build (#429). */
   build: { version: string | null; commit: string | null }
+  /** The payment provider for the billing module (#196); `provider` is `null` while billing is off. */
+  billing: {
+    provider: Required<BillingProvider> | null
+    graceDays: number
+    dashboardUrl: string | null
+  }
 }
 
 /**
