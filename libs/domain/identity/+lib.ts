@@ -778,9 +778,9 @@ export const ADMIN_NO_FILTER: AdminUserFilter = {
 }
 
 /**
- * Reads the user list's filter from query parameters (`q`, `role`, `blocked`, `page`). A value it
- * does not understand falls back to the default for that part, so a hand-edited address still
- * shows a list.
+ * Reads the user list's filter from query parameters (`q`, `role`, `blocked`, `sort`, `page`). A
+ * value it does not understand falls back to the default for that part, so a hand-edited address
+ * still shows a list. `sort=none` reads as no sort rules: the operator turned every sort off.
  */
 export function parseAdminUserFilter(params: URLSearchParams): AdminUserFilter {
   const query = (params.get("q") ?? "").trim().slice(0, ADMIN_SEARCH_MAX_LENGTH)
