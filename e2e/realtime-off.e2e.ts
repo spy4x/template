@@ -8,6 +8,7 @@ import { expect, test } from "./fixtures/stack.ts"
 import { gotoApp, submitAuthForm } from "./fixtures/app.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
 import { createGroup, openGroups, openNotes } from "./fixtures/groups.ts"
+import { signUpInPage, signUpWithCode } from "./fixtures/sign-up.ts"
 
 /**
  * The core flows on a page whose `/config.json` says `realtime: false` (ADR 003, "the proof of the
@@ -68,10 +69,7 @@ async function socketFree(browser: Browser): Promise<SocketFree> {
 }
 
 async function signUpInBrowser(page: Page, email: string): Promise<void> {
-  await gotoApp(page, "/sign-up", page.locator("[data-e2e=auth-form-login]"))
-  await page.locator("[data-e2e=auth-form-login]").fill(email)
-  await page.locator("[data-e2e=auth-form-password]").fill(password)
-  await submitAuthForm(page, "/", page.locator("[data-e2e=shell-ws-status]"))
+  await signUpInPage(page, email, password, page.locator("[data-e2e=shell-ws-status]"))
 }
 
 async function signInBrowser(page: Page, email: string): Promise<void> {
@@ -126,7 +124,7 @@ test.describe("the app with the WebSocket module switched off", () => {
       await page.locator("[data-e2e=note-menu]").click()
       await page.getByRole("menuitem", { name: "Delete" }).click()
       await page.locator("[data-e2e=note-delete-dialog]")
-        .getByRole("button", { name: "Delete", exact: true }).click()
+        .getByRole("button", { name: "Delete note", exact: true }).click()
       await expect(page).toHaveURL("/notes")
       await expect(titles).toHaveCount(0)
 
@@ -149,7 +147,7 @@ test.describe("the app with the WebSocket module switched off", () => {
     const second = await socketFree(browser)
     try {
       for (const email of [owner, member]) {
-        const response = await request.post(`${apiBase}/api/auth/password/sign-up`, {
+        const response = await signUpWithCode(request, `${apiBase}/api/auth/password/sign-up`, {
           headers,
           data: { email, password },
         })
@@ -169,7 +167,7 @@ test.describe("the app with the WebSocket module switched off", () => {
 
       await signInBrowser(second.page, member)
       await openNotes(second.page, "Polling team")
-      await expect(second.page.getByText("No notes yet.")).toBeVisible()
+      await expect(second.page.getByText("No notes yet")).toBeVisible()
       let loads = 0
       second.page.on("load", () => loads++)
 
