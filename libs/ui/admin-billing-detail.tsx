@@ -246,9 +246,7 @@ export function AdminBillingCustomerScreen(props: AdminBillingCustomerScreenProp
     <Stack>
       <PageHeader
         title={customer.groupName}
-        subtitle={customer.owner.email
-          ? `Owned by ${owner}, ${customer.owner.email}`
-          : `Owned by ${owner}`}
+        subtitle={`Owned by ${owner}`}
         back={back}
         navigate={navigate}
         action={stripe || undefined}
@@ -301,6 +299,13 @@ export function AdminBillingCustomerScreen(props: AdminBillingCustomerScreenProp
         <Fact label="Customer since">
           {detail.customerSince ? billingDate(detail.customerSince) : `Not recorded`}
         </Fact>
+        {customer.owner.email && (
+          <Fact label="Owner's email">
+            <span class="wrap-anywhere" data-e2e="admin-billing-owner-email">
+              {customer.owner.email}
+            </span>
+          </Fact>
+        )}
         <Fact label="Group">
           <Link
             href={ADMIN_GROUP_PATHS.group(customer.groupId)}

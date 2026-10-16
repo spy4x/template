@@ -325,6 +325,8 @@ describe(`one customer in the admin app`, () => {
     expect(summary).toContain(`Pro, 4 seats`)
     expect(summary).toContain(`4 × €9.00 = €36.00`)
     expect(summary).toContain(`Mar 3, 2026`)
+    // The page header keeps one line, so the address lives in the summary, where it wraps.
+    expect(find(`[data-e2e=admin-billing-owner-email]`).textContent).toBe(`ada@acme.test`)
     expect(find(`[data-e2e=admin-billing-payment]`).textContent).toBe(`€36.00 on Oct 12, 2026`)
     const history = find(`[data-e2e=admin-billing-history]`).textContent
     expect(history).toContain(`€36.00 refunded`)
