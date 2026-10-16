@@ -146,7 +146,7 @@ export interface GroupEditorScreenProps {
    */
   transfer?: (close: () => void) => ComponentChildren
   /**
-   * The groups the person may write to, other than this one. The menu offers "Move all data to..."
+   * The groups the person may write to, other than this one. The menu offers "Move all data to…"
    * to an editor or above, and only when there is a group to move to and `onMoveAll` is given.
    */
   moveTargets?: readonly MoveTarget[]

@@ -74,7 +74,7 @@ function OpenIfSelected({ groupId, noteId }: { groupId: string; noteId?: string 
       { replace: true },
     )
   }, [selected, groupId, noteId])
-  return <LoadingSpinner size="lg" label="Opening the notes..." class="min-h-[50vh]" />
+  return <LoadingSpinner size="lg" label="Opening the notes…" class="min-h-[50vh]" />
 }
 
 /**
@@ -253,7 +253,7 @@ export function App() {
       {!ready || !sessionState.value.isReady
         ? (
           <main>
-            <LoadingSpinner size="lg" label="Loading..." class="min-h-dvh bg-canvas" />
+            <LoadingSpinner size="lg" label="Loading…" class="min-h-dvh bg-canvas" />
           </main>
         )
         : <Frame />}

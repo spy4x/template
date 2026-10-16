@@ -266,7 +266,7 @@ describe("NotesScreen", () => {
 
   it("says the group was not found once loading is over, with a way back to the groups", () => {
     expect(renderToString(<NotesScreen {...listDefaults} group={null} loading />)).toContain(
-      "Loading the group...",
+      "Loading the group…",
     )
     const html = renderToString(<NotesScreen {...listDefaults} group={null} />)
     expect(html).toContain("This group was not found.")
@@ -582,7 +582,7 @@ describe("NotesScreen deleted notes", () => {
     )
     expect(
       renderToString(<NotesScreen {...deletedDefaults} deletedNotes={[]} deletedLoading />),
-    ).toContain("Loading deleted notes...")
+    ).toContain("Loading deleted notes…")
   })
 
   it("shows a refused restore under the banner, and the plan's limit as an upgrade prompt", async () => {
@@ -842,7 +842,7 @@ describe("NoteEditorScreen", () => {
 
   it("says the group was not found once loading is over", () => {
     expect(renderToString(<NoteEditorScreen {...editorDefaults} group={null} loading />))
-      .toContain("Loading the group...")
+      .toContain("Loading the group…")
     expect(renderToString(<NoteEditorScreen {...editorDefaults} group={null} />)).toContain(
       "This group was not found.",
     )
@@ -851,7 +851,7 @@ describe("NoteEditorScreen", () => {
   it("says the note is loading while it is read", () => {
     const html = renderToString(<NoteEditorScreen {...editorDefaults} loading />)
 
-    expect(html).toContain("Loading the note...")
+    expect(html).toContain("Loading the note…")
     expect(html).not.toContain("<form")
   })
 })

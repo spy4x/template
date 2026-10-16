@@ -90,7 +90,7 @@ export function NoteEditorScreen(props: NoteEditorScreenProps): JSX.Element {
       <EditorPage>
         <PageHeader back={BACK} navigate={navigate} title="Note" />
         <ListEmpty
-          title={props.loading ? "Loading the group..." : "This group was not found."}
+          title={props.loading ? "Loading the group…" : "This group was not found."}
           action={!props.loading && (
             <Button href={SCREEN_PATHS.groups} navigate={navigate} variant="outline">
               Back to groups
@@ -114,7 +114,7 @@ export function NoteEditorScreen(props: NoteEditorScreenProps): JSX.Element {
               class="min-h-11 sm:min-h-9"
               data-e2e="note-switch-group"
               busy={props.switching}
-              busyLabel="Switching..."
+              busyLabel="Switching…"
               disabled={!props.onSwitchGroup}
               onClick={props.onSwitchGroup}
             >
@@ -145,7 +145,7 @@ export function NoteEditorScreen(props: NoteEditorScreenProps): JSX.Element {
     return (
       <EditorPage>
         <PageHeader back={BACK} navigate={navigate} title="Note" />
-        <ListEmpty title="Loading the note..." />
+        <ListEmpty title="Loading the note…" />
       </EditorPage>
     )
   }
@@ -277,7 +277,7 @@ function Editor(props: WithGroup): JSX.Element {
               class="min-h-11 w-full sm:min-h-9 sm:w-auto"
               data-e2e="note-save"
               busy={saving}
-              busyLabel="Saving..."
+              busyLabel="Saving…"
             >
               {note ? "Save note" : "Add note"}
             </Button>

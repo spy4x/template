@@ -299,7 +299,7 @@ function CreateForm(
             type="submit"
             data-e2e="api-token-create"
             busy={pending.create}
-            busyLabel="Creating..."
+            busyLabel="Creating…"
           >
             Create token
           </Button>

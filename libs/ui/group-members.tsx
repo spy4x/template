@@ -135,7 +135,7 @@ export function GroupMembersSection(
         : members === null
         ? (
           <p class="text-sm text-muted" data-e2e="group-members-loading">
-            Loading the members...
+            Loading the members…
           </p>
         )
         : (
@@ -217,7 +217,7 @@ function MemberItem(
           )}
         </div>
         <span class="shrink-0 text-sm text-muted" data-e2e="group-member-role">
-          {pending ? "Saving..." : ROLE_TEXT[member.role]}
+          {pending ? "Saving…" : ROLE_TEXT[member.role]}
         </span>
         {roles.length > 0 || removable
           ? (

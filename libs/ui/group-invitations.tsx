@@ -256,7 +256,7 @@ export function InviteForm(
             type="submit"
             data-e2e="invitation-create"
             busy={creating}
-            busyLabel="Creating..."
+            busyLabel="Creating…"
           >
             Create link
           </Button>
@@ -494,7 +494,7 @@ export function InvitationScreen(
         <EmptyState
           headingLevel={1}
           inset
-          title={loading ? "Opening the invitation..." : "This invitation cannot be used"}
+          title={loading ? "Opening the invitation…" : "This invitation cannot be used"}
           description={loading ? undefined : error ?? undefined}
           action={!loading && (
             <Button
@@ -541,7 +541,7 @@ export function InvitationScreen(
                   class="min-h-11 w-full justify-center sm:min-h-9 sm:w-auto"
                   data-e2e="invitation-accept"
                   busy={answering}
-                  busyLabel="Joining..."
+                  busyLabel="Joining…"
                   onClick={() => !answering && onAccept?.()}
                 >
                   Accept invitation
@@ -653,7 +653,7 @@ export function MyInvitationsSection(
                         data-e2e="invitation-accept"
                         aria-label={`Accept the invitation to ${invitation.groupName}`}
                         busy={answering}
-                        busyLabel="Joining..."
+                        busyLabel="Joining…"
                         onClick={() => !answering && onAccept?.(invitation.id)}
                       >
                         Accept
