@@ -29,12 +29,21 @@ export function changeText(change: AdminStatChange, period: string): string {
 }
 
 /**
- * The top of a count chart's Y axis: at least 4, and a multiple of 4, so its 4 steps fall on whole
- * people. A derived domain would pad below 0 and step by fractions.
+ * The top of a count chart's Y axis: the first of 5, 10, 20, 50, 100, 200 and on that holds the
+ * largest count. The chart steps its axis by a nice fraction of the top, and for these tops the
+ * {@link COUNT_AXIS_STEPS} steps fall on whole people. A derived domain would pad below 0 and step
+ * by fractions.
  */
 export function countAxisTop(counts: readonly number[]): number {
-  return Math.max(4, Math.ceil(Math.max(0, ...counts) / 4) * 4)
+  const largest = Math.max(0, ...counts)
+  if (!Number.isFinite(largest)) return 5
+  for (let scale = 1;; scale *= 10) {
+    for (const top of [5 * scale, 10 * scale, 20 * scale]) if (top >= largest) return top
+  }
 }
+
+/** How many steps a count chart's Y axis takes from 0 to {@link countAxisTop}. */
+const COUNT_AXIS_STEPS = 5
 
 /** A growth number's colour: up is good, down is a warning, flat is neutral. */
 export function changeTone(change: AdminStatChange): KpiTone {
@@ -165,7 +174,7 @@ function DailyChart(
           series={[{ name: series, points: days.map((day) => ({ x: day.day, y: day.count })) }]}
           height={220}
           yDomain={[0, countAxisTop(days.map((day) => day.count))]}
-          yTicks={4}
+          yTicks={COUNT_AXIS_STEPS}
           xFormat={(x) => DAY.format(typeof x === "string" ? new Date(`${x}T00:00:00Z`) : x)}
           yFormat={(value) => NUMBER.format(value)}
           ariaLabel={`${title}, the last ${days.length} days`}
