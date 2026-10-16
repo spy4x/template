@@ -33,6 +33,8 @@ async function openProfile(device: BrowserContext, email: string): Promise<Page>
 
 test.describe("preferences across devices", () => {
   test("a theme and a time zone picked on one device show on the other", async ({ browser, request }) => {
+    // Two devices, a sign-up by code and two dialogs: longer than the default 30 seconds.
+    test.setTimeout(90_000)
     const email = `e2e-preferences-${uuidV7().slice(-8)}@example.com`
     let laptop: BrowserContext | null = null
     let phone: BrowserContext | null = null
