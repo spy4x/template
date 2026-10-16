@@ -11,11 +11,14 @@ import {
   adminBillingStatus,
   adminBillingTimeSchema,
   BILLING_AUDIT_EVENT_TYPES,
+  billingAuditIdentifier,
+  billingAuditPrefix,
   BillingStatus,
   monthlyRevenue,
   noChargeUntil,
   parseAdminBillingFilter,
   PRO_PLAN_ID,
+  readBillingAuditIdentifier,
 } from "./+lib.ts"
 import { type } from "arktype"
 
@@ -170,5 +173,29 @@ describe(`action bodies`, () => {
 describe(`audit event numbers`, () => {
   it(`continue the account audit log from 25, one per action`, () => {
     expect(BILLING_AUDIT_EVENT_TYPES).toEqual([25, 26, 27, 28, 29])
+  })
+})
+
+describe(`billing audit identifier`, () => {
+  it(`reads back every fact it wrote, the note last with any text`, () => {
+    const facts = {
+      groupId: `0199f0a0-0000-7000-8000-000000000001`,
+      objectId: `pi_123`,
+      amount: { amount: 900, currency: `EUR`, decimals: 2 },
+      until: `2026-11-30T00:00:00.000Z`,
+      note: `asked by mail: note: "x"`,
+    }
+    expect(readBillingAuditIdentifier(billingAuditIdentifier(facts))).toEqual(facts)
+  })
+
+  it(`cuts a long note so the identifier fits its column`, () => {
+    const identifier = billingAuditIdentifier({
+      groupId: `0199f0a0-0000-7000-8000-000000000001`,
+      objectId: `sub_${`x`.repeat(200)}`,
+      note: `n`.repeat(200),
+    })
+    expect(identifier.length).toBe(320)
+    expect(identifier.startsWith(billingAuditPrefix(`0199f0a0-0000-7000-8000-000000000001`)))
+      .toBe(true)
   })
 })

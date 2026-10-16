@@ -185,7 +185,7 @@ export interface AdminBillingHistoryEntry {
   /** The operator's name, or their address before they set one; `null` once their account is gone. */
   operator: string | null
   /** The refunded amount, for a refund. */
-  amount: Money | null
+  amount: (Money & { decimals: number }) | null
   /** The new end of the time at no charge, for time given. */
   until: string | null
   /** The note the operator wrote, or `""`. */
@@ -494,4 +494,57 @@ export interface AdminBillingActionResponse {
   refunded?: Money
   /** The new end of the time at no charge, for time given. */
   until?: string
+}
+
+/** The longest `auth_audits.identifier`. */
+const IDENTIFIER_MAX_LENGTH = 320
+
+/** What one billing audit row says, besides who did it and when. */
+export interface BillingAuditFacts {
+  groupId: string
+  /** The provider's object the action changed: the payment for a refund, else the subscription. */
+  objectId: string
+  amount?: Money & { decimals: number }
+  until?: string
+  note: string
+}
+
+/**
+ * The `identifier` of a billing audit row: `group:<id> obj:<provider id> [amount:<minor> <CUR>
+ * <decimals>] [until:<ISO>] note:<note>`. The note comes last, so it may hold any text, and is cut
+ * so the whole fits the column's 320 characters.
+ */
+export function billingAuditIdentifier(facts: BillingAuditFacts): string {
+  let head = `group:${facts.groupId} obj:${facts.objectId}`
+  if (facts.amount) {
+    head += ` amount:${facts.amount.amount} ${facts.amount.currency} ${facts.amount.decimals}`
+  }
+  if (facts.until) head += ` until:${facts.until}`
+  head += ` note:`
+  return head + Array.from(facts.note).slice(0, Math.max(0, IDENTIFIER_MAX_LENGTH - head.length))
+    .join(``)
+}
+
+const IDENTIFIER_PATTERN =
+  /^group:(\S+) obj:(\S+)(?: amount:(\d+) ([A-Z]{3}) (\d+))?(?: until:(\S+))? note:([\s\S]*)$/
+
+/** The facts {@link billingAuditIdentifier} wrote, or `null` for an identifier of another shape. */
+export function readBillingAuditIdentifier(identifier: string): BillingAuditFacts | null {
+  const match = IDENTIFIER_PATTERN.exec(identifier)
+  if (!match) return null
+  const [, groupId, objectId, amount, currency, decimals, until, note] = match
+  return {
+    groupId,
+    objectId,
+    ...(amount === undefined
+      ? {}
+      : { amount: { amount: Number(amount), currency, decimals: Number(decimals) } }),
+    ...(until === undefined ? {} : { until }),
+    note,
+  }
+}
+
+/** The prefix every audit row about `groupId` starts with, for a `LIKE` over `identifier`. */
+export function billingAuditPrefix(groupId: string): string {
+  return `group:${groupId} `
 }
