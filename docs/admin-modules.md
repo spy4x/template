@@ -17,8 +17,8 @@ each side holds them to that (`apps/admin/src/modules/registry.test.ts`,
 | `users`      | Users         | `/users`, `/users/:id`    | (the page's own five)               | `/api/admin/users/*`    |
 | `groups`     | Groups        | `/groups`                 |                                     | none yet                |
 | `newsletter` | Newsletter    | `/newsletter`             |                                     | none yet                |
-| `audit`      | Audit log     | `/audit`                  |                                     | none yet                |
-| `system`     | System        | `/system`                 |                                     | none yet                |
+| `audit`      | Audit log     | `/audit`                  |                                     | `/api/admin/audit*`     |
+| `system`     | System        | `/system`                 |                                     | `/api/admin/system*`    |
 | `api-tokens` | API tokens    | `/api-tokens`             | API tokens, Devices, Notifications  | none yet                |
 
 A module marked "none yet" is registered with a "coming soon" page (and tabs), so the sidebar shows
