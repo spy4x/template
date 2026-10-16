@@ -71,13 +71,19 @@ function atKey(sql: postgres.Sql, column: string) {
   return sql`to_char(${sql(column)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
 }
 
+/** The largest id a `users` row can have: the column is `int4`. */
+const MAX_PERSON_ID = 2_147_483_647
+
 /**
  * The ids of the people whose first name, last name, an address a key holds or the password key's
  * subject contains every word of `query`, as the people list matches them; or the one id `query`
- * is when it is a number.
+ * is when it is a number a person's id can be. A longer number is searched for as a word, like
+ * any other text, so it never reaches Postgres as an `int4` it cannot hold.
  */
 function personIds(sql: postgres.Sql, query: string) {
-  if (/^[1-9]\d{0,9}$/.test(query)) return sql`SELECT ${Number(query)}::int4 AS id`
+  if (/^[1-9]\d{0,9}$/.test(query) && Number(query) <= MAX_PERSON_ID) {
+    return sql`SELECT ${Number(query)}::int4 AS id`
+  }
   let where = sql`TRUE`
   for (const word of query.split(/\s+/).filter(Boolean)) {
     const pattern = containsPattern(word)
