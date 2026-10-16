@@ -197,6 +197,20 @@ describe(`the admin group list`, () => {
     expect(rows[1].querySelector(`[data-e2e=admin-group-deleted]`) !== null).toBe(true)
   })
 
+  it(`keeps a long owner name on one line, with the full name in its tooltip`, async () => {
+    const long = `${`a`.repeat(60)}@example.com`
+    const nameless = { ...family, owner: { id: 7, name: ``, email: long } }
+    await mount(
+      <AdminGroupsListScreen
+        {...listProps([], { list: { groups: [nameless], total: 1, page: 1, pageSize: 25 } })}
+      />,
+    )
+    const owner = find(`[data-e2e=admin-groups-owner]`)
+    expect(owner.textContent).toBe(long)
+    expect(owner.getAttribute(`title`)).toBe(long)
+    expect(owner.classList.contains(`truncate`)).toBe(true)
+  })
+
   it(`moves focus to the count after a page change, not on the first page`, async () => {
     const calls: unknown[][] = []
     await mount(<AdminGroupsListScreen {...listProps(calls)} />)

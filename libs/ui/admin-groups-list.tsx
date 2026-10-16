@@ -41,6 +41,26 @@ const STATUS_CHIPS: { value: Exclude<AdminGroupStatusFilter, "any">; label: stri
   { value: `deleted`, label: `In trash` },
 ]
 
+/**
+ * The table's layout on top of preact-ui's `DataTable`, which takes no class per column:
+ *
+ * - The library's table box keeps 300px of height even under a single row; here it fits its rows.
+ * - Cells are padded 1rem on each side instead of 1.5rem, so all seven columns fit at 1280px.
+ * - On narrower screens the low-value columns go, by position, so the rest fit without scrolling:
+ *   below 1280px the note count, the plan and the creation date; below 640px also the last
+ *   activity, which leaves the group, its owner and its member count.
+ *
+ * Positions follow `groupColumns`: 4 notes, 5 plan, 6 last activity, 7 created.
+ */
+const TABLE_CLASS = [
+  `[&>div:first-child]:min-h-0`,
+  `[&_:is(th,td)]:px-4`,
+  `max-xl:[&_:is(th,td):nth-child(4)]:hidden`,
+  `max-xl:[&_:is(th,td):nth-child(5)]:hidden`,
+  `max-xl:[&_:is(th,td):nth-child(7)]:hidden`,
+  `max-sm:[&_:is(th,td):nth-child(n+4)]:hidden`,
+].join(` `)
+
 const CREATED = new Intl.DateTimeFormat(`en`, { year: `numeric`, month: `short`, day: `numeric` })
 const NUMBER = new Intl.NumberFormat(`en`)
 
@@ -204,6 +224,7 @@ export function AdminGroupsListScreen(
           <div data-e2e="admin-groups-list">
             <DataTable
               mode="server"
+              class={TABLE_CLASS}
               columns={groupColumns(navigate)}
               rows={rows}
               sort={filter.sort}
@@ -251,14 +272,22 @@ function groupColumns(navigate?: Navigate): DataTableColumn<GroupTableRow, Admin
       id: `owner`,
       header: `Owner`,
       render: ({ group }) => (
-        <div class="flex min-w-40 items-center gap-2">
-          <Avatar name={adminGroupPersonName(group.owner)} size="sm" />
-          <div class="flex min-w-0 flex-col">
-            <span class="text-sm font-medium wrap-anywhere">
+        // One line each, cut with an ellipsis at 11rem; the full text stays in the tooltip.
+        <div class="flex items-center gap-2">
+          {/* Decorative: the name beside it already names the owner. */}
+          <Avatar name={adminGroupPersonName(group.owner)} alt="" size="sm" />
+          <div class="flex w-44 min-w-0 flex-col">
+            <span
+              class="truncate text-sm font-medium"
+              title={adminGroupPersonName(group.owner)}
+              data-e2e="admin-groups-owner"
+            >
               {adminGroupPersonName(group.owner)}
             </span>
             {group.owner.email && group.owner.name && (
-              <span class="text-xs text-muted wrap-anywhere">{group.owner.email}</span>
+              <span class="truncate text-xs text-muted" title={group.owner.email}>
+                {group.owner.email}
+              </span>
             )}
           </div>
         </div>
@@ -319,8 +348,8 @@ function GroupCell(
   { group, navigate }: { group: AdminGroupRow; navigate?: Navigate },
 ): JSX.Element {
   return (
-    // At least 12rem wide: on a phone the table scrolls sideways instead of squeezing the name.
-    <div class="flex min-w-48 items-center gap-3">
+    // At least 10rem wide: a long name wraps rather than squeezing into a few letters.
+    <div class="flex min-w-40 items-center gap-3">
       <GroupMark color={group.color} emoji={group.emoji} size="sm" />
       <Link
         href={ADMIN_GROUP_PATHS.group(group.id)}

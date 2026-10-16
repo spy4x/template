@@ -92,6 +92,30 @@ test.describe(`the admin app's groups`, () => {
       const row = ops.locator(`[data-e2e=admin-groups-list] tbody tr`)
       await expect(row).toHaveCount(1)
       await expect(row).toContainText(ownerEmail)
+
+      // At 1280px every column fits without scrolling, the table is as tall as its one row, and
+      // the owner's long address stays on one line with the full address in its tooltip.
+      const box = ops.locator(`[data-e2e=admin-groups-list] table`).locator(`..`)
+      const fit = await box.evaluate((element) => ({
+        scrolls: element.scrollWidth > element.clientWidth,
+        spare: element.clientHeight - element.querySelector(`table`)!.offsetHeight,
+      }))
+      expect(fit.scrolls).toBe(false)
+      expect(fit.spare).toBeLessThan(8)
+      const owner = row.locator(`[data-e2e=admin-groups-owner]`)
+      await expect(owner).toHaveAttribute(`title`, ownerEmail)
+      expect((await owner.boundingBox())!.height).toBeLessThan(30)
+
+      // On a phone only the group, its owner and its member count stay.
+      const columns = ops.locator(`[data-e2e=admin-groups-list] th:visible`)
+      await ops.setViewportSize({ width: 390, height: 844 })
+      await expect(columns).toHaveText([/Group/, `Owner`, /Members/])
+      // Between the two, the plan, the note count and the creation date go, and nothing scrolls.
+      await ops.setViewportSize({ width: 1024, height: 768 })
+      await expect(columns).toHaveText([/Group/, `Owner`, /Members/, /Last activity/])
+      expect(await box.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(false)
+      await ops.setViewportSize({ width: 1280, height: 720 })
+      await expect(columns).toHaveCount(7)
       await ops.locator(`[data-e2e=admin-group-${groupId}]`).click()
 
       // The group's page: the header card and its members with their roles.
