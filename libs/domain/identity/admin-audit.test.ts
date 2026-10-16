@@ -39,6 +39,7 @@ describe("audit log filter", () => {
     ).toEqual(ADMIN_AUDIT_NO_FILTER)
     expect(parse("event=activity:DROP TABLE").event).toBeNull()
     expect(parse("operator=99999999999").operator).toBeNull()
+    expect(parse("operator=2147483648").operator).toBeNull()
   })
 
   it("swaps days given in the wrong order", () => {
