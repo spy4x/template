@@ -6,20 +6,26 @@ import { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
 import { GroupInvitationCreateCommand, GroupRole, InvitationError } from "@domain/groups"
 import { UserMFAStatus } from "@domain/identity"
-import { PostgresInvitationRepository } from "@server/groups/postgres-invitation-repository.ts"
+import {
+  invitationLookup,
+  newInvitationToken,
+  PostgresInvitationRepository,
+} from "@server/groups/postgres-invitation-repository.ts"
+import { sha256Hex } from "@spy4x/platform/tokens"
 import { hasProvenAddress, provenAddressOwner } from "@server/auth/email-verification.ts"
 import { AppDbBase } from "../../apps/api/services/db-base.ts"
 import { createSignIn } from "../../apps/api/services/sign-in.ts"
 import type { APIContext } from "../../apps/api/_types.ts"
 import { createInvitationCreateHandler } from "../../apps/api/features/groups/invitations.ts"
 import { issuePasswordReset } from "../../libs/server/auth/password-reset.ts"
-import { withSchema } from "./group-team.ts"
+import { insertUser, withSchema } from "./group-team.ts"
 
 /**
  * An account whose address is not proven cannot invite (#411), against a real Postgres built from
  * schema.sql. The case it closes: somebody signs up first with the owner's address and invites a
  * second account of theirs into the first group; the owner's password reset gives the account
- * back but would leave that member in the group. Needs "DB_HOST", "DB_USER", "DB_PASS" and
+ * back but would leave that member in the group. A link made before invitations needed a proven
+ * address is revoked by that reset. Needs "DB_HOST", "DB_USER", "DB_PASS" and
  * "DB_NAME" (recipe in docs/handoff.md); it fails when they are missing.
  */
 
@@ -81,7 +87,7 @@ async function groupState(sql: postgres.Sql, groupId: string) {
   return { members: members.count, invitations: invitations.count }
 }
 
-Deno.test("an account whose address is not proven cannot invite, and can once a reset proves it", async () => {
+Deno.test("an account whose address is not proven cannot invite, its older links die at the reset that proves it, and it can invite after", async () => {
   await withSchema(async (sql) => {
     const db = new AppDbBase({ sql })
     const signIn = createSignIn({
@@ -108,11 +114,38 @@ Deno.test("an account whose address is not proven cannot invite, and can once a 
       "ADDRESS_NOT_PROVEN",
     )
 
+    // A link made before invitations needed a proven address: written to the store directly.
+    const invitations = new PostgresInvitationRepository(sql)
+    const oldToken = newInvitationToken()
+    const old = await invitations.create(
+      {
+        groupId,
+        role: GroupRole.ADMIN,
+        expiresInDays: 7,
+        maxUses: 10,
+        email: null,
+        tokenHash: await sha256Hex(oldToken),
+      },
+      userId,
+      { maxMembers: null, memberRoles: true },
+    )
+    expect(old).not.toBeNull()
+    expect(await groupState(sql, groupId)).toEqual({ members: 1, invitations: 1 })
+
     // The owner takes the account back with a reset link mailed to the address.
     const issued = await issuePasswordReset(db.authStore, EMAIL)
     if (!issued) throw new Error("No reset was issued")
     expect(await signIn.resetPassword(issued.email, issued.code, "Owner-0123456")).toBe(true)
 
+    expect(await groupState(sql, groupId)).toEqual({ members: 1, invitations: 0 })
+    // The reset revoked the old link: the squatter's second account cannot join through it.
+    const second = await insertUser(sql)
+    const accepted = invitations.accept(
+      await invitationLookup({ token: oldToken }),
+      second,
+      { maxMembers: null, memberRoles: true },
+    )
+    expect(await refusalCode(accepted)).toBe("INVITATION_REVOKED")
     expect(await groupState(sql, groupId)).toEqual({ members: 1, invitations: 0 })
 
     // The reset proved the address, so the owner invites as before.
