@@ -33,8 +33,8 @@ async function openProfile(device: BrowserContext, email: string): Promise<Page>
 
 test.describe("preferences across devices", () => {
   test("a theme and a time zone picked on one device show on the other", async ({ browser, request }) => {
-    // Two devices, a sign-up by code and two dialogs: longer than the default 30 seconds.
-    test.setTimeout(90_000)
+    // Two devices, a sign-up by code and four dialogs: longer than the default 30 seconds.
+    test.setTimeout(120_000)
     const email = `e2e-preferences-${uuidV7().slice(-8)}@example.com`
     let laptop: BrowserContext | null = null
     let phone: BrowserContext | null = null
@@ -64,6 +64,12 @@ test.describe("preferences across devices", () => {
       await onLaptop.locator("[data-e2e=preferences-change-timeZone]").click()
       const zone = onLaptop.getByRole("combobox", { name: "Time zone" })
       await expect(zone).toBeFocused()
+      // Escape closes an open list, not the dialog around it.
+      await zone.fill("Tok")
+      await expect(onLaptop.getByRole("option", { name: /^Tokyo, Asia/ })).toBeVisible()
+      await zone.press("Escape")
+      await expect(onLaptop.getByRole("option", { name: /^Tokyo, Asia/ })).toBeHidden()
+      await expect(onLaptop.locator("[data-e2e=preferences-dialog]")).toBeVisible()
       await zone.fill("Tokyo")
       await onLaptop.getByRole("option", { name: /^Tokyo, Asia/ }).click()
       await onLaptop.locator("[data-e2e=preferences-save]").click()
@@ -96,6 +102,15 @@ test.describe("preferences across devices", () => {
       await expect(onLaptop.locator("[data-e2e=preferences-conflict]")).toBeVisible()
       await expect(onPhone.locator("[data-e2e=preferences-formats]")).toContainText("Italian")
       await expect(onPhone.locator("[data-e2e=preferences-clock]")).not.toContainText("12-hour")
+
+      // A theme picked on another device while the dialog is open does not refuse its save.
+      await onLaptop.locator("[data-e2e=preferences-clock-select]").selectOption("h12")
+      await onPhone.getByRole("button", { name: "Change theme" }).click()
+      await onPhone.locator("[data-e2e=preferences-theme-light]").click()
+      await expect(onLaptop.locator("html")).not.toHaveClass(/\bdark\b/)
+      await onLaptop.locator("[data-e2e=preferences-save]").click()
+      await expect(onLaptop.locator("[data-e2e=preferences-dialog]")).toBeHidden()
+      await expect(onPhone.locator("[data-e2e=preferences-clock]")).toContainText("12-hour")
     } finally {
       await laptop?.close()
       await phone?.close()
