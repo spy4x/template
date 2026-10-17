@@ -34,7 +34,8 @@ Deno.test("every Playwright configuration of the repository is checked", async (
   for await (
     const entry of walk(ROOT, {
       match: [/playwright\.config\.[cm]?[jt]s$/],
-      skip: [/node_modules/, /\.git$/],
+      // .volumes holds the development stack's data, which its containers own and often hide.
+      skip: [/(^|\/)(\.git|node_modules|\.volumes)$/],
     })
   ) found.push(relative(ROOT, entry.path))
   expect(found.sort()).toEqual(Object.keys(await loadConfigs()).sort())
