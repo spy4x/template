@@ -14,8 +14,10 @@
  *
  * The user is created through the API's own sign-up (`createSignIn`), so the auth user, password
  * key, profile and first group are written exactly as a real sign-up writes them. The session
- * that sign-up opens is signed out at once. Running the seed again only makes the demo user an
- * administrator again: it looks the address up first and writes nothing else when the user exists. When sign-up refuses a user that does not
+ * that sign-up opens is signed out at once, and the address is marked proven, as a finished
+ * sign-up leaves it. Running the seed again makes the demo user an administrator again and marks
+ * their address proven if it is not yet: it looks the address up first and writes nothing else
+ * when the user exists. When sign-up refuses a user that does not
  * exist, the seed fails instead of reporting success. It runs only when `ENV` is `dev`, the same
  * rule as `db:reset`, so no production database gets a demo account with a known password.
  *
@@ -87,7 +89,7 @@ export function readSeedOptions(env: Record<string, string | undefined>): SeedOp
 
 /**
  * Creates the demo data and makes the demo user an administrator. `false` when the demo user
- * already exists: then only the role is written.
+ * already exists: then only the role is written, and the address is marked proven if it is not.
  *
  * @throws {SeedRefusedError} When the user does not exist and sign-up still refuses to create it.
  */
