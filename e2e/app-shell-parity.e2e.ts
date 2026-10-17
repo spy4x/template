@@ -1,0 +1,128 @@
+import type { APIRequestContext, Page } from "@playwright/test"
+import { expect, test } from "./fixtures/stack.ts"
+import { signIn } from "./fixtures/app.ts"
+import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
+import { signUpWithCode } from "./fixtures/sign-up.ts"
+
+/**
+ * The SPA and the admin draw the same frame, the library's `AppShell` (#516): at 1440 px the same
+ * 72 px rail of 48 px cells with the page centred in the rest of the window, and at 390 px the same
+ * tab bar in place of the rail. Measured in a real browser, because happy-dom lays nothing out.
+ */
+
+const appBase = "http://app.localhost"
+const adminBase = "http://admin.localhost"
+const headers = { origin: appBase, "sec-fetch-site": "same-origin" }
+const password = "Passw0rd!"
+const OPERATOR = 2
+
+/**
+ * The onboarding tour's targets in the rail's bottom zone, as `TOUR_STEPS` in
+ * `libs/ui/onboarding-card.tsx` names them (its unit test pins the same strings). A step whose
+ * target matches nothing loses its spotlight without failing anything else.
+ */
+const TOUR_TARGETS = [
+  `[data-e2e="rail-shell-rail"] a[href="/notes"]`,
+  `[data-e2e="rail-shell-rail"] a[href="/groups"]`,
+  `[data-e2e="rail-shell-bottom"] a[href="/notifications"]`,
+  `[data-e2e="rail-shell-bottom"] [data-e2e="account-menu-button"]`,
+]
+
+async function cleanup(request: APIRequestContext, email: string) {
+  const response = await request.post(`${appBase}/api/test/cleanup-user`, {
+    data: { login: email },
+  })
+  expect.soft(response.status(), await response.text()).toBe(200)
+}
+
+interface Layout {
+  /** The rail's own width, without the border that divides it from the page. */
+  rail: number
+  cell: { width: number; height: number }
+  /** The gap between the rail and the page's column, and between the column and the window. */
+  gaps: { left: number; right: number }
+}
+
+/** The rail's width, its first navigation cell, and where the page's column sits beside it. */
+async function measure(page: Page): Promise<Layout> {
+  const column = page.locator("[data-e2e=rail-shell-column]")
+  const cell = page.locator("[data-e2e=rail-shell-rail] [data-e2e=rail-shell-entry]").first()
+  const content = page.locator("[data-e2e=app-shell-content]")
+  await expect(column).toBeVisible()
+  const [railBox, cellBox, contentBox] = await Promise.all([
+    column.boundingBox(),
+    cell.boundingBox(),
+    content.boundingBox(),
+  ])
+  if (!railBox || !cellBox || !contentBox) throw new Error("The shell drew no rail or no page.")
+  const windowWidth = await page.evaluate(() => document.documentElement.clientWidth)
+  return {
+    // Inside its 1 px border, which `boundingBox` would count.
+    rail: await column.evaluate((element) => element.clientWidth),
+    cell: { width: cellBox.width, height: cellBox.height },
+    gaps: {
+      left: contentBox.x - (railBox.x + railBox.width),
+      right: windowWidth - (contentBox.x + contentBox.width),
+    },
+  }
+}
+
+/** Checks the 1440 px frame, then the 390 px one, on the page as it is. */
+async function expectSharedFrame(page: Page): Promise<void> {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const wide = await measure(page)
+  expect(wide.rail).toBe(72)
+  expect(wide.cell).toEqual({ width: 48, height: 48 })
+  expect(wide.gaps.left).toBeGreaterThan(0)
+  expect(Math.abs(wide.gaps.left - wide.gaps.right)).toBeLessThanOrEqual(1)
+  await expect(page.locator("[data-e2e=rail-shell-tabbar]")).toBeHidden()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator("[data-e2e=rail-shell-tabbar]")).toBeVisible()
+  await expect(page.locator("[data-e2e=rail-shell-column]")).toBeHidden()
+  expect(
+    await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth
+    ),
+  ).toBeLessThanOrEqual(0)
+}
+
+test.describe("one frame for the SPA and the admin", () => {
+  test("both draw a 72 px rail of 48 px cells beside a centred page at 1440 px, and a tab bar at 390 px", async ({ browser, page, request }) => {
+    const email = `e2e-shell-${uuidV7().slice(-8)}@example.com`
+    const admin = await browser.newContext({ baseURL: adminBase })
+    try {
+      const response = await signUpWithCode(request, `${appBase}/api/auth/password/sign-up`, {
+        headers,
+        data: { email, password },
+      })
+      expect(response.ok(), await response.text()).toBe(true)
+      const signedOut = await request.post(`${appBase}/api/auth/sign-out`, { headers })
+      expect(signedOut.ok(), await signedOut.text()).toBe(true)
+      const promoted = await request.post(`${appBase}/api/test/set-role`, {
+        data: { login: email, role: OPERATOR },
+      })
+      expect(promoted.ok(), await promoted.text()).toBe(true)
+
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await signIn(page, email, password)
+      await page.goto("/notes")
+      await expect(page.locator("[data-e2e=rail-shell-column]")).toBeVisible()
+      for (const target of TOUR_TARGETS) await expect(page.locator(target)).toHaveCount(1)
+      await expectSharedFrame(page)
+
+      const ops = await admin.newPage()
+      await ops.setViewportSize({ width: 1440, height: 900 })
+      await ops.goto(`${adminBase}/sign-in`)
+      await ops.locator("[data-e2e=auth-form-login]").fill(email)
+      await ops.locator("[data-e2e=auth-form-password]").fill(password)
+      await ops.locator("[data-e2e=auth-form-submit]").click()
+      await expect(ops.locator("[data-e2e=admin-dashboard-title]")).toBeVisible()
+      await expect(ops).toHaveTitle("Dashboard · Admin · Seed")
+      await expectSharedFrame(ops)
+    } finally {
+      await admin.close()
+      await cleanup(request, email)
+    }
+  })
+})
