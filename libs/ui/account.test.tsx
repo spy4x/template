@@ -484,7 +484,7 @@ describe("AppFrame", () => {
     expect(theme.chosen).toEqual(["dark"])
   })
 
-  it("shows the current group as a 40 px tile with its initial, named for a screen reader and with its role in the tooltip", async () => {
+  it("shows the current group as a 40 px tile with its initial, named for a screen reader, with its role in the rail's own tooltip and the rail's focus ring", async () => {
     await mount(
       <AppFrame
         user={ada}
