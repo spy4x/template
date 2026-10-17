@@ -572,6 +572,11 @@ git push origin v1.2.3
 The pipeline refuses a tag whose commit is not on `main`. Setup and the steps:
 [docs/woodpecker-ci-setup.md](docs/woodpecker-ci-setup.md#releases).
 
+**Release images are public.** A new Docker Hub repository is public unless the account says
+otherwise, and the API image holds the whole source tree, not only the build output. A private
+product makes its repositories private on Docker Hub (`-base`, `-api`, `-spa` and `-mpa`), or sets
+the account's default visibility to private, before its first release tag.
+
 ## Built by
 
 I'm [Anton Shubin](https://antonshubin.com), a senior full-stack engineer and tech lead. This
