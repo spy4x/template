@@ -156,7 +156,7 @@ describe("InvitationNewView", () => {
   })
 
   it("shows a refusal for the creator's unverified address above the buttons, not at the invitee's address", () => {
-    const message = "Verify your e-mail address on the E-mail page before you invite anyone"
+    const message = "Verify your e-mail address on the E-mail page before you invite anyone."
     invitationsStore.createError.value = { message, code: "ADDRESS_NOT_PROVEN", plan: null }
 
     const html = renderInvite(GroupRole.OWNER)
