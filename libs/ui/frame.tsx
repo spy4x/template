@@ -1,10 +1,12 @@
-import type { ComponentChildren, JSX } from "preact"
+import type { ComponentChildren, JSX, RefObject } from "preact"
+import { useRef } from "preact/hooks"
 import { canViewActivity } from "@domain/groups"
 import {
   IconAlertTriangle,
   IconBell,
   IconClock,
   IconDocumentText,
+  IconSearch,
   IconTag,
   IconUsers,
 } from "@spy4x/preact-icons"
@@ -34,6 +36,7 @@ import {
   ScreenForm,
   TAG_PATHS,
 } from "./progressive.tsx"
+import type { SearchPlace } from "./search-palette.tsx"
 
 /**
  * The daily destinations, in the order the sidebar and the phone tab bar show them. Four at most, so
@@ -283,17 +286,73 @@ function AccountEntry(
 }
 
 /**
+ * The search trigger in the column: a field under the group switcher in the sidebar, an icon with
+ * "Search" as its tooltip in the rail.
+ */
+function SearchEntry(
+  { search, place }: {
+    search: (place: SearchPlace) => ComponentChildren
+    place: "sidebar" | "rail"
+  },
+): JSX.Element {
+  // Inset like the navigation's entries below it, so their edges line up.
+  if (place === "sidebar") return <div class="px-1">{search("sidebar")}</div>
+  return (
+    <Tooltip
+      label="Search"
+      content="Search"
+      placement="right"
+      focusable={false}
+      class="flex w-full justify-center px-1"
+      // Hidden while the palette is open, as a menu's tooltip is while its menu is open.
+      contentClass="group-has-[dialog[open]]:invisible!"
+    >
+      {search("rail")}
+    </Tooltip>
+  )
+}
+
+/**
+ * "Search" in the phone's Account sheet. A phone has no column, and a signed-in page starts with
+ * its own header, so the sheet holds the search as it holds the rest. Choosing it closes the sheet,
+ * which returns focus to "Account", then opens the palette of the `"sheet"` place, whose own trigger
+ * is hidden; closing the palette returns focus to "Account" again.
+ */
+function SearchSheetEntry(
+  { palette }: { palette: RefObject<HTMLDivElement> },
+): JSX.Element {
+  const openPalette = () => palette.current?.querySelector<HTMLButtonElement>("button")?.click()
+  return (
+    <button
+      type="button"
+      class={SLOT_ROW}
+      data-e2e={placeHook("shell-search", "overlay")}
+      onClick={(event) => {
+        const sheet = event.currentTarget.closest("dialog")
+        if (!sheet?.open) return openPalette()
+        // After the sheet's own close handler, which focuses "Account".
+        sheet.addEventListener("close", openPalette, { once: true })
+        sheet.close()
+      }}
+    >
+      <IconSearch class="size-6 shrink-0" aria-hidden="true" />
+      <span class="min-w-0 flex-1 truncate text-left">Search</span>
+    </button>
+  )
+}
+
+/**
  * The signed-in frame, mobile first, with no header: everything around the page lives in
  * `RailShell`'s column, a labelled sidebar from `lg`, a 72 px icon rail from `md`, and a bottom tab
  * bar below that.
  *
- * - The top of the column is the group switcher.
+ * - The top of the column is the group switcher, then the search trigger (`search`).
  * - The middle is the destinations ({@link navItems}).
  * - The bottom is the connection while it is not live, Notifications with its unread count, and the
  *   account menu (Profile, Theme, Sign out).
  *
  * On a phone the tab bar's last slot is "Account": the avatar with the unread count, opening a sheet
- * with the groups, Notifications and the account menu. The skip link jumps past the column into
+ * with the groups, Search, Notifications and the account menu. The skip link jumps past the column into
  * `<main>`.
  *
  * The connection has one live region, outside the column so it exists once; its text is always
@@ -318,6 +377,7 @@ export function AppFrame(
     groupPicker,
     banner,
     unreadCount,
+    search,
     wide = false,
     children,
   }: {
@@ -332,6 +392,11 @@ export function AppFrame(
     banner?: ComponentChildren
     /** How many notifications are unread. Left out, the sidebar has no Notifications entry. */
     unreadCount?: number
+    /**
+     * The search trigger for one place, such as `SearchPalette` with that `place`. Left out, the
+     * frame has no search.
+     */
+    search?: (place: SearchPlace) => ComponentChildren
     /** Gives the page the wider column (64 rem), for a data table that needs it. */
     wide?: boolean
     children: ComponentChildren
@@ -339,13 +404,20 @@ export function AppFrame(
 ): JSX.Element {
   const selected = groupPicker?.groups.find((group) => group.id === groupPicker.selectedId)
   const activityGroupId = selected && canViewActivity(selected.role) ? selected.id : null
-  const top = groupPicker &&
+  const top = (groupPicker || search) &&
     ((place: RailShellSidebarPlace) =>
       place === "overlay"
-        ? <GroupSheet {...groupPicker} navigate={navigate} />
-        : <GroupPicker {...groupPicker} navigate={navigate} place={place} />)
+        ? groupPicker && <GroupSheet {...groupPicker} navigate={navigate} />
+        : (
+          <div class="flex flex-col gap-2">
+            {groupPicker && <GroupPicker {...groupPicker} navigate={navigate} place={place} />}
+            {search && <SearchEntry search={search} place={place} />}
+          </div>
+        ))
+  const sheetPalette = useRef<HTMLDivElement>(null)
   const bottom = (place: RailShellSidebarPlace) => (
     <div class="flex flex-col gap-1">
+      {search && place === "overlay" && <SearchSheetEntry palette={sheetPalette} />}
       {connection && connectionIsNews(connection) && (
         <ConnectionChip status={connection} place={place} />
       )}
@@ -384,6 +456,7 @@ export function AppFrame(
           {banner}
           {children}
         </Page>
+        {search && <div ref={sheetPalette} data-e2e="shell-search-sheet">{search("sheet")}</div>}
       </RailShell>
     </>
   )

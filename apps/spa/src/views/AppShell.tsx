@@ -1,12 +1,17 @@
 import type { ComponentChildren } from "preact"
 import { useLocation, useSearch } from "wouter-preact"
-import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
+import { canMutateNotes } from "@domain/groups"
+import { GROUP_PATHS, NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
 import { AppFrame, type ConnectionStatus, PublicFrame as PublicFrameScreen } from "@ui/frame.tsx"
 import { EmailBanner } from "@ui/email-screen.tsx"
+import { type SearchChoice, SearchPalette } from "@ui/search-palette.tsx"
+import { callQuery, canCall, currentLayer } from "../modules.ts"
 import { emailStore } from "../state/email.ts"
 import { signOut } from "../state/auth.ts"
 import { groupsStore } from "../state/groups.ts"
+import { notesStore } from "../state/notes.ts"
 import { notificationsStore } from "../state/notifications.ts"
+import { createNoteSearch } from "../state/search.ts"
 import { selectionStore } from "../state/selection.ts"
 import { themeStore } from "../state/theme.ts"
 import type { SessionUser } from "../state/session.ts"
@@ -28,6 +33,20 @@ function useSignOut(): () => void {
 }
 
 /**
+ * The palette's notes: the server's search, or this device's copy when the server cannot be
+ * reached, over the groups the person belongs to now.
+ */
+const searchNotes = createNoteSearch({
+  canCall,
+  // One try: when the server cannot be reached the device answers at once, without retries.
+  server: (q, signal) => callQuery("note.search", { q }, { attempts: 1, signal }),
+  groupIds: () => groupsStore.groups.value.map((group) => group.id),
+  selectedGroupId: () => selectionStore.groupId.value,
+  loadedNotes: (groupId) => notesStore.groupId.value === groupId ? notesStore.notes.value : null,
+  deviceNotes: async (groupId) => await currentLayer()?.cache.readNotes(groupId) ?? [],
+})
+
+/**
  * Wires the signed-in `AppFrame` to this app's router, stores and `signOut`: the groups and the
  * selected one for the switcher and the Activity entry, the name and address for the account menu.
  */
@@ -40,8 +59,31 @@ export function AppShell(
 ) {
   const [location, navigate] = useLocation()
   const onSignOut = useSignOut()
+  const groups = groupsStore.groups.value
+  const current = groups.find((group) => group.id === selectionStore.groupId.value)
+  const open = async (choice: SearchChoice) => {
+    if (choice.kind === "page") return navigate(choice.href)
+    if (choice.kind === "group") return navigate(GROUP_PATHS.settings(choice.groupId))
+    // Straight to the note: never the editor's "Note in another group" page in between.
+    if (choice.groupId !== selectionStore.groupId.value) {
+      await selectionStore.select(choice.groupId)
+    }
+    navigate(NOTE_PATHS.note(choice.noteId))
+  }
   return (
     <AppFrame
+      search={(place) => (
+        <SearchPalette
+          place={place}
+          searchNotes={searchNotes}
+          groups={groups}
+          currentGroup={current
+            ? { id: current.id, name: current.name, canWrite: canMutateNotes(current.role) }
+            : null}
+          online={wsStatus === "open"}
+          onSelect={(choice) => void open(choice)}
+        />
+      )}
       groupPicker={{
         groups: groupsStore.groups.value,
         selectedId: selectionStore.groupId.value,
