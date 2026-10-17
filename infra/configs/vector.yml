@@ -93,5 +93,5 @@ sinks:
     address: 0.0.0.0:9598
     # Keep a counter that no request has moved for a day, so a quiet API does not lose its series.
     # The backup's gauge, set once a day, may still drop out between two runs or at a restart:
-    # BackupMissing reads its newest value over 30 days, so a gap does not matter.
+    # BackupMissing reads its newest value over 14 days, so a gap does not matter.
     flush_period_secs: 86400

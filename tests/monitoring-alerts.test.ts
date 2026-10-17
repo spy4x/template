@@ -125,5 +125,20 @@ Deno.test("Vector turns the backup's own last line into the gauge BackupMissing 
   })
   const rules = parse(await Deno.readTextFile(new URL("alerts.yml", CONFIGS))) as AlertRules
   const rule = rules.groups.flatMap((group) => group.rules).find((r) => r.alert === `BackupMissing`)
-  expect(rule?.expr).toContain(`max_over_time(${metric.name}[30d])`)
+  expect(rule?.expr).toContain(`max_over_time(${metric.name}[14d])`)
+})
+
+Deno.test("BackupMissing looks back no further than the bundled VictoriaMetrics keeps data", async () => {
+  // A longer window would promise an alert that the store has already dropped the data for.
+  const compose = parse(
+    await Deno.readTextFile(new URL("../compose/compose.shared.yml", CONFIGS)),
+  ) as { services: { victoriametrics: { command: string[] } } }
+  const retention = compose.services.victoriametrics.command
+    .map((flag) => flag.match(/^-retentionPeriod=(\d+)d$/)?.[1])
+    .find(Boolean)
+  const rules = parse(await Deno.readTextFile(new URL("alerts.yml", CONFIGS))) as AlertRules
+  const rule = rules.groups.flatMap((group) => group.rules).find((r) => r.alert === `BackupMissing`)
+  const window = rule?.expr.match(/backup_last_success_timestamp_seconds\[(\d+)d\]/)?.[1]
+  if (!retention || !window) throw new Error(`the retention or the rule's window was not found`)
+  expect(Number(window)).toBeLessThanOrEqual(Number(retention))
 })

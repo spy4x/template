@@ -18,7 +18,9 @@ tests:
         exp_alerts: []
 
   # The last run completes at hour 0; the series stops a day later, as when Vector drops a gauge
-  # nothing set for a day. Quiet before two days, firing after.
+  # nothing set for a day. Quiet before two days, firing after, still firing at 12.5 days, and
+  # resolved once the last sample is older than the rule's 14-day window (the retention of the
+  # bundled VictoriaMetrics, which drops it anyway).
   - interval: 1h
     input_series:
       - series: 'backup_last_success_timestamp_seconds{project="seed"}'
@@ -38,6 +40,20 @@ tests:
             exp_annotations:
               summary: 'seed: no backup has completed for 2d 1h 0m 0s'
               description: 'Read the backup log (deno task compose logs backup) and docs/backups.md, "When the backup is unhealthy".'
+      - eval_time: 300h
+        groupname: backup
+        alertname: BackupMissing
+        exp_alerts:
+          - exp_labels:
+              project: seed
+              severity: critical
+            exp_annotations:
+              summary: 'seed: no backup has completed for 12d 12h 0m 0s'
+              description: 'Read the backup log (deno task compose logs backup) and docs/backups.md, "When the backup is unhealthy".'
+      - eval_time: 360h
+        groupname: backup
+        alertname: BackupMissing
+        exp_alerts: []
 
   # A project without the backup profile: no backup line, no series, no alert.
   - interval: 1h

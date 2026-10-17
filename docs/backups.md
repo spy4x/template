@@ -36,8 +36,10 @@ backup. The env file is not in the backup: keep your own copy of it.
 
 `docker ps` shows the container as unhealthy when the last complete backup is more than two days
 old, and the `BackupMissing` alert ([stack.md](stack.md#alerts)) sends the same news to ntfy. A
-project that never switched the profile on gets no such alert; one that switches it off gets it for
-30 days.
+project that never switched the profile on gets no such alert. The alert resolves by itself 14 days
+after the last complete backup, because the bundled VictoriaMetrics keeps 14 days of data and the
+last backup's time is then gone from it. A "resolved" with no new `Backup done.` line in
+`deno task compose logs backup` means the backup is still broken.
 
 ## When the backup is unhealthy
 
@@ -106,7 +108,9 @@ restore is done:
 2. Restore the database with the steps above, choosing the last snapshot from before the old server
    failed.
 3. Before step 4 of those steps, put the old web push keys back in place of the new ones, so the
-   push subscriptions people already gave keep working (`<project>` is `PROJECT` in the env file):
+   push subscriptions people already gave keep working (`<project>` is `PROJECT` in the env file).
+   The commands assume the server's SSH user is uid 1000, the user the `backup` and `api`
+   containers run as:
 
    ```sh
    mkdir -m 700 restored-keys
