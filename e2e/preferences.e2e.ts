@@ -1,6 +1,6 @@
 import type { APIRequestContext, BrowserContext, Page } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
-import { signIn } from "./fixtures/app.ts"
+import { openProfile, signIn } from "./fixtures/app.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
 import { signUpWithCode } from "./fixtures/sign-up.ts"
 
@@ -22,11 +22,10 @@ async function cleanup(request: APIRequestContext, email: string) {
 }
 
 /** Signs the person in on a device of its own and opens the profile page. */
-async function openProfile(device: BrowserContext, email: string): Promise<Page> {
+async function openOnDevice(device: BrowserContext, email: string): Promise<Page> {
   const page = await device.newPage()
   await signIn(page, email, password)
-  await page.getByRole("navigation", { name: "Main navigation" })
-    .getByRole("link", { name: "Profile" }).click()
+  await openProfile(page)
   await expect(page.locator("[data-e2e=preferences]")).toBeVisible()
   return page
 }
@@ -47,8 +46,8 @@ test.describe("preferences across devices", () => {
 
       laptop = await browser.newContext({ timezoneId: "Europe/Berlin", locale: "en-GB" })
       phone = await browser.newContext({ timezoneId: "Asia/Tokyo", locale: "en-GB" })
-      const onLaptop = await openProfile(laptop, email)
-      const onPhone = await openProfile(phone, email)
+      const onLaptop = await openOnDevice(laptop, email)
+      const onPhone = await openOnDevice(phone, email)
       await expect(onPhone.locator("[data-e2e=preferences-time-zone]")).toContainText(
         "Automatic: same as this device — Tokyo, Asia",
       )
