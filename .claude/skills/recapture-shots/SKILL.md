@@ -60,8 +60,8 @@ BASE_URL=http://app.localhost systemd-run --user --scope --quiet -p TasksMax=400
 
 It signs the demo user `alex.rivera@example.com` up with the code the worker mails, which it
 reads from the API's development route `/api/test/last-mail`; that route exists only with
-`ENV=dev`. It deletes the demo user through `/api/test/cleanup-user` before it starts and again at
-the end, so any development database works, also one where an earlier run left the user.
+`ENV=dev`. It deletes the demo user through `/api/test/cleanup-user` before it starts, so any
+development database works, also one where an earlier run left the user.
 
 ## 4. Look, then ship
 

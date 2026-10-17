@@ -2,14 +2,12 @@
  * Records the README screenshots, the sign-up GIF and the GitHub social preview image from a
  * running app, with neutral demo data.
  *
- * Needs the app reachable as one origin (API under /api, SPA everywhere else), with `ENV=dev` in
- * `infra/envs/.env`: only then does the API mount its development routes under `/api/test`, the
- * same ones the e2e specs use. The GIF signs the demo user up the way a person does since #142,
- * with an address on example.com and the code the worker mails, which the script reads from
- * `POST /api/test/last-mail`; the stills then sign that user in. The script deletes the demo user
- * through `POST /api/test/cleanup-user` before it starts and again at the end, so it runs on any
- * development database, as often as needed. `deno task dev` behind `deno task proxy:start`
- * serves the app at http://app.localhost. Also needs `ffmpeg` on the PATH for the GIF.
+ * Needs the app reachable as one origin (API under /api, SPA everywhere else) on a throw-away
+ * database in development mode: the run first deletes the demo user through the development route
+ * `/api/test/cleanup-user`; the GIF signs that user up, reading the mailed code
+ * from the development route `/api/test/last-mail`, and the stills sign that user in.
+ * `deno task dev` behind `deno task proxy:start` serves it at http://app.localhost. Also needs
+ * `ffmpeg` on the PATH for the GIF.
  *
  * ```sh
  * BASE_URL=http://app.localhost deno run -A docs/screenshots/record.ts
@@ -26,64 +24,12 @@ const VIEWPORT = { width: 1280, height: 800 }
 const THEMES = ["light", "dark"] as const
 type Theme = typeof THEMES[number]
 
-/** Neutral demo data: no real person, product or price; the address is on a reserved domain. */
+/** Neutral demo data: no real person, product or price. */
 const DEMO = {
   email: "alex.rivera@example.com",
   password: "Demo-passw0rd!",
   firstName: "Alex",
   lastName: "Rivera",
-}
-
-/** The subject of the mail that carries the code to confirm an address. */
-const CODE_SUBJECT = "Your code to confirm your e-mail address"
-
-interface Mail {
-  subject: string
-  text: string
-}
-
-/** Posts `{ login }` or `{ email }` to a development route; throws when the API lacks them. */
-async function devRoute(path: string, body: Record<string, string>): Promise<Response> {
-  const response = await fetch(new URL(`/api/test/${path}`, BASE_URL), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  })
-  if (response.status === 403 || (response.status === 404 && path !== "last-mail")) {
-    await response.body?.cancel()
-    throw new Error(`${BASE_URL} has no development routes: run the API with ENV=dev`)
-  }
-  return response
-}
-
-/** Deletes the demo user and forgets its code mails this hour; succeeds when there is none. */
-async function cleanupDemoUser(): Promise<void> {
-  const response = await devRoute("cleanup-user", { login: DEMO.email })
-  if (!response.ok) throw new Error(`cleanup-user answered ${response.status}`)
-  await response.body?.cancel()
-}
-
-/** The newest mail the dev worker sent to `email`, or `null`. */
-async function lastMail(email: string): Promise<Mail | null> {
-  const response = await devRoute("last-mail", { email })
-  if (!response.ok) {
-    await response.body?.cancel()
-    return null
-  }
-  return await response.json() as Mail
-}
-
-/** Waits up to 20 seconds for a code mail to `email` newer than `before`, and answers its code. */
-async function nextCode(email: string, before: Mail | null): Promise<string> {
-  const deadline = Date.now() + 20_000
-  while (Date.now() < deadline) {
-    const mail = await lastMail(email)
-    if (mail && mail.subject === CODE_SUBJECT && mail.text !== before?.text) {
-      return mail.text.split("\n\n")[1].trim()
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error(`the worker mailed no sign-up code to ${email} within 20 seconds`)
 }
 
 /** The frame's backdrop behind each still, per theme. */
@@ -103,15 +49,23 @@ function newContext(browser: Browser, theme: Theme, scale: number): Promise<Brow
   })
 }
 
-/** Waits for the SPA's first load, which is slow while the dev server bundles dependencies. */
+/**
+ * Deletes the demo user a previous run left, through the development route, and waits for the
+ * first load of both signed-out pages, which is slow while the dev server bundles dependencies.
+ */
 async function warmUp(browser: Browser): Promise<void> {
   const context = await newContext(browser, "light", 1)
   try {
     const page = await context.newPage()
-    await page.goto("/sign-in")
-    await page.getByRole("heading", { level: 1, name: "Welcome back" }).waitFor({
-      timeout: 120_000,
+    const cleanup = await page.request.post("/api/test/cleanup-user", {
+      data: { login: DEMO.email },
     })
+    if (!cleanup.ok()) throw new Error(`cleanup-user answered ${cleanup.status()}`)
+    const pages = [["/sign-in", "Welcome back"], ["/sign-up", "Create your account"]]
+    for (const [path, name] of pages) {
+      await page.goto(path)
+      await page.getByRole("heading", { level: 1, name }).waitFor({ timeout: 120_000 })
+    }
   } finally {
     await context.close()
   }
@@ -130,12 +84,11 @@ async function captureStills(browser: Browser, theme: Theme): Promise<Record<str
     await page.locator("[data-e2e=auth-form-password]").fill(DEMO.password)
     await page.locator("[data-e2e=auth-form-submit]").click()
     await page.waitForURL(`${BASE_URL}/`)
-    await page.locator("[data-e2e=shell-ws-status]", { hasText: "Online" }).waitFor({
-      state: "attached",
-    })
     await page.locator("[data-e2e=profile-name]", {
       hasText: `${DEMO.firstName} ${DEMO.lastName}`,
     }).waitFor()
+    // The sidebar names the group once the groups have loaded.
+    await page.getByRole("button", { name: /^Group: / }).waitFor()
     await page.waitForTimeout(800)
     const profile = await page.screenshot()
     return { "sign-in": signIn, profile }
@@ -191,8 +144,25 @@ async function socialPreview(browser: Browser, profile: Uint8Array): Promise<Uin
   }
 }
 
+/** The text of the newest mail the dev worker sent to `email`, from the development route. */
+async function lastMailText(page: Page, email: string): Promise<string | null> {
+  const response = await page.request.post("/api/test/last-mail", { data: { email } })
+  return response.ok() ? (await response.json() as { text: string }).text : null
+}
+
+/** Waits for a mail to `email` other than `before` and answers the code in it. */
+async function nextCode(page: Page, email: string, before: string | null): Promise<string> {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const text = await lastMailText(page, email)
+    if (text && text !== before) return text.split("\n\n")[1].trim()
+    await page.waitForTimeout(500)
+  }
+  throw new Error(`no sign-up code reached ${email} within 20 seconds`)
+}
+
 /**
- * Records sign-up with the mailed code, then naming the profile, the way a person does it, with a drawn pointer.
+ * Records sign-up with an address, a password and the mailed code, then naming the profile, the
+ * way a person does it, with a drawn pointer.
  * The GIF is recorded in the light theme; the stills cover both.
  * Returns the WebM path and how many seconds of blank start to trim.
  */
@@ -224,22 +194,22 @@ async function recordFlow(browser: Browser, dir: string): Promise<{ video: strin
     await page.waitForTimeout(300)
     await typeLike(page, pointer, page.locator("[data-e2e=auth-form-password]"), DEMO.password, h)
     await page.waitForTimeout(500)
-    const before = await lastMail(DEMO.email)
+    const before = await lastMailText(page, DEMO.email)
     await clickLike(page, pointer, page.locator("[data-e2e=auth-form-submit]"), h)
-    const codeField = page.locator("[data-e2e=sign-up-code-input]")
-    await codeField.waitFor()
-    const code = await nextCode(DEMO.email, before)
-    await page.waitForTimeout(700)
-    await typeLike(page, pointer, codeField, code, h)
+    const codeInput = page.locator("[data-e2e=sign-up-code-input]")
+    await codeInput.waitFor()
+    const code = await nextCode(page, DEMO.email, before)
+    await page.waitForTimeout(600)
+    await typeLike(page, pointer, codeInput, code, h)
     await page.waitForTimeout(400)
     await clickLike(page, pointer, page.locator("[data-e2e=sign-up-code-submit]"), h)
     await page.waitForURL(`${BASE_URL}/`)
-    await page.locator("[data-e2e=shell-ws-status]", { hasText: "Online" }).waitFor({
-      state: "attached",
-    })
+    const edit = page.locator("[data-e2e=profile-edit]")
+    await edit.waitFor()
     await page.waitForTimeout(1000)
 
-    await clickLike(page, pointer, page.locator("[data-e2e=profile-edit]"), h)
+    await clickLike(page, pointer, edit, h)
+    await page.locator("[data-e2e=profile-first-name]").waitFor()
     await page.waitForTimeout(400)
     await typeLike(page, pointer, page.locator("[data-e2e=profile-first-name]"), DEMO.firstName, h)
     await page.waitForTimeout(300)
@@ -284,7 +254,6 @@ const browser = await chromium.launch({ executablePath: Deno.env.get("CHROME_PAT
 const videoDir = await Deno.makeTempDir()
 try {
   await warmUp(browser)
-  await cleanupDemoUser()
   const { video, trim } = await recordFlow(browser, videoDir)
   await toGif(video, trim, `${OUT_DIR}sign-up-flow.gif`)
   let darkProfile: Uint8Array | undefined
@@ -298,7 +267,6 @@ try {
   if (!darkProfile) throw new Error("no dark profile capture")
   await Deno.writeFile(`${OUT_DIR}social-preview.png`, await socialPreview(browser, darkProfile))
 } finally {
-  await cleanupDemoUser().catch((error) => console.error(`could not delete the demo user:`, error))
   await browser.close()
   await Deno.remove(videoDir, { recursive: true })
 }

@@ -12,7 +12,7 @@ web app, a worker and Postgres. Work in progress.**
 gh repo create my-product --template spy4x/template --private --clone
 ```
 
-<img src="docs/screenshots/sign-up-flow.gif" alt="A new user signs up with the address alex.rivera@example.com and a password, types the code mailed to confirm the address, and lands on the profile page with a Get started checklist; they open Edit name, type the first name Alex and the last name Rivera, and save; a green toast confirms the profile was updated." width="800">
+<img src="docs/screenshots/sign-up-flow.gif" alt="A new user signs up with an e-mail address and a password, types the code the app mailed to that address, lands on the profile page with a Get started checklist, opens Edit name, types the first name Alex and the last name Rivera, and saves; a green toast confirms the profile was updated." width="800">
 
 [Architecture](docs/architecture.md) · [ADR 001](docs/decisions/001-deno-platform-template.md) ·
 [ADR 002](docs/decisions/002-realtime-transport-and-sync.md) ·
@@ -100,12 +100,12 @@ it cannot create the user, it says so and exits with 1.
 
 ## What a fresh project looks like
 
-| Light                                                                                                                                                                                                                                                                 | Dark                                                                                                                                                                                                                                                                |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <img src="docs/screenshots/sign-in-light.png" alt="The sign-in page in the light theme: the Seed logo above a card titled Welcome back with e-mail-or-username and password fields, a Sign in button, a forgot-password link and a link to create an account.">       | <img src="docs/screenshots/sign-in-dark.png" alt="The sign-in page in the dark theme: the Seed logo above a card titled Welcome back with e-mail-or-username and password fields, a Sign in button, a forgot-password link and a link to create an account.">       |
-| <img src="docs/screenshots/profile-light.png" alt="The profile page in the light theme for the demo user Alex Rivera: the side navigation, a Get started checklist with one of five steps done and a Write a note button, and the Account section showing the name."> | <img src="docs/screenshots/profile-dark.png" alt="The profile page in the dark theme for the demo user Alex Rivera: the side navigation, a Get started checklist with one of five steps done and a Write a note button, and the Account section showing the name."> |
+| Light                                                                                                                                                                                                                                                                                                   | Dark                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="docs/screenshots/sign-in-light.png" alt="The sign-in page in the light theme: a card titled Welcome back with an e-mail or username field, a password field, a Sign in button, a link for a forgotten password and a link to create an account.">                                             | <img src="docs/screenshots/sign-in-dark.png" alt="The sign-in page in the dark theme: a card titled Welcome back with an e-mail or username field, a password field, a Sign in button, a link for a forgotten password and a link to create an account.">                                             |
+| <img src="docs/screenshots/profile-light.png" alt="The profile page in the light theme for the demo user Alex Rivera: the sidebar with the Personal group, Notes, Tags, Activity and Groups, a Get started checklist with the e-mail address already verified, and the Account section with the name."> | <img src="docs/screenshots/profile-dark.png" alt="The profile page in the dark theme for the demo user Alex Rivera: the sidebar with the Personal group, Notes, Tags, Activity and Groups, a Get started checklist with the e-mail address already verified, and the Account section with the name."> |
 
-The screenshots and the GIF use a development database and a made-up user on example.com;
+The screenshots and the GIF use a throw-away database and a made-up user;
 [`docs/screenshots/record.ts`](docs/screenshots/record.ts) records them again from a running app.
 
 <details>
@@ -258,7 +258,13 @@ name another): `SSH_TO_SERVER`, `PATH_ON_SERVER` and, when Deno is not on the se
 `DENO_ON_SERVER`. `infra/envs/.env.example` lists them with every other name. The copy replaces
 every server file that differs from your checkout, one edited on the server or newer there too, and
 deletes the ones your checkout no longer has; env files and the web push keys are never touched. So
-deploying an older commit is a full rollback of the code. It does not roll back the database.
+deploying an older commit is a full rollback of the code. It does not roll back the database or
+Valkey: before rolling back, read traps 10 and 11 in [docs/handoff.md](docs/handoff.md).
+
+The deploy stops when your working tree has uncommitted changes, untracked files included, and
+lists them: the copy sends files as they are on disk, so the server would run code that matches no
+commit. Commit or stash them first, or run `deno task deploy --allow-dirty [env file]` to send
+them anyway.
 
 **A server that ran Postgres 16 moves its data once.** The Compose file runs Postgres 18, which
 keeps its data in a directory of its own, so the first deploy of this version stops at "Starting
@@ -566,6 +572,11 @@ git push origin v1.2.3
 
 The pipeline refuses a tag whose commit is not on `main`. Setup and the steps:
 [docs/woodpecker-ci-setup.md](docs/woodpecker-ci-setup.md#releases).
+
+**Release images are public.** A new Docker Hub repository is public unless the account says
+otherwise, and the API image holds the whole source tree, not only the build output. A private
+product makes its repositories private on Docker Hub (`-base`, `-api`, `-spa` and `-mpa`), or sets
+the account's default visibility to private, before its first release tag.
 
 ## Built by
 
