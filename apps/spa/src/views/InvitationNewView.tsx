@@ -53,7 +53,7 @@ export function InvitationNewView({ groupId }: { groupId: string }) {
   const seatRefused = !!billing?.seatPrice &&
     createFailure?.code === ("SEAT_PRICE_NOT_ACCEPTED" satisfies InvitationErrorCode)
   // The creator's own address is not verified: no field of the form can fix that, so the message
-  // stands above the buttons rather than at the invitee's address.
+  // stands above the buttons, with the way to the E-mail page, rather than at the invitee's address.
   const unproven = createFailure?.code === ("ADDRESS_NOT_PROVEN" satisfies InvitationErrorCode)
   const created = invites.created.value
   const draft = invites.draft.value
@@ -80,7 +80,7 @@ export function InvitationNewView({ groupId }: { groupId: string }) {
         onDraftChange={(next) => (invites.draft.value = next)}
         creating={invites.creating.value}
         createError={createFailure?.plan || seatRefused || unproven ? null : createFailure?.message}
-        formError={unproven ? createFailure.message : null}
+        addressRefusal={unproven ? createFailure.message : null}
         createRefusal={createFailure?.plan ?? null}
         onCreate={() => {
           setRefusedOffline(offline)

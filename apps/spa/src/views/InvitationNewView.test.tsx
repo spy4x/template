@@ -155,15 +155,17 @@ describe("InvitationNewView", () => {
     expect(other).not.toContain(`id="invitation-seat-price-error"`)
   })
 
-  it("shows a refusal for the creator's unverified address above the buttons, not at the invitee's address", () => {
+  it("shows a refusal for the creator's unverified address above the buttons with a way to the E-mail page, not at the invitee's address", () => {
     const message = "Verify your e-mail address on the E-mail page before you invite anyone."
     invitationsStore.createError.value = { message, code: "ADDRESS_NOT_PROVEN", plan: null }
 
     const html = renderInvite(GroupRole.OWNER)
     const email = html.match(/<input[^>]*name="email"[^>]*>/)?.[0] ?? ""
-    const alert = html.match(/<div[^>]*data-e2e="invitation-error"[^>]*>.*?<\/div>/)?.[0] ?? ""
+    const start = html.indexOf(`data-e2e="invitation-error"`)
+    const notice = start < 0 ? "" : html.slice(start, html.indexOf(`data-e2e="invitation-create"`))
 
-    expect(alert).toContain(message)
+    expect(notice).toContain(message)
+    expect(notice).toContain(`href="/email"`)
     expect(html.match(new RegExp(message, "g"))).toHaveLength(1)
     expect(email).not.toBe("")
     expect(email).not.toContain("aria-invalid")

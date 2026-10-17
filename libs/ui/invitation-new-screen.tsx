@@ -16,7 +16,8 @@ import { FORM_WIDTH, useWaited } from "./tag-editor-screen.tsx"
 export const INVITATION_OFFLINE =
   "Creating an invitation needs a connection. Try again when you are back online."
 
-export interface InvitationNewScreenProps extends Omit<InviteFormProps, "groupId" | "actorRole"> {
+export interface InvitationNewScreenProps
+  extends Omit<InviteFormProps, "groupId" | "actorRole" | "formError"> {
   /** The group's id, from the address. */
   groupId: string
   /** The group and the person's role in it, once known; `null` while read or when not found. */
@@ -78,9 +79,7 @@ export function InvitationNewScreen(props: InvitationNewScreenProps): JSX.Elemen
                   {...props}
                   groupId={groupId}
                   actorRole={group.role}
-                  formError={props.refusedOffline && offline
-                    ? INVITATION_OFFLINE
-                    : props.formError ?? null}
+                  formError={props.refusedOffline && offline ? INVITATION_OFFLINE : null}
                 />
               </div>
             </>
