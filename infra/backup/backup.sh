@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Backs the database up into a restic repository, and restores it from there. README, "Backups".
+# Backs the database up into a restic repository, and restores it from there. docs/backups.md.
 #
 #   backup             a backup now, then one every 24 hours (what the `backup` service runs)
 #   backup once        one backup, then old snapshots are thinned out
@@ -43,7 +43,7 @@ require_env() {
   done
   if [ "${#missing[@]}" -gt 0 ]; then
     log "Not set: ${missing[*]}. RESTIC_REPOSITORY and RESTIC_PASSWORD come from" \
-      "BACKUP_RESTIC_REPOSITORY and BACKUP_RESTIC_PASSWORD in the env file (README, \"Backups\")."
+      "BACKUP_RESTIC_REPOSITORY and BACKUP_RESTIC_PASSWORD in the env file (docs/backups.md)."
     exit 1
   fi
 }
@@ -54,7 +54,7 @@ explain_lock() {
   if [ "$code" = "$LOCKED" ]; then
     log "The repository is locked by another restic process. restic unlock removes a lock once its" \
       "process is gone, or 30 minutes after a lock of another host was last refreshed; each run" \
-      "does that first (README, \"When the backup is unhealthy\")."
+      "does that first (docs/backups.md, \"When the backup is unhealthy\")."
   fi
   return "$code"
 }
@@ -148,7 +148,7 @@ restore() {
      where c.relkind in ('r', 'p') and n.nspname <> 'information_schema' and n.nspname !~ '^pg_'")
   if [ "$tables" != 0 ]; then
     log "Database ${PGDATABASE} holds ${tables} tables. A restore needs an empty database: nothing" \
-      "was changed (README, \"Backups\")."
+      "was changed (docs/backups.md)."
     exit 1
   fi
   # Said before anything is loaded, so the person sees which backup they are getting.

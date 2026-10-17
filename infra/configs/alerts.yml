@@ -53,4 +53,4 @@ groups:
           severity: critical
         annotations:
           summary: '{{ $labels.project }}: no backup has completed for {{ $value | humanizeDuration }}'
-          description: 'Read the backup log (deno task compose logs backup) and README, "When the backup is unhealthy".'
+          description: 'Read the backup log (deno task compose logs backup) and docs/backups.md, "When the backup is unhealthy".'

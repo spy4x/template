@@ -37,7 +37,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: 'seed: no backup has completed for 2d 1h 0m 0s'
-              description: 'Read the backup log (deno task compose logs backup) and README, "When the backup is unhealthy".'
+              description: 'Read the backup log (deno task compose logs backup) and docs/backups.md, "When the backup is unhealthy".'
 
   # A project without the backup profile: no backup line, no series, no alert.
   - interval: 1h
