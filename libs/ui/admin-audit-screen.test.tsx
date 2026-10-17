@@ -308,7 +308,30 @@ describe("audit log screen", () => {
     expect(find("[data-e2e=admin-audit-export]").getAttribute("href")).toBe(href)
   })
 
-  it("tells an empty log from a filter that matches nothing", async () => {
+  it("names the people inside the event cell for a phone, and hides their columns there", async () => {
+    await mount(<AdminAuditScreen {...props([])} />)
+    const rows = [...find("[data-e2e=admin-audit-table]").querySelectorAll("tbody tr")]
+    const phone = (row: Element) =>
+      row.querySelector("td:nth-child(2) [data-e2e=admin-audit-people-phone]")
+
+    expect(phone(rows[1])?.textContent).toBe("About Ada Lovelace · by Grace Hopper")
+    expect(phone(rows[1])?.className).toContain("sm:hidden")
+    expect(phone(rows[2])?.textContent).toBe("About Ada Lovelace")
+    const table = find("[data-e2e=admin-audit-table]").querySelector(`[class*="hidden"]`)!
+    expect(table.className).toContain("max-sm:[&_:is(th,td):nth-child(n+3)]:hidden")
+  })
+
+  it("keeps a long address on one line, with the whole address in its tooltip", async () => {
+    await mount(<AdminAuditScreen {...props([])} />)
+    const address = [...find("[data-e2e=admin-audit-table]").querySelectorAll("td span")]
+      .find((span) => span.textContent === "ada@example.com")!
+
+    expect(address.className).toContain("truncate")
+    expect(address.className).not.toContain("wrap-anywhere")
+    expect(address.getAttribute("title")).toBe("ada@example.com")
+  })
+
+  it("tells an empty log from a filter that matches nothing, without a dashed box", async () => {
     await mount(<AdminAuditScreen {...props([], { entries: [] })} />)
     expect(find("[data-e2e=admin-audit-empty]").textContent).toContain("Nothing recorded yet")
 
@@ -318,6 +341,7 @@ describe("audit log screen", () => {
       />,
     )
     expect(find("[data-e2e=admin-audit-empty]").textContent).toContain("Nothing matches")
+    expect(document.querySelector(".border-dashed")).toBeNull()
   })
 
   it("shows a loading state, then the error when the log could not be read", async () => {
