@@ -41,6 +41,14 @@ interface Layout {
   cell: { width: number; height: number }
   /** The gap between the rail and the page's column, and between the column and the window. */
   gaps: { left: number; right: number }
+  /** How far the rail starts from the window's left edge. */
+  railX: number
+}
+
+/** Where the page's column and its heading start from the top of the window. */
+interface Tops {
+  column: number
+  heading: number
 }
 
 /** The rail's width, its first navigation cell, and where the page's column sits beside it. */
@@ -64,13 +72,31 @@ async function measure(page: Page): Promise<Layout> {
       left: contentBox.x - (railBox.x + railBox.width),
       right: windowWidth - (contentBox.x + contentBox.width),
     },
+    railX: railBox.x,
   }
 }
 
-/** Checks the 1440 px frame, then the 390 px one, on the page as it is. */
-async function expectSharedFrame(page: Page): Promise<void> {
+/** The top of the page's column and of its first heading, at the current window size. */
+async function tops(page: Page): Promise<Tops> {
+  const heading = page.locator("[data-e2e=app-shell-content] h1").first()
+  await expect(heading).toBeVisible()
+  const [columnBox, headingBox] = await Promise.all([
+    page.locator("[data-e2e=app-shell-content]").boundingBox(),
+    heading.boundingBox(),
+  ])
+  if (!columnBox || !headingBox) throw new Error("The shell drew no page or no heading.")
+  return { column: columnBox.y, heading: headingBox.y }
+}
+
+/**
+ * Checks the 1440 px frame, then the 390 px one, on the page as it is, and returns where its column
+ * and heading start at each width, so the two apps can be compared.
+ */
+async function expectSharedFrame(page: Page): Promise<{ wide: Tops; narrow: Tops }> {
   await page.setViewportSize({ width: 1440, height: 900 })
   const wide = await measure(page)
+  const wideTops = await tops(page)
+  expect(wide.railX).toBe(0)
   expect(wide.rail).toBe(72)
   expect(wide.cell).toEqual({ width: 48, height: 48 })
   expect(wide.gaps.left).toBeGreaterThan(0)
@@ -85,10 +111,11 @@ async function expectSharedFrame(page: Page): Promise<void> {
       document.documentElement.scrollWidth - document.documentElement.clientWidth
     ),
   ).toBeLessThanOrEqual(0)
+  return { wide: wideTops, narrow: await tops(page) }
 }
 
 test.describe("one frame for the SPA and the admin", () => {
-  test("both draw a 72 px rail of 48 px cells beside a centred page at 1440 px, and a tab bar at 390 px", async ({ browser, page, request }) => {
+  test("both draw a 72 px rail at the window's edge, 48 px cells and a centred page at the same height at 1440 px, and a tab bar at 390 px", async ({ browser, page, request }) => {
     const email = `e2e-shell-${uuidV7().slice(-8)}@example.com`
     const admin = await browser.newContext({ baseURL: adminBase })
     try {
@@ -109,7 +136,7 @@ test.describe("one frame for the SPA and the admin", () => {
       await page.goto("/notes")
       await expect(page.locator("[data-e2e=rail-shell-column]")).toBeVisible()
       for (const target of TOUR_TARGETS) await expect(page.locator(target)).toHaveCount(1)
-      await expectSharedFrame(page)
+      const product = await expectSharedFrame(page)
 
       const ops = await admin.newPage()
       await ops.setViewportSize({ width: 1440, height: 900 })
@@ -119,7 +146,8 @@ test.describe("one frame for the SPA and the admin", () => {
       await ops.locator("[data-e2e=auth-form-submit]").click()
       await expect(ops.locator("[data-e2e=admin-dashboard-title]")).toBeVisible()
       await expect(ops).toHaveTitle("Dashboard · Admin · Seed")
-      await expectSharedFrame(ops)
+      // A verified person sees no banner, so nothing may push the product's page below the admin's.
+      expect(product).toEqual(await expectSharedFrame(ops))
     } finally {
       await admin.close()
       await cleanup(request, email)
