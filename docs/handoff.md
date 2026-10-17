@@ -314,8 +314,8 @@ to 15 (`PASSWORD_LOCK_POLICY`, `apps/api/services/password-locked.ts`). While it
 right password is answered 429 with `Retry-After` (`PasswordLockedError`). The sign-in page keeps
 its own count per name (`password_failures`), so a stranger who types the person's address there
 does not lock their signed-in steps, and a session's guesses do not lock the sign-in page. A check
-counts as wrong until it is found right, so more than five checks of one account at the same moment
-are refused: no person sends that many.
+counts as wrong until it is found right, so more than six checks of one account at the same moment
+are refused (the sixth sets the lock): no person sends that many.
 
 **A squatted address.** Anyone can still sign up first with someone else's
 address, but it stays unproven and cannot carry a second factor. A reset
