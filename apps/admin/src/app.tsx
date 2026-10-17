@@ -100,8 +100,8 @@ export function App(
       navItems={modules.map((module) => module.nav)}
       currentPath={path}
       operator={{ name: operatorName(user), email: null }}
-      onSignOut={store.signOut}
       theme={theme}
+      onSignOut={store.signOut}
       navigate={navigate}
     >
       <Switch>

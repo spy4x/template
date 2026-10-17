@@ -48,7 +48,12 @@ const EXTRA_SOURCES = {
  * them. A container build once lost libs/ui's classes and still exited 0 (libs/ui/sources.css
  * says why).
  */
-const REQUIRED_SELECTORS = [".lg\\:w-64", ".focus\\:not-sr-only", ".sm\\:pt-16", ".sm\\:w-9"]
+const REQUIRED_SELECTORS = [
+  ".lg\\:w-64",
+  ".focus\\:not-sr-only",
+  ".sm\\:justify-end",
+  ".sm\\:flex-wrap",
+]
 
 // https://vite.dev/config/
 export default defineConfig({

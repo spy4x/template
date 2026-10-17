@@ -114,3 +114,13 @@ export async function signIn(page: Page, email: string, password: string): Promi
   await page.locator("[data-e2e=auth-form-password]").fill(password)
   await submitAuthForm(page, "/", page.locator("[data-e2e=shell-ws-status]"))
 }
+
+/**
+ * Opens the profile the way a person does on a wide window: from the account menu at the bottom of
+ * the sidebar, which goes through the app's router. Waits for the page's heading.
+ */
+export async function openProfile(page: Page): Promise<void> {
+  await page.locator("[data-e2e=shell-user-menu-button]").click()
+  await page.getByRole("menuitem", { name: "Profile" }).click()
+  await page.getByRole("heading", { level: 1, name: "Profile" }).waitFor()
+}

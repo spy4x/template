@@ -224,7 +224,7 @@ describe("notifications screen", () => {
   })
 })
 
-describe("notification bell", () => {
+describe("Notifications entry", () => {
   const frame = (unreadCount?: number) =>
     renderToString(
       <AppFrame
@@ -236,26 +236,24 @@ describe("notification bell", () => {
       </AppFrame>,
     )
 
-  it("names the unread count in the link's accessible name and badges it, 44 px in the rail and the sidebar", () => {
+  it("names the unread count in the link's accessible name and badges it", () => {
     const page = frame(3)
     expect(page).toContain(`aria-label="Notifications, 3 unread"`)
     expect(page).toContain(`href="/notifications"`)
     expect(page).toContain(`data-e2e="shell-bell-count"`)
-    // The classes must sit on the bell's own link, not on a neighbour.
-    const link = (hook: string) =>
-      page.match(new RegExp(`<a\\b[^>]*data-e2e="${hook}"[^>]*>`))?.[0] ?? ""
-    expect(link("shell-bell")).toContain("min-h-11")
-    expect(link("shell-bell-rail")).toContain("size-11")
+    // 44 px tall: the class must sit on the entry's own link, not on a neighbour.
+    const link = page.match(/<a\b[^>]*data-e2e="shell-bell"[^>]*>/)?.[0] ?? ""
+    expect(link).toContain("min-h-11")
   })
 
   it("shows no badge when everything is read, and caps a long count at 99+", () => {
     expect(frame(0)).not.toContain(`data-e2e="shell-bell-count"`)
     expect(frame(0)).toContain(`aria-label="Notifications"`)
-    expect(frame(250)).toContain("99+")
+    expect(frame(250)).toMatch(/data-e2e="shell-bell-count"[^>]*>99\+</)
     expect(bellLabel(250)).toBe("Notifications, 250 unread")
   })
 
-  it("has no bell in a frame that was not given a count", () => {
+  it("has no Notifications entry in a frame that was not given a count", () => {
     expect(frame()).not.toContain(`data-e2e="shell-bell"`)
   })
 })
