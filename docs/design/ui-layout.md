@@ -66,13 +66,14 @@ screens were redesigned against these rules in October 2026.
     no app draws `RailShell` itself (`tests/ui-boundary.test.ts`). From `md` the frame is a 72 px
     rail of 48 px icon cells, each named by a tooltip on hover and focus, and the page's column is
     centred in the rest of the window. The rail's top is the group switcher: a 40 px tile with the
-    current group's mark or initial, its tooltip the group and the person's role, opening a short
-    menu of checked items (`DropdownItem checked`) ending with "All groups" and "New group". The
-    bottom zone is the connection while it is not live, "Notifications" with its unread count, and
-    the account: the avatar opening the library's `AccountMenu` (the name and address, then
-    Profile, the theme and Sign out). The skip link jumps past the rail into `<main>`. The admin's
-    rail starts with Dashboard and has no switcher; a neutral "Admin" badge under the operator's
-    avatar says where the operator is, and its tables use the wide column.
+    current group's mark or initial in a `RailCell`, with the rail's own tooltip (the group and the
+    person's role) and focus ring, opening a short menu of checked items (`DropdownItem checked`)
+    ending with "All groups" and "New group". The bottom zone is the connection while it is not
+    live, "Notifications" with its unread count, and the account: the avatar opening the library's
+    `AccountMenu` (the name and address, then Profile, the theme and Sign out). The skip link
+    jumps past the rail into `<main>`. The admin's rail starts with Dashboard and has no switcher;
+    a neutral "Admin" badge under the operator's avatar says where the operator is, and its tables
+    use the wide column.
 12. **The rail's middle holds the daily destinations,** at most four so the phone bar keeps its
     last slot: Notes, Tags, Activity, Groups. Activity is the selected group's log and is left out
     when there is no selected group or the person may not read its log. Profile lives in the

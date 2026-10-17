@@ -29,7 +29,7 @@ import {
 } from "./email-screen.tsx"
 import { createFormatters } from "@spy4x/time/format"
 import { AppFrame, PublicFrame } from "./frame.tsx"
-import { SWITCHER_TOOLTIP_CLASS } from "./group-picker.tsx"
+import { railFocusRing } from "@spy4x/preact-system/rail"
 import { ProfileScreen, type ProfileScreenProps } from "./profile-screen.tsx"
 import { GROUP_PATHS, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
 import { TwoFactorProof } from "./two-factor.ts"
@@ -502,9 +502,12 @@ describe("AppFrame", () => {
     const tile = trigger.querySelector("span[aria-hidden=true]")!
     expect(tile.classList.contains("size-10")).toBe(true)
     expect(tile.textContent).toBe("H")
-    const tip = trigger.closest("[role=group]")!.querySelector("[role=tooltip]")!
+    // The rail's own tooltip, hidden from a screen reader: the button's name already says it.
+    const tip = trigger.closest("[data-rail-cell]")!.querySelector("[data-e2e=rail-shell-tooltip]")!
     expect(tip.textContent).toBe("Home · Owner")
-    expect(tip.className).toContain(SWITCHER_TOOLTIP_CLASS)
+    expect(tip.getAttribute("aria-hidden")).toBe("true")
+    // The rail's keyboard focus ring, not the browser's.
+    for (const name of railFocusRing.split(" ")) expect(trigger.classList.contains(name)).toBe(true)
   })
 
   it("asks to choose a group while none is chosen, in words its name contains", async () => {

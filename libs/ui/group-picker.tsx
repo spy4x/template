@@ -2,7 +2,7 @@ import type { JSX } from "preact"
 import { IconCheck, IconChevronDown } from "@spy4x/preact-icons"
 import { Dropdown, DropdownItem } from "@spy4x/preact-ui/dropdown"
 import { Link } from "@spy4x/preact-ui/link"
-import { Tooltip } from "@spy4x/preact-ui/tooltip"
+import { RailCell, railFocusRing } from "@spy4x/preact-system/rail"
 import type { GroupColor, GroupRole } from "@domain/groups"
 import { GroupMark } from "./group-appearance.tsx"
 import { NEW_GROUP_PATH, ROLE_TEXT } from "./groups-screen.tsx"
@@ -26,14 +26,6 @@ export interface GroupPickerData {
   /** Called with the group the person picked. */
   onSelect: (groupId: string) => void
 }
-
-/**
- * `contentClass` for the switcher's tooltip: it starts 8 px past the rail's border, where
- * `AppShell`'s own tooltips start. The cell ends 12 px before that border, so a 12 px margin adds to
- * the tooltip's own 8 px gap, both on the spacing scale. It hides while the menu is open
- * so it does not sit beside it (the tooltip shows while focus is inside it).
- */
-export const SWITCHER_TOOLTIP_CLASS = "ml-3 group-has-[[aria-expanded=true]]:invisible!"
 
 /**
  * The group's mark in the switcher: its own colour and emoji, or its initial on a quiet tile when
@@ -67,8 +59,10 @@ export function switcherTip(selected: PickerGroup | null): string {
  * The current group in the rail's top zone: a 40 px tile with the group's mark or initial, never
  * filled with the accent, that opens a short menu of the person's groups. The current one is
  * checked (`menuitemradio`), each names the person's role there, and the menu ends with links to
- * all groups and to a new one. The tile is named `Group: Home`; its tooltip says `Home · Owner`.
- * On a phone the sheet lists the groups instead ({@link GroupSheet}).
+ * all groups and to a new one. The tile is named `Group: Home`; its tooltip, the rail's own
+ * (`RailCell`), says `Home · Owner`, and its focus ring is the rail's too. `Rail` places that
+ * tooltip, so `AppFrame` returns this cell straight from its `switcher` render prop. On a phone
+ * the sheet lists the groups instead ({@link GroupSheet}).
  */
 export function GroupPicker(
   { groups, selectedId, onSelect, navigate }: GroupPickerData & { navigate?: Navigate },
@@ -77,14 +71,7 @@ export function GroupPicker(
   const tile =
     "flex size-10 items-center justify-center rounded-[var(--radius-primary,0.5rem)] border border-subtle bg-canvas text-sm font-semibold text-muted"
   return (
-    <Tooltip
-      label={switcherLabel(selected)}
-      content={switcherTip(selected)}
-      placement="right"
-      focusable={false}
-      class="flex"
-      contentClass={SWITCHER_TOOLTIP_CLASS}
-    >
+    <RailCell tip={switcherTip(selected)}>
       <Dropdown
         trigger={
           <span class={tile} aria-hidden="true">
@@ -97,7 +84,7 @@ export function GroupPicker(
         }
         triggerLabel={switcherLabel(selected)}
         triggerDataE2E="group-picker"
-        triggerClasses="flex size-12 cursor-pointer items-center justify-center rounded-[var(--radius-primary,0.5rem)] hover:bg-canvas"
+        triggerClasses={`flex size-12 cursor-pointer items-center justify-center rounded-[var(--radius-primary,0.5rem)] hover:bg-canvas ${railFocusRing}`}
         containerClasses="relative flex text-left"
         panelClasses="z-30 w-60 max-w-[calc(100vw-5rem)] left-[calc(100%+1.25rem)] top-0 mt-0"
         horizontal="left"
@@ -126,7 +113,7 @@ export function GroupPicker(
           New group
         </DropdownItem>
       </Dropdown>
-    </Tooltip>
+    </RailCell>
   )
 }
 
