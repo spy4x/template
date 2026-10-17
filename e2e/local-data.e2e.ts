@@ -131,7 +131,7 @@ async function userIdOnDevice(page: Page): Promise<number> {
 }
 
 async function signOut(page: Page): Promise<void> {
-  await page.locator("[data-e2e=shell-user-menu-button]").click()
+  await page.locator("[data-e2e=account-menu-button]").click()
   await page.getByRole("menuitem", { name: "Sign out" }).click()
   await page.locator("[data-e2e=signin-required]").waitFor()
 }
