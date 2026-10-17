@@ -168,7 +168,7 @@ export function AdminUsersScreen(
         >
           {/* Keyed by the query, so going back in history shows the search that page had. */}
           <div key={filter.query} class="flex flex-wrap items-end gap-3" role="search">
-            <div class="min-w-0 flex-1 basis-60">
+            <div class="min-w-0 flex-1 basis-60 sm:max-w-md">
               <Field id="admin-users-q" label="Name or address">
                 <Input
                   name="q"
@@ -195,6 +195,7 @@ export function AdminUsersScreen(
             <ToggleChips
               mode="single"
               label="Status"
+              class="flex-nowrap sm:flex-wrap"
               options={STATUS_CHIPS}
               value={filter.blocked === "any" ? null : filter.blocked}
               onChange={(value) =>
@@ -205,6 +206,7 @@ export function AdminUsersScreen(
             <ToggleChips
               mode="single"
               label="Role"
+              class="flex-nowrap sm:flex-wrap"
               options={ROLE_CHIPS}
               value={filter.role === null ? null : String(filter.role)}
               onChange={(value) =>
@@ -254,6 +256,7 @@ export function AdminUsersScreen(
               rowKey={(row) => row.user.id}
               empty={
                 <EmptyState
+                  inset
                   title="Nobody matches"
                   description="Try another name or address, or clear the filters."
                 />
@@ -329,8 +332,13 @@ function FilterChips(
   { label, dataE2E, children }: { label: string; dataE2E: string; children: JSX.Element },
 ): JSX.Element {
   return (
-    <div class="flex flex-wrap items-center gap-2" data-e2e={dataE2E}>
-      <span class="text-sm text-muted" aria-hidden="true">{label}</span>
+    // One row that scrolls sideways on a phone rather than wrapping onto a second line, as the
+    // billing page's chips do; from `sm` it wraps.
+    <div
+      class="-mx-4 flex max-w-[calc(100%+2rem)] items-center gap-2 overflow-x-auto px-4 sm:mx-0 sm:max-w-full sm:flex-wrap sm:px-0"
+      data-e2e={dataE2E}
+    >
+      <span class="shrink-0 text-sm text-muted" aria-hidden="true">{label}</span>
       {children}
     </div>
   )
