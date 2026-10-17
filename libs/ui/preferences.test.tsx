@@ -186,6 +186,12 @@ describe(`PreferencesGroup`, () => {
   it(`after a refused save, saves an edit on the newer version when only the theme changed since`, async () => {
     await mount(group().node)
     await click(`[data-e2e="preferences-change-clock"]`)
+    const first = $<HTMLSelectElement>(`[data-e2e="preferences-clock-select"]`)!
+    first.value = `h12`
+    await act(() =>
+      void first.dispatchEvent(new window.Event(`change`, { bubbles: true }) as never)
+    )
+    // The edited save is refused: another device had saved a 24-hour clock.
     const won: Preferences = { ...DEFAULT_PREFERENCES, hourCycle: `h23` }
     await rerender(group({ conflict: { version: 4, value: won }, value: won, version: 4 }).node)
     const select = $<HTMLSelectElement>(`[data-e2e="preferences-clock-select"]`)!
