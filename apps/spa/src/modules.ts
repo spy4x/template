@@ -26,6 +26,11 @@ import { offlineNotes as notesOverLayer } from "./offline/notes-collection.ts"
 import { offlineTags as tagsOverLayer } from "./offline/tags-collection.ts"
 import { OfflineStatus as OfflineStatusLine } from "./offline/OfflineStatus.tsx"
 import { type QueueDatabases, refusedMessage, sendQueueOnce } from "./offline/send-once.ts"
+import {
+  type UnsentView,
+  type UnsentWait,
+  watchUnsent as watchLayerUnsent,
+} from "./offline/unsent.ts"
 import type { RuntimeConfig } from "./runtime-config.ts"
 import { canCallAs, createAppCallPort } from "./state/realtime-call.ts"
 import type { SessionState, SessionUser } from "./state/session.ts"
@@ -341,6 +346,24 @@ export function connectionDisplay(
 export function currentLayer(): OfflineLayer | null {
   return offlineLayer()
 }
+
+/**
+ * The queue watched for a sign-out, or `null` when nothing waits: no write is queued, nobody is
+ * signed in, or the module is off. The caller disposes it when the dialog closes.
+ */
+export function watchUnsentChanges(): UnsentWait | null {
+  const running = offlineLayer()
+  if (!running || !session) return null
+  if (running.entries.value.length + running.tagEntries.value.length === 0) return null
+  const { userId } = running
+  return watchLayerUnsent({
+    layer: running,
+    online: network.online,
+    canSend: () => canCallAs(userId),
+  })
+}
+
+export type { UnsentView, UnsentWait }
 
 /** Sends the queued writes. Never rejects: what could not be sent stays queued. */
 export function flushOutbox(): Promise<void> {
