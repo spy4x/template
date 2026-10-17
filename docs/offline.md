@@ -315,7 +315,7 @@ and are sent only at the next sign-in here. "Send, then sign out" (the focused p
 queue now and shows the wait in the same dialog: "Sending changes… 1 of 3 sent", "You're offline.
 We'll send your changes when you're back online, then sign you out." (the button then reads
 "Waiting…"), or "Couldn't reach the server. Trying again…" while the sync runner backs off. Once
-nothing sendable is left, the sign-out goes on by itself. A write the server refused never sends by
+the queue is empty, the sign-out goes on by itself. A write the server refused never sends by
 itself, so it is counted apart; once only such writes are left, the button becomes "Review
 changes", which closes the dialog and opens the notes page of their group, where the chooser is.
 "Sign out anyway" signs out at once and keeps the queue, as before; "Cancel", Escape and the
