@@ -321,9 +321,11 @@ function RegionDialog(
   const { value, version, device, conflict, pending, error, now, field, onClose, onSave } = props
   const open = field !== null
   const [draft, setDraft] = useState<RegionPreferences>(pick(value))
-  // The version the draft was made on. A save goes out on it, so a change another device saved
-  // after the person started editing is refused, never overwritten.
+  // The version the draft was made on, and the values it had then. A save goes out on that
+  // version, so a change another device made to these fields after the person started editing is
+  // refused, never overwritten.
   const [base, setBase] = useState(version)
+  const [made, setMade] = useState<RegionPreferences>(pick(value))
   const [touched, setTouched] = useState(false)
   const body = useRef<HTMLDivElement>(null)
   const notice = useRef<HTMLDivElement>(null)
@@ -332,15 +334,21 @@ function RegionDialog(
   useEffect(() => {
     if (!open) return
     setDraft(pick(value))
+    setMade(pick(value))
     setBase(version)
     setTouched(false)
     body.current?.querySelector<HTMLElement>(`#${FIELD_IDS[field]}`)?.focus()
   }, [open, field])
 
-  // Another device saved while the dialog is open: untouched fields follow it.
+  // Another device saved while the dialog is open. An untouched draft follows it. An edited one
+  // moves to the new version only when these three fields are as it found them (the theme
+  // changed), so only a change to what the person is editing makes the save refused.
   useEffect(() => {
-    if (!open || touched) return
-    setDraft(pick(value))
+    if (!open) return
+    const saved = pick(value)
+    if (touched && !sameRegion(saved, made)) return
+    if (!touched) setDraft(saved)
+    setMade(saved)
     setBase(version)
   }, [value.locale, value.timeZone, value.hourCycle, version])
 
@@ -348,6 +356,7 @@ function RegionDialog(
   useEffect(() => {
     if (!conflict) return
     setDraft(pick(conflict.value))
+    setMade(pick(conflict.value))
     setBase(conflict.version)
     setTouched(false)
     notice.current?.focus()
@@ -514,6 +523,11 @@ function RegionDialog(
 
 function pick(value: Preferences): RegionPreferences {
   return { locale: value.locale, timeZone: value.timeZone, hourCycle: value.hourCycle }
+}
+
+/** Whether two drafts name the same region format, zone and clock. */
+function sameRegion(a: RegionPreferences, b: RegionPreferences): boolean {
+  return a.locale === b.locale && a.timeZone === b.timeZone && a.hourCycle === b.hourCycle
 }
 
 /** Every word of the query must appear in the option's label or its search text. */

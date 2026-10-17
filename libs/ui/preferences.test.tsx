@@ -201,6 +201,23 @@ describe(`PreferencesGroup`, () => {
     expect(later.calls).toEqual([[`save`, { locale: null, timeZone: null, hourCycle: `h12` }, 0]])
   })
 
+  it(`saves an edited draft on the newer version when another device changed only the theme`, async () => {
+    await mount(group().node)
+    await click(`[data-e2e="preferences-change-clock"]`)
+    const select = $<HTMLSelectElement>(`[data-e2e="preferences-clock-select"]`)!
+    select.value = `h12`
+    await act(() =>
+      void select.dispatchEvent(new window.Event(`change`, { bubbles: true }) as never)
+    )
+
+    // Another device picked Dark: nothing this dialog edits changed, so the save is not refused.
+    const later = group({ value: { ...DEFAULT_PREFERENCES, theme: `dark` }, version: 1 })
+    await rerender(later.node)
+    await click(`[data-e2e="preferences-save"]`)
+
+    expect(later.calls).toEqual([[`save`, { locale: null, timeZone: null, hourCycle: `h12` }, 1]])
+  })
+
   it(`follows another device's save while nothing is edited, and saves on its version`, async () => {
     await mount(group().node)
     await click(`[data-e2e="preferences-change-clock"]`)
