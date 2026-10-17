@@ -80,18 +80,10 @@ steps:
 
   alert-rules:
     # The unit tests of the alert rules (infra/configs/alerts.test.yml), run by vmalert-tool of the
-    # vmalert version in infra/compose/compose.shared.yml. The image has no shell, so the tool is
-    # the entrypoint; the one command only makes this a step rather than a plugin, and nothing
-    # runs it. The entrypoint does not start in the workspace, so the path is absolute: Woodpecker
-    # pastes CI_WORKSPACE in before it reads the file.
+    # vmalert version in infra/compose/compose.shared.yml.
     image: victoriametrics/vmalert-tool:v1.146.0@sha256:4360dc66ac7e758d15a9704a3ab2348f8f3f47bbc0798642985d7945973a34ff
-    entrypoint: [
-      "/vmalert-tool-prod",
-      "unittest",
-      "--files=${CI_WORKSPACE}/infra/configs/alerts.test.yml",
-    ]
     commands:
-      - vmalert-tool unittest
+      - /vmalert-tool-prod unittest --files=infra/configs/alerts.test.yml
     depends_on: [check]
 
   e2e-mpa:
