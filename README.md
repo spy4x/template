@@ -12,7 +12,7 @@ web app, a worker and Postgres. Work in progress.**
 gh repo create my-product --template spy4x/template --private --clone
 ```
 
-<img src="docs/screenshots/sign-up-flow.gif" alt="An older version of the app: a new user signs up with a username and password, lands on the profile page with the realtime connection open, types the first name Alex and the last name Rivera, and saves; a green toast confirms the profile was updated." width="800">
+<img src="docs/screenshots/sign-up-flow.gif" alt="A new user signs up with the address alex.rivera@example.com and a password, types the code mailed to confirm the address, and lands on the profile page with a Get started checklist; they open Edit name, type the first name Alex and the last name Rivera, and save; a green toast confirms the profile was updated." width="800">
 
 [Architecture](docs/architecture.md) · [ADR 001](docs/decisions/001-deno-platform-template.md) ·
 [ADR 002](docs/decisions/002-realtime-transport-and-sync.md) ·
@@ -100,12 +100,12 @@ it cannot create the user, it says so and exits with 1.
 
 ## What a fresh project looks like
 
-| Light                                                                                                                                                                                                                     | Dark                                                                                                                                                                                                                    |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <img src="docs/screenshots/sign-in-light.png" alt="An older version of the sign-in page in the light theme: a card titled Welcome back with username and password fields, a Sign in button and a link to sign up.">       | <img src="docs/screenshots/sign-in-dark.png" alt="An older version of the sign-in page in the dark theme: a card titled Welcome back with username and password fields, a Sign in button and a link to sign up.">       |
-| <img src="docs/screenshots/profile-light.png" alt="An older version of the profile page in the light theme for the demo user Alex Rivera: name fields with a Save button, a change-password card and a two-factor card."> | <img src="docs/screenshots/profile-dark.png" alt="An older version of the profile page in the dark theme for the demo user Alex Rivera: name fields with a Save button, a change-password card and a two-factor card."> |
+| Light                                                                                                                                                                                                                                                                 | Dark                                                                                                                                                                                                                                                                |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="docs/screenshots/sign-in-light.png" alt="The sign-in page in the light theme: the Seed logo above a card titled Welcome back with e-mail-or-username and password fields, a Sign in button, a forgot-password link and a link to create an account.">       | <img src="docs/screenshots/sign-in-dark.png" alt="The sign-in page in the dark theme: the Seed logo above a card titled Welcome back with e-mail-or-username and password fields, a Sign in button, a forgot-password link and a link to create an account.">       |
+| <img src="docs/screenshots/profile-light.png" alt="The profile page in the light theme for the demo user Alex Rivera: the side navigation, a Get started checklist with one of five steps done and a Write a note button, and the Account section showing the name."> | <img src="docs/screenshots/profile-dark.png" alt="The profile page in the dark theme for the demo user Alex Rivera: the side navigation, a Get started checklist with one of five steps done and a Write a note button, and the Account section showing the name."> |
 
-The screenshots and the GIF use a throw-away database and a made-up user;
+The screenshots and the GIF use a development database and a made-up user on example.com;
 [`docs/screenshots/record.ts`](docs/screenshots/record.ts) records them again from a running app.
 
 <details>
