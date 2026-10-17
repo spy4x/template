@@ -798,7 +798,7 @@ CREATE TABLE sign_up_code_requests (
 CREATE INDEX sign_up_code_requests_sign_up_id_idx ON sign_up_code_requests (sign_up_id);
 
 -- #163: a person's display preferences, one versioned row per person. See migration
--- 2026_11_19_0001_user_preferences.sql.
+-- 2026_11_20_0001_user_preferences.sql.
 CREATE TABLE user_preferences (
     user_id INT4 PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     value JSONB DEFAULT '{}'::jsonb NOT NULL,
