@@ -341,6 +341,8 @@ function JobsCard({ jobs }: { jobs: readonly AdminSystemJobKind[] }): JSX.Elemen
         <DataTable
           columns={columns}
           rows={jobs}
+          // No 300 px blank under a short table or its empty state.
+          class="[&>div:first-child]:min-h-0"
           sort={[]}
           onSortChange={() => {}}
           caption="Each job's last and next run"
@@ -420,6 +422,8 @@ function FailedJobsCard(
         <DataTable
           columns={columns}
           rows={jobs}
+          // No 300 px blank under a short table or its empty state.
+          class="[&>div:first-child]:min-h-0"
           sort={[]}
           onSortChange={() => {}}
           caption="Jobs that gave up"

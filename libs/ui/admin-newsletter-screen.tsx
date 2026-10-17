@@ -364,6 +364,7 @@ function SubscribersTab(props: AdminNewsletterScreenProps): JSX.Element {
           <div data-e2e="admin-newsletter-list">
             <DataTable
               mode="server"
+              class="[&>div:first-child]:min-h-0"
               columns={subscriberColumns(onOpenDialog)}
               rows={list.subscribers}
               sort={NO_SORT}
@@ -486,6 +487,7 @@ function SendsTab(
     <div data-e2e="admin-newsletter-sends">
       <DataTable
         mode="server"
+        class="[&>div:first-child]:min-h-0"
         columns={SEND_COLUMNS}
         rows={sends}
         sort={NO_SORT}

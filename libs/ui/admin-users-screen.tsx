@@ -246,6 +246,7 @@ export function AdminUsersScreen(
           <div data-e2e="admin-users-list">
             <DataTable
               mode="server"
+              class="[&>div:first-child]:min-h-0"
               columns={userColumns(operatorId, navigate)}
               rows={rows}
               sort={filter.sort}
