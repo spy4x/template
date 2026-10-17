@@ -169,7 +169,7 @@ function NotificationBell(
             "filled",
             rail
               ? "absolute top-1 right-1 min-w-4 justify-center px-1 py-0 text-[10px] leading-4"
-              : "min-w-5 justify-center px-1.5 py-0 text-xs",
+              : "min-w-5 justify-center px-2 py-0 text-xs",
           )}
           aria-hidden="true"
           data-e2e={placeHook("shell-bell-count", place)}
