@@ -566,6 +566,46 @@ Deno.test("creating a token needs the account's password: none, a wrong one and 
   })
 })
 
+Deno.test("wrong passwords at a token create count on the account's lock, which refuses the right one (#406)", async () => {
+  await withSchema(async (sql) => {
+    const app = await buildApp(sql)
+    const ada = await signUp(app, "ada@example.com")
+    const create = async (password: string) => {
+      const response = await app.app.request(`${API}/tokens`, {
+        method: "POST",
+        headers: browser(ada.cookie),
+        body: JSON.stringify({
+          name: "Script",
+          groupId: ada.groupId,
+          access: ApiTokenAccess.READ,
+          expiresInDays: 30,
+          password,
+        }),
+      })
+      const body = (await response.json()) as { code?: string }
+      return {
+        status: response.status,
+        code: body.code,
+        retryAfter: response.headers.get("retry-after"),
+      }
+    }
+
+    for (let guess = 0; guess < 6; guess++) {
+      expect(await create("Not-the-Passw0rd")).toEqual({
+        status: 400,
+        code: "PASSWORD_INVALID",
+        retryAfter: null,
+      })
+    }
+    expect(await create(PASSWORD)).toEqual({
+      status: 429,
+      code: "PASSWORD_LOCKED",
+      retryAfter: "60",
+    })
+    expect(await sql`SELECT 1 FROM api_tokens`).toEqual([])
+  })
+})
+
 Deno.test("creating a token queues one mail to its owner, which names the token and not its secret", async () => {
   await withSchema(async (sql) => {
     const app = await buildApp(sql)
