@@ -369,6 +369,36 @@ describe("AppFrame", () => {
     expect(chips.every((chip) => chip.closest("[aria-hidden=true]") !== null)).toBe(true)
   })
 
+  it("puts the search under the group switcher in the sidebar and the rail, and at the top of a phone's page, never in the Account sheet", async () => {
+    await mount(
+      <AppFrame
+        user={ada}
+        onSignOut={() => {}}
+        groupPicker={{ groups, selectedId: "g-1", onSelect: () => {} }}
+        search={(place) => <button type="button" data-e2e={`stub-search-${place}`}>s</button>}
+        banner={<p id="banner">b</p>}
+      >
+        <p id="page">page</p>
+      </AppFrame>,
+    )
+
+    for (const place of ["sidebar", "rail"]) {
+      const trigger = find(`[data-e2e=rail-shell-top] [data-e2e=stub-search-${place}]`)
+      const picker = trigger.closest("[data-e2e=rail-shell-top] > div")!
+        .querySelector("[data-e2e^=group-picker]")!
+      // The switcher comes first, then the search.
+      expect(picker.compareDocumentPosition(trigger) & 4).toBe(4)
+    }
+    const column = find("#page").parentElement!
+    const phoneRow = column.firstElementChild!
+    expect(phoneRow.querySelector("[data-e2e=stub-search-page]")).not.toBeNull()
+    expect(phoneRow.className).toContain("md:hidden")
+    expect(phoneRow.nextElementSibling?.id).toBe("banner")
+    expect(
+      document.querySelectorAll("[data-e2e=rail-shell-overlay-top] [data-e2e^=stub-search]").length,
+    ).toBe(0)
+  })
+
   it("draws the banner at the top of the page's own column on every page", async () => {
     const frame = (path: string) => (
       <AppFrame user={ada} onSignOut={() => {}} currentPath={path} banner={<p id="banner">b</p>}>

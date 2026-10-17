@@ -72,8 +72,9 @@ export function AppShell(
   }
   return (
     <AppFrame
-      search={
+      search={(place) => (
         <SearchPalette
+          place={place}
           searchNotes={searchNotes}
           groups={groups}
           currentGroup={current
@@ -82,7 +83,7 @@ export function AppShell(
           online={wsStatus === "open"}
           onSelect={(choice) => void open(choice)}
         />
-      }
+      )}
       groupPicker={{
         groups: groupsStore.groups.value,
         selectedId: selectionStore.groupId.value,

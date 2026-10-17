@@ -146,6 +146,20 @@ describe("SearchPalette", () => {
     expect(trigger.getAttribute("aria-keyshortcuts")).toBe("Control+K /")
   })
 
+  it("keeps the sidebar's trigger named search and names the others after their place", async () => {
+    await mount()
+    expect(document.querySelector("[data-e2e=search-open]")).not.toBeNull()
+
+    for (const place of ["rail", "page"] as const) {
+      await act(() => render(null, root!))
+      root!.remove()
+      await mount({ place })
+      expect(document.querySelectorAll("[data-e2e=search-open]").length).toBe(0)
+      expect(document.querySelector(`[data-e2e=search-${place}-open]`)).not.toBeNull()
+      expect(document.querySelector(`dialog[data-e2e=search-${place}]`)).not.toBeNull()
+    }
+  })
+
   it("lists the current group's recent notes, then the actions, before anything is typed", async () => {
     const { asked } = await mount()
 

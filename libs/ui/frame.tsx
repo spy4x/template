@@ -34,6 +34,7 @@ import {
   ScreenForm,
   TAG_PATHS,
 } from "./progressive.tsx"
+import type { SearchPlace } from "./search-palette.tsx"
 
 /**
  * The daily destinations, in the order the sidebar and the phone tab bar show them. Four at most, so
@@ -283,11 +284,37 @@ function AccountEntry(
 }
 
 /**
+ * The search trigger in the column: a field under the group switcher in the sidebar, an icon with
+ * "Search" as its tooltip in the rail.
+ */
+function SearchEntry(
+  { search, place }: {
+    search: (place: SearchPlace) => ComponentChildren
+    place: "sidebar" | "rail"
+  },
+): JSX.Element {
+  // Inset like the navigation's entries below it, so their edges line up.
+  if (place === "sidebar") return <div class="px-1">{search("sidebar")}</div>
+  return (
+    <Tooltip
+      label="Search"
+      content="Search"
+      placement="right"
+      focusable={false}
+      class="flex w-full justify-center px-1"
+    >
+      {search("rail")}
+    </Tooltip>
+  )
+}
+
+/**
  * The signed-in frame, mobile first, with no header: everything around the page lives in
  * `RailShell`'s column, a labelled sidebar from `lg`, a 72 px icon rail from `md`, and a bottom tab
  * bar below that.
  *
- * - The top of the column is the group switcher.
+ * - The top of the column is the group switcher, then the search trigger (`search`). A phone has
+ *   no column, so its trigger is a field at the top of the page.
  * - The middle is the destinations ({@link navItems}).
  * - The bottom is the connection while it is not live, Notifications with its unread count, and the
  *   account menu (Profile, Theme, Sign out).
@@ -318,6 +345,7 @@ export function AppFrame(
     groupPicker,
     banner,
     unreadCount,
+    search,
     wide = false,
     children,
   }: {
@@ -332,6 +360,11 @@ export function AppFrame(
     banner?: ComponentChildren
     /** How many notifications are unread. Left out, the sidebar has no Notifications entry. */
     unreadCount?: number
+    /**
+     * The search trigger for one place, such as `SearchPalette` with that `place`. Left out, the
+     * frame has no search.
+     */
+    search?: (place: SearchPlace) => ComponentChildren
     /** Gives the page the wider column (64 rem), for a data table that needs it. */
     wide?: boolean
     children: ComponentChildren
@@ -339,11 +372,16 @@ export function AppFrame(
 ): JSX.Element {
   const selected = groupPicker?.groups.find((group) => group.id === groupPicker.selectedId)
   const activityGroupId = selected && canViewActivity(selected.role) ? selected.id : null
-  const top = groupPicker &&
+  const top = (groupPicker || search) &&
     ((place: RailShellSidebarPlace) =>
       place === "overlay"
-        ? <GroupSheet {...groupPicker} navigate={navigate} />
-        : <GroupPicker {...groupPicker} navigate={navigate} place={place} />)
+        ? groupPicker && <GroupSheet {...groupPicker} navigate={navigate} />
+        : (
+          <div class="flex flex-col gap-2">
+            {groupPicker && <GroupPicker {...groupPicker} navigate={navigate} place={place} />}
+            {search && <SearchEntry search={search} place={place} />}
+          </div>
+        ))
   const bottom = (place: RailShellSidebarPlace) => (
     <div class="flex flex-col gap-1">
       {connection && connectionIsNews(connection) && (
@@ -381,6 +419,7 @@ export function AppFrame(
         labels={{ more: "Account", moreDialog: "Account", counter: (count) => `${count} unread` }}
       >
         <Page class={wide ? "max-w-5xl py-6 sm:py-8" : "max-w-3xl py-6 sm:py-8"}>
+          {search && <div class="mb-4 md:hidden">{search("page")}</div>}
           {banner}
           {children}
         </Page>

@@ -58,6 +58,32 @@ export interface SearchPaletteProps {
   online: boolean
   /** Called with what the person picked, after the palette has closed. */
   onSelect: (choice: SearchChoice) => void
+  /** Where the frame draws the trigger; see {@link SearchPlace}. Defaults to `"sidebar"`. */
+  place?: SearchPlace
+}
+
+/**
+ * Where `AppFrame` draws a search trigger: under the group switcher in the labelled sidebar (from
+ * `lg`), in the 72 px icon rail (from `md`), or at the top of the page on a phone, which has no
+ * column. The frame draws one per place and CSS shows the one that fits, so the hotkeys reach the
+ * visible one only (a hidden trigger ignores them).
+ */
+export type SearchPlace = "sidebar" | "rail" | "page"
+
+/**
+ * The trigger's look per place, over the library's (an icon below `sm`, a field from `sm`).
+ * - The sidebar: a field the column's width with the words. The column is too narrow for the words
+ *   and the hotkey hint as well, so the hint is left out; the hotkeys still work and the trigger
+ *   still announces them.
+ * - The rail: an icon the size of the rail's others, in a 44 px cell; its name is its tooltip.
+ * - The page on a phone: a 44 px field the page's width with the words.
+ */
+const TRIGGER_CLASS: Record<SearchPlace, string> = {
+  sidebar: "min-h-11 w-full min-w-0 whitespace-nowrap sm:w-full lg:w-full [&>span+span]:hidden",
+  rail:
+    "min-h-11 w-full justify-center rounded-md px-0 hover:bg-canvas sm:w-full sm:border-transparent sm:bg-transparent sm:px-0 sm:hover:border-transparent lg:w-full [&>span]:hidden [&>svg]:size-6",
+  page:
+    "min-h-11 w-full border-subtle bg-surface px-3 sm:w-full [&>span:first-of-type]:inline [&>span:first-of-type]:truncate",
 }
 
 /** The fewest characters a note search takes; one letter finds too much. The API holds the same. */
@@ -107,8 +133,8 @@ export function emptyLabel(query: string, onDevice: boolean): string {
 
 /**
  * The search of the signed-in shell, opened with Ctrl K (⌘K on a Mac) or `/` from every page, or
- * from its trigger: a field on a wide screen, an icon on a phone. One per page, so the hotkeys bind
- * once; `AppFrame` places it.
+ * from its trigger. `AppFrame` draws one trigger per place ({@link SearchPlace}); only the visible
+ * one answers the hotkeys.
  *
  * Before anything is typed it lists the current group's most recent notes, then the actions. A
  * query lists the notes that match (from `searchNotes`), then the person's groups whose name
@@ -117,6 +143,7 @@ export function emptyLabel(query: string, onDevice: boolean): string {
  * "New tag" need a group they may write to, and "New group" needs the server.
  */
 export function SearchPalette(props: SearchPaletteProps): JSX.Element {
+  const place = props.place ?? "sidebar"
   const [empty, setEmpty] = useState(emptyLabel("", false))
   // The search runs inside the palette, after a render; it reads the latest props through this.
   const latest = useRef(props)
@@ -165,11 +192,8 @@ export function SearchPalette(props: SearchPaletteProps): JSX.Element {
       onSelect={(option) => props.onSelect(option.choice)}
       hotkeys={["mod+k", "/"]}
       labels={{ ...LABELS, empty }}
-      dataE2E="search"
-      // The library's fixed widths wrap "Search notes and groups" beside the hotkey hint: the
-      // trigger takes the width of its words instead, and the group switcher gives way. On a phone
-      // it is 44 px square, like the other header controls.
-      class="min-h-11 min-w-11 justify-center whitespace-nowrap sm:min-h-9 sm:min-w-9 sm:w-auto lg:w-auto"
+      dataE2E={place === "sidebar" ? "search" : `search-${place}`}
+      class={TRIGGER_CLASS[place]}
     />
   )
 }
