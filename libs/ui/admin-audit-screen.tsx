@@ -422,8 +422,8 @@ function Cell({ children }: { children: ComponentChildren }): JSX.Element {
 
 /**
  * A person in the About and Done by columns: the name as the link and the address under it, each
- * on one line and cut with an ellipsis at 11rem, the full text in its tooltip. An address never
- * breaks mid-word. The groups list's owner column draws the same.
+ * on one line and cut with an ellipsis at 9rem (`w-36`), the full text in its tooltip. An address
+ * never breaks mid-word. The groups list's owner column draws the same.
  */
 function PersonCell(
   { person, entry, navigate, address = false }: {
