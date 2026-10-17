@@ -2,6 +2,7 @@ import type { APIRequestContext, BrowserContext } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
 import { signUpWithCode } from "./fixtures/sign-up.ts"
+import { readdir } from "node:fs/promises"
 
 /**
  * The admin app's System page (#429): an operator sees the database, the cache and the migrations
@@ -14,6 +15,17 @@ const adminBase = "http://admin.localhost"
 const headers = { origin: appBase, "sec-fetch-site": "same-origin" }
 const password = "Passw0rd!"
 const OPERATOR = 2
+
+/**
+ * The newest migration in the repository, without its ending: the one the page names. The path is
+ * relative to the repository root, where the e2e runs start (e2e:local runs a copy of this file).
+ */
+async function newestMigration() {
+  const names = await readdir("libs/server/db/migrations")
+  const newest = names.filter((name) => name.endsWith(".sql")).sort().at(-1)
+  if (!newest) throw new Error("no migration found")
+  return newest.replace(/(\.no_transaction)?\.sql$/, "")
+}
 
 async function cleanup(request: APIRequestContext, email: string) {
   const response = await request.post(`${appBase}/api/test/cleanup-user`, {
@@ -58,7 +70,7 @@ test.describe("the admin System page", () => {
       await expect(badge("admin-system-migrations")).toHaveAttribute("data-health", "ok")
       await expect(ops.locator("[data-e2e=admin-system-database]")).toContainText("Postgres 18")
       await expect(ops.locator("[data-e2e=admin-system-migrations]")).toContainText(
-        "2026_11_17_0001_sign_up_requests",
+        await newestMigration(),
       )
       await expect(ops.locator("[data-e2e=admin-system-queue]")).toContainText("Due now")
       await expect(ops.locator("[data-e2e=admin-system-build]")).toContainText("Runtime")
