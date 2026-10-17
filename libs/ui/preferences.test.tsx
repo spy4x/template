@@ -224,13 +224,12 @@ describe(`PreferencesGroup`, () => {
     )
     expect($(`[data-e2e="preferences-use-device-zone"]`)?.textContent).toBe(`Use Tokyo time`)
     expect($(`[data-e2e="preferences-keep-zone"]`)?.textContent).toBe(`Keep Berlin time`)
-    const change = $(`[data-e2e="preferences-change-timeZone"]`)
     await click(`[data-e2e="preferences-use-device-zone"]`)
     // Both buttons remove themselves; the focus lands on the row's own button, not the page.
-    expect(document.activeElement).toBe(change)
+    expect(document.activeElement?.getAttribute(`data-e2e`)).toBe(`preferences-change-timeZone`)
     $(`[data-e2e="preferences-keep-zone"]`)!.focus()
     await click(`[data-e2e="preferences-keep-zone"]`)
-    expect(document.activeElement).toBe(change)
+    expect(document.activeElement?.getAttribute(`data-e2e`)).toBe(`preferences-change-timeZone`)
 
     expect(calls).toEqual([[`use`], [`keep`]])
   })
