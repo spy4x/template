@@ -1,10 +1,12 @@
 import type { JSX } from "preact"
-import { IconChevronDown } from "@spy4x/preact-icons"
+import { IconChevronDown, IconUsers } from "@spy4x/preact-icons"
+import type { RailShellSidebarPlace } from "@spy4x/preact-system/rail-shell"
 import { Dropdown, DropdownItem } from "@spy4x/preact-ui/dropdown"
 import type { GroupColor, GroupRole } from "@domain/groups"
 import { GroupMark } from "./group-appearance.tsx"
 import { NEW_GROUP_PATH, ROLE_TEXT } from "./groups-screen.tsx"
 import { type Navigate, SCREEN_PATHS } from "./progressive.tsx"
+import { placeHook } from "./shell-place.ts"
 
 /** One group of the switcher: its name, and the person's role in it. */
 export interface PickerGroup {
@@ -44,27 +46,44 @@ function SwitcherMark({ group }: { group: PickerGroup }): JSX.Element {
 }
 
 /**
- * The current group in the header: a button showing its mark and name that opens a short menu of
- * the person's groups. The current one is checked (`menuitemradio`), each names the person's role
- * there, and the menu ends with links to all groups and to a new one.
+ * The current group at the top of the sidebar: a button showing its mark and name that opens a
+ * short menu of the person's groups. The current one is checked (`menuitemradio`), each names the
+ * person's role there, and the menu ends with links to all groups and to a new one. In the 72 px
+ * icon rail the button shows the mark alone and keeps its name for a screen reader.
  */
 export function GroupPicker(
-  { groups, selectedId, onSelect, navigate }: GroupPickerData & { navigate?: Navigate },
+  { groups, selectedId, onSelect, navigate, place = "sidebar" }: GroupPickerData & {
+    navigate?: Navigate
+    /** Which of `RailShell`'s places draws it; see {@link placeHook}. */
+    place?: RailShellSidebarPlace
+  },
 ): JSX.Element {
   const selected = groups.find((group) => group.id === selectedId) ?? null
+  const hook = (name: string) => placeHook(name, place)
+  const rail = place === "rail"
   return (
     <Dropdown
-      trigger={
-        <>
-          {selected && <SwitcherMark group={selected} />}
-          <span class="min-w-0 truncate">{selected?.name ?? "Choose a group"}</span>
-          <IconChevronDown class="size-4 shrink-0 text-muted" aria-hidden="true" />
-        </>
-      }
+      trigger={rail
+        ? (selected
+          ? <SwitcherMark group={selected} />
+          : <IconUsers class="size-5 text-muted" aria-hidden="true" />)
+        : (
+          <>
+            {selected && <SwitcherMark group={selected} />}
+            <span class="min-w-0 flex-1 truncate text-left">
+              {selected?.name ?? "Choose a group"}
+            </span>
+            <IconChevronDown class="size-4 shrink-0 text-muted" aria-hidden="true" />
+          </>
+        )}
       triggerLabel={selected ? `Group: ${selected.name}` : "Group: none chosen"}
-      triggerDataE2E="group-picker"
-      triggerClasses="flex h-11 max-w-56 min-w-0 items-center gap-2 rounded-md px-2 text-sm font-medium text-foreground hover:bg-hover sm:h-9"
-      containerClasses="relative flex min-w-0 text-left"
+      triggerDataE2E={hook("group-picker")}
+      triggerClasses={rail
+        ? "flex size-11 items-center justify-center rounded-md hover:bg-hover"
+        : "flex h-11 w-full min-w-0 items-center gap-3 rounded-md px-3 text-sm font-medium text-foreground hover:bg-hover"}
+      containerClasses={rail
+        ? "relative flex justify-center"
+        : "relative flex w-full min-w-0 text-left"}
       panelClasses="w-72 max-w-[calc(100vw-5rem)]"
       horizontal="left"
       menuLabel="Switch group"
@@ -74,7 +93,7 @@ export function GroupPicker(
           key={group.id}
           checked={group.id === selectedId}
           onClick={() => group.id !== selectedId && onSelect(group.id)}
-          dataE2E={`group-picker-${group.id}`}
+          dataE2E={hook(`group-picker-${group.id}`)}
         >
           <SwitcherMark group={group} />
           <span class="min-w-0 flex-1 truncate">{group.name}</span>
@@ -84,10 +103,14 @@ export function GroupPicker(
         </DropdownItem>
       ))}
       {groups.length > 0 && <div role="separator" class="my-1 border-t border-subtle" />}
-      <DropdownItem href={SCREEN_PATHS.groups} navigate={navigate} dataE2E="group-picker-all">
+      <DropdownItem
+        href={SCREEN_PATHS.groups}
+        navigate={navigate}
+        dataE2E={hook("group-picker-all")}
+      >
         All groups
       </DropdownItem>
-      <DropdownItem href={NEW_GROUP_PATH} navigate={navigate} dataE2E="group-picker-new">
+      <DropdownItem href={NEW_GROUP_PATH} navigate={navigate} dataE2E={hook("group-picker-new")}>
         New group
       </DropdownItem>
     </Dropdown>

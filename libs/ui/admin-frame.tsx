@@ -1,16 +1,20 @@
 import type { ComponentChildren, ComponentType, JSX } from "preact"
-import type { IconProps } from "@spy4x/preact-icons"
+import { type IconProps, IconSprout } from "@spy4x/preact-icons"
 import { type AuthCredentials, AuthForm } from "@spy4x/preact-system/auth-form"
-import { Shell, type ShellNavItem } from "@spy4x/preact-system/shell"
+import { AccountMenu } from "@spy4x/preact-system/account-menu"
+import { RailShell, type RailShellItem } from "@spy4x/preact-system/rail-shell"
 import { Avatar } from "@spy4x/preact-ui/avatar"
 import { Badge } from "@spy4x/preact-ui/badge"
+import { BrandMark } from "@spy4x/preact-ui/brand-mark"
 import { Button } from "@spy4x/preact-ui/button"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { Link } from "@spy4x/preact-ui/link"
 import { Stack } from "@spy4x/preact-ui/layout"
 import { PageHeader } from "@spy4x/preact-ui/page-header"
 import { AuthCard } from "./auth-screen.tsx"
+import type { FrameTheme } from "./frame.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
+import { placeHook } from "./shell-place.ts"
 
 /**
  * The pages of the admin app (`apps/admin`, #146) that its screens link to. It runs on a host of
@@ -25,21 +29,23 @@ export const ADMIN_PATHS = {
   oneTimeCode: "/one-time-code",
 } as const
 
-/** The admin app's brand: tells an operator at once that this is not the product. */
-function AdminBrand({ navigate }: { navigate?: Navigate }): JSX.Element {
+/**
+ * The admin app's mark: Seed's mark and the "Admin" badge, which tells an operator at once that
+ * this is not the product. The 72 px icon rail has room for the badge alone.
+ */
+function AdminBrand(
+  { navigate, compact = false }: { navigate?: Navigate; compact?: boolean },
+): JSX.Element {
   return (
     <Link
       href={ADMIN_PATHS.dashboard}
       navigate={navigate}
-      class="flex shrink-0 items-center gap-2 rounded-md"
+      class={compact
+        ? "flex min-h-11 items-center justify-center rounded-md"
+        : "flex min-h-11 min-w-0 items-center gap-2 rounded-md px-1"}
+      aria-label={compact ? "Seed admin" : undefined}
     >
-      <span
-        class="flex size-7 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground"
-        aria-hidden="true"
-      >
-        S
-      </span>
-      <span class="text-base font-semibold">Seed</span>
+      {!compact && <BrandMark Icon={IconSprout} name="Seed" />}
       <span data-e2e="admin-mark">
         <Badge text="Admin" />
       </span>
@@ -61,46 +67,58 @@ export interface AdminNavItem {
 }
 
 /**
- * The signed-in admin app's frame (#424): the brand with its "Admin" mark, a sidebar with one
- * entry per module (a drawer below `lg`), the theme switch and the operator's menu with Sign out.
- * The page itself sits in a column of at most 72 rem.
+ * The signed-in admin app's frame (#424): the product's shell (`RailShell`, with no top bar), so an
+ * operator recognises it. The sidebar holds the mark with its "Admin" badge on top, one entry per
+ * module, and the operator's menu at the bottom with the theme and Sign out. On a phone the first
+ * four modules are tabs and the avatar opens the rest. The page sits in a column of at most 72 rem.
  */
 export function AdminShell(
-  { navItems, currentPath, operator, onSignOut, status, navigate, children }: {
+  { navItems, currentPath, operator, onSignOut, theme, navigate, children }: {
     navItems: readonly AdminNavItem[]
     /** The address of the page shown; the entry whose page it is, or is under, is marked. */
     currentPath: string
     operator: AdminShellOperator
     onSignOut: () => void
-    /** Shown in the top bar before the operator's menu: the theme switch. */
-    status?: ComponentChildren
+    /** The theme store; left out, the operator's menu offers no theme. */
+    theme?: FrameTheme
     navigate?: Navigate
     children: ComponentChildren
   },
 ): JSX.Element {
-  const items: ShellNavItem[] = navItems.map(({ name, href, Icon }) => ({ name, href, Icon }))
+  const items: RailShellItem[] = navItems.map(({ name, href, Icon }) => ({
+    key: href,
+    label: name,
+    href,
+    Icon,
+  }))
   return (
-    <Shell
-      navItems={items}
-      currentPath={adminNavPath(navItems, currentPath)}
-      brand={<AdminBrand navigate={navigate} />}
-      user={{ name: operator.name, email: operator.email ?? undefined }}
-      userMenuItems={[{ label: "Sign out", onClick: onSignOut, dataE2E: "admin-signout" }]}
-      status={status}
-      navigate={navigate}
-      labels={{ nav: "Admin sections" }}
-      sidebarBottom={() => (
-        <div class="flex min-w-0 items-center gap-3 rounded-lg px-2 py-2" data-e2e="admin-operator">
-          <Avatar name={operator.name} size="sm" />
-          <div class="flex min-w-0 flex-col">
-            <span class="truncate text-sm font-medium">{operator.name}</span>
-            {operator.email && <span class="truncate text-xs text-muted">{operator.email}</span>}
-          </div>
+    <RailShell
+      items={items}
+      currentKey={adminNavPath(navItems, currentPath)}
+      navigateLink={navigate && ((_key, href) => navigate(href))}
+      labels={{ nav: "Admin sections", more: "Account", moreDialog: "Account" }}
+      moreTab={{ icon: <Avatar name={operator.name} alt="" size="sm" /> }}
+      sidebarTop={(place) => <AdminBrand navigate={navigate} compact={place === "rail"} />}
+      sidebarBottom={(place) => (
+        <div class={place === "rail" ? "flex justify-center" : "flex"}>
+          <AccountMenu
+            user={{ name: operator.name, email: operator.email ?? undefined }}
+            display={place === "rail" ? "avatar" : "full"}
+            theme={theme?.preference.value}
+            onThemeChange={theme && ((choice) => theme.set(choice))}
+            signOut={{
+              label: "Sign out",
+              onClick: onSignOut,
+              dataE2E: placeHook("admin-signout", place),
+            }}
+            dataE2E={placeHook("admin-account-menu", place)}
+            labels={{ trigger: `Account: ${operator.name}` }}
+          />
         </div>
       )}
     >
-      <div class="mx-auto w-full max-w-6xl pb-12">{children}</div>
-    </Shell>
+      <div class="mx-auto w-full max-w-6xl px-4 py-6 pb-12 sm:px-6 sm:py-8 lg:px-8">{children}</div>
+    </RailShell>
   )
 }
 

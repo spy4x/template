@@ -236,14 +236,16 @@ describe("notification bell", () => {
       </AppFrame>,
     )
 
-  it("names the unread count in the link's accessible name and badges it", () => {
+  it("names the unread count in the link's accessible name and badges it, 44 px in the rail and the sidebar", () => {
     const page = frame(3)
     expect(page).toContain(`aria-label="Notifications, 3 unread"`)
     expect(page).toContain(`href="/notifications"`)
     expect(page).toContain(`data-e2e="shell-bell-count"`)
-    // 44 px on a phone: the class must sit on the bell's own link, not on a neighbour.
-    const link = page.match(/<a\b[^>]*data-e2e="shell-bell"[^>]*>/)?.[0] ?? ""
-    expect(link).toContain("min-h-11 min-w-11")
+    // The classes must sit on the bell's own link, not on a neighbour.
+    const link = (hook: string) =>
+      page.match(new RegExp(`<a\\b[^>]*data-e2e="${hook}"[^>]*>`))?.[0] ?? ""
+    expect(link("shell-bell")).toContain("min-h-11")
+    expect(link("shell-bell-rail")).toContain("size-11")
   })
 
   it("shows no badge when everything is read, and caps a long count at 99+", () => {

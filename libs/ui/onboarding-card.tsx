@@ -101,7 +101,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     target: `[data-e2e="shell-bell"]`,
     title: "Notifications",
     body: "The bell shows what happened while you were away, such as an invitation.",
-    placement: "bottom",
+    placement: "right",
   },
   {
     id: "profile",

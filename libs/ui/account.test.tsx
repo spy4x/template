@@ -211,18 +211,17 @@ describe("AppFrame", () => {
     { id: "g-2", name: "Team", role: GroupRole.VIEWER },
   ]
 
-  it("draws the header as the banner, outside main, and the page inside main", async () => {
+  it("draws no top bar: the account menu sits at the bottom of the sidebar, and the page inside main", async () => {
     await mount(
       <AppFrame user={ada} onSignOut={() => {}}>
         <p id="page">page</p>
       </AppFrame>,
     )
 
-    const header = find("header")
-    expect(header.closest("main")).toBe(null)
-    expect(header.querySelector("[data-e2e=shell-user-menu-button]")).not.toBe(null)
+    expect(document.querySelector("header")).toBe(null)
+    const menu = find("[data-e2e=rail-shell-bottom] [data-e2e=shell-user-menu-button]")
+    expect(menu.closest("main")).toBe(null)
     expect(find("#page").closest("main")).not.toBe(null)
-    expect(document.querySelector("main header")).toBe(null)
   })
 
   it("puts every page in the one centred 48 rem column, and a wide page in 64 rem", async () => {
@@ -245,7 +244,7 @@ describe("AppFrame", () => {
     expect(column()).not.toContain("max-w-3xl")
   })
 
-  it("lists Notes, Tags, Activity, Groups and Profile, with Activity pointing at the selected group", async () => {
+  it("lists Notes, Tags, Activity, Groups and Profile, with Activity pointing at the selected group, and keeps the phone bar's last slot for the account", async () => {
     await mount(
       <AppFrame
         user={ada}
@@ -259,8 +258,10 @@ describe("AppFrame", () => {
     expect(texts(rail)).toEqual(["Notes", "Tags", "Activity", "Groups", "Profile"])
     expect([...document.querySelectorAll(rail)].map((link) => link.getAttribute("href")))
       .toEqual(["/notes", "/tags", "/groups/g-1/activity", "/groups", "/"])
-    // All five fit the phone bar, so it has no "More".
-    expect(texts('[data-e2e=rail-shell-tabbar] [data-e2e="rail-shell-entry"]')).toHaveLength(5)
+    // Four entries are tabs; the fifth slot is the person's avatar, which opens the account sheet.
+    expect(texts('[data-e2e=rail-shell-tabbar] [data-e2e="rail-shell-entry"]'))
+      .toEqual(["Notes", "Tags", "Activity", "Groups"])
+    expect(texts("[data-e2e=rail-shell-more]")).toEqual(["Account"])
   })
 
   it("leaves Activity out with no selected group, and for a group whose log the person may not read", async () => {
@@ -292,9 +293,18 @@ describe("AppFrame", () => {
     expect(navigate.calls).toEqual([["/tags"]])
   })
 
-  it("links the brand to the notes", async () => {
-    await mount(<AppFrame user={ada} onSignOut={() => {}}>page</AppFrame>)
-    expect(find('header a[aria-label="Seed"]').getAttribute("href")).toBe(NOTE_PATHS.list)
+  it("draws no brand mark: the sidebar starts with the group switcher", async () => {
+    await mount(
+      <AppFrame
+        user={ada}
+        onSignOut={() => {}}
+        groupPicker={{ groups, selectedId: "g-1", onSelect: () => {} }}
+      >
+        page
+      </AppFrame>,
+    )
+    expect(document.querySelector("[data-e2e=brand-mark]")).toBe(null)
+    expect(find("[data-e2e=rail-shell-top] [data-e2e=group-picker]").tagName).toBe("BUTTON")
   })
 
   it("marks the entry of the page shown: a note under Notes, a group's log under Activity, the e-mail page under Profile", async () => {
@@ -338,18 +348,17 @@ describe("AppFrame", () => {
     atTop()
   })
 
-  it("names the account menu after the person and shows their name and address in it", async () => {
+  it("names the account menu after the person and shows their name and address on it", async () => {
     await mount(<AppFrame user={ada} onSignOut={() => {}} theme={themeSpy()}>page</AppFrame>)
     const trigger = find("[data-e2e=shell-user-menu-button]")
     expect(trigger.getAttribute("aria-label")).toBe("Account: Ada Lovelace")
+    expect(trigger.textContent).toContain("Ada Lovelace")
+    expect(trigger.textContent).toContain("ada@example.com")
 
     await click("[data-e2e=shell-user-menu-button]")
 
-    expect(texts("[data-e2e=shell-user-identity] span")).toEqual([
-      "Ada Lovelace",
-      "ada@example.com",
-    ])
-    expect(texts("[role=menu] [role=menuitem], [role=menu] [role=menuitemradio]")).toEqual([
+    const items = "[data-e2e=shell-account] [role=menu] :is([role=menuitem], [role=menuitemradio])"
+    expect(texts(items)).toEqual([
       "Profile",
       "Notifications",
       "System",
@@ -357,6 +366,19 @@ describe("AppFrame", () => {
       "Dark",
       "Sign out",
     ])
+  })
+
+  it("offers only the theme and sign-out in the phone sheet's menu, under the sheet's bell", async () => {
+    await mount(
+      <AppFrame user={ada} onSignOut={() => {}} theme={themeSpy()} unreadCount={0}>
+        page
+      </AppFrame>,
+    )
+
+    const sheet = "[data-e2e=shell-account-overlay]"
+    expect(find(`${sheet} [data-e2e=shell-bell-overlay]`).textContent).toContain("Notifications")
+    const items = `${sheet} [role=menu] :is([role=menuitem], [role=menuitemradio])`
+    expect(texts(items)).toEqual(["System", "Light", "Dark", "Sign out"])
   })
 
   it("signs out from the account menu through the app's callback", async () => {
@@ -375,10 +397,13 @@ describe("AppFrame", () => {
 
     await click("[data-e2e=shell-user-menu-button]")
     const checked = () =>
-      [...document.querySelectorAll("[data-e2e=shell-theme] [role=menuitemradio]")]
-        .map((item) => item.getAttribute("aria-checked"))
+      [
+        ...document.querySelectorAll(
+          "[data-e2e=shell-account] [data-e2e=account-menu-theme] [role=menuitemradio]",
+        ),
+      ].map((item) => item.getAttribute("aria-checked"))
     expect(checked()).toEqual(["true", "false", "false"])
-    await click("[data-e2e=shell-theme-dark]")
+    await click("[data-e2e=shell-account] [data-e2e=account-menu-theme-dark]")
 
     expect(theme.chosen).toEqual(["dark"])
   })
@@ -415,7 +440,8 @@ describe("AppFrame", () => {
     find<HTMLButtonElement>("[data-e2e=group-picker]").focus()
     await enter()
 
-    const radios = [...document.querySelectorAll("[role=menuitemradio]")]
+    const picker = find("[data-e2e=group-picker]").parentElement!
+    const radios = [...picker.querySelectorAll("[role=menuitemradio]")]
     expect(radios.map((item) => item.textContent)).toEqual(["HHome Owner", "TTeam Viewer"])
     expect(radios.map((item) => item.getAttribute("aria-checked"))).toEqual(["true", "false"])
     expect(document.activeElement).toBe(radios[0])
@@ -451,13 +477,14 @@ describe("PublicFrame", () => {
     expect(signOut.calls).toHaveLength(1)
   })
 
-  it("follows the brand link through navigate instead of loading the page", async () => {
+  it("shows the Seed mark as a link to /, and follows it through navigate instead of loading the page", async () => {
     const navigate = spy<[string]>()
     await mount(
       <PublicFrame canSignOut={false} onSignOut={() => {}} navigate={navigate.fn}>
         page
       </PublicFrame>,
     )
+    expect(texts('a[href="/"] [data-e2e=brand-mark]')).toEqual(["Seed"])
 
     expect(await click('a[href="/"]')).toBe(true)
     expect(navigate.calls).toEqual([["/"]])
