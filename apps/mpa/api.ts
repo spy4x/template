@@ -4,8 +4,8 @@ import { isRecord } from "@spy4x/platform/universal/is-record"
  * The browser's request headers the API needs: the two headers the API's cross-site guard checks,
  * and what its rate limits record. The MPA has no session, so no cookie passes either way. All pass
  * on unchanged, except an `Origin` equal to the MPA's own when the MPA has its own domain (see
- * `createApi`). The MPA never adds `Origin` or `Sec-Fetch-Site` itself, so it cannot vouch for a
- * post the browser did not make.
+ * `createApi`). The MPA never adds `Origin` itself, and adds `Sec-Fetch-Site` in one case only
+ * (`sameOriginByOrigin` of `createApi`), so it cannot vouch for a post the browser did not make.
  */
 const FORWARDED_HEADERS = [
   "origin",
@@ -47,6 +47,11 @@ export const API_TIMEOUT_MS = 10_000
  * That is safe because `pageMiddleware` has already refused every post whose `Origin` is not the
  * MPA's own; any other value, `null` included, passes on unchanged for the API to judge.
  *
+ * `sameOriginByOrigin` is set when `pageMiddleware` let a post through that carries the site's own
+ * `Origin` and no `Sec-Fetch-Site` (an old browser, or a privacy tool that strips the header). The
+ * API's guard needs both headers, so the call then carries `Sec-Fetch-Site: same-origin`, or the
+ * API would refuse what the MPA accepted. A value the browser sent is never replaced.
+ *
  * A failed call is told to `log` as its method, its path without the query, and the kind of
  * failure. The error itself is never logged: it names the full address, and a newsletter call's
  * query holds the visitor's token.
@@ -57,6 +62,7 @@ export function createApi(
     request,
     remoteAddress,
     origins,
+    sameOriginByOrigin = false,
     fetch = globalThis.fetch,
     timeoutMs = API_TIMEOUT_MS,
     log = console.error,
@@ -64,6 +70,7 @@ export function createApi(
     apiUrl: string
     request: Request
     origins?: { page: string; api: string }
+    sameOriginByOrigin?: boolean
     remoteAddress: string
     fetch?: typeof globalThis.fetch
     timeoutMs?: number
@@ -76,6 +83,9 @@ export function createApi(
       for (const name of FORWARDED_HEADERS) {
         const value = request.headers.get(name)
         if (value !== null) headers.set(name, value)
+      }
+      if (sameOriginByOrigin && !headers.has("sec-fetch-site")) {
+        headers.set("sec-fetch-site", "same-origin")
       }
       if (origins && headers.get("origin") === origins.page) headers.set("origin", origins.api)
       if (!headers.has("x-real-ip") && remoteAddress) headers.set("x-real-ip", remoteAddress)

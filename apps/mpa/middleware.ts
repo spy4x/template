@@ -5,7 +5,7 @@ import { createNewsletterStatus } from "./newsletter.ts"
 import { define } from "./utils.ts"
 import { HttpError } from "fresh"
 import { HTTPException } from "hono/http-exception"
-import { createSameOriginCheck } from "@spy4x/server/http/same-origin"
+import { createSameOriginCheck, type SameOriginRefusal } from "@spy4x/server/http/same-origin"
 import { securityHeaderList, withSecurityHeaders } from "@spy4x/server/http/security-headers"
 
 /**
@@ -49,7 +49,9 @@ export async function securityHeadersMiddleware(config: MpaConfig) {
  *
  * 1. refuses a post from another site with 403 before anything else runs: the API's own rule
  *    (`Sec-Fetch-Site: same-origin`, and `Origin` equal to `webAppOrigin` or `null`), without its
- *    session cookie check, since the MPA has no session;
+ *    session cookie check, since the MPA has no session. One case is wider than the API's rule: a
+ *    post with no `Sec-Fetch-Site` at all passes when its `Origin` equals `webAppOrigin`, because
+ *    old browsers and some privacy tools send no such header (see {@link originAloneIsEnough});
  * 2. gives the route an API client bound to this request, which presents an MPA on its own domain
  *    to the API as the API's origin once step 1 has passed;
  * 3. tells the route whether the newsletter is on, as `newsletter()` says. It is required, so a
@@ -72,7 +74,9 @@ export function pageMiddleware(
     requireSessionCookie: false,
   })
   return define.middleware(async (ctx) => {
-    if (crossSiteRefusal(ctx.req)) {
+    const refusal = crossSiteRefusal(ctx.req)
+    const byOriginAlone = originAloneIsEnough(refusal, ctx.req)
+    if (refusal && !byOriginAlone) {
       return withPageHeaders(new Response("Cross-site request refused", { status: 403 }))
     }
     ctx.state.webAppOrigin = config.webAppOrigin
@@ -84,6 +88,7 @@ export function pageMiddleware(
       origins: config.webAppOrigin === config.apiOrigin
         ? undefined
         : { page: config.webAppOrigin, api: config.apiOrigin },
+      sameOriginByOrigin: byOriginAlone,
       fetch,
     })
     ctx.state.newsletter = newsletter()
@@ -97,6 +102,20 @@ export function pageMiddleware(
     }
     return withPageHeaders(response)
   })
+}
+
+/**
+ * Whether a post the same-origin check refused may pass after all: it carries no `Sec-Fetch-Site`
+ * header, and that is the only thing the check found wrong. The check reports a wrong `Origin`
+ * first, so `not-same-origin-fetch` means `Origin` equals the site's own exactly; a missing one,
+ * another site's and `null` are all `origin-mismatch` and stay refused. A `Sec-Fetch-Site` the
+ * browser did send, whatever its value, is the browser's own verdict and is never overruled.
+ *
+ * A page cannot set or remove either header on a form post, and every browser without
+ * `Sec-Fetch-Site` either sends the posting page's `Origin` on a cross-site post or sends none.
+ */
+function originAloneIsEnough(refusal: SameOriginRefusal | undefined, request: Request): boolean {
+  return refusal === "not-same-origin-fetch" && request.headers.get("sec-fetch-site") === null
 }
 
 /**
