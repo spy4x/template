@@ -331,6 +331,47 @@ describe("the person's tabs", () => {
     expect(text(`[data-e2e="admin-person-api-tokens"]`)).toBe("No API tokens.")
   })
 
+  it("moves focus to the person's token count once a revoke goes through", async () => {
+    const sending = { target: { kind: "revoke", token: live }, error: null, pending: true } as const
+    const panel = (confirm: AdminTokensConfirmState) => (
+      <AdminPersonTokensPanel
+        data={[live, revoked]}
+        error={null}
+        userId={42}
+        {...actions([])}
+        confirm={confirm}
+      />
+    )
+    await mount(panel(sending))
+    await mount(panel(NO_CONFIRM))
+    const count = find(`[data-e2e="admin-person-api-tokens-count"]`)
+    expect(count.textContent).toBe("2 tokens")
+    expect(document.activeElement === count).toBe(true)
+  })
+
+  it("moves focus to the person's device count once a removal goes through", async () => {
+    const at = "2026-10-01T10:00:00.000Z"
+    const sending = {
+      target: { kind: "remove-device", userId: 42, deviceId: 5, label: "phone123" },
+      error: null,
+      pending: true,
+    } as const
+    const panel = (confirm: AdminTokensConfirmState) => (
+      <AdminPersonDevicesPanel
+        data={[{ id: 6, label: "laptop9", createdAt: at, updatedAt: at }]}
+        error={null}
+        userId={42}
+        {...actions([])}
+        confirm={confirm}
+      />
+    )
+    await mount(panel(sending))
+    await mount(panel(NO_CONFIRM))
+    const count = find(`[data-e2e="admin-person-devices-count"]`)
+    expect(count.textContent).toBe("1 device")
+    expect(document.activeElement === count).toBe(true)
+  })
+
   it("lists the person's devices by label and asks to remove one", async () => {
     const events: unknown[][] = []
     const device = {
