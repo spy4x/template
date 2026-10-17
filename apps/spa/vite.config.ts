@@ -146,6 +146,14 @@ export default defineConfig({
     alias: [{
       find: /^@ui\//,
       replacement: fromFileUrl(new URL("../../libs/ui/", import.meta.url)),
+    }, {
+      // One copy of the date format's context, so the screens read the one the app provides.
+      // @deno/vite-plugin 2.0.4 names a JSR module after the specifier the loader gave back, which
+      // is `jsr:/…` until the package is loaded and `https://jsr.io/…` after: the first module to
+      // import it got a copy of its own. Its URL has one name. It moves with the six packages in
+      // deno.jsonc; remove it once the Vite plugins of @spy4x/preact-theme give each module one name.
+      find: /^@spy4x\/preact-ui\/format$/,
+      replacement: "https://jsr.io/@spy4x/preact-ui/6.1.0/format.tsx",
     }],
   },
   optimizeDeps: {

@@ -75,6 +75,10 @@ export default defineConfig({
     alias: [{
       find: /^@ui\//,
       replacement: fromFileUrl(new URL("../../libs/ui/", import.meta.url)),
+    }, {
+      // One copy of the date format's context, as in the SPA (apps/spa/vite.config.ts says why).
+      find: /^@spy4x\/preact-ui\/format$/,
+      replacement: "https://jsr.io/@spy4x/preact-ui/6.1.0/format.tsx",
     }],
   },
   optimizeDeps: {
