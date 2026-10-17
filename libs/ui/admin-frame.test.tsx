@@ -244,6 +244,6 @@ describe("ComingSoonPanel", () => {
 
     expect(panel.textContent).toContain("Reports is coming soon")
     expect(panel.textContent).toContain("Coming soon")
-    expect(document.querySelector(".border-dashed")).toBeNull()
+    expect(document.querySelector(".border-dashed") === null).toBe(true)
   })
 })

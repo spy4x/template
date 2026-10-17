@@ -242,6 +242,6 @@ describe("system screen", () => {
       <AdminSystemScreen {...props([], { snapshot: { ...snapshot, failedJobs: [] } })} />,
     )
 
-    expect(document.querySelector(".border-dashed")).toBeNull()
+    expect(document.querySelector(".border-dashed") === null).toBe(true)
   })
 })

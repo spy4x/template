@@ -341,7 +341,7 @@ describe("audit log screen", () => {
       />,
     )
     expect(find("[data-e2e=admin-audit-empty]").textContent).toContain("Nothing matches")
-    expect(document.querySelector(".border-dashed")).toBeNull()
+    expect(document.querySelector(".border-dashed") === null).toBe(true)
   })
 
   it("shows a loading state, then the error when the log could not be read", async () => {
