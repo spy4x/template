@@ -70,7 +70,7 @@
     "proxy:network": "deno run -R=./infra --allow-run=docker,podman ./infra/scripts/proxy-network.ts", // creates the shared "proxy" network when it is missing
     "proxy:start": "deno task proxy:network && docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env up -d",
     "proxy:stop": "docker compose -f ./infra/compose/compose.proxy.yml --env-file ./infra/envs/.env down",
-    "deploy": "deno run -R=./infra --allow-run=rsync,ssh ./infra/scripts/deploy.ts",
+    "deploy": "deno run -R=./infra --allow-run=git,rsync,ssh ./infra/scripts/deploy.ts",
     "env:encrypt": "deno run --no-prompt -R -W=. @spy4x/server/env-age64/cli encrypt",
     "env:decrypt": "deno run --no-prompt -R -W=. @spy4x/server/env-age64/cli decrypt",
     "env:status": "deno run --no-prompt -R -W=. @spy4x/server/env-age64/cli status",
