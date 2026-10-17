@@ -7,9 +7,9 @@ folder at the repository root as its own workflow, with no setting to change in 
 Every product copied from the template gets the pipeline the moment its repository is activated in
 Woodpecker.
 
-It runs on every pull request, every push to `main` and every tag `v<digit>*`, in this order. A
-push to any other branch runs nothing: open a pull request to run the pipeline. This is the one
-list of CI's steps; other pages link here.
+It runs on every pull request, every push to `main` and every tag, in this order; only
+`release.yml` (below) filters tags to `v<digit>*`. A push to any other branch runs nothing: open a
+pull request to run the pipeline. This is the one list of CI's steps; other pages link here.
 
 ```
 check ──┬── build ────────┐

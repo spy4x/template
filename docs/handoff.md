@@ -19,11 +19,9 @@ across real projects, a CLI last.
 
 ## Ground rules
 
-- **Deno is the runtime and the toolchain.** No `node`, `npm`, `pnpm`, `yarn` or `bun`
-  commands. Selected `npm:` specifiers are fine where Vite or Preact need them - they still run
-  through Deno. New code, and old functions you change anyway, must run unchanged on Deno, Node
-  and Bun: web standards and `@std/*`, with anything runtime-specific (`Deno.*`) behind an adapter
-  in `@spy4x/platform` ([deno-policy.md](deno-policy.md)).
+- **Deno only.** No `node`, `npm`, `pnpm`, `yarn` or `bun` commands. Selected
+  `npm:` specifiers are fine where Vite or Preact need them - they still
+  run through Deno.
 - Enums start at 1, never 0.
 - Money is integers.
 - `BIGINT` crosses JSON as a decimal string (`::text` in SQL), because
@@ -125,8 +123,7 @@ pointer. Do not edit accepted decisions in place.
 
 ## Traps in this codebase
 
-These cost real time to find. Do not rediscover them. Other files cite a trap by its number, so a
-number is never reused: a trap that stops being true is deleted and leaves a gap.
+These cost real time to find. Do not rediscover them.
 
 ### 1. Deno workspace test discovery
 
@@ -151,6 +148,14 @@ reports ready against that one, tests connect, the temporary server shuts
 down, and everything fails with `ConnectionReset` at random. See the recipe
 below.
 
+### 4. `.git` is inside a Syncthing folder shared across several machines
+
+`.stignore` excludes only `node_modules` and `.volumes`. Absolute paths in
+worktree pointers do not survive the hop between machines, so a worktree can
+look missing or `prunable` when nothing is wrong - run `git worktree repair`
+rather than assuming lost work. Concurrent git operations on two machines can
+corrupt objects; prefer the remote as the sync channel.
+
 ### 5. `DbService.group` is constructed per access on purpose
 
 `begin()` derives
@@ -158,7 +163,6 @@ the transactional service with `Object.create(this)` and rebinds `sql`, so
 caching the repository would silently escape the transaction.
 
 ### 8. Accounts sign in with an e-mail address; older accounts keep their username (#139)
-
 
 Sign-up takes an address, normalised by `normalizeEmail`
 (`@spy4x/server/auth`), and stores it on the password key twice: as `subject`,
@@ -385,11 +389,10 @@ DB_HOST=127.0.0.1 DB_PORT="$PORT" DB_USER=tester DB_PASS="$PASS" DB_NAME=templat
 Compose, and so `deno task deploy`, applies migrations itself: the one-shot `migrate` service runs
 `deno task db:migrate` on every `up`, and the new API and worker start only after it exits with 0.
 There is no manual migration step in production. A failed migration fails `compose up` and leaves
-the new API and worker created but not started; fix the migration and deploy again. The old API and
-worker are replaced only after the migration has run (`compose up -d --build`, in
-`infra/scripts/deploy.ts`), so for as long as it runs the old code serves requests against the
-migrated database. A migration that drops or renames what the running code reads breaks those
-requests for that moment. A server that
+the new API and worker created but not started; fix the migration and deploy again. A deploy (`compose up -d --build`, in
+`infra/scripts/deploy.ts`) stops and removes the old API and worker before `migrate` runs, and
+starts the new ones only after it exits with 0, so the API is down for as long as the migration
+runs. Old code never runs against the migrated database. A server that
 still holds Postgres 16 data refuses to start until `deno task db:upgrade-18` has moved it:
 [postgres-18-upgrade.md](postgres-18-upgrade.md).
 
