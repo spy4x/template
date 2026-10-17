@@ -150,7 +150,7 @@ describe("SearchPalette", () => {
     await mount()
     expect(document.querySelector("[data-e2e=search-open]")).not.toBeNull()
 
-    for (const place of ["rail", "page"] as const) {
+    for (const place of ["rail", "sheet"] as const) {
       await act(() => render(null, root!))
       root!.remove()
       await mount({ place })

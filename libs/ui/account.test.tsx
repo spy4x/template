@@ -369,7 +369,7 @@ describe("AppFrame", () => {
     expect(chips.every((chip) => chip.closest("[aria-hidden=true]") !== null)).toBe(true)
   })
 
-  it("puts the search under the group switcher in the sidebar and the rail, and at the top of a phone's page, never in the Account sheet", async () => {
+  it("puts the search under the group switcher in the sidebar and the rail, and none above a phone's page", async () => {
     await mount(
       <AppFrame
         user={ada}
@@ -389,14 +389,54 @@ describe("AppFrame", () => {
       // The switcher comes first, then the search.
       expect(picker.compareDocumentPosition(trigger) & 4).toBe(4)
     }
+    // A signed-in page starts with its own header: the banner, then the page.
     const column = find("#page").parentElement!
-    const phoneRow = column.firstElementChild!
-    expect(phoneRow.querySelector("[data-e2e=stub-search-page]")).not.toBeNull()
-    expect(phoneRow.className).toContain("md:hidden")
-    expect(phoneRow.nextElementSibling?.id).toBe("banner")
+    expect(column.firstElementChild?.id).toBe("banner")
+    expect(column.querySelectorAll("[data-e2e^=stub-search]").length).toBe(0)
+  })
+
+  it("offers Search in the phone's Account sheet, which closes the sheet and then opens the sheet's palette", async () => {
+    const opened: string[] = []
+    await mount(
+      <AppFrame
+        user={ada}
+        onSignOut={() => {}}
+        search={(place) => (
+          <button
+            type="button"
+            data-e2e={`stub-search-${place}`}
+            onClick={() => {
+              // The palette opens only once the sheet has closed.
+              const sheet = document.querySelector<HTMLDialogElement>(
+                "[data-e2e=rail-shell-dialog]",
+              )
+              opened.push(`${place}, sheet ${sheet?.open ? "open" : "closed"}`)
+            }}
+          >
+            s
+          </button>
+        )}
+      >
+        <p id="page">page</p>
+      </AppFrame>,
+    )
+    const sheet = find<HTMLDialogElement>("dialog[data-e2e=rail-shell-dialog]")
+    const entry = find("[data-e2e=rail-shell-overlay-bottom] [data-e2e=shell-search-overlay]")
+    expect(entry.textContent?.trim()).toBe("Search")
+    expect(entry.className).toContain("min-h-11")
+    expect(find("[data-e2e=shell-search-sheet] [data-e2e=stub-search-sheet]")).not.toBe(null)
     expect(
       document.querySelectorAll("[data-e2e=rail-shell-overlay-top] [data-e2e^=stub-search]").length,
     ).toBe(0)
+
+    await act(() => sheet.showModal())
+    await act(async () => {
+      entry.dispatchEvent(new window.MouseEvent("click", { bubbles: true }) as unknown as Event)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+
+    expect(sheet.open).toBe(false)
+    expect(opened).toEqual(["sheet, sheet closed"])
   })
 
   it("draws the banner at the top of the page's own column on every page", async () => {

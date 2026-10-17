@@ -95,4 +95,49 @@ test.describe("search", () => {
       await cleanup(request, user)
     }
   })
+
+  test("on a phone, Search in the Account sheet opens the search, gives focus back to Account, and finds a note", async ({ browser, request }) => {
+    const user = "e2e_search_phone@example.com"
+    await cleanup(request, user)
+    const context = await browser.newContext({
+      baseURL: test.info().project.use.baseURL,
+      viewport: { width: 390, height: 844 },
+    })
+    try {
+      await signUp(request, user)
+      const page = await context.newPage()
+      await signIn(page, user, password)
+      const garden = await groupWithNote(
+        page,
+        "Side project",
+        "Garden notes",
+        "Tomatoes by the fence",
+      )
+      await openNotes(page, garden.groupId, "Garden notes")
+      const account = page.locator("[data-e2e=rail-shell-more]")
+      const sheet = page.locator("dialog[data-e2e=rail-shell-dialog]")
+      const phonePalette = page.locator("dialog[data-e2e=search-sheet]")
+      const phoneField = phonePalette.getByRole("combobox")
+      const chooseSearch = async () => {
+        await account.click()
+        await sheet.locator("[data-e2e=shell-search-overlay]").click()
+        await expect(sheet).toBeHidden()
+        await expect(phoneField).toBeFocused()
+      }
+
+      await chooseSearch()
+      await page.keyboard.press("Escape")
+      await expect(phonePalette).toBeHidden()
+      await expect(account).toBeFocused()
+
+      await chooseSearch()
+      await phoneField.fill("tomato")
+      await phonePalette.getByRole("option").filter({ hasText: "Garden notes" }).click()
+      await expect(page).toHaveURL(new RegExp(`/notes/${garden.noteId}$`))
+      await expect(page.locator("[data-e2e=note-title]")).toHaveValue("Garden notes")
+    } finally {
+      await context.close()
+      await cleanup(request, user)
+    }
+  })
 })

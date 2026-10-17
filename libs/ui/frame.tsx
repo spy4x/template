@@ -1,10 +1,12 @@
-import type { ComponentChildren, JSX } from "preact"
+import type { ComponentChildren, JSX, RefObject } from "preact"
+import { useRef } from "preact/hooks"
 import { canViewActivity } from "@domain/groups"
 import {
   IconAlertTriangle,
   IconBell,
   IconClock,
   IconDocumentText,
+  IconSearch,
   IconTag,
   IconUsers,
 } from "@spy4x/preact-icons"
@@ -302,9 +304,40 @@ function SearchEntry(
       placement="right"
       focusable={false}
       class="flex w-full justify-center px-1"
+      // Hidden while the palette is open, as a menu's tooltip is while its menu is open.
+      contentClass="group-has-[dialog[open]]:invisible!"
     >
       {search("rail")}
     </Tooltip>
+  )
+}
+
+/**
+ * "Search" in the phone's Account sheet. A phone has no column, and a signed-in page starts with
+ * its own header, so the sheet holds the search as it holds the rest. Choosing it closes the sheet,
+ * which returns focus to "Account", then opens the palette of the `"sheet"` place, whose own trigger
+ * is hidden; closing the palette returns focus to "Account" again.
+ */
+function SearchSheetEntry(
+  { palette }: { palette: RefObject<HTMLDivElement> },
+): JSX.Element {
+  const openPalette = () => palette.current?.querySelector<HTMLButtonElement>("button")?.click()
+  return (
+    <button
+      type="button"
+      class={SLOT_ROW}
+      data-e2e={placeHook("shell-search", "overlay")}
+      onClick={(event) => {
+        const sheet = event.currentTarget.closest("dialog")
+        if (!sheet?.open) return openPalette()
+        // After the sheet's own close handler, which focuses "Account".
+        sheet.addEventListener("close", openPalette, { once: true })
+        sheet.close()
+      }}
+    >
+      <IconSearch class="size-6 shrink-0" aria-hidden="true" />
+      <span class="min-w-0 flex-1 truncate text-left">Search</span>
+    </button>
   )
 }
 
@@ -313,14 +346,13 @@ function SearchEntry(
  * `RailShell`'s column, a labelled sidebar from `lg`, a 72 px icon rail from `md`, and a bottom tab
  * bar below that.
  *
- * - The top of the column is the group switcher, then the search trigger (`search`). A phone has
- *   no column, so its trigger is a field at the top of the page.
+ * - The top of the column is the group switcher, then the search trigger (`search`).
  * - The middle is the destinations ({@link navItems}).
  * - The bottom is the connection while it is not live, Notifications with its unread count, and the
  *   account menu (Profile, Theme, Sign out).
  *
  * On a phone the tab bar's last slot is "Account": the avatar with the unread count, opening a sheet
- * with the groups, Notifications and the account menu. The skip link jumps past the column into
+ * with the groups, Search, Notifications and the account menu. The skip link jumps past the column into
  * `<main>`.
  *
  * The connection has one live region, outside the column so it exists once; its text is always
@@ -382,8 +414,10 @@ export function AppFrame(
             {search && <SearchEntry search={search} place={place} />}
           </div>
         ))
+  const sheetPalette = useRef<HTMLDivElement>(null)
   const bottom = (place: RailShellSidebarPlace) => (
     <div class="flex flex-col gap-1">
+      {search && place === "overlay" && <SearchSheetEntry palette={sheetPalette} />}
       {connection && connectionIsNews(connection) && (
         <ConnectionChip status={connection} place={place} />
       )}
@@ -419,10 +453,10 @@ export function AppFrame(
         labels={{ more: "Account", moreDialog: "Account", counter: (count) => `${count} unread` }}
       >
         <Page class={wide ? "max-w-5xl py-6 sm:py-8" : "max-w-3xl py-6 sm:py-8"}>
-          {search && <div class="mb-4 md:hidden">{search("page")}</div>}
           {banner}
           {children}
         </Page>
+        {search && <div ref={sheetPalette} data-e2e="shell-search-sheet">{search("sheet")}</div>}
       </RailShell>
     </>
   )

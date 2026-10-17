@@ -64,11 +64,12 @@ export interface SearchPaletteProps {
 
 /**
  * Where `AppFrame` draws a search trigger: under the group switcher in the labelled sidebar (from
- * `lg`), in the 72 px icon rail (from `md`), or at the top of the page on a phone, which has no
- * column. The frame draws one per place and CSS shows the one that fits, so the hotkeys reach the
- * visible one only (a hidden trigger ignores them).
+ * `lg`), or in the 72 px icon rail (from `md`). A phone has no column, so its palette (`"sheet"`)
+ * has a hidden trigger, and the Account sheet's "Search" entry opens it. The frame draws one per
+ * place and CSS shows the one that fits, so the hotkeys reach the visible one only (a hidden
+ * trigger ignores them).
  */
-export type SearchPlace = "sidebar" | "rail" | "page"
+export type SearchPlace = "sidebar" | "rail" | "sheet"
 
 /**
  * The trigger's look per place, over the library's (an icon below `sm`, a field from `sm`).
@@ -76,14 +77,13 @@ export type SearchPlace = "sidebar" | "rail" | "page"
  *   and the hotkey hint as well, so the hint is left out; the hotkeys still work and the trigger
  *   still announces them.
  * - The rail: an icon the size of the rail's others, in a 44 px cell; its name is its tooltip.
- * - The page on a phone: a 44 px field the page's width with the words.
+ * - The sheet: no trigger of its own; the Account sheet's entry opens the palette.
  */
 const TRIGGER_CLASS: Record<SearchPlace, string> = {
   sidebar: "min-h-11 w-full min-w-0 whitespace-nowrap sm:w-full lg:w-full [&>span+span]:hidden",
   rail:
     "min-h-11 w-full justify-center rounded-md px-0 hover:bg-canvas sm:w-full sm:border-transparent sm:bg-transparent sm:px-0 sm:hover:border-transparent lg:w-full [&>span]:hidden [&>svg]:size-6",
-  page:
-    "min-h-11 w-full border-subtle bg-surface px-3 sm:w-full [&>span:first-of-type]:inline [&>span:first-of-type]:truncate",
+  sheet: "hidden",
 }
 
 /** The fewest characters a note search takes; one letter finds too much. The API holds the same. */
