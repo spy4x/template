@@ -262,7 +262,7 @@ export function App() {
     sessionState.value.isMfaRequired,
   ])
 
-  // Every date, time and number on every screen is written in the person's own settings.
+  // Every date and time on every screen is written in the person's own settings.
   return (
     <FormatContext.Provider value={preferencesState.format.value}>
       {!ready || !sessionState.value.isReady

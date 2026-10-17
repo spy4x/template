@@ -81,7 +81,7 @@ export function createPreferencesState(dependencies: PreferencesDependencies) {
     wasSaving = saving
   })
 
-  /** Every date, time and number on screen, in the person's settings. */
+  /** Every date and time on screen, in the person's settings. */
   const format = computed(() => createFormatters(store.value.value, { device: device.value }))
 
   /**
