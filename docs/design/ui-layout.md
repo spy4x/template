@@ -51,22 +51,23 @@ screens were redesigned against these rules in October 2026.
    header instead.
 8. **Mobile first.** Design the 375 px layout first; touch targets at least 44 px; nothing scrolls
    sideways. The desktop layout is the same content with more room, not a different screen.
-9. **Status only when it matters.** "Online" in the header and "WS: open" on the profile are debug
+9. **Status only when it matters.** "Online" in the chrome and "WS: open" on the profile are debug
    output. Show the connection only when it is not live (offline, reconnecting). Keep the
    `data-e2e="shell-ws-status"` element and its text for the e2e tests, visually hidden when online
    (a screen-reader-only span is fine: `toHaveText` reads text content).
 10. **Badges carry meaning.** A green "Selected" pill on the current group is noise; show the
     current group by the picker and by a quiet check mark, not a loud badge.
-11. **The header is the banner:** the brand (leading to Notes), the group switcher, then the bell
-    and the account menu on the right. It is passed through `RailShell`'s `header`, so it sits
-    outside `<main>` and the skip link jumps past it; it is never rendered inside `<main>`. The
-    group switcher is a button showing the current group that opens a short menu of checked items
-    (`DropdownItem checked`), not a text field. The account menu says who is signed in (name and
-    address), then Profile, Notifications, the theme (System, Light, Dark) and Sign out.
-12. **The rail holds the daily destinations,** at most five so the phone bar needs no "More": Notes,
-    Tags, Activity, Groups, Profile. Activity is the selected group's log and is left out when there
-    is no selected group or the person may not read its log. Notifications stay on the bell and in
-    the account menu.
+11. **No top bar; the sidebar is the chrome** (`RailShell` with no `header`). Its top slot holds
+    the group switcher, a button showing the current group that opens a short menu of checked
+    items (`DropdownItem checked`), not a text field. Its bottom slot holds the bell, then the
+    library `AccountMenu`: who is signed in (name and address), then Profile, Notifications, the
+    theme (System, Light, Dark) and Sign out. A signed-in app draws no brand mark. Admin uses the
+    same shell, with the mark and an "Admin" badge in the top slot.
+12. **The rail holds the daily destinations:** Notes, Tags, Activity, Groups, Profile. Activity is
+    the selected group's log and is left out when there is no selected group or the person may not
+    read its log. On a phone the bar shows the first four and its last slot, the person's avatar
+    with the unread count, opens a sheet with the rest, the switcher, the bell and a menu of the
+    theme and Sign out. Notifications stay on the bell and in the account menu.
 
 ## Spacing rhythm
 
