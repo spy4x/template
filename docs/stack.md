@@ -324,10 +324,10 @@ baked into the build; the container writes them to `/config.json` when it starts
 Docker Compose for both local development and single-node production. Scaling is
 vertical, through per-service resource limits.
 
-CI is Woodpecker. `.woodpecker/ci.yml` runs `deno task check`, the SPA build, the integration
-tests against a Postgres service and a smoke set of browser tests on every pull request, and every
-browser test on a push to `main`; see [woodpecker-ci-setup.md](woodpecker-ci-setup.md). A `v*` tag publishes the
-images (`.woodpecker/release.yml`). Deploys are not wired up (`.woodpecker/deploy.yml.example`).
+CI is Woodpecker: `.woodpecker/ci.yml` on every pull request, push to `main` and version tag. Its
+steps are listed once, in [woodpecker-ci-setup.md](woodpecker-ci-setup.md). A `v*` tag also
+publishes the images (`.woodpecker/release.yml`). Deploys are not wired up
+(`.woodpecker/deploy.yml.example`).
 
 ## Conventions worth keeping
 

@@ -516,7 +516,8 @@ one.
 #### Which browser tests CI runs
 
 A merge needs the pull-request check, so that check runs a smoke set; the whole suite runs after
-the merge.
+the merge. Every step of the pipeline, browser tests or not, is listed in
+[docs/woodpecker-ci-setup.md](docs/woodpecker-ci-setup.md).
 
 | When                    | Step        | Specs                                                      |
 | ----------------------- | ----------- | ---------------------------------------------------------- |
