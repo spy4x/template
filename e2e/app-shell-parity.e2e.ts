@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page } from "@playwright/test"
+import type { APIRequestContext, Locator, Page } from "@playwright/test"
 import { expect, test } from "./fixtures/stack.ts"
 import { signIn } from "./fixtures/app.ts"
 import { uuidV7 } from "@jsr/spy4x__platform/universal/uuid"
@@ -89,6 +89,84 @@ async function tops(page: Page): Promise<Tops> {
 }
 
 /**
+ * A colour as the pixel it paints, `r,g,b,a`, so one colour written two ways (`oklch(…)` and
+ * `oklab(…)`, as the browser may report the same token) compares equal.
+ */
+async function paint(page: Page, color: string): Promise<string> {
+  return await page.evaluate((value) => {
+    const context = document.createElement("canvas").getContext("2d")!
+    context.fillStyle = value
+    context.fillRect(0, 0, 1, 1)
+    return context.getImageData(0, 0, 1, 1).data.join(",")
+  }, color)
+}
+
+/** What makes a tooltip's bubble look like the rail's: its colours and the weight of its words. */
+async function bubbleStyle(bubble: Locator): Promise<Record<string, string>> {
+  const style = await bubble.evaluate((element) => {
+    const { backgroundColor, color, fontWeight, fontSize } = getComputedStyle(element)
+    return { backgroundColor, color, fontWeight, fontSize }
+  })
+  const page = bubble.page()
+  return {
+    background: await paint(page, style.backgroundColor),
+    color: await paint(page, style.color),
+    fontWeight: style.fontWeight,
+    fontSize: style.fontSize,
+  }
+}
+
+/** The keyboard focus ring a control draws while it has `:focus-visible`. */
+async function focusRing(control: Locator): Promise<Record<string, string>> {
+  // A key press first, so the next focus counts as keyboard focus and `:focus-visible` matches.
+  await control.page().keyboard.press("Shift")
+  await control.focus()
+  const ring = await control.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      focusVisible: String(element.matches(":focus-visible")),
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+      outlineColor: style.outlineColor,
+      outlineOffset: style.outlineOffset,
+    }
+  })
+  return { ...ring, outlineColor: await paint(control.page(), ring.outlineColor) }
+}
+
+/**
+ * The group switcher's tooltip and focus ring are the rail's own: the same bubble as a navigation
+ * cell's, held back for a moment when the pointer arrives, and the same ring on keyboard focus.
+ */
+async function expectSwitcherLikeRail(page: Page): Promise<void> {
+  const notes = page.locator(`[data-e2e="rail-shell-rail"] a[href="/notes"]`)
+  const picker = page.locator("[data-e2e=group-picker]")
+  const noteTip = page.locator("[data-e2e=rail-shell-rail] [data-e2e=rail-shell-tooltip]", {
+    hasText: "Notes",
+  }).locator("span")
+  // The switcher's tip says the group's name and the person's role there: `Home · Owner`.
+  const switcherTip = page.getByText(/ · Owner$/)
+
+  await notes.hover()
+  await expect(noteTip).toBeVisible()
+  const railBubble = await bubbleStyle(noteTip)
+
+  await page.mouse.move(700, 450)
+  await picker.hover()
+  await page.waitForTimeout(100)
+  // The rail waits 300 ms before it shows a tip under a resting pointer.
+  await expect(switcherTip).toBeHidden({ timeout: 1 })
+  await expect(switcherTip).toBeVisible()
+  expect(await bubbleStyle(switcherTip)).toEqual(railBubble)
+  await page.mouse.move(700, 450)
+
+  const railRing = await focusRing(notes)
+  expect(railRing.focusVisible).toBe("true")
+  expect(await focusRing(picker)).toEqual(railRing)
+  await page.locator("body").focus()
+}
+
+/**
  * Checks the 1440 px frame, then the 390 px one, on the page as it is, and returns where its column
  * and heading start at each width, so the two apps can be compared.
  */
@@ -115,7 +193,7 @@ async function expectSharedFrame(page: Page): Promise<{ wide: Tops; narrow: Tops
 }
 
 test.describe("one frame for the SPA and the admin", () => {
-  test("both draw a 72 px rail at the window's edge, 48 px cells and a centred page at the same height at 1440 px, and a tab bar at 390 px", async ({ browser, page, request }) => {
+  test("both draw a 72 px rail at the window's edge, 48 px cells and a centred page at the same height at 1440 px, and a tab bar at 390 px; the group switcher's tooltip and focus ring are the rail's", async ({ browser, page, request }) => {
     const email = `e2e-shell-${uuidV7().slice(-8)}@example.com`
     const admin = await browser.newContext({ baseURL: adminBase })
     try {
@@ -136,6 +214,7 @@ test.describe("one frame for the SPA and the admin", () => {
       await page.goto("/notes")
       await expect(page.locator("[data-e2e=rail-shell-column]")).toBeVisible()
       for (const target of TOUR_TARGETS) await expect(page.locator(target)).toHaveCount(1)
+      await expectSwitcherLikeRail(page)
       const product = await expectSharedFrame(page)
 
       const ops = await admin.newPage()
