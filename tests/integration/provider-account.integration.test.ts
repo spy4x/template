@@ -221,6 +221,7 @@ function browser({ app }: App) {
   return {
     get: (path: string) => send("GET", path),
     post: (path: string, body: unknown = {}) => send("POST", path, body),
+    delete: (path: string, body: unknown = {}) => send("DELETE", path, body),
     /** Goes to Google and comes back as the person `code` names; returns where it lands. */
     async throughGoogle(code: string): Promise<string> {
       const at = (await send("GET", "/auth/google/start")).headers.get("location")
@@ -523,6 +524,27 @@ Deno.test("an account with a password links a provider only with that password",
       .toBe("Invalid password")
     expect((await ada.post("/auth/methods/google/link", { password: NEW_PASSWORD })).status)
       .toBe(200)
+  })
+})
+
+Deno.test("a link and an unlink wait out the lock the account's wrong passwords set (#406)", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada } = await googleAccount(app)
+    expect((await ada.post("/auth/password/set", { newPassword: NEW_PASSWORD })).status).toBe(200)
+    for (let guess = 0; guess < 6; guess++) {
+      const wrong = await ada.post("/auth/totp/disconnect", { password: "Wr0ng-one!" })
+      expect(wrong.status).toBe(400)
+      await wrong.body?.cancel()
+    }
+
+    const link = await ada.post("/auth/methods/google/link", { password: NEW_PASSWORD })
+    expect(link.headers.get("retry-after")).toBe("60")
+    expect(await refusal(link, 429)).toBe("Too many wrong passwords. Try again in 1 minute.")
+    const google = (await methodsOf(ada)).methods.find((method) => method.kind === "google")!
+    const unlink = await ada.delete(`/auth/methods/${google.id}`, { password: NEW_PASSWORD })
+    expect(await refusal(unlink, 429)).toBe("Too many wrong passwords. Try again in 1 minute.")
+    expect((await methodsOf(ada)).methods.map((method) => method.kind)).toContain("google")
   })
 })
 
