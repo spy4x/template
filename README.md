@@ -62,7 +62,8 @@ you run.
 
 ## Quick start
 
-Requires [Deno](https://deno.com) 2 and Docker.
+Requires [Deno](https://deno.com) 2, Docker and the [GitHub CLI](https://cli.github.com) (or use
+GitHub's "Use this template" button and clone the result).
 
 ```sh
 gh repo create my-product --template spy4x/template --private --clone

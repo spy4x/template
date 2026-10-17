@@ -36,4 +36,6 @@ Pick the guide that fits. The [README](../README.md) has the pitch and the quick
   [ADR 002](decisions/002-realtime-transport-and-sync.md),
   [ADR 003](decisions/003-swappable-transport-and-local-data.md)
 - [UI and design](design/)
+- [Group sync product requirements](prd/group-sync-platform.md)
+- [Financy extraction inventory](financy-extraction-inventory.md)
 - [Screenshots](screenshots/): `record.ts` re-records the README's pictures.
