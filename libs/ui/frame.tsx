@@ -17,7 +17,7 @@ import {
 import { Avatar } from "@spy4x/preact-ui/avatar"
 import { Button } from "@spy4x/preact-ui/button"
 import { Page } from "@spy4x/preact-ui/layout"
-import { followLinkClick, Link } from "@spy4x/preact-ui/link"
+import { Link } from "@spy4x/preact-ui/link"
 import { Tooltip } from "@spy4x/preact-ui/tooltip"
 import {
   GroupPicker,
@@ -232,27 +232,6 @@ function ConnectionChip(
 }
 
 /**
- * Sends a plain click on a same-origin link inside it through the app's router. `AccountMenu`'s
- * items take no `navigate` port, so without this "Profile" would reload the app. The wrapper draws
- * no box (`display: contents`).
- */
-function RoutedLinks(
-  { navigate, children }: { navigate?: Navigate; children: ComponentChildren },
-): JSX.Element {
-  return (
-    <div
-      class="contents"
-      onClick={(event) => {
-        const href = (event.target as Element).closest?.("a[href]")?.getAttribute("href")
-        if (navigate && href) followLinkClick(event, { href, navigate })
-      }}
-    >
-      {children}
-    </div>
-  )
-}
-
-/**
  * The account entry: the library's `AccountMenu` with Profile, the theme and Sign out. The sidebar
  * and the sheet show the avatar, the name and the e-mail; the rail shows the avatar alone with its
  * name as a tooltip.
@@ -271,23 +250,22 @@ function AccountEntry(
   // A person known only by the address would read it twice.
   const email = user.email && user.email !== name ? user.email : undefined
   const menu = (
-    <RoutedLinks navigate={navigate}>
-      <AccountMenu
-        user={{ name, email }}
-        items={[{
-          label: "Profile",
-          href: SCREEN_PATHS.profile,
-          dataE2E: placeHook("shell-menu-profile", place),
-        }]}
-        theme={theme?.preference.value}
-        onThemeChange={theme && ((choice) => theme.set(choice))}
-        signOut={{ label: "Sign out", onClick: onSignOut, dataE2E: placeHook("signout", place) }}
-        display={place === "rail" ? "avatar" : "full"}
-        vertical={place === "overlay" ? "auto" : "up"}
-        dataE2E={placeHook("shell-user-menu-button", place)}
-        labels={{ trigger: label }}
-      />
-    </RoutedLinks>
+    <AccountMenu
+      user={{ name, email }}
+      items={[{
+        label: "Profile",
+        href: SCREEN_PATHS.profile,
+        dataE2E: placeHook("shell-menu-profile", place),
+      }]}
+      theme={theme?.preference.value}
+      onThemeChange={theme && ((choice) => theme.set(choice))}
+      signOut={{ label: "Sign out", onClick: onSignOut, dataE2E: placeHook("signout", place) }}
+      display={place === "rail" ? "avatar" : "full"}
+      vertical={place === "overlay" ? "auto" : "up"}
+      navigate={navigate}
+      dataE2E={placeHook("shell-user-menu-button", place)}
+      labels={{ trigger: label }}
+    />
   )
   if (place !== "rail") return menu
   return (

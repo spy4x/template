@@ -115,6 +115,7 @@ export function AdminShell(
       }}
       display={place === "rail" ? "avatar" : "full"}
       vertical={place === "overlay" ? "auto" : "up"}
+      navigate={navigate}
       dataE2E={placeHook("admin-operator", place)}
       labels={{ trigger: label }}
     />

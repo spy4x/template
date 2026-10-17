@@ -438,14 +438,20 @@ describe("AppFrame", () => {
     expect(signOut.calls).toHaveLength(2)
   })
 
-  it("opens Profile from the account menu through navigate, and leaves a Ctrl-click to the browser", async () => {
+  it("opens Profile from every copy of the account menu through navigate, and leaves a Ctrl-click to the browser", async () => {
     const navigate = spy<[string]>()
     await mount(<AppFrame user={ada} onSignOut={() => {}} navigate={navigate.fn}>page</AppFrame>)
 
     expect(find("[data-e2e=shell-menu-profile]").getAttribute("href")).toBe(SCREEN_PATHS.profile)
     expect(await click("[data-e2e=shell-menu-profile]")).toBe(true)
     expect(await click("[data-e2e=shell-menu-profile]", { ctrlKey: true })).toBe(false)
-    expect(navigate.calls).toEqual([[SCREEN_PATHS.profile]])
+    expect(await click("[data-e2e=shell-menu-profile-rail]")).toBe(true)
+    expect(await click("[data-e2e=shell-menu-profile-overlay]")).toBe(true)
+    expect(navigate.calls).toEqual([
+      [SCREEN_PATHS.profile],
+      [SCREEN_PATHS.profile],
+      [SCREEN_PATHS.profile],
+    ])
   })
 
   it("checks the current theme in the account menu and stores the one chosen", async () => {
