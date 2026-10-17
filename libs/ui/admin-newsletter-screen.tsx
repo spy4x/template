@@ -295,7 +295,7 @@ function SubscribersTab(props: AdminNewsletterScreenProps): JSX.Element {
         >
           {/* Keyed by the query, so the box shows the search the list was loaded with. */}
           <div key={filter.query} class="flex flex-wrap items-end gap-3" role="search">
-            <div class="min-w-0 flex-1 basis-60">
+            <div class="min-w-0 flex-1 basis-60 sm:max-w-md">
               <Field id="admin-newsletter-q" label="Address">
                 <Input
                   name="q"
@@ -374,12 +374,14 @@ function SubscribersTab(props: AdminNewsletterScreenProps): JSX.Element {
               empty={filtered
                 ? (
                   <EmptyState
+                    inset
                     title="Nobody matches"
                     description="Try another address, or clear the filters."
                   />
                 )
                 : (
                   <EmptyState
+                    inset
                     title="No subscribers yet"
                     description="Addresses show here once someone subscribes on the website."
                   />
@@ -493,6 +495,7 @@ function SendsTab(
         rowKey={(row) => row.issue}
         empty={
           <EmptyState
+            inset
             title="Nothing sent yet"
             description="An issue shows here once the send command starts mailing it."
           />
