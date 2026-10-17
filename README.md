@@ -258,7 +258,8 @@ name another): `SSH_TO_SERVER`, `PATH_ON_SERVER` and, when Deno is not on the se
 `DENO_ON_SERVER`. `infra/envs/.env.example` lists them with every other name. The copy replaces
 every server file that differs from your checkout, one edited on the server or newer there too, and
 deletes the ones your checkout no longer has; env files and the web push keys are never touched. So
-deploying an older commit is a full rollback of the code. It does not roll back the database.
+deploying an older commit is a full rollback of the code. It does not roll back the database or
+Valkey: before rolling back, read traps 10 and 11 in [docs/handoff.md](docs/handoff.md).
 
 **A server that ran Postgres 16 moves its data once.** The Compose file runs Postgres 18, which
 keeps its data in a directory of its own, so the first deploy of this version stops at "Starting
