@@ -25,6 +25,7 @@ import {
   EmailScreen,
   type EmailScreenProps,
   EmailUnavailable,
+  showsEmailBanner,
 } from "./email-screen.tsx"
 import { createFormatters } from "@spy4x/time/format"
 import { AppFrame, PublicFrame } from "./frame.tsx"
@@ -1597,5 +1598,12 @@ describe("EmailBanner", () => {
     const proven = { email: "ann@example.com", proven: true, pending: null }
     expect(renderToString(<EmailBanner status={proven} />)).toBe("")
     expect(renderToString(<EmailBanner status={null} />)).toBe("")
+  })
+
+  it("is said to show only while an address waits for its code, as it draws", () => {
+    const proven = { email: "ann@example.com", proven: true, pending: null }
+    expect(showsEmailBanner(emailDefaults.status)).toBe(true)
+    expect(showsEmailBanner(proven)).toBe(false)
+    expect(showsEmailBanner(null)).toBe(false)
   })
 })
