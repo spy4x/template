@@ -95,6 +95,8 @@ export async function seed(db: AppDbBase, options: SeedOptions): Promise<boolean
   // Sign-up answers `null` for a taken address and for a refused one alike, so "exists already"
   // is decided here, not from its answer.
   if (await db.authStore.findKey(PASSWORD_METHOD, DEMO_EMAIL)) {
+    // A demo user seeded before #411 has an unproven address; a rerun proves it.
+    await proveDemoAddress(db)
     await db.admin.setRoleByAddress(DEMO_EMAIL, UserRole.ADMIN, SEED_ACTOR)
     return false
   }
@@ -126,9 +128,19 @@ export async function seed(db: AppDbBase, options: SeedOptions): Promise<boolean
   }
 
   await db.sessionStore.signOutUser(userId, null)
+  await proveDemoAddress(db)
   await db.group.create({ id: uuidV7(), name: DEMO_GROUP_NAME }, userId)
   await db.admin.setRoleByAddress(DEMO_EMAIL, UserRole.ADMIN, SEED_ACTOR)
   return true
+}
+
+/**
+ * Marks the demo user's address proven, as a finished sign-up leaves it: an account with an
+ * unproven address cannot invite (#411). Does nothing when it is proven already.
+ */
+async function proveDemoAddress(db: AppDbBase): Promise<void> {
+  const key = await db.authStore.findKey(PASSWORD_METHOD, DEMO_EMAIL)
+  if (key && key.provenAt === null) await db.authStore.proveKey(key.id, new Date())
 }
 
 async function main(): Promise<void> {
