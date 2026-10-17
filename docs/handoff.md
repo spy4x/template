@@ -183,8 +183,8 @@ is stored, one per address, 30 minutes, with no practical cap on wrong guesses: 
 in the same step, so the raw code exists only in the mail. `POST
 /api/auth/password/reset` with `{ email, code, newPassword }` spends the code,
 marks the address proven, sets the password and signs out every session of
-the user; it signs nobody in. It also revokes every API token and drops a
-waiting address change. When the address was not proven before, it removes
+the user; it signs nobody in. It also revokes every API token, removes every
+push subscription (#409) and drops a waiting address change. When the address was not proven before, it removes
 the authenticator app and every sign-in method but the password as well
 ("A squatted address" below); an address proven before keeps them. Limits: the IP limit of the other anonymous auth
 routes, and 3 requests an hour per address (`ratelimit-reset` in Valkey,
@@ -320,8 +320,9 @@ are refused (the sixth sets the lock): no person sends that many.
 **A squatted address.** Anyone can still sign up first with someone else's
 address, but it stays unproven and cannot carry a second factor. A reset
 link proves the mailbox, so it gives the owner the account back: new
-password, address proven, every session signed out and every API token
-revoked, any authenticator app removed, and every other sign-in method
+password, address proven, every session signed out, every API token
+revoked, every push subscription removed (#409), so no browser keeps getting the
+account's notifications, any authenticator app removed, and every other sign-in method
 deleted (#404): each linked Google or GitHub account, and a code key for
 another address if the account holds one. Whoever linked them did so before
 anyone proved the address, so they would be a way back in. This happens only

@@ -70,3 +70,16 @@ export function createPushTokenStore(sql: Sql): PushTokenStore {
     },
   }
 }
+
+/**
+ * Marks every stored subscription of `userId` deleted, so no browser of the account gets its
+ * notifications any more. A password reset calls it inside its transaction (#409): whoever had
+ * the account before the owner took it back keeps no browser that the account pushes to. Other
+ * users' rows are never touched.
+ */
+export async function removeAllPushTokensOf(sql: Sql, userId: number): Promise<void> {
+  await sql`
+    UPDATE user_push_tokens
+    SET deleted_at = NOW(), updated_at = NOW()
+    WHERE deleted_at IS NULL AND user_id = ${userId}`
+}
