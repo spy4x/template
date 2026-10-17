@@ -435,7 +435,7 @@ function PersonCell(
   },
 ): JSX.Element {
   return (
-    <div class="flex w-44 min-w-0 flex-col gap-1 text-sm">
+    <div class="flex w-36 min-w-0 flex-col gap-1 text-sm">
       <PersonLink person={person} entry={entry} navigate={navigate} truncate />
       {address && person && person.email !== person.name && (
         <span class="truncate text-muted" title={person.email ?? undefined}>{person.email}</span>
