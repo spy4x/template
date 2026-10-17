@@ -20,7 +20,7 @@ import type {
   AdminBillingWaiting,
 } from "@ui/admin-billing-detail.tsx"
 import { billingDate } from "@ui/admin-billing-list.tsx"
-import { type AppFormat, appFormat } from "@ui/format.tsx"
+import { createFormatters, type Formatters } from "@spy4x/time/format"
 import type { AdminApiResult, AdminFetch } from "../../state.ts"
 
 /**
@@ -126,7 +126,7 @@ function actionRequest(
 function actionDone(
   action: AdminBillingAction,
   answer: AdminBillingActionResponse,
-  format: Pick<AppFormat, "date">,
+  format: Pick<Formatters, "date">,
 ): string {
   const { customer } = answer.detail
   const group = customer.groupName
@@ -164,7 +164,7 @@ export function createBillingState(
   request: AdminFetch,
   toasts: ToastStore,
   clock: BillingClock = SYSTEM_CLOCK,
-  format: () => Pick<AppFormat, "date"> = () => appFormat(),
+  format: () => Pick<Formatters, "date"> = () => createFormatters(),
 ) {
   const figures = signal<BillingFiguresState>({ figures: null, error: null })
   const list = signal<BillingListState>({ filter: null, list: null, pending: false, error: null })

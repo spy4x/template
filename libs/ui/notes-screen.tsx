@@ -18,7 +18,7 @@ import { PageAction, PageHeader } from "@spy4x/preact-ui/page-header"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import { NoteTags, TagChips, type TagRow } from "./tag-parts.tsx"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS, ScreenForm, TAG_PATHS } from "./progressive.tsx"
-import { When } from "./format.tsx"
+import { When } from "@spy4x/preact-ui/format"
 
 /**
  * Where focus goes once the list changes: after the row of note `id` (at `index`) leaves, the row

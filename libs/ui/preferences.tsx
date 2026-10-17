@@ -11,10 +11,11 @@ import { Modal } from "@spy4x/preact-ui/modal"
 import { Notice } from "@spy4x/preact-ui/notice"
 import { TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
 import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-row"
+import { useFormat, When } from "@spy4x/preact-ui/format"
+import { createFormatters, regionHourCycle } from "@spy4x/time/format"
 import { type LocaleOption, localeOptions } from "@spy4x/time/locale"
-import { timeZoneOptions, zoneCity, zoneOffsetLabel } from "@spy4x/time/tz"
+import { timeZoneOptions, zoneCity, zoneLabel, zoneOffsetLabel } from "@spy4x/time/tz"
 import type { AdminUserPreferences, Preferences, ThemePreference } from "@domain/identity"
-import { appFormat, regionHourCycle, useFormat, When } from "./format.tsx"
 import { ScreenForm } from "./progressive.tsx"
 
 /** The fields the "Language and region" dialog edits; the theme changes from its own menu. */
@@ -89,14 +90,6 @@ function regions(): LocaleOption[] {
 /** A region format's English name, `German (Germany)`, or the tag when the list lacks it. */
 export function regionName(locale: string): string {
   return regions().find((option) => option.value === locale)?.name ?? locale
-}
-
-/** A zone as a person reads it: `Berlin, Europe · GMT+2`, with the offset it has at `at`. */
-export function zoneLabel(zone: string, at: Date): string {
-  const slash = zone.indexOf(`/`)
-  const area = slash === -1 ? `` : zone.slice(0, slash).replaceAll(`_`, ` `)
-  const offset = zoneOffsetLabel(zone, at, `GMT`)
-  return area ? `${zoneCity(zone)}, ${area} · ${offset}` : `${zoneCity(zone)} · ${offset}`
 }
 
 /** A clock as a person reads it. */
@@ -403,7 +396,7 @@ function RegionDialog(
     setDraft({ ...draft, ...patch })
   }
   const resolvedClock = clockLabel(regionHourCycle(draft.locale ?? device.locale))
-  const example = appFormat(draft, { device }).dateTime(now, `full`)
+  const example = createFormatters(draft, { device }).dateTime(now, `full`)
 
   return (
     <Modal
@@ -549,7 +542,7 @@ export function AdminPreferencesGroup(
   const { value, firstTimeZone } = preferences
   const zone = value.timeZone ?? firstTimeZone
   const localTime = zone
-    ? appFormat({ locale: format.locale, timeZone: zone, hourCycle: format.hourCycle })
+    ? createFormatters({ locale: format.locale, timeZone: zone, hourCycle: format.hourCycle })
       .time(now)
     : null
   const zoneText = value.timeZone !== null

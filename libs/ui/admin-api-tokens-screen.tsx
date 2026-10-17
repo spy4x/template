@@ -23,7 +23,7 @@ import {
 import { ADMIN_PATHS } from "./admin-frame.tsx"
 import { adminUserName } from "./admin-users-screen.tsx"
 import type { Navigate } from "./progressive.tsx"
-import { OnDay, When } from "./format.tsx"
+import { OnDay, When } from "@spy4x/preact-ui/format"
 
 /** The page's address in the admin app. */
 export const ADMIN_API_TOKENS_PATH = "/api-tokens"

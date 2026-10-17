@@ -23,7 +23,7 @@ import {
   type AdminSystemJobKind,
   type AdminSystemSnapshot,
 } from "@domain/identity"
-import { When } from "./format.tsx"
+import { When } from "@spy4x/preact-ui/format"
 
 const NUMBER = new Intl.NumberFormat("en")
 

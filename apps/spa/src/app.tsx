@@ -57,7 +57,7 @@ import { AppShell, PublicFrame } from "./views/AppShell.tsx"
 import { signInRedirect } from "./views/sign-in-gate.ts"
 import { SPA_ROUTE_PATHS, type SpaRoutePath } from "./views/spa-paths.ts"
 import { NOTE_PATHS, SCREEN_PATHS } from "@ui/progressive.tsx"
-import { FormatContext } from "@ui/format.tsx"
+import { FormatContext } from "@spy4x/preact-ui/format"
 
 /**
  * An old `/groups/:groupId/notes…` link. It selects nothing: a link must not change the selection,

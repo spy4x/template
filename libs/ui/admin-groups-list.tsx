@@ -28,7 +28,7 @@ import {
 import { GroupMark } from "./group-appearance.tsx"
 import { nextSort } from "./admin-users-screen.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
-import { OnDay, When } from "./format.tsx"
+import { OnDay, When } from "@spy4x/preact-ui/format"
 
 /** The groups module's pages in the admin app. */
 export const ADMIN_GROUP_PATHS = {

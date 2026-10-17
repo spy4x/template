@@ -14,7 +14,7 @@ import { useFocusAfterRemoval } from "@spy4x/preact-ui/use-focus-after-removal"
 import { MoreMenu } from "@spy4x/preact-ui/page-header"
 import { PlanRefusalNotice } from "./plan-refusal.tsx"
 import type { Navigate } from "./progressive.tsx"
-import { When } from "./format.tsx"
+import { When } from "@spy4x/preact-ui/format"
 
 /** One member of a group as the members section shows them. */
 export interface GroupMemberRow {

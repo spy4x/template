@@ -6,9 +6,8 @@ import type {
   StoredSettings,
   VersionedSettings,
 } from "@spy4x/platform/universal/settings"
-import { type DeviceFormat, deviceFormat } from "@spy4x/time/format"
+import { createFormatters, type DeviceFormat, deviceFormat } from "@spy4x/time/format"
 import { type Preferences, preferencesDefinition } from "@domain/identity"
-import { appFormat } from "@ui/format.tsx"
 import { callCommand, callQuery } from "../modules.ts"
 import { themeStore } from "./theme.ts"
 
@@ -83,7 +82,7 @@ export function createPreferencesState(dependencies: PreferencesDependencies) {
   })
 
   /** Every date, time and number on screen, in the person's settings. */
-  const format = computed(() => appFormat(store.value.value, { device: device.value }))
+  const format = computed(() => createFormatters(store.value.value, { device: device.value }))
 
   /**
    * This device's zone when the person pinned another one and has not chosen to keep it: the Time

@@ -8,7 +8,7 @@ import { Link } from "@spy4x/preact-ui/link"
 import { type ActivityEvent, describeActivity } from "@domain/groups"
 import { PageHeader } from "@spy4x/preact-ui/page-header"
 import { type Navigate, NOTE_PATHS, SCREEN_PATHS } from "./progressive.tsx"
-import { When } from "./format.tsx"
+import { When } from "@spy4x/preact-ui/format"
 
 /** One event as the API sends it: `at` is an ISO timestamp. */
 export type ActivityRow = Omit<ActivityEvent, "at"> & { at: string }

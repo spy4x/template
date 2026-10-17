@@ -1,11 +1,12 @@
 /// <reference lib="deno.ns" />
 /**
- * Every date and time the apps and `libs/ui` show goes through the one formatter in
- * `libs/ui/format.tsx` (#163), so it follows the person's region format, time zone and clock. A
- * direct `toLocaleString()`, `toLocaleDateString()`, `toLocaleTimeString()` or
+ * Every date and time the apps and `libs/ui` show goes through the one formatter (#163): ts-libs
+ * `createFormatters` (`@spy4x/time/format`), handed to the screens by preact-components'
+ * `FormatContext` (`@spy4x/preact-ui/format`). It follows the person's region format, time zone and
+ * clock. A direct `toLocaleString()`, `toLocaleDateString()`, `toLocaleTimeString()` or
  * `new Intl.DateTimeFormat` ignores them and shows the device's instead. This test walks `apps/`
- * and `libs/ui/` and fails on any of those calls outside the formatter. Tests may call them, to
- * work out what a screen should show.
+ * and `libs/ui/` and fails on any of those calls. Tests may call them, to work out what a screen
+ * should show.
  */
 
 import { expect } from "@std/expect"
@@ -16,9 +17,6 @@ const ROOT = fromFileUrl(new URL("../", import.meta.url))
 
 /** The calls that format a date or a time on their own (`toLocaleString()` too, on any value). */
 export const FORBIDDEN = /\.toLocale(?:Date|Time)?String\s*\(|\bIntl\.DateTimeFormat\s*\(/
-
-/** The one file that may make them: the formatter itself. */
-const ALLOWED: ReadonlySet<string> = new Set([`libs/ui/format.tsx`])
 
 /** Built or installed code, which no person writes. */
 const SKIPPED = [/[\\/]node_modules[\\/]/, /[\\/]dist[\\/]/, /[\\/]_fresh[\\/]/, /[\\/]\.vite[\\/]/]
@@ -43,7 +41,7 @@ Deno.test(`directCalls finds each call that bypasses the formatter`, () => {
   expect(directCalls(`format.date(at)`)).toEqual([])
 })
 
-Deno.test(`no screen formats a date or a time outside libs/ui/format.tsx`, async () => {
+Deno.test(`no screen formats a date or a time on its own`, async () => {
   const seen: string[] = []
   const found: string[] = []
   for (const directory of [`apps`, `libs/ui`]) {
@@ -53,7 +51,7 @@ Deno.test(`no screen formats a date or a time outside libs/ui/format.tsx`, async
       if (!entry.isFile) continue
       const path = relative(ROOT, entry.path).replaceAll(`\\`, `/`)
       seen.push(path)
-      if (ALLOWED.has(path) || /\.test\.tsx?$/.test(path)) continue
+      if (/\.test\.tsx?$/.test(path)) continue
       for (const call of directCalls(await Deno.readTextFile(entry.path))) {
         found.push(`${path}:${call}`)
       }
@@ -61,6 +59,6 @@ Deno.test(`no screen formats a date or a time outside libs/ui/format.tsx`, async
   }
   // An empty walk would pass silently, so require files the apps cannot lose.
   expect(seen).toContain(`apps/spa/src/app.tsx`)
-  expect(seen).toContain(`libs/ui/format.tsx`)
+  expect(seen).toContain(`libs/ui/notes-screen.tsx`)
   expect(found).toEqual([])
 })

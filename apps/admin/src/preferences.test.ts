@@ -1,6 +1,6 @@
 import { expect } from "@std/expect"
 import { it } from "@std/testing/bdd"
-import { appFormat } from "@ui/format.tsx"
+import { createFormatters } from "@spy4x/time/format"
 import { createOperatorFormat, OWN_PREFERENCES_PATH } from "./preferences.ts"
 import type { AdminApiResult, AdminFetch } from "./state.ts"
 
@@ -35,7 +35,7 @@ it(`writes every date in the operator's own zone once their preferences load`, a
 })
 
 it(`keeps the device's format when the read fails, and goes back to it on sign-out`, async () => {
-  const device = appFormat().timeZone
+  const device = createFormatters().timeZone
   const failing = createOperatorFormat(api(() => Promise.reject(new Error(`offline`))).request)
   await failing.load()
   expect(failing.format.value.timeZone).toBe(device)
@@ -56,5 +56,5 @@ it(`drops an answer that arrives after the operator signed out`, async () => {
   answer({ ok: true, status: 200, data: tokyo })
   await loading
 
-  expect(own.format.value.timeZone).toBe(appFormat().timeZone)
+  expect(own.format.value.timeZone).toBe(createFormatters().timeZone)
 })

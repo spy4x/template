@@ -18,7 +18,8 @@ import { TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
 import { GROUP_PATHS, type Navigate, SCREEN_PATHS, ScreenForm } from "./progressive.tsx"
 import { type ProviderProof, ProviderProofNotice } from "./provider-proof.tsx"
 import { SettingRow } from "@spy4x/preact-ui/setting-row"
-import { type AppFormat, useFormat } from "./format.tsx"
+import { useFormat } from "@spy4x/preact-ui/format"
+import type { Formatters } from "@spy4x/time/format"
 
 /** What the person has typed into the deletion dialog. */
 export interface AccountDeleteValues {
@@ -39,7 +40,7 @@ export interface AccountDeleteErrors {
  */
 export function blockerHint(
   blocker: AccountDeletionBlocker,
-  format: Pick<AppFormat, "date">,
+  format: Pick<Formatters, "date">,
 ): string {
   switch (blocker.reason) {
     case AccountDeletionBlockReason.Members:

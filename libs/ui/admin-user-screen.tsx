@@ -28,7 +28,7 @@ import { ADMIN_PATHS } from "./admin-frame.tsx"
 import { BILLING_AUDIT_LABELS } from "./admin-billing-list.tsx"
 import { adminUserName, adminUserSubtitle, roleColor, roleLabel } from "./admin-users-screen.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
-import { When } from "./format.tsx"
+import { When } from "@spy4x/preact-ui/format"
 import { AdminPreferencesGroup } from "./preferences.tsx"
 
 /** What an operator can do to a person; each is confirmed in a dialog first. */

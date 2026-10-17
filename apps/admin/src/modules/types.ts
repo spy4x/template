@@ -2,7 +2,7 @@ import type { ComponentChildren, ComponentType } from "preact"
 import type { IconProps } from "@spy4x/preact-icons"
 import type { ToastStore } from "@spy4x/preact-signals/toast"
 import type { User } from "@domain/identity"
-import type { AppFormat } from "@ui/format.tsx"
+import type { Formatters } from "@spy4x/time/format"
 import type { AdminFetch } from "../state.ts"
 
 /**
@@ -19,7 +19,7 @@ export interface AdminContext {
   /** Every module's tabs for the person page, in registry order (`registry.ts`). */
   personTabs: readonly AdminPersonTab[]
   /** The operator's own formatter: their region format, time zone and clock (#163). */
-  format(): AppFormat
+  format(): Formatters
 }
 
 /** One page of a module: a wouter path pattern and the view that fills the frame there. */

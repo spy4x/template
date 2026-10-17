@@ -37,7 +37,8 @@ import {
 } from "@domain/billing"
 import { adminGroupPersonName } from "./admin-groups-list.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
-import { type AppFormat, useFormat, When } from "./format.tsx"
+import { useFormat, When } from "@spy4x/preact-ui/format"
+import type { Formatters } from "@spy4x/time/format"
 
 /** The billing module's pages in the admin app. */
 export const ADMIN_BILLING_PATHS = {
@@ -77,7 +78,7 @@ const STATUS_CHIPS: { value: AdminBillingStatusFilter; label: string }[] = [
 const NUMBER = new Intl.NumberFormat(`en`)
 
 /** A date as the admin shows it, in the operator's format: `23 Oct 2026` or `Oct 23, 2026`. */
-export function billingDate(at: string, format: Pick<AppFormat, "date">): string {
+export function billingDate(at: string, format: Pick<Formatters, "date">): string {
   return format.date(at)
 }
 
@@ -111,7 +112,7 @@ export function billingStatusBadge(
 /** The key date beside the status word: `Plan kept until Oct 23, 2026`, or `""` for none. */
 export function billingDatePhrase(
   view: AdminBillingStatusView,
-  format: Pick<AppFormat, "date">,
+  format: Pick<Formatters, "date">,
 ): string {
   if (view.date === null) return ``
   const day = billingDate(view.date.at, format)
@@ -512,7 +513,7 @@ interface CustomerRow {
 const NO_SORT: [] = []
 
 /** When the customer is charged next: the renewal, or the end of a trial; `None` otherwise. */
-function nextCharge(view: AdminBillingStatusView, format: Pick<AppFormat, "date">): string {
+function nextCharge(view: AdminBillingStatusView, format: Pick<Formatters, "date">): string {
   return view.date?.kind === `renews` || view.date?.kind === `trial_ends`
     ? billingDate(view.date.at, format)
     : `None`
@@ -522,7 +523,7 @@ function nextCharge(view: AdminBillingStatusView, format: Pick<AppFormat, "date"
 function customerColumns(
   now: Date,
   graceDays: number,
-  format: Pick<AppFormat, "date">,
+  format: Pick<Formatters, "date">,
   navigate?: Navigate,
 ): DataTableColumn<CustomerRow, "customer">[] {
   return [

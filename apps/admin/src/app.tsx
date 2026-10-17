@@ -17,7 +17,7 @@ import {
 import { type AdminStore, hasAdminAccess, operatorName } from "./state.ts"
 import { ADMIN_MODULES, adminPersonTabs } from "./modules/registry.ts"
 import type { AdminContext, AdminModule } from "./modules/types.ts"
-import { FormatContext } from "@ui/format.tsx"
+import { FormatContext } from "@spy4x/preact-ui/format"
 import { createOperatorFormat, type OperatorFormat } from "./preferences.ts"
 
 export interface AppProps {

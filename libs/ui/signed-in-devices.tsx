@@ -8,7 +8,7 @@ import { SavedCopyNotice } from "@spy4x/preact-system/saved-copy-notice"
 import type { SignedInDevice } from "@domain/identity"
 import { TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
 import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-row"
-import { When } from "./format.tsx"
+import { When } from "@spy4x/preact-ui/format"
 
 /** The message shown when ending a session failed without a message of its own. */
 export const SESSIONS_FAILURE = "Signing that device out failed"

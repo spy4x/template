@@ -25,7 +25,7 @@ import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-
 import { SignedInDevices, type SignedInDevicesProps } from "./signed-in-devices.tsx"
 import { signInMethodName, SignInMethods, type SignInMethodsProps } from "./sign-in-methods.tsx"
 import { ApiTokens, type ApiTokensProps } from "./api-tokens.tsx"
-import { useFormat } from "./format.tsx"
+import { useFormat } from "@spy4x/preact-ui/format"
 import { PreferencesGroup, type PreferencesGroupProps } from "./preferences.tsx"
 import { useSucceeded } from "@spy4x/preact-ui/use-succeeded"
 import { ProviderProofNotice, providerProofOf } from "./provider-proof.tsx"

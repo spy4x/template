@@ -45,7 +45,8 @@ import {
   money,
   perMonth,
 } from "./admin-billing-list.tsx"
-import { type AppFormat, useFormat } from "./format.tsx"
+import { useFormat } from "@spy4x/preact-ui/format"
+import type { Formatters } from "@spy4x/time/format"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
 
 /** The signed-in operator, as far as the page needs them. */
@@ -420,7 +421,7 @@ function paymentAmount(payment: Pick<AdminBillingPayment, "amount" | "currency">
 /** What the operator did, as the history names it. */
 export function historyTitle(
   entry: AdminBillingHistoryEntry,
-  format: Pick<AppFormat, "date">,
+  format: Pick<Formatters, "date">,
 ): string {
   switch (entry.event) {
     case BILLING_AUDIT_EVENTS.paymentRefunded:

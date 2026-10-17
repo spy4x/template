@@ -9,7 +9,7 @@ import { followLinkClick } from "@spy4x/preact-ui/link"
 import { describeNotification, type Notification } from "@domain/notifications"
 import { PageHeader } from "@spy4x/preact-ui/page-header"
 import type { Navigate } from "./progressive.tsx"
-import { When } from "./format.tsx"
+import { When } from "@spy4x/preact-ui/format"
 
 /** One notification as the API sends it: the times are ISO timestamps, `readAt` is `null` unread. */
 export type NotificationRow =

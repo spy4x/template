@@ -9,7 +9,8 @@ import { Window } from "happy-dom"
 import { render, type VNode } from "preact"
 import { act } from "preact/test-utils"
 import { DEFAULT_PREFERENCES, type Preferences } from "@domain/identity"
-import { appFormat, FormatContext } from "./format.tsx"
+import { FormatContext } from "@spy4x/preact-ui/format"
+import { createFormatters } from "@spy4x/time/format"
 import {
   AdminPreferencesGroup,
   PreferencesGroup,
@@ -89,7 +90,7 @@ function group(overrides: Partial<PreferencesGroupProps> = {}) {
     onCloseDialog: () => calls.push([`close`]),
     ...overrides,
   }
-  const format = appFormat(props.value, { device: props.device })
+  const format = createFormatters(props.value, { device: props.device })
   const node = (
     <FormatContext.Provider value={format}>
       <PreferencesGroup {...props} />
@@ -252,7 +253,7 @@ describe(`PreferencesGroup`, () => {
 describe(`AdminPreferencesGroup`, () => {
   it(`shows a person's preferences read-only, with their local time now`, async () => {
     await mount(
-      <FormatContext.Provider value={appFormat({ locale: `en-GB`, timeZone: `UTC` })}>
+      <FormatContext.Provider value={createFormatters({ locale: `en-GB`, timeZone: `UTC` })}>
         <AdminPreferencesGroup
           now={NOW}
           preferences={{

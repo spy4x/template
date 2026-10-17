@@ -13,7 +13,7 @@ import {
   type AdminStatChange,
   type AdminStats,
 } from "@domain/identity"
-import { useFormat } from "./format.tsx"
+import { useFormat } from "@spy4x/preact-ui/format"
 
 const NUMBER = new Intl.NumberFormat("en")
 

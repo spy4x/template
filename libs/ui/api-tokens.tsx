@@ -12,7 +12,7 @@ import { type ApiToken, ApiTokenAccess } from "@domain/api-tokens"
 import { TOUCH_TARGET } from "@spy4x/preact-ui/page-header"
 import { API_TOKEN_PATHS, type Navigate } from "./progressive.tsx"
 import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-row"
-import { useFormat, When } from "./format.tsx"
+import { useFormat, When } from "@spy4x/preact-ui/format"
 
 export interface ApiTokensProps {
   /** Live tokens, newest first; `null` while the list is not known yet. */

@@ -30,7 +30,7 @@ import type {
 } from "@domain/subscribers"
 import { changeText, changeTone, countAxisTop } from "./admin-dashboard-screen.tsx"
 import { ScreenForm } from "./progressive.tsx"
-import { OnDay, useFormat, When } from "./format.tsx"
+import { OnDay, useFormat, When } from "@spy4x/preact-ui/format"
 
 const NUMBER = new Intl.NumberFormat("en")
 

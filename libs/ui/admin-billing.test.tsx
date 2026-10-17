@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd"
 import { Window } from "happy-dom"
 import { render, type VNode } from "preact"
 import { act } from "preact/test-utils"
-import { appFormat } from "./format.tsx"
+import { createFormatters } from "@spy4x/time/format"
 import {
   ADMIN_BILLING_NO_FILTER,
   type AdminBillingCustomer,
@@ -32,7 +32,7 @@ import {
 } from "./admin-billing-detail.tsx"
 
 /** A day as the screens write it on this device: the default formatter, with no person's settings. */
-const day = (at: string) => appFormat().date(at)
+const day = (at: string) => createFormatters().date(at)
 
 const window = new Window({ url: `http://admin.localhost/` })
 const own = {

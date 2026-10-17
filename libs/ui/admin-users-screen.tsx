@@ -27,7 +27,7 @@ import {
 } from "@domain/identity"
 import { ADMIN_PATHS } from "./admin-frame.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
-import { OnDay, When } from "./format.tsx"
+import { OnDay, When } from "@spy4x/preact-ui/format"
 
 const ROLE_CHIPS = [UserRole.VIEWER, UserRole.OPERATOR, UserRole.SUPERVISOR, UserRole.ADMIN].map(
   (role) => ({ value: String(role), label: roleLabel(role) }),

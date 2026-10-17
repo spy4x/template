@@ -38,7 +38,7 @@ import {
 import { roleColor, roleLabel } from "./admin-users-screen.tsx"
 import { GroupMark } from "./group-appearance.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
-import { useFormat, When } from "./format.tsx"
+import { useFormat, When } from "@spy4x/preact-ui/format"
 
 /** The signed-in operator, as far as the page needs them. */
 export interface AdminGroupOperatorView {
