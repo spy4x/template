@@ -25,9 +25,11 @@ import {
 import { offlineNotes as notesOverLayer } from "./offline/notes-collection.ts"
 import { offlineTags as tagsOverLayer } from "./offline/tags-collection.ts"
 import { OfflineStatus as OfflineStatusLine } from "./offline/OfflineStatus.tsx"
+import { type QueueDatabases, refusedMessage, sendQueueOnce } from "./offline/send-once.ts"
 import type { RuntimeConfig } from "./runtime-config.ts"
 import { canCallAs, createAppCallPort } from "./state/realtime-call.ts"
 import type { SessionState, SessionUser } from "./state/session.ts"
+import { toasts } from "./state/toasts.ts"
 
 /**
  * The composition root (ADR 003): the one file that imports the WebSocket module
@@ -151,6 +153,8 @@ export interface StartOptions {
   pollIntervalMs?: number
   /** Where the local-data module keeps its data. Defaults to IndexedDB; a test passes memory. */
   storage?: OfflineStorage
+  /** The device's database list, for the queue left while the module is off. A test passes one. */
+  databases?: QueueDatabases
 }
 
 /**
@@ -190,6 +194,7 @@ export function startModules(userId: number, reads: ChangeReads, options: StartO
     stopEvents: () => {},
   }
   session = opened
+  let stopQueue = () => {}
   if (switches.offline) {
     const start = () => {
       startOfflineLayer(userId, offlineTransportFor(userId, port), options.storage)
@@ -205,8 +210,10 @@ export function startModules(userId: number, reads: ChangeReads, options: StartO
     }
   } else {
     // What the module kept before it was switched off is deleted; nothing is opened on a device
-    // that holds no trace of it.
+    // that holds no trace of it. A queue of unsent writes is the person's work: it is sent once,
+    // then deleted.
     void forgetUser(options.storage)
+    stopQueue = sendLeftQueue(opened, options)
   }
   // The runner runs on these events too; marking the run first makes it the pull, not the check.
   // A hidden tab reads nothing, and an open socket brings the page up to date itself.
@@ -219,6 +226,7 @@ export function startModules(userId: number, reads: ChangeReads, options: StartO
   addEventListener("online", wake)
   document.addEventListener("visibilitychange", wake)
   opened.stopEvents = () => {
+    stopQueue()
     removeEventListener("online", wake)
     stopNetwork()
     document.removeEventListener("visibilitychange", wake)
@@ -236,6 +244,45 @@ export function startModules(userId: number, reads: ChangeReads, options: StartO
   if (switches.realtime) connectRealtime(userId, reads.pull, (open) => poll(!open))
   // The first run is the start-up pull.
   poll(true)
+}
+
+/**
+ * The queue an earlier visit left while the local-data module is now off: sent once, at the start
+ * and again whenever the browser comes back online, until the device holds none. Writes the server
+ * refused are dropped, and one warning that stays until dismissed names them. Returns the way to
+ * stop trying.
+ */
+function sendLeftQueue(opened: Session, options: StartOptions): () => void {
+  let done = false
+  let running = false
+  const run = async () => {
+    if (done || running || session !== opened) return
+    running = true
+    try {
+      const result = await sendQueueOnce({
+        userId: opened.userId,
+        transport: offlineTransportFor(opened.userId, opened.port),
+        storage: options.storage,
+        databases: options.databases,
+      })
+      done = result.done
+      if (result.refused.length > 0) {
+        toasts.warning({
+          body: refusedMessage(result.refused),
+          duration: 0,
+          dataE2E: "offline-queue-refused",
+        })
+      }
+    } catch (error) {
+      // The queue stays on the device; the next start or reconnect tries again.
+      console.warn("The offline queue could not be sent. The next start tries again.", error)
+    } finally {
+      running = false
+    }
+  }
+  addEventListener("online", run)
+  void run()
+  return () => removeEventListener("online", run)
 }
 
 /**
