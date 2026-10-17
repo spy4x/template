@@ -331,6 +331,21 @@ describe("audit log screen", () => {
     expect(address.getAttribute("title")).toBe("ada@example.com")
   })
 
+  it("fits the detail in a narrow column on two lines, the whole detail in its tooltip", async () => {
+    const token = "01a1486e-38d4-74c2-a049-94b2bdd90d1d group=01a1486e-35ed access=write name=CI"
+    const created = { ...signedIn, key: "account-5", identifier: token }
+    await mount(<AdminAuditScreen {...props([], { entries: [created] })} />)
+    const detail = find("[data-e2e=admin-audit-detail]")
+    const text = detail.firstElementChild!
+
+    expect(detail.className).toContain("sm:w-28")
+    expect(text.textContent).toBe(token)
+    expect(text.className).toContain("line-clamp-2")
+    expect(text.getAttribute("title")).toBe(token)
+    const table = find("[data-e2e=admin-audit-table]").firstElementChild!
+    expect(table.className.split(" ")).toContain("[&_:is(th,td)]:px-3")
+  })
+
   it("tells an empty log from a filter that matches nothing, without a dashed box", async () => {
     await mount(<AdminAuditScreen {...props([], { entries: [] })} />)
     expect(find("[data-e2e=admin-audit-empty]").textContent).toContain("Nothing recorded yet")
