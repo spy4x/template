@@ -139,7 +139,7 @@ describe("watchUnsent", () => {
   it("says offline while the browser has no network, and sending again once it is back", () => {
     const { layer } = layerWith([noteEntry("n-1", "pending")])
     const online = signal(false)
-    const wait = watchUnsent({ layer, online, canSend: () => online.value })
+    const wait = watchUnsent({ layer, online, canSend: () => true })
 
     wait.send()
     const offline = wait.view.value.state

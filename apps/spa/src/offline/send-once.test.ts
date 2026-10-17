@@ -91,7 +91,7 @@ describe("sendQueueOnce", () => {
     expect([result, opened, sent]).toEqual([{ done: true, refused: [] }, 0, []])
   })
 
-  it("sends every queued write in order, then deletes the queue's database", async () => {
+  it("sends every queued write, then deletes the queue's database", async () => {
     const storage = createMemoryStorage()
     await storage.of(7).queue.putEntry(edit("n-1", "First"))
     await storage.of(7).queue.putEntry(edit("n-2", "Second"))
@@ -108,6 +108,26 @@ describe("sendQueueOnce", () => {
     expect(result).toEqual({ done: true, refused: [] })
     expect(sent).toEqual(["note.update n-1", "note.update n-2"])
     expect(deleted).toEqual([NOTES_QUEUE])
+  })
+
+  it("opens only the queue the device holds, so no other database is created", async () => {
+    const storage = createMemoryStorage()
+    await storage.of(7).queue.putEntry(edit("n-1", "First"))
+    const opened: string[] = []
+    const { databases } = databasesHolding(NOTES_QUEUE)
+    const { calls } = serverAnswering(accepts)
+
+    await sendQueueOnce({
+      userId: 7,
+      transport: { calls, canSend: () => true },
+      storage: {
+        openQueue: (id) => (opened.push("notes"), storage.openQueue!(id)),
+        openTagsQueue: (id) => (opened.push("tags"), storage.openTagsQueue!(id)),
+      },
+      databases,
+    })
+
+    expect(opened).toEqual(["notes"])
   })
 
   it("keeps the whole queue when a write cannot reach the server", async () => {
