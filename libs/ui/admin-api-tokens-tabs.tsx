@@ -16,6 +16,7 @@ import {
   PANEL_ROW,
   PanelRows,
   tokenColumns,
+  tokenTableClass,
 } from "./admin-api-tokens-screen.tsx"
 
 /** What each notification kind is called; a kind this page does not know shows as stored. */
@@ -79,6 +80,7 @@ export function AdminPersonTokensPanel(
         : (
           <div data-e2e="admin-person-api-tokens">
             <DataTable
+              class={tokenTableClass(false)}
               columns={tokenColumns({ ...props, withOwner: false })}
               rows={tokens}
               sort={[]}

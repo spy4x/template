@@ -249,6 +249,49 @@ describe("the API tokens page", () => {
       "You cannot do this to a person at or above your role",
     )
   })
+
+  it("moves focus to the token count once a revoke goes through", async () => {
+    const sending = { target: { kind: "revoke", token: live }, error: null, pending: true } as const
+    await mount(tokensPage({ confirm: sending }).node)
+    await mount(tokensPage({ confirm: NO_CONFIRM }).node)
+    expect(document.activeElement).toBe(find(`[data-e2e="admin-api-tokens-count"]`))
+  })
+
+  it("leaves focus alone when the revoke dialog is cancelled or refused", async () => {
+    const asking = { target: { kind: "revoke", token: live }, error: null, pending: false } as const
+    await mount(tokensPage({ confirm: asking }).node)
+    await mount(tokensPage({ confirm: NO_CONFIRM }).node)
+    expect(document.activeElement).not.toBe(find(`[data-e2e="admin-api-tokens-count"]`))
+
+    const sending = { ...asking, pending: true } as const
+    const refused = { ...asking, error: "Something went wrong. Try again." } as const
+    await mount(tokensPage({ confirm: sending }).node)
+    await mount(tokensPage({ confirm: refused }).node)
+    expect(document.activeElement).not.toBe(find(`[data-e2e="admin-api-tokens-count"]`))
+  })
+
+  it("on a phone, shows the owner and state under the token name and a 44 px Revoke", async () => {
+    await mount(tokensPage().node)
+    const row = find(`[data-e2e="admin-api-token-revoke-${live.id}"]`).closest("tr")!
+    const phone = row.querySelector(`[data-e2e="admin-api-token-phone"]`)!
+    expect(phone.className).toContain("sm:hidden")
+    expect(phone.textContent).toContain("Owner: Ada Lovelace")
+    expect(phone.textContent).toContain("ada@example.com")
+    expect(phone.textContent).toContain("Live")
+    expect(find(`[data-e2e="admin-api-token-revoke-${live.id}"]`).className).toContain(
+      "max-sm:min-h-11",
+    )
+    const table = find(`[data-e2e="admin-api-tokens-list"]`).querySelector(`[class*="hidden"]`)!
+    expect(table.className).toContain(
+      "max-sm:[&_:is(th,td):is(:nth-child(1),:nth-child(3),:nth-child(4),:nth-child(5))]:hidden",
+    )
+  })
+
+  it("draws the empty list without a dashed box", async () => {
+    const empty = { ...page, tokens: [], total: 0 }
+    await mount(tokensPage({ list: empty }).node)
+    expect(has(`.border-dashed`)).toBe(false)
+  })
 })
 
 const actions = (events: unknown[][]) => ({
