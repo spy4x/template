@@ -254,20 +254,20 @@ describe("the API tokens page", () => {
     const sending = { target: { kind: "revoke", token: live }, error: null, pending: true } as const
     await mount(tokensPage({ confirm: sending }).node)
     await mount(tokensPage({ confirm: NO_CONFIRM }).node)
-    expect(document.activeElement).toBe(find(`[data-e2e="admin-api-tokens-count"]`))
+    expect(document.activeElement === find(`[data-e2e="admin-api-tokens-count"]`)).toBe(true)
   })
 
   it("leaves focus alone when the revoke dialog is cancelled or refused", async () => {
     const asking = { target: { kind: "revoke", token: live }, error: null, pending: false } as const
     await mount(tokensPage({ confirm: asking }).node)
     await mount(tokensPage({ confirm: NO_CONFIRM }).node)
-    expect(document.activeElement).not.toBe(find(`[data-e2e="admin-api-tokens-count"]`))
+    expect(document.activeElement === find(`[data-e2e="admin-api-tokens-count"]`)).toBe(false)
 
     const sending = { ...asking, pending: true } as const
     const refused = { ...asking, error: "Something went wrong. Try again." } as const
     await mount(tokensPage({ confirm: sending }).node)
     await mount(tokensPage({ confirm: refused }).node)
-    expect(document.activeElement).not.toBe(find(`[data-e2e="admin-api-tokens-count"]`))
+    expect(document.activeElement === find(`[data-e2e="admin-api-tokens-count"]`)).toBe(false)
   })
 
   it("on a phone, shows the owner and state under the token name and a 44 px Revoke", async () => {
