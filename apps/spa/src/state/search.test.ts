@@ -2,7 +2,7 @@ import { expect } from "@std/expect"
 import { describe, it } from "@std/testing/bdd"
 import { ConnectionLostError, RealtimeRequestError } from "@spy4x/realtime"
 import type { NoteItem } from "./notes.ts"
-import { ReadRefused } from "./read-keys.ts"
+import { ReadRefused } from "@spy4x/realtime/read-cache"
 import { createNoteSearch, type NoteSearchSources } from "./search.ts"
 
 const HOME = "group-home"

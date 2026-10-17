@@ -1,10 +1,9 @@
-import { isUnreachable } from "@spy4x/realtime/read-cache"
+import { isProxyAnswer, isUnreachable } from "@spy4x/realtime/read-cache"
 import { filterRows, search } from "@spy4x/platform/universal/text"
 import { NOTE_SEARCH_LIMIT, type NoteSearchHit, trimNoteSnippet } from "@domain/notes"
 import type { SearchNote, SearchNotesAnswer } from "@ui/search-palette.tsx"
 import { RECENT_NOTES } from "@ui/search-palette.tsx"
 import type { NoteItem } from "./notes.ts"
-import { isProxyAnswer } from "./read-keys.ts"
 
 /** The note search's answer as the API sends it: dates are strings once they cross the wire. */
 type WireHit = Omit<NoteSearchHit, "updatedAt"> & { updatedAt: string }
