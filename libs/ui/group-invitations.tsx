@@ -727,6 +727,7 @@ function AddressRefusalNotice(
             href={SCREEN_PATHS.email}
             navigate={navigate}
             size="sm"
+            class="min-h-11 sm:min-h-9"
             data-e2e="invitation-verify-email"
           >
             Verify e-mail
