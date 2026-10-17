@@ -183,6 +183,25 @@ describe(`PreferencesGroup`, () => {
     expect(refused.calls).toEqual([[`save`, { locale: null, timeZone: null, hourCycle: `h23` }, 4]])
   })
 
+  it(`after a refused save, saves an edit on the newer version when only the theme changed since`, async () => {
+    await mount(group().node)
+    await click(`[data-e2e="preferences-change-clock"]`)
+    const won: Preferences = { ...DEFAULT_PREFERENCES, hourCycle: `h23` }
+    await rerender(group({ conflict: { version: 4, value: won }, value: won, version: 4 }).node)
+    const select = $<HTMLSelectElement>(`[data-e2e="preferences-clock-select"]`)!
+    select.value = `h12`
+    await act(() =>
+      void select.dispatchEvent(new window.Event(`change`, { bubbles: true }) as never)
+    )
+
+    // Another device picked Dark after the refusal: the values that won are unchanged.
+    const later = group({ value: { ...won, theme: `dark` }, version: 5 })
+    await rerender(later.node)
+    await click(`[data-e2e="preferences-save"]`)
+
+    expect(later.calls).toEqual([[`save`, { locale: null, timeZone: null, hourCycle: `h12` }, 5]])
+  })
+
   it(`saves an edited draft on the version it was made on, though another device saved since`, async () => {
     const first = group()
     await mount(first.node)
