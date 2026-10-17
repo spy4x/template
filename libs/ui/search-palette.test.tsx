@@ -116,9 +116,11 @@ function listed(): string[] {
   return [...document.querySelectorAll("[data-e2e=search] [role=listbox] > li")].flatMap((
     item,
   ) => {
-    if (item.getAttribute("role") !== "group") return [text(item)]
-    const heading = item.querySelector("[role=presentation]")?.textContent?.trim() ?? ""
-    return [`# ${heading}`, ...[...item.querySelectorAll("[role=option]")].map(text)]
+    // A heading's options sit in a `role="group"` list inside the row (preact-components 6.1).
+    const group = item.querySelector("[role=group]")
+    if (!group) return [text(item)]
+    const heading = group.querySelector("[role=presentation]")?.textContent?.trim() ?? ""
+    return [`# ${heading}`, ...[...group.querySelectorAll("[role=option]")].map(text)]
   })
 }
 
