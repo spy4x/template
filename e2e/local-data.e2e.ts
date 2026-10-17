@@ -515,10 +515,11 @@ test.describe("what a device keeps", () => {
 
       await askToSignOut(page)
       await page.locator("[data-e2e=unsent-dialog]").waitFor()
-      await page.keyboard.press("Escape")
+      await page.locator("[data-e2e=unsent-cancel]").click()
 
       await expect(page.locator("[data-e2e=unsent-dialog]")).toHaveCount(0)
-      await expect(page.locator("[data-e2e=session-current]")).toBeVisible()
+      // A fresh start asks the server who is signed in, so a sign-out in flight cannot pass.
+      await gotoApp(page, "/", page.locator("[data-e2e=session-current]"))
       expect(await recordsIn(page, `offline:user:${userId}:outbox`)).toBe(1)
     } finally {
       await context.close()
