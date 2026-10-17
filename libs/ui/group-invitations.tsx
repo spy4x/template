@@ -93,7 +93,10 @@ export interface InviteFormProps {
   createError?: string | null
   /** The group's plan refused the create: shown as a notice in place of `createError`. */
   createRefusal?: PlanRefusal | null
-  /** Why the create did not start, when no field owns it (offline): shown above the buttons. */
+  /**
+   * Why the create was refused or did not start, when no field owns it (offline, or the creator's
+   * own address is not verified): shown above the buttons.
+   */
   formError?: string | null
   /** Creates an invitation from the draft. */
   onCreate?: () => void
