@@ -421,7 +421,7 @@ describe("AppFrame", () => {
     )
   }
 
-  it("puts Search under the group switcher in the rail, which opens the one palette after the page", async () => {
+  it("puts Search under the group switcher in the rail, names its keys, and opens the one palette after the page", async () => {
     const opened: string[] = []
     await mount(
       <AppFrame
@@ -440,7 +440,9 @@ describe("AppFrame", () => {
     // The switcher comes first, then the search.
     expect(picker.compareDocumentPosition(cell) & 4).toBe(4)
     expect(cell.querySelector("button")?.textContent?.trim()).toBe("Search")
-    expect(cell.querySelector("[data-e2e=rail-shell-tooltip]")?.textContent).toBe("Search")
+    // It names the palette's keys, in the tooltip and to a screen reader.
+    expect(cell.querySelector("[data-e2e=rail-shell-tooltip]")?.textContent).toBe("Search (Ctrl K)")
+    expect(cell.querySelector("button")?.getAttribute("aria-keyshortcuts")).toBe("Control+K /")
     // One palette, after the page: a signed-in page still starts with the banner, then its own.
     expect(document.querySelectorAll("[data-e2e=search-root]").length).toBe(1)
     const column = find("[data-e2e=app-shell-content]")

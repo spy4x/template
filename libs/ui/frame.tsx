@@ -27,7 +27,7 @@ import {
   ScreenForm,
   TAG_PATHS,
 } from "./progressive.tsx"
-import { openSearch } from "./search-palette.tsx"
+import { openSearch, SEARCH_HOTKEYS } from "./search-palette.tsx"
 
 /**
  * The daily destinations, in the order the rail and the phone tab bar show them. Four at most, so
@@ -76,8 +76,17 @@ export function displayName(user: FrameUser): string {
   return `${user.firstName} ${user.lastName}`.trim() || user.email || "User"
 }
 
-/** The search's entry, drawn by the library as the rail's other cells and the sheet's other rows. */
-const SEARCH_ENTRY: RailItem = { key: "search", label: "Search", Icon: IconSearch }
+/**
+ * The search's entry, drawn by the library as the rail's other cells and the sheet's other rows. It
+ * names the palette's keys, so the rail's tooltip reads "Search (Ctrl K)" and a screen reader hears
+ * them; the palette binds them itself.
+ */
+const SEARCH_ENTRY: RailItem = {
+  key: "search",
+  label: "Search",
+  Icon: IconSearch,
+  keyshortcuts: SEARCH_HOTKEYS,
+}
 
 /**
  * The signed-in frame: the library's `AppShell`, which draws every piece of chrome the same way in
