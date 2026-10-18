@@ -371,10 +371,12 @@ describe("AppFrame", () => {
       [...document.querySelectorAll(`[data-e2e=rail-shell-rail] [aria-current="${value}"]`)]
         .map((link) => link.getAttribute("href"))
 
+    // preact-components 8 writes `aria-current="false"` on the entries that are not current.
+    const current = "[aria-current]:not([aria-current=false])"
     await mount(at(SCREEN_PATHS.email))
-    expect(document.querySelectorAll("[aria-current]")).toHaveLength(0)
+    expect(document.querySelectorAll(current)).toHaveLength(0)
     await rerender(at(SCREEN_PATHS.profile))
-    expect(document.querySelectorAll("[aria-current]")).toHaveLength(0)
+    expect(document.querySelectorAll(current)).toHaveLength(0)
 
     await rerender(at(NOTE_PATHS.list))
     expect(marked("page")).toEqual(["/notes"])
