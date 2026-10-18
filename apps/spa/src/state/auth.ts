@@ -286,7 +286,26 @@ export async function resetPassword(
   return { ok: true }
 }
 
+/**
+ * Ends this browser's push subscription, so the account's notifications stop reaching it once
+ * nobody is signed in here (#409). Never throws, and sign-out never waits for it: the browser
+ * drops the subscription at once, also offline, and the server deletes its stored row the next
+ * time the push service answers that the subscription is gone. `getRegistration` rather than
+ * `ready`, which never settles in a browser without the service worker.
+ */
+async function dropPushSubscription(): Promise<void> {
+  try {
+    const registration = await globalThis.navigator?.serviceWorker?.getRegistration()
+    const subscription = await registration?.pushManager?.getSubscription()
+    await subscription?.unsubscribe()
+  } catch (_error) {
+    // A browser that refuses has nothing this page can do about it; the profile page's device
+    // list still removes the stored subscription.
+  }
+}
+
 export async function signOut(): Promise<void> {
+  void dropPushSubscription()
   try {
     const result = await apiFetch<ApiSuccessResponse>("/api/auth/sign-out", { method: "POST" })
     // An error answer (a proxy's 502 during a deploy) has not ended the session either. A 401 is
@@ -399,13 +418,18 @@ export async function endOtherSessions(): Promise<{ ok: boolean; error?: string 
   return { ok: true }
 }
 
-export async function totpConnectStart(): Promise<
+/**
+ * Starts turning two-factor on. The API asks for proof that it is the account's owner (#406): the
+ * password, or for an account without one, which sends none, a provider sign-in a moment ago.
+ */
+export async function totpConnectStart(password: string | undefined): Promise<
   | { ok: true; qrcode: string; secret: string }
   | { ok: false; error: string }
 > {
   const result = await apiFetch<TotpConnectStartResponse>(
     "/api/auth/totp/connect/start",
-    { method: "POST" },
+    // `JSON.stringify` leaves out the password an account does not have.
+    { method: "POST", body: JSON.stringify({ password }) },
   )
   if (!result.ok) {
     return { ok: false, error: result.error.message }

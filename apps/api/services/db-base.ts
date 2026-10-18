@@ -10,6 +10,7 @@ import {
   type AuthAuditBase,
   type OnboardingMark,
   type OnboardingStatus,
+  type PreferencesDevice,
   type User,
   type UserBase,
   UserMFAStatus,
@@ -19,6 +20,7 @@ import { PostgresGroupRepository } from "@server/groups/postgres-group-repositor
 import { PostgresNotificationRepository } from "@server/notifications/postgres-notification-repository.ts"
 import { PostgresGroupActivityRepository } from "@server/groups/postgres-activity-repository.ts"
 import { PostgresGroupDataMover } from "@server/groups/postgres-group-data-mover.ts"
+import { revokeAllInvitationsOf } from "@server/groups/invitation-revocation.ts"
 import type { MovableAggregate } from "@server/groups/movable.ts"
 import { noteMovable } from "@server/notes/note-movable.ts"
 import { tagMovable } from "@server/tags/tag-movable.ts"
@@ -26,6 +28,8 @@ import { PostgresTagRepository } from "@server/tags/postgres-tag-repository.ts"
 import { PostgresNoteRepository } from "@server/notes/postgres-note-repository.ts"
 import { PostgresBillingRepository } from "@server/billing/postgres-billing-repository.ts"
 import { emailChanges } from "@server/auth/email-verification.ts"
+import type { Lockout } from "@spy4x/server/lockout"
+import { createPasswordCheckFailures } from "./password-locked.ts"
 import { signUpRequests } from "@server/auth/sign-up-requests.ts"
 import { enqueueSignUpCodeMail } from "@server/jobs/sign-up-code-mail.ts"
 import {
@@ -47,6 +51,7 @@ import {
 } from "@server/jobs/sign-in-method-mail.ts"
 import { touchUserSeen } from "@server/auth/sessions.ts"
 import { markOnboarding, readOnboarding } from "@server/auth/onboarding.ts"
+import { preferencesStore, recordFirstDevice } from "@server/auth/preferences.ts"
 import { type ApiTokenRows, apiTokenRows } from "@server/api-tokens/api-tokens.ts"
 import { enqueuePasswordResetMail } from "@server/jobs/password-reset-mail.ts"
 import {
@@ -62,6 +67,7 @@ import {
   setUserRoleByAddress,
 } from "@server/auth/admin-users.ts"
 import { readAdminStats } from "@server/auth/admin-stats.ts"
+import { removeAllPushTokensOf } from "./push-token-store.ts"
 import { adminGroupRows } from "@server/groups/admin-groups.ts"
 import {
   listAdminApiTokens,
@@ -151,6 +157,25 @@ export class AppDbBase extends DbServiceBase {
    */
   get group(): PostgresGroupRepository {
     return new PostgresGroupRepository(this.sql)
+  }
+
+  /** Revokes every pending invitation a person made (#411). Built per access, like `group`. */
+  get invitationRevocation() {
+    const sql = this.sql
+    return {
+      allOf: (creatorId: number): Promise<number> => revokeAllInvitationsOf(sql, creatorId),
+    }
+  }
+
+  /**
+   * A person's stored push subscriptions (#409). Built per access, like `group`, so a reset's
+   * transaction removes them inside it.
+   */
+  get pushTokens() {
+    const sql = this.sql
+    return {
+      removeAllOf: (userId: number): Promise<void> => removeAllPushTokensOf(sql, userId),
+    }
   }
 
   /** The read side of a group's activity log. Built per access, like `group`. */
@@ -354,6 +379,21 @@ export class AppDbBase extends DbServiceBase {
   }
 
   /**
+   * A person's display preferences (`@server/auth/preferences.ts`, #163). Built per access, like
+   * `group`.
+   */
+  get preferences() {
+    const sql = this.sql
+    return {
+      /** The versioned record, keyed by the person's id; the write is a compare-and-set. */
+      store: preferencesStore(sql),
+      /** Keeps the first device's zone and region format: the ones the person signed up with. */
+      recordFirstDevice: (userId: number, device: PreferencesDevice): Promise<void> =>
+        recordFirstDevice(sql, userId, device),
+    }
+  }
+
+  /**
    * The operator area's reads and writes (`@server/auth/admin-users.ts`, #146). Built per access,
    * like `group`: `lockTarget`, `setBlocked` and the audit row of an action share its `begin()`.
    */
@@ -395,6 +435,14 @@ export class AppDbBase extends DbServiceBase {
   /** The operator area's group reads and actions (`@server/groups/admin-groups.ts`, #426). */
   get adminGroups(): ReturnType<typeof adminGroupRows> {
     return adminGroupRows(this.sql)
+  }
+
+  /**
+   * The count of wrong passwords a signed-in account types (#406). Only the pool's is used: each
+   * update runs in a transaction of its own. Built per access, like `group`.
+   */
+  get passwordCheckFailures(): Lockout {
+    return createPasswordCheckFailures({ sql: this.sql })
   }
 
   /** The address change waiting for its code. Built per access, like `group`. */

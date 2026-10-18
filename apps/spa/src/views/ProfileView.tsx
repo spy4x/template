@@ -56,6 +56,8 @@ import { createSignInMethodsStore } from "../state/sign-in-methods.ts"
 import { localReads } from "../modules.ts"
 import { groupsStore } from "../state/groups.ts"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
+import { preferencesState } from "../state/preferences.ts"
+import { usePreferencesProps } from "./preferences-props.ts"
 
 const NO_DELETE_VALUES: AccountDeleteValues = { password: "", otp: "" }
 const NO_DELETE_ERRORS: AccountDeleteErrors = { form: null }
@@ -69,6 +71,7 @@ export function ProfileView() {
   const [, navigate] = useLocation()
   const search = useSearch()
   const session = sessionState.value
+  const preferences = usePreferencesProps()
   const [values, setValues] = useState<ProfileValues>({
     firstName: session.user?.firstName || "",
     lastName: session.user?.lastName || "",
@@ -76,6 +79,7 @@ export function ProfileView() {
     newPassword: "",
     passwordOtp: "",
     otp: "",
+    totpPassword: "",
     twoFactorProof: "",
   })
   const [fieldErrors, setFieldErrors] = useState<ProfileFieldErrors>({})
@@ -259,15 +263,27 @@ export function ProfileView() {
     })
   }
 
+  /**
+   * Starts the set-up after the "Turn on" dialog: with the password, or for an account with none
+   * after its provider sign-in a moment ago, as the deletion asks (#406).
+   */
   const startTotp = async () => {
     setTotpError(null)
+    const password = providerProof ? undefined : values.totpPassword
+    if (password !== undefined) {
+      const problem = refusedFields(authPasswordSchema, { password })?.password
+      if (!fieldsPass(problem ? { totpPassword: problem } : null)) return
+    }
     setTotpBusy(true)
-    const result = await totpConnectStart()
+    const result = await totpConnectStart(password)
     setTotpBusy(false)
     if (!result.ok) {
       setTotpError(result.error)
+      // A refusal may mean the provider sign-in is no longer recent: the dialog then says so.
+      if (providerProof) void methods.load()
       return
     }
+    setValue("totpPassword", "")
     setEnrolment({ qrcode: result.qrcode, secret: result.secret })
   }
 
@@ -379,7 +395,7 @@ export function ProfileView() {
     toasts.success({
       title: "Account deleted",
       body: `It goes for good on ${
-        result.deleteAfter.toLocaleDateString(undefined, { dateStyle: "long" })
+        preferencesState.format.value.date(result.deleteAfter, "long")
       }. Sign in before then to keep it.`,
       dataE2E: "account-deleted",
     })
@@ -425,11 +441,15 @@ export function ProfileView() {
       }}
       signOutOthers={signOutOthers}
       onSignOutOthersChange={setSignOutOthers}
+      preferences={preferences}
       methods={{
         methods: methods.methods.value,
         available: methods.available.value,
         pending: methods.pending.value,
         error: methods.error.value === "" ? SIGN_IN_METHODS_FAILURE : methods.error.value,
+        loadError: methods.loadError.value,
+        loading: methods.loading.value,
+        onRetry: () => void methods.load(),
         onLink: (provider, password) => void methods.link(provider, password),
         onUnlink: (id, password) => void unlinkMethod(id, password),
       }}
@@ -461,6 +481,11 @@ export function ProfileView() {
           }),
       }}
       onStartTotp={startTotp}
+      onCancelStartTotp={() => {
+        setTotpError(null)
+        setFieldErrors(({ totpPassword: _password, ...rest }) => rest)
+        setValue("totpPassword", "")
+      }}
       onFinishTotp={finishTotp}
       onCancelTotp={() => {
         setEnrolment(null)

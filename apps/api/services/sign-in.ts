@@ -13,11 +13,12 @@
  *   key's `(method, subject)` constraint, and compared after normalisation.
  * - **Password reset by link.** `resetPassword` spends a code from `password-reset.ts`, proves the
  *   address (whoever holds the mailbox owns the account that signs in with it), sets the new
- *   password, signs out every session of the user and deletes every API token. It signs nobody
- *   in: the person signs in again with the new password, and their second factor if they have one.
- *   When the address was not proven before, the second factor and every other sign-in method of
- *   the account go too (#404): whoever added them never proved they own the address. An account
- *   waiting to be deleted is restored by the reset (#388).
+ *   password, signs out every session of the user, deletes every API token and removes every
+ *   push subscription (#409). It signs nobody in: the person signs in again with the new
+ *   password, and their second factor if they have one. When the address was not proven
+ *   before, the second factor and every other sign-in method of the account go too (#404):
+ *   whoever added them never proved they own the address. An account waiting to be deleted is
+ *   restored by the reset (#388).
  * - **One sign-up transaction.** The auth user and key, the session, the `users` profile row (same
  *   id) and the first group are written in one `db.begin()`: the sign-up provider is built over
  *   that transaction's stores.
@@ -29,7 +30,9 @@
  *   address too; when it was unproven until then, the reset also removes any second factor, since
  *   whoever set it up never showed they own the mailbox. A new address waits in `email_changes`
  *   until its code proves it; only then does the password key move to it, so the account signs in
- *   with the old address until that moment.
+ *   with the old address until that moment. Then a Google or GitHub key that carried the old
+ *   address loses it and keeps signing in (#403): the old address no longer opens the account
+ *   through another provider identity that vouches for it.
  * - **Audit rows in the same transaction (#191).** Sign-up, sign-in and sign-out each write their
  *   `auth_audits` row inside the transaction that changes the session, so a failed row undoes the
  *   action. Sign-in checks the password with the package's `checkCredentials` first and creates
@@ -118,6 +121,7 @@ import {
   passwordKeyOf,
   proveEmailCode,
   readEmailStatus,
+  releaseAddress,
 } from "@server/auth/email-verification.ts"
 import { hasUnstorableTextCharacters } from "@spy4x/platform/universal/text"
 import { uuidV7 } from "@spy4x/platform/universal/uuid"
@@ -129,6 +133,7 @@ import {
   signUpExpiry,
 } from "@server/auth/sign-up-requests.ts"
 import { createOAuthOperations, type OAuthOperations, type OAuthOptions } from "./oauth-sign-in.ts"
+import { PasswordLockedError } from "./password-locked.ts"
 
 /** Longest username, in characters (code points), after normalisation. */
 export const USERNAME_MAX_LENGTH = 50
@@ -162,6 +167,11 @@ export enum EmailChangeOutcome {
   WrongPassword = 4,
   /** The account has no password and its session is no recent provider sign-in. Nothing changed. */
   ProofRequired = 5,
+  /**
+   * The account has no password, and another of its sign-in methods carries the address already.
+   * Such an account reads its address from those methods, so the change would change nothing.
+   */
+  AlreadyCarried = 6,
 }
 
 /** What {@link SignIn.setPassword} did. */
@@ -300,7 +310,10 @@ export interface SignIn {
    * request also gets its audit row, in the same transaction.
    */
   signOut(c: Context): Promise<void>
-  /** Starts authenticator-app enrolment, or returns the unfinished one. */
+  /**
+   * Starts authenticator-app enrolment, or returns the unfinished one. The caller checks the
+   * password, or the provider sign-in of an account without one, first (#406).
+   */
   connectTotpStart(state: AppAuthState): Promise<TotpConnectStart>
   /** Finishes enrolment with a code; signs out every other session of the user. */
   connectTotpFinish(state: AppAuthState, code: string): Promise<boolean>
@@ -318,7 +331,7 @@ export interface SignIn {
    * transaction as the password, so a failed revoke leaves the old password in place, and answers
    * how many: a token is what a stolen session leaves behind, and a person who changes the
    * password after a break-in expects it gone (#293). `null` when the current password is wrong or
-   * the new one is refused.
+   * the new one is refused. The current password is counted as {@link checkPassword} counts it.
    */
   changePassword(
     c: Context,
@@ -330,8 +343,9 @@ export interface SignIn {
   /**
    * Spends the reset code for `email` and, when it was the live one, proves the address, replaces
    * the password, signs out every session of the user and revokes every API token, with an audit
-   * row each. An account waiting to be deleted is restored too: the link proved the mailbox, so
-   * the person is back (#388). `c`, when given, names the request in the restore's audit row.
+   * row each, and removes every push subscription of the user (#409). An account waiting to be
+   * deleted is restored too: the link proved the mailbox, so the person is back (#388). `c`,
+   * when given, names the request in the restore's audit row.
    * `false`, and the password unchanged, when the code is wrong, expired, already used or
    * replaced, the new password is refused, or no live account signs in with the address.
    */
@@ -339,10 +353,31 @@ export interface SignIn {
   /**
    * Whether `password` is the current password of user `userId`, checked as a password change
    * checks it. A step that must not run on a stolen session alone, such as handing a group to
-   * someone else, asks for it. `false` for an account with no password. `over` is the transaction
-   * to read the password in, for a caller that holds the user's row lock (a token create).
+   * someone else, asks for it. `false` for an account with no password.
+   *
+   * Counted per user (#406): a wrong password counts, a right one gives its count back, and while
+   * the account is locked the password is not looked at and {@link PasswordLockedError} is thrown,
+   * right password or not. An account with no password has nothing to guess and is not counted.
    */
-  checkPassword(userId: number, password: string, over?: AppDbBase): Promise<boolean>
+  checkPassword(userId: number, password: string): Promise<boolean>
+  /**
+   * Runs `check`, which looks at a password of user `userId` and answers whether it was right,
+   * under the count {@link checkPassword} keeps: while the account is locked `check` does not run
+   * and {@link PasswordLockedError} is thrown; `false` counts as a wrong password; `true`, and
+   * `null` for a check that looked at no password, give the count back. For a caller that checks
+   * the password inside a transaction with {@link verifyPassword}: the count needs a connection of
+   * its own, so it goes around the transaction, never inside it.
+   */
+  countPasswordCheck<Right extends boolean | null>(
+    userId: number,
+    check: () => Promise<Right>,
+  ): Promise<Right>
+  /**
+   * Whether `password` is the current password of user `userId`, read through `over`, the
+   * transaction of a caller that holds the user's row lock (a token create). Not counted: call it
+   * only inside {@link countPasswordCheck}. `false` for an account with no password.
+   */
+  verifyPassword(userId: number, password: string, over: AppDbBase): Promise<boolean>
   /** Whether user `userId` has a password at all, read through `over` when given. */
   hasPassword(userId: number, over?: AppDbBase): Promise<boolean>
   /**
@@ -354,7 +389,8 @@ export interface SignIn {
   /**
    * Gives an account that has no password its first one, after a provider sign-in a moment ago
    * ({@link confirmedByProvider}): a new password key on the address the account has, proven, and
-   * an audit row, in one transaction. No session ends and no cookie changes.
+   * an audit row, in one transaction. Every other session of the user ends, as a password change
+   * ends them; this one keeps its cookie (#406).
    */
   setPassword(c: Context, state: AppAuthState, newPassword: string): Promise<PasswordSetOutcome>
   /**
@@ -379,7 +415,7 @@ export interface SignIn {
    * there proves it. The account keeps signing in with its old address until then. The password
    * is asked so that a stolen session cannot point the account, and its reset links, elsewhere.
    * An account with no password is asked for a provider sign-in a moment ago instead
-   * ({@link confirmedByProvider}).
+   * ({@link confirmedByProvider}). The password is counted as {@link checkPassword} counts it.
    */
   requestEmailChange(
     state: AppAuthState,
@@ -388,10 +424,10 @@ export interface SignIn {
   ): Promise<EmailChangeOutcome>
   /**
    * Checks a code for the address that needs one (`emailToVerify`) and proves it. For a waiting
-   * change, the password key then moves to the new address: a new session on it gets the cookie,
-   * and every session on the old key ends. An account with no password keeps its sessions: the
-   * key the code proved holds the new address, and an address held that way before goes. A wrong
-   * code is counted in the same transaction and changes nothing else.
+   * change, the password key then moves to the new address and a new session on it gets the
+   * cookie; an account with no password has the key the code proved hold the new address, and an
+   * address held that way before goes. Either way every other session of the user ends (#406). A
+   * wrong code is counted in the same transaction and changes nothing else.
    */
   verifyEmail(c: Context, state: AppAuthState, code: string): Promise<EmailVerifyOutcome>
   /** Marks every active session that has run out as expired. */
@@ -471,6 +507,24 @@ export function createSignIn(options: SignInOptions): SignIn {
   const sessions = sessionsOver(db.sessionStore)
   const cookie = new SessionCookie({ secret: options.cookieSecret, secure: options.secureCookie })
   const hasher = options.hasher ?? createPasswordHasher({ pepper: options.pepper })
+
+  /**
+   * Runs `verify`, one password check of user `userId`, under the account's count (#406): see
+   * {@link SignIn.countPasswordCheck}. The count runs on the pool, never inside a transaction:
+   * it needs a connection of its own.
+   */
+  async function countedPasswordCheck<Right extends boolean | null>(
+    userId: number,
+    verify: () => Promise<Right>,
+  ): Promise<Right> {
+    const passwordChecks = db.passwordCheckFailures
+    const waitMs = await passwordChecks.begin(userId)
+    if (waitMs > 0) throw new PasswordLockedError(waitMs)
+    const right = await verify()
+    if (right === false) await passwordChecks.fail(userId)
+    else await passwordChecks.refund(userId)
+    return right
+  }
 
   /**
    * The user a session belongs to, or `null` when the user is gone or may not sign in. A blocked
@@ -1020,13 +1074,12 @@ export function createSignIn(options: SignInOptions): SignIn {
     async changePassword(c, { user }, password, newPassword, signOutOthers = true) {
       const change = { userId: user.id, currentPassword: password, newPassword }
       const request = requestInfoFromContext(c, { trustedProxy: true })
-      let changed
-      try {
-        // One transaction (#293): the password and the tokens change together or not at all, so a
-        // failed revoke never leaves a new password with live tokens. The provider is built over
-        // the transaction's stores, as at sign-up. The connection is held for one hash and one
-        // verify.
-        changed = await db.begin(async (tx) => {
+      // One transaction (#293): the password and the tokens change together or not at all, so a
+      // failed revoke never leaves a new password with live tokens. The provider is built over
+      // the transaction's stores, as at sign-up. The connection is held for one hash and one
+      // verify.
+      const run = () =>
+        db.begin(async (tx) => {
           // Key first, then the user's row: the order a reset takes them in. A token create holds
           // the user's row while it checks the password and inserts, so it either commits before
           // this revoke runs or sees the new password.
@@ -1048,10 +1101,20 @@ export function createSignIn(options: SignInOptions): SignIn {
           )
           return { session, revokedTokens }
         })
-      } catch (error) {
-        if (error instanceof PasswordSignInError) return null
-        throw error
-      }
+      const outcome: { changed?: Awaited<ReturnType<typeof run>> } = {}
+      // Counted as every password check of a signed-in step is (#406). Only a wrong current
+      // password is a guess; a new password the provider refuses gives the count back.
+      await countedPasswordCheck(user.id, async () => {
+        try {
+          outcome.changed = await run()
+          return true
+        } catch (error) {
+          if (error instanceof PasswordSignInError) return error.reason !== "invalid-credentials"
+          throw error
+        }
+      })
+      const { changed } = outcome
+      if (!changed) return null
       // After the commit: a cookie for a session that was rolled back would sign the device out.
       if (changed.session) {
         await cookie.set(c, changed.session.session, changed.session.cookieValue)
@@ -1108,6 +1171,9 @@ export function createSignIn(options: SignInOptions): SignIn {
           for (const other of await tx.authStore.listKeys(user.id)) {
             if (other.id !== key.id) await tx.authStore.deleteKey(user.id, other.id)
           }
+          // An invitation made before the address was proven is a way in for whoever made it
+          // (#411): a second account of theirs could still join through the link after this reset.
+          await tx.invitationRevocation.allOf(user.id)
         }
         await tx.authStore.updateKeySecret(key.id, secret)
         // The mailbox owner is back in control: an address change someone else asked for goes.
@@ -1116,11 +1182,26 @@ export function createSignIn(options: SignInOptions): SignIn {
         // A reset is account recovery: a token minted with a stolen session goes too (#167), as
         // it does on a password change.
         await tx.apiTokens.revoke({ userId: user.id }, "password-reset")
+        // Every browser that switched the account's notifications on stops getting them (#409),
+        // whoever it belongs to: the owner switches them on again where they want them.
+        await tx.pushTokens.removeAllOf(user.id)
         return true
       })
     },
 
-    async checkPassword(userId, password, over = db) {
+    async checkPassword(userId, password) {
+      const key = await passwordKeyOf(db.authStore, userId)
+      const secret = key?.secret
+      if (!secret) return false
+      return await countedPasswordCheck(
+        userId,
+        async () => (await hasher.verify(password, secret)).valid,
+      )
+    },
+
+    countPasswordCheck: countedPasswordCheck,
+
+    async verifyPassword(userId, password, over) {
       const key = await passwordKeyOf(over.authStore, userId)
       return !!key?.secret && (await hasher.verify(password, key.secret)).valid
     },
@@ -1134,7 +1215,7 @@ export function createSignIn(options: SignInOptions): SignIn {
     },
 
     async setPassword(c, state, newPassword) {
-      const { user } = state
+      const { user, session } = state
       if (await passwordKeyOf(db.authStore, user.id)) return PasswordSetOutcome.AlreadySet
       if (!(await oauth.proofUntil(state))) return PasswordSetOutcome.ProofRequired
       // Hashed before the transaction, as at sign-up, so no pool connection waits on PBKDF2.
@@ -1171,6 +1252,9 @@ export function createSignIn(options: SignInOptions): SignIn {
           // behind, proven, when the address changes again, and would then let whoever has that
           // address later into this account. The key of a change that waits for its code stays.
           await dropCodeKeys(tx.authStore, user.id, pending)
+          // A new way in, as a password change is: whoever else holds a session of the account
+          // is signed out, and this device stays signed in (#406).
+          await sessionsOver(tx.sessionStore).signOutUser(user.id, { except: session.id })
           await tx.authAudit.insert(
             auditRow(c, user.id, AuthAuditEventType.SIGN_IN_METHOD_LINKED, PASSWORD_METHOD),
           )
@@ -1227,12 +1311,13 @@ export function createSignIn(options: SignInOptions): SignIn {
       if (email === null) return EmailChangeOutcome.InvalidEmail
       const key = await passwordKeyOf(db.authStore, user.id)
       if (key) {
-        if (
-          !key.secret || password === undefined ||
-          !(await hasher.verify(password, key.secret)).valid
-        ) {
-          return EmailChangeOutcome.WrongPassword
-        }
+        if (!key.secret || password === undefined) return EmailChangeOutcome.WrongPassword
+        const secret = key.secret
+        const right = await countedPasswordCheck(
+          user.id,
+          async () => (await hasher.verify(password, secret)).valid,
+        )
+        if (!right) return EmailChangeOutcome.WrongPassword
       } else if (!(await oauth.proofUntil(state))) {
         return EmailChangeOutcome.ProofRequired
       }
@@ -1243,11 +1328,17 @@ export function createSignIn(options: SignInOptions): SignIn {
         await db.emailChange.remove(user.id)
         return EmailChangeOutcome.Kept
       }
+      // Without a password the address is read from the account's other sign-in methods, and a
+      // proof of an address one of them carries adds no key of its own: the change would answer
+      // "done" and leave the address as it was.
+      if (!key && (await db.authStore.listKeys(user.id)).some((other) => other.email === email)) {
+        return EmailChangeOutcome.AlreadyCarried
+      }
       await db.emailChange.save(user.id, email)
       return EmailChangeOutcome.Requested
     },
 
-    async verifyEmail(c, { user }, code) {
+    async verifyEmail(c, { user, session }, code) {
       const now = new Date()
       // One transaction, but a wrong code still counts: the refusal returns, it does not throw.
       const result = await db.begin(async (tx) => {
@@ -1280,20 +1371,26 @@ export function createSignIn(options: SignInOptions): SignIn {
         if (status.pending === null) return { outcome: EmailVerifyOutcome.Verified }
 
         // No password to move (#384): the key `proveAddress` just proved holds the new address.
-        // An address held that way before goes, so the account has one address and the old one
-        // is free again. The provider keys keep what their provider vouched for.
+        // An address held that way before goes, and a provider key that carried the old address
+        // keeps signing in but carries it no more (#403), so the account has one address and the
+        // old one is free again. Every other session ends, as for an account with a password
+        // below (#406).
         if (key === null) {
           await dropCodeKeys(tx.authStore, user.id, target)
+          if (status.email !== null) await releaseAddress(tx.authStore, user.id, status.email)
           await tx.emailChange.remove(user.id)
+          await txSessions.signOutUser(user.id, { except: session.id })
           return { outcome: EmailVerifyOutcome.Verified }
         }
 
         // A new address: `proveAddress` gave the user a proven code key for it, which also removed
         // every other user's unproven claim to it. The password moves onto a key for the new
         // address, then every code key of the account and the old key go; deleting the old key
-        // ends its sessions. No key of the account's own making is left on an address it had
-        // before, so that address is free again. A provider key keeps what its provider vouched
-        // for.
+        // ends its sessions. A provider key that carried the old address loses it but stays: the
+        // Google or GitHub identity linked before the move keeps signing in by its own user id,
+        // while a different identity that only vouches for the old address is no longer matched
+        // to this account (#403). No key is left on the old address, so it is free again. The
+        // sessions that a provider sign-in started end too: only the new one stays.
         const moved = await tx.authStore.addKey(user.id, {
           method: PASSWORD_METHOD,
           subject: target,
@@ -1310,6 +1407,8 @@ export function createSignIn(options: SignInOptions): SignIn {
             : SecondFactorStatus.NotRequired,
         }, deviceOf(c))
         await tx.authStore.deleteKey(user.id, key.id)
+        if (status.email !== null) await releaseAddress(tx.authStore, user.id, status.email)
+        await txSessions.signOutUser(user.id, { except: created.session.id })
         await tx.emailChange.remove(user.id)
         return { outcome: EmailVerifyOutcome.Verified, created }
       })

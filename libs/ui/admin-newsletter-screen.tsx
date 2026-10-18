@@ -1,6 +1,5 @@
 import type { JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
-import { timeAgo } from "@spy4x/platform/universal/time"
 import { IconDownload } from "@spy4x/preact-icons"
 import { Kpi, KpiGrid } from "@spy4x/preact-charts/kpi"
 import { LineChart } from "@spy4x/preact-charts/line-chart"
@@ -31,10 +30,9 @@ import type {
 } from "@domain/subscribers"
 import { changeText, changeTone, countAxisTop } from "./admin-dashboard-screen.tsx"
 import { ScreenForm } from "./progressive.tsx"
+import { OnDay, useFormat, When } from "@spy4x/preact-ui/format"
 
 const NUMBER = new Intl.NumberFormat("en")
-const DAY = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", timeZone: "UTC" })
-const DATE = new Intl.DateTimeFormat("en", { year: "numeric", month: "short", day: "numeric" })
 
 /** Both tables keep the server's order: newest first. */
 const NO_SORT: never[] = []
@@ -184,6 +182,8 @@ function StatsSection(
     onRetry: () => void
   },
 ): JSX.Element {
+  // The server counts each day in UTC, so its label is that UTC day, in the operator's format.
+  const day = useFormat().utc()
   if (stats === null) {
     return error
       ? (
@@ -250,7 +250,7 @@ function StatsSection(
             height={220}
             yDomain={[0, countAxisTop(days.map((day) => day.count))]}
             yTicks={5}
-            xFormat={(x) => DAY.format(typeof x === "string" ? new Date(`${x}T00:00:00Z`) : x)}
+            xFormat={(x) => day.dayMonth(typeof x === "string" ? `${x}T00:00:00Z` : x)}
             yFormat={(value) => NUMBER.format(value)}
             ariaLabel={`Subscribers at the end of each day, the last ${days.length} days`}
             emptyLabel="Nothing yet"
@@ -295,7 +295,7 @@ function SubscribersTab(props: AdminNewsletterScreenProps): JSX.Element {
         >
           {/* Keyed by the query, so the box shows the search the list was loaded with. */}
           <div key={filter.query} class="flex flex-wrap items-end gap-3" role="search">
-            <div class="min-w-0 flex-1 basis-60">
+            <div class="min-w-0 flex-1 basis-60 sm:max-w-md">
               <Field id="admin-newsletter-q" label="Address">
                 <Input
                   name="q"
@@ -364,6 +364,7 @@ function SubscribersTab(props: AdminNewsletterScreenProps): JSX.Element {
           <div data-e2e="admin-newsletter-list">
             <DataTable
               mode="server"
+              class="[&>div:first-child]:min-h-0"
               columns={subscriberColumns(onOpenDialog)}
               rows={list.subscribers}
               sort={NO_SORT}
@@ -374,12 +375,14 @@ function SubscribersTab(props: AdminNewsletterScreenProps): JSX.Element {
               empty={filtered
                 ? (
                   <EmptyState
+                    inset
                     title="Nobody matches"
                     description="Try another address, or clear the filters."
                   />
                 )
                 : (
                   <EmptyState
+                    inset
                     title="No subscribers yet"
                     description="Addresses show here once someone subscribes on the website."
                   />
@@ -454,13 +457,13 @@ function subscriberColumns(
         const at = row.confirmedAt ?? row.requestedAt
         if (!at) return <span class="text-sm text-muted">Unknown</span>
         return (
-          <time
-            class="whitespace-nowrap text-sm text-muted"
-            dateTime={at}
-            title={new Date(at).toLocaleString()}
-          >
-            {row.confirmedAt ? DATE.format(new Date(at)) : `Asked ${timeAgo(at)}`}
-          </time>
+          row.confirmedAt
+            ? <OnDay class="whitespace-nowrap text-sm text-muted" at={at} />
+            : (
+              <span class="whitespace-nowrap text-sm text-muted">
+                Asked <When at={at} />
+              </span>
+            )
         )
       },
     },
@@ -484,6 +487,7 @@ function SendsTab(
     <div data-e2e="admin-newsletter-sends">
       <DataTable
         mode="server"
+        class="[&>div:first-child]:min-h-0"
         columns={SEND_COLUMNS}
         rows={sends}
         sort={NO_SORT}
@@ -493,6 +497,7 @@ function SendsTab(
         rowKey={(row) => row.issue}
         empty={
           <EmptyState
+            inset
             title="Nothing sent yet"
             description="An issue shows here once the send command starts mailing it."
           />
@@ -523,15 +528,7 @@ const SEND_COLUMNS: DataTableColumn<AdminNewsletterSend, never>[] = [
   {
     id: "startedAt",
     header: "Sent",
-    render: ({ startedAt }) => (
-      <time
-        class="whitespace-nowrap text-sm"
-        dateTime={startedAt}
-        title={new Date(startedAt).toLocaleString()}
-      >
-        {DATE.format(new Date(startedAt))}
-      </time>
-    ),
+    render: ({ startedAt }) => <OnDay class="whitespace-nowrap text-sm" at={startedAt} />,
   },
   { id: "recipients", header: "Recipients", render: ({ recipients }) => count(recipients) },
   { id: "sent", header: "Delivered", render: ({ sent }) => count(sent) },

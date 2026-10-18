@@ -83,7 +83,7 @@ Where they send is the only difference between the two modes, and the env file a
 **Bundled** (the default of `infra/envs/.env.example`): `COMPOSE_PROFILES` contains `monitoring`,
 and `VM_REMOTE_WRITE_URL` and `VLOGS_URL` are empty. Compose then also runs VictoriaMetrics,
 VictoriaLogs, Grafana, vmalert and Alertmanager, and vmagent and Vector send to them. Grafana is on
-`127.0.0.1:3000` of the machine, with no public address (README, "Admin consoles"; user `admin`,
+`127.0.0.1:3000` of the machine, with no public address (docs/deploy.md, "Admin consoles"; user `admin`,
 password `GRAFANA_PASS`), with both data sources already there
 (`infra/configs/grafana-datasources.yml`); it downloads the VictoriaLogs data source plugin, at
 the version pinned in the Compose file, at its first start. Both databases keep 14 days, under
@@ -126,6 +126,12 @@ Bundled mode only. vmalert evaluates `infra/configs/alerts.yml` every minute:
   host exporter is needed.
 - **HostDiskSpaceLow** - any disk of the host has under 10% free for 10 minutes. It has data only
   with the `host-monitoring` profile.
+- **BackupMissing** - no backup has completed for two days. Vector reads the backup service's
+  "Backup done." line; a project without the `backup` profile has no such line and no alert. The
+  rule reads the last 14 days, the bundled VictoriaMetrics' retention: 14 days after the last
+  complete backup the alert resolves although backups are still stopped, and so does it for a
+  project that switches the profile off. `infra/configs/alerts.test.yml` tests
+  the rule (CI step `alert-rules`).
 
 Alertmanager sends what fires, and what resolves, to ntfy: `ALERT_NTFY_URL` (the ntfy server),
 `ALERT_NTFY_TOPIC` (default `alerts`) and `ALERT_NTFY_TOKEN` (an access token, empty for an open

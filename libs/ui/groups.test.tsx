@@ -247,6 +247,32 @@ describe("GroupsScreen", () => {
     expect(has("[data-e2e=group-new-empty]")).toBe(false)
   })
 
+  it("shows a failed first read with Try again, not No groups yet or New group", async () => {
+    const retries = spy<[]>()
+    const failed = { ...defaults, groups: [], loadError: "Could not load the groups" }
+    await mount(<GroupsScreen {...failed} onRetry={retries.fn} />)
+    expect(find("[data-e2e=groups-load-error] [role=alert]").textContent)
+      .toBe("Could not load the groups")
+    expect(root!.textContent).not.toContain("No groups yet")
+    expect(has("[data-e2e=group-new]")).toBe(false)
+    expect(has("[data-e2e=group-new-empty]")).toBe(false)
+
+    find("[data-e2e=groups-retry]").focus()
+    await click("[data-e2e=groups-retry]")
+    expect(retries.calls).toHaveLength(1)
+
+    // While the retry runs the message and the button stay, so focus stays on the button.
+    await rerender(<GroupsScreen {...failed} onRetry={retries.fn} loading />)
+    expect(find("[data-e2e=groups-retry]").textContent).toContain("Loading groups…")
+    expect(focused()).toBe("groups-retry")
+    expect(root!.textContent).not.toContain("No groups yet")
+
+    // A retry that answers brings the list and New group back.
+    await rerender(<GroupsScreen {...defaults} onRetry={retries.fn} />)
+    expect(has("[data-e2e=groups-load-error]")).toBe(false)
+    expect(has("[data-e2e=group-new]")).toBe(true)
+  })
+
   it("marks only the current group, with Current as text and in its link's name", async () => {
     await mount(<GroupsScreen {...defaults} />)
     expect(texts("[data-e2e=group-current]")).toEqual(["Current"])
@@ -1083,6 +1109,25 @@ describe("InviteForm", () => {
     await rerender(<InviteForm {...defaults} createError="Full." createRefusal={plan} />)
     expect(has("[data-e2e=plan-refusal]")).toBe(true)
     expect(root!.textContent).not.toContain("Full.")
+  })
+
+  it("shows a refusal for the creator's unverified address as a focused notice that leads to the E-mail page", async () => {
+    const message = "Verify your e-mail address on the E-mail page before you invite anyone."
+    const went: string[] = []
+    await mount(<InviteForm {...defaults} navigate={(to) => went.push(to)} />)
+    await rerender(
+      <InviteForm {...defaults} navigate={(to) => went.push(to)} addressRefusal={message} />,
+    )
+    expect(focused()).toBe("invitation-error")
+    expect(find("[data-e2e=invitation-error]").textContent).toContain(message)
+    expect(find("[data-e2e=invitation-verify-email]").textContent).toBe("Verify e-mail")
+    // A phone-sized touch target, as tall as the form's own controls.
+    expect(find("[data-e2e=invitation-verify-email]").classList.contains("min-h-11")).toBe(true)
+    // The address field is not blamed, and the form stays to send once the address is verified.
+    expect(find("[data-e2e=invitation-email]").getAttribute("aria-invalid")).toBe(null)
+    expect(has("[data-e2e=invitation-create]")).toBe(true)
+    await click("[data-e2e=invitation-verify-email]")
+    expect(went).toEqual([SCREEN_PATHS.email])
   })
 
   it("shows the created link in place of the form, its copy button focused, and calls onDone on Done", async () => {

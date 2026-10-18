@@ -57,6 +57,24 @@ export async function dropCodeKeys(
   }
 }
 
+/**
+ * Takes `address` off every key of the user that still carries it, keeping the keys (#403). After
+ * an address change those are the provider keys: each keeps signing in by its provider's own user
+ * id, but no longer says "this person owns the old address". Left in place, it would let any other
+ * Google or GitHub identity that vouches for the old address, such as one the mailbox's next
+ * holder makes, be linked into the account.
+ */
+export async function releaseAddress(
+  store: AuthStore,
+  userId: number,
+  address: string,
+): Promise<void> {
+  if (!store.releaseKeyEmail) throw new TypeError("the auth store cannot release an address")
+  for (const key of await store.listKeys(userId)) {
+    if (key.email === address) await store.releaseKeyEmail(userId, key.id)
+  }
+}
+
 /** The `email_changes` table: one new address per user, waiting for its code. */
 export type EmailChanges = ReturnType<typeof emailChanges>
 
@@ -92,16 +110,32 @@ export async function readEmailStatus(
   store: AuthStore,
   userId: number,
 ): Promise<EmailStatus> {
-  const keys = await store.listKeys(userId)
-  const held = (candidate: AuthKey) => candidate.email !== null && candidate.provenAt !== null
-  const key = keys.find((candidate) => candidate.method === PASSWORD_METHOD) ??
-    keys.find((candidate) => candidate.method === EMAIL_CODE_METHOD && held(candidate)) ??
-    keys.find(held)
+  const key = addressKeyOf(await store.listKeys(userId))
   return {
     email: key?.email ?? null,
-    proven: key?.email != null && key.provenAt !== null,
+    proven: isProven(key),
     pending: await changes.find(userId),
   }
+}
+
+/**
+ * Whether the address the user signs in with is proven: `readEmailStatus`'s `proven`, without the
+ * pending change. An account with no address at all (a username account made before #139) is not.
+ */
+export async function hasProvenAddress(store: AuthStore, userId: number): Promise<boolean> {
+  return isProven(addressKeyOf(await store.listKeys(userId)))
+}
+
+/** The key that holds the user's address, in the order `readEmailStatus` describes. */
+function addressKeyOf(keys: AuthKey[]): AuthKey | undefined {
+  const held = (candidate: AuthKey) => candidate.email !== null && candidate.provenAt !== null
+  return keys.find((candidate) => candidate.method === PASSWORD_METHOD) ??
+    keys.find((candidate) => candidate.method === EMAIL_CODE_METHOD && held(candidate)) ??
+    keys.find(held)
+}
+
+function isProven(key: AuthKey | undefined): boolean {
+  return key?.email != null && key.provenAt !== null
 }
 
 /**
@@ -138,8 +172,8 @@ export async function proveEmailCode(
 
 /**
  * The user who owns `email` because a code or a reset link proved it, or `null`: an unproven claim
- * owns nothing. Anything that trusts an address to name a person asks this first: an invitation
- * by address (#131) and linking a Google or GitHub account by its address (#141).
+ * owns nothing. Anything that trusts an address to name a person asks this first; today that is
+ * an invitation by address (#131).
  */
 export async function provenAddressOwner(store: AuthStore, email: unknown): Promise<number | null> {
   const address = normalizeEmail(email)

@@ -333,7 +333,7 @@ CREATE INDEX idx_notes_group_updated_id_deleted
     ON notes (group_id, updated_at DESC, id)
     WHERE deleted_at IS NOT NULL;
 CREATE INDEX idx_notes_deleted_at ON notes (deleted_at) WHERE deleted_at IS NOT NULL;
--- Search over live notes (#299). See migration 2026_11_19_0001.
+-- Search over live notes (#299). See migration 2026_11_22_0001.
 CREATE INDEX idx_notes_search_vector_active ON notes USING GIN (search_vector)
     WHERE deleted_at IS NULL;
 
@@ -411,6 +411,15 @@ CREATE TABLE password_failures (
     locked_until TIMESTAMPTZ,
     last_failure_at TIMESTAMPTZ,
     CONSTRAINT password_failures_failed_attempts_check CHECK (failed_attempts >= 0)
+);
+
+-- Wrong passwords a signed-in account types at the steps that ask for it again (#406).
+CREATE TABLE password_check_failures (
+    user_id INT4 PRIMARY KEY REFERENCES auth_users (id) ON DELETE CASCADE,
+    failed_attempts INT4 DEFAULT 0 NOT NULL,
+    locked_until TIMESTAMPTZ,
+    last_failure_at TIMESTAMPTZ,
+    CONSTRAINT password_check_failures_failed_attempts_check CHECK (failed_attempts >= 0)
 );
 
 -- One subscription per group, paid through a provider (#202). See the migration for the why.
@@ -803,3 +812,15 @@ CREATE TABLE sign_up_code_requests (
 );
 
 CREATE INDEX sign_up_code_requests_sign_up_id_idx ON sign_up_code_requests (sign_up_id);
+
+-- #163: a person's display preferences, one versioned row per person. See migration
+-- 2026_11_20_0001_user_preferences.sql.
+CREATE TABLE user_preferences (
+    user_id INT4 PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    value JSONB DEFAULT '{}'::jsonb NOT NULL,
+    version INT4 DEFAULT 0 NOT NULL,
+    first_time_zone VARCHAR(64),
+    first_locale VARCHAR(64),
+    updated_at TIMESTAMPTZ(3),
+    CONSTRAINT user_preferences_version_check CHECK (version >= 0)
+);

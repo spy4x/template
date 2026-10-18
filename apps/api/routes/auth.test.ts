@@ -36,15 +36,19 @@ import {
   EMAIL_CHANGE_MAILS_PER_ADDRESS,
   EMAIL_CODE_MAILS_PER_ADDRESS,
   RESET_MAILS_PER_ADDRESS,
+  SIGN_UP_CODE_MAILS_PER_ADDRESS,
+  SIGN_UP_CODE_MAILS_PER_CLIENT,
 } from "../middlewares/auth-rate-limits.ts"
 import { createLockout, type Lockout } from "@spy4x/server/lockout"
 import { MemoryLockoutStore } from "@spy4x/server/lockout/memory-store"
 import { PASSWORD_LOCK_POLICY } from "../services/password-failures.ts"
+import { PasswordLockedError } from "../services/password-locked.ts"
 import { createKvStore, type RateLimitStore } from "@spy4x/platform/rate-limit"
 import {
   ACCOUNT_DELETE_BLOCKED,
   ACCOUNT_DELETE_CODE_REQUIRED,
   createAuthRoute,
+  EMAIL_ALREADY_CARRIED,
   EMAIL_CHANGE_TOO_MANY,
   EMAIL_CODE_REFUSED,
   EMAIL_NOTHING_TO_VERIFY,
@@ -148,6 +152,8 @@ function fakeSignIn(
     ),
     resetPassword: () => (calls.push("resetPassword"), Promise.resolve(succeed)),
     checkPassword: () => (calls.push("checkPassword"), Promise.resolve(succeed)),
+    countPasswordCheck: (_userId, check) => check(),
+    verifyPassword: () => (calls.push("verifyPassword"), Promise.resolve(succeed)),
     hasPassword: () => Promise.resolve(true),
     confirmedByProvider: () => Promise.resolve(false),
     setPassword: () => (
@@ -357,8 +363,9 @@ const sessionRoutes: SessionRoute[] = [
   {
     method: "POST",
     path: "/auth/totp/connect/start",
-    body: undefined,
+    body: { password: "correct-horse" },
     operation: "connectTotpStart",
+    calls: { succeeded: ["checkPassword", "connectTotpStart"], failed: ["checkPassword"] },
   },
   {
     method: "POST",
@@ -987,6 +994,113 @@ describe("auth routes ask for proof before turning two-factor off", () => {
   })
 })
 
+describe("auth routes ask for proof before turning two-factor on (#406)", () => {
+  const start = (body: unknown) => ({
+    method: "POST" as const,
+    path: "/auth/totp/connect/start",
+    body,
+  })
+
+  it("refuses an account with a password that sends none, and starts nothing", async () => {
+    const { app, calls } = buildApp()
+    const response = await send(app, start({}), sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Invalid password" })
+    expect(calls).toEqual([])
+  })
+
+  it("refuses a wrong password and starts nothing", async () => {
+    const { app, calls } = buildApp(undefined, { succeed: false })
+    const response = await send(app, start({ password: "wrong-horse" }), sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Invalid password" })
+    expect(calls).toEqual(["checkPassword"])
+  })
+
+  it("starts the set-up for the account's password", async () => {
+    const { app, calls } = buildApp()
+    const response = await send(app, start({ password: "correct-horse" }), sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ qrcode: "qr", secret: "s" })
+    expect(calls).toEqual(["checkPassword", "connectTotpStart"])
+  })
+
+  it("refuses an account without a password whose provider sign-in is not recent", async () => {
+    const { app, calls } = buildApp(undefined, {
+      signIn: { hasPassword: () => Promise.resolve(false) },
+    })
+    const response = await send(app, start({}), sameOriginHeaders)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: PROVIDER_PROOF_REQUIRED })
+    expect(calls).toEqual([])
+  })
+
+  it("starts the set-up for an account without a password after a provider sign-in a moment ago", async () => {
+    const { app, calls } = buildApp(undefined, {
+      signIn: {
+        hasPassword: () => Promise.resolve(false),
+        confirmedByProvider: () => Promise.resolve(true),
+      },
+    })
+    const response = await send(app, start({}), sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(calls).toEqual(["connectTotpStart"])
+  })
+})
+
+describe("auth routes refuse a password step while the account's wrong passwords lock it (#406)", () => {
+  const locked = () => Promise.reject(new PasswordLockedError(90_500))
+  const cases: { route: MutationCase; signIn: Partial<SignIn> }[] = [
+    {
+      route: { method: "POST", path: "/auth/totp/connect/start", body: { password: "pw-12345" } },
+      signIn: { checkPassword: locked },
+    },
+    {
+      route: { method: "POST", path: "/auth/totp/disconnect", body: { password: "pw-12345" } },
+      signIn: { checkPassword: locked },
+    },
+    {
+      route: { method: "POST", path: "/auth/account/delete", body: { password: "pw-12345" } },
+      signIn: { checkPassword: locked },
+    },
+    {
+      route: {
+        method: "POST",
+        path: "/auth/password/change",
+        body: { password: "pw-12345", newPassword: "battery-staple" },
+      },
+      signIn: { changePassword: locked },
+    },
+    {
+      route: {
+        method: "POST",
+        path: "/auth/email/change",
+        body: { email: "new@example.com", password: "pw-12345" },
+      },
+      signIn: { requestEmailChange: locked },
+    },
+  ]
+  for (const { route, signIn } of cases) {
+    it(`answers ${route.path} with 429, the time to wait and no change`, async () => {
+      const { app, calls, mailed } = buildApp(undefined, { signIn })
+      const response = await send(app, route, sameOriginHeaders)
+
+      expect(response.status).toBe(429)
+      expect(response.headers.get("retry-after")).toBe("91")
+      expect(await response.json()).toEqual({
+        error: "Too many wrong passwords. Try again in 2 minutes.",
+      })
+      expect(calls.filter((call) => call !== "accountDeletionBlockers")).toEqual([])
+      expect(mailed).toEqual([])
+    })
+  }
+})
+
 describe("auth routes lock a sign-in name after repeated wrong passwords", () => {
   const signInRoute = anonymousRoutes.find((route) => route.path === "/auth/password/check")!
   const RIGHT = "correct-horse"
@@ -1296,12 +1410,12 @@ describe("auth routes prove the address before a sign-up creates anything (#142)
     expect(calls).toEqual(["requestSignUp", "requestSignUp"])
   })
 
-  it("refuses past the address's code budget with one answer for every address", async () => {
+  it("refuses past one client's code budget for an address with one answer for every address", async () => {
     const { app, calls } = buildApp(null)
     const refusals = []
     for (const email of ["free@example.com", "taken@example.com"]) {
       const body = { ...signUpBody, email }
-      for (let mail = 0; mail < EMAIL_CODE_MAILS_PER_ADDRESS; mail++) {
+      for (let mail = 0; mail < SIGN_UP_CODE_MAILS_PER_CLIENT; mail++) {
         await send(app, { ...signUp, body }, sameOriginWithoutCookieHeaders)
       }
       const refused = await send(app, { ...signUp, body }, sameOriginWithoutCookieHeaders)
@@ -1315,7 +1429,76 @@ describe("auth routes prove the address before a sign-up creates anything (#142)
     expect(refusals[0].status).toBe(429)
     expect(refusals[0].body).toEqual({ error: SIGN_UP_CODES_TOO_MANY })
     expect(refusals[1]).toEqual(refusals[0])
-    expect(calls).toEqual(Array(2 * EMAIL_CODE_MAILS_PER_ADDRESS).fill("requestSignUp"))
+    expect(calls).toEqual(Array(2 * SIGN_UP_CODE_MAILS_PER_CLIENT).fill("requestSignUp"))
+  })
+
+  /** The headers of an anonymous request from `ip`. */
+  const from = (ip: string) => ({ ...sameOriginWithoutCookieHeaders, "x-real-ip": ip })
+
+  it("leaves the address's owner a code after a stranger keeps signing the address up (#494)", async () => {
+    const { app, calls } = buildApp(null)
+    const stranger = []
+    for (let attempt = 0; attempt <= SIGN_UP_CODE_MAILS_PER_ADDRESS; attempt++) {
+      stranger.push((await send(app, signUp, from("192.0.2.1"))).status)
+    }
+    const owner = await send(app, signUp, from("198.51.100.7"))
+
+    expect(stranger).toEqual([
+      ...Array(SIGN_UP_CODE_MAILS_PER_CLIENT).fill(200),
+      ...Array(SIGN_UP_CODE_MAILS_PER_ADDRESS + 1 - SIGN_UP_CODE_MAILS_PER_CLIENT).fill(429),
+    ])
+    expect(owner.status).toBe(200)
+    expect(calls).toEqual(Array(SIGN_UP_CODE_MAILS_PER_CLIENT + 1).fill("requestSignUp"))
+  })
+
+  it("counts every address of an IPv6 /64 as one client", async () => {
+    const { app } = buildApp(null)
+    const statuses = []
+    for (let attempt = 0; attempt <= SIGN_UP_CODE_MAILS_PER_CLIENT; attempt++) {
+      statuses.push((await send(app, signUp, from(`2001:db8::${attempt + 1}`))).status)
+    }
+
+    expect(statuses).toEqual([...Array(SIGN_UP_CODE_MAILS_PER_CLIENT).fill(200), 429])
+  })
+
+  it("caps sign-up codes to one address from many networks together", async () => {
+    const { app, calls } = buildApp(null)
+    const statuses = []
+    for (let network = 1; statuses.length <= SIGN_UP_CODE_MAILS_PER_ADDRESS; network++) {
+      for (let mail = 0; mail < SIGN_UP_CODE_MAILS_PER_CLIENT; mail++) {
+        statuses.push((await send(app, signUp, from(`192.0.2.${network}`))).status)
+      }
+    }
+    const fresh = await send(app, signUp, from("198.51.100.7"))
+    const otherAddress = await send(
+      app,
+      { ...signUp, body: { ...signUpBody, email: "bob@example.com" } },
+      from("198.51.100.7"),
+    )
+
+    expect(statuses.slice(0, SIGN_UP_CODE_MAILS_PER_ADDRESS)).toEqual(
+      Array(SIGN_UP_CODE_MAILS_PER_ADDRESS).fill(200),
+    )
+    expect(statuses.slice(SIGN_UP_CODE_MAILS_PER_ADDRESS)).not.toContain(200)
+    expect(fresh.status).toBe(429)
+    expect(otherAddress.status).toBe(200)
+    expect(calls).toHaveLength(SIGN_UP_CODE_MAILS_PER_ADDRESS + 1)
+  })
+
+  it("leaves a signed-in account's own code budget whole after strangers sign its address up", async () => {
+    const rateLimits = createAuthRateLimits(generousLimits)
+    const anonymous = buildApp(null, { rateLimits })
+    for (let network = 1; network <= 4; network++) {
+      for (let mail = 0; mail < SIGN_UP_CODE_MAILS_PER_CLIENT; mail++) {
+        await send(anonymous.app, signUp, from(`192.0.2.${network}`))
+      }
+    }
+    const signedIn = buildApp(undefined, { rateLimits })
+    const sendCode = sessionRoutes.find((candidate) => candidate.path === "/auth/email/send")!
+    const response = await send(signedIn.app, sendCode, sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(signedIn.mailed).toEqual(["alice@example.com"])
   })
 
   it("signs in the account a right code created", async () => {
@@ -1373,15 +1556,25 @@ describe("auth routes prove the address before a sign-up creates anything (#142)
     expect(calls).toEqual([])
   })
 
-  it("spends the waiting address's code budget on a new code", async () => {
+  it("spends the client's sign-up code budget for the waiting address on a new code", async () => {
     const { app, calls } = buildApp(null)
     const statuses = []
-    for (let mail = 0; mail <= EMAIL_CODE_MAILS_PER_ADDRESS; mail++) {
+    for (let mail = 0; mail <= SIGN_UP_CODE_MAILS_PER_CLIENT; mail++) {
       statuses.push((await send(app, resend, sameOriginWithoutCookieHeaders)).status)
     }
 
-    expect(statuses).toEqual([...Array(EMAIL_CODE_MAILS_PER_ADDRESS).fill(200), 429])
-    expect(calls).toEqual(Array(EMAIL_CODE_MAILS_PER_ADDRESS).fill("resendSignUpCode"))
+    expect(statuses).toEqual([...Array(SIGN_UP_CODE_MAILS_PER_CLIENT).fill(200), 429])
+    expect(calls).toEqual(Array(SIGN_UP_CODE_MAILS_PER_CLIENT).fill("resendSignUpCode"))
+  })
+
+  it("shares one client's sign-up code budget between a sign-up and its new codes", async () => {
+    const { app } = buildApp(null)
+    for (let mail = 0; mail < SIGN_UP_CODE_MAILS_PER_CLIENT; mail++) {
+      await send(app, signUp, sameOriginWithoutCookieHeaders)
+    }
+    const response = await send(app, resend, sameOriginWithoutCookieHeaders)
+
+    expect(response.status).toBe(429)
   })
 
   it("reads back the waiting sign-up's address for the page that asks for the code", async () => {
@@ -1640,6 +1833,36 @@ describe("auth routes prove an e-mail address with a code", () => {
     expect(await response.json()).toEqual({ error: PROVIDER_PROOF_REQUIRED })
     expect(mailed).toEqual([])
   })
+
+  it("refuses, and queues nothing, when another sign-in method of the account carries the address", async () => {
+    const { app, mailed } = buildApp(undefined, {
+      signIn: { requestEmailChange: () => Promise.resolve(EmailChangeOutcome.AlreadyCarried) },
+    })
+    const response = await send(
+      app,
+      { ...change, body: { email: "new@example.com" } },
+      sameOriginHeaders,
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: EMAIL_ALREADY_CARRIED })
+    expect(mailed).toEqual([])
+  })
+
+  it("announces a sign-out once a code proved a new address, so the other devices' sockets close", async () => {
+    const { app, emitted } = buildApp()
+    const response = await send(app, verify, sameOriginHeaders)
+
+    expect(response.status).toBe(200)
+    expect(emitted.map((event) => event.data.userId)).toEqual([buildAuthData().user.id])
+  })
+
+  it("announces no sign-out for a wrong code", async () => {
+    const { app, emitted } = buildApp(undefined, { succeed: false })
+    await send(app, verify, sameOriginHeaders)
+
+    expect(emitted).toEqual([])
+  })
 })
 
 describe("deleting one's own account", () => {
@@ -1839,6 +2062,20 @@ describe("a first password", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ success: true })
     expect(calls).toEqual(["setPassword"])
+  })
+
+  it("announces a sign-out once it is set, so the other devices' sockets close", async () => {
+    const { app, emitted } = buildApp()
+    await send(app, setRoute, sameOriginHeaders)
+
+    expect(emitted.map((event) => event.data.userId)).toEqual([buildAuthData().user.id])
+  })
+
+  it("announces no sign-out when it is refused", async () => {
+    const { app, emitted } = buildApp(undefined, { succeed: false })
+    await send(app, setRoute, sameOriginHeaders)
+
+    expect(emitted).toEqual([])
   })
 
   it("refuses a password shorter than eight characters without trying to set it", async () => {

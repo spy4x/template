@@ -1,6 +1,5 @@
 import type { JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
-import { timeAgo } from "@spy4x/platform/universal/time"
 import { Avatar } from "@spy4x/preact-ui/avatar"
 import { Badge } from "@spy4x/preact-ui/badge"
 import { Button } from "@spy4x/preact-ui/button"
@@ -29,6 +28,7 @@ import {
 import { GroupMark } from "./group-appearance.tsx"
 import { nextSort } from "./admin-users-screen.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
+import { OnDay, When } from "@spy4x/preact-ui/format"
 
 /** The groups module's pages in the admin app. */
 export const ADMIN_GROUP_PATHS = {
@@ -65,7 +65,6 @@ const TABLE_CLASS = [
   `max-sm:[&_:is(th,td):nth-child(n+4)]:hidden`,
 ].join(` `)
 
-const CREATED = new Intl.DateTimeFormat(`en`, { year: `numeric`, month: `short`, day: `numeric` })
 const NUMBER = new Intl.NumberFormat(`en`)
 
 /** A group role as a person reads it: `Owner`. */
@@ -160,7 +159,7 @@ export function AdminGroupsListScreen(
         >
           {/* Keyed by the query, so going back in history shows the search that page had. */}
           <div key={filter.query} class="flex flex-wrap items-end gap-3" role="search">
-            <div class="min-w-0 flex-1 basis-60">
+            <div class="min-w-0 flex-1 basis-60 sm:max-w-md">
               <Field id="admin-groups-q" label="Group name, owner or group id">
                 <Input
                   name="q"
@@ -243,6 +242,7 @@ export function AdminGroupsListScreen(
               rowKey={(row) => row.group.id}
               empty={
                 <EmptyState
+                  inset
                   title="No group matches"
                   description={filtered
                     ? `Try another name or address, or clear the filters.`
@@ -328,11 +328,7 @@ function groupColumns(navigate?: Navigate): DataTableColumn<GroupTableRow, Admin
       sortable: true,
       render: ({ lastActivityAt }) =>
         lastActivityAt
-          ? (
-            <time class="whitespace-nowrap text-sm" dateTime={lastActivityAt}>
-              {timeAgo(lastActivityAt)}
-            </time>
-          )
+          ? <When class="whitespace-nowrap text-sm" at={lastActivityAt} />
           : <span class="text-sm text-muted">None</span>,
     },
     {
@@ -340,9 +336,7 @@ function groupColumns(navigate?: Navigate): DataTableColumn<GroupTableRow, Admin
       header: `Created`,
       sortable: true,
       render: ({ createdAt }) => (
-        <time class="whitespace-nowrap text-sm text-muted" dateTime={createdAt}>
-          {CREATED.format(new Date(createdAt))}
-        </time>
+        <OnDay class="whitespace-nowrap text-sm text-muted" at={createdAt} />
       ),
     },
   ]

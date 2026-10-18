@@ -21,6 +21,8 @@ import { createTagsRoute } from "./routes/tags.ts"
 import { createApiTokensRoute } from "./routes/api-tokens.ts"
 import { createAdminRoute } from "./routes/admin/+routes.ts"
 import { adminModuleRoutes } from "./routes/admin/registry.ts"
+import { createAdminOwnPreferencesRoute } from "./routes/admin/own-preferences.ts"
+import { preferencesDefinition } from "@domain/identity"
 import { createTokenApiRoute } from "./routes/token-api.ts"
 import { createApiTokens } from "./services/api-tokens.ts"
 import { createTokenRateLimits } from "./middlewares/token-rate-limits.ts"
@@ -42,6 +44,8 @@ import {
   createAuthRateLimits,
   EMAIL_CODE_STORE,
   emailCodeBudgetKey,
+  SIGN_UP_CODE_STORE,
+  signUpCodeBudgetKeys,
 } from "./middlewares/auth-rate-limits.ts"
 import { commandBus } from "./services/commandBus.ts"
 import { queryBus } from "./services/queryBus.ts"
@@ -170,8 +174,9 @@ const apiTokens = createApiTokens({
   key: await deriveSecret(config.authPepper, "api-tokens"),
   checkPassword: async (tx, userId, password) =>
     (await signIn.hasPassword(userId, tx))
-      ? await signIn.checkPassword(userId, password, tx)
+      ? await signIn.verifyPassword(userId, password, tx)
       : null,
+  countPasswordCheck: signIn.countPasswordCheck,
   mayAuditRefusal: tokenRateLimits.refusalAudit,
   logError: (message, error) => log(message, error),
 })
@@ -208,7 +213,13 @@ app.route(
       cacheConnected: isCacheConnected,
       build: config.build,
       billing: billingSetup,
-    }),
+    }).concat(
+      createAdminOwnPreferencesRoute({
+        limit: rateLimits.normal,
+        read: async (userId) =>
+          preferencesDefinition.resolve(await db.preferences.store.read(String(userId))),
+      }),
+    ),
   }),
 )
 // The only routes that accept a token, and they accept nothing else.
@@ -365,9 +376,14 @@ if (config.isDev) {
       db,
       sql,
       closeSockets: (userId) => realtime.closeUser(userId, "closed by a development script", 1012),
-      forgetCodeBudget: async (email) =>
+      forgetCodeBudget: async (email, client) => {
         await createRedisRateLimitStore(kv, { keyPrefix: EMAIL_CODE_STORE })
-          .delete(await emailCodeBudgetKey(email)),
+          .delete(await emailCodeBudgetKey(email))
+        const signUp = createRedisRateLimitStore(kv, { keyPrefix: SIGN_UP_CODE_STORE })
+        const keys = await signUpCodeBudgetKeys(email, client)
+        await signUp.delete(keys.address)
+        await signUp.delete(keys.client)
+      },
     }),
   )
 }

@@ -6,6 +6,7 @@ import preact from "@preact/preset-vite"
 import tailwindcss from "@tailwindcss/vite"
 import { themeBootstrapScript } from "@spy4x/preact-signals/theme"
 import {
+  denoModuleIds,
   npmSpecifiers,
   preactThemeCss,
   requireComponentCss,
@@ -29,17 +30,15 @@ const ERROR_TRACKER_VARIABLE = "$csp_error_tracker"
 /**
  * What the SPA loads from another origin, added to the defaults of the library's policy:
  *
- * - the Google Fonts stylesheet `index.html` links, and the font files that stylesheet names;
  * - the error tracker the reporter posts to, when the deployment has one;
  * - the Google and GitHub image hosts, for the provider's picture of the person on "Create a new
  *   account?" (#142). The API drops a picture from any other host before it reaches the page.
  *
  * The API and its WebSocket are on the SPA's own origin (the proxy routes `/api` and `/ws`), so
- * `'self'` covers them, as it covers the service worker and the web manifest.
+ * `'self'` covers them, as it covers the service worker, the web manifest and the fonts
+ * (`public/fonts`).
  */
 const EXTRA_SOURCES = {
-  styleSrc: ["https://fonts.googleapis.com"],
-  fontSrc: ["https://fonts.gstatic.com"],
   connectSrc: [ERROR_TRACKER_VARIABLE],
   imgSrc: [...PROVIDER_AVATAR_ORIGINS],
 }
@@ -60,6 +59,9 @@ const REQUIRED_SELECTORS = [
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
+    // One id per Deno module, so a context such as the date format's loads once and the screens
+    // read the copy the app provides (spy4x/preact-components#785). It must come before `deno()`.
+    denoModuleIds(),
     npmSpecifiers({ readTextFile: Deno.readTextFile }),
     deno(),
     preact(),
@@ -79,10 +81,11 @@ export default defineConfig({
     webManifest({
       writeTextFile: Deno.writeTextFile,
       manifest: {
-        name: `App Template`,
-        short_name: `App`,
-        theme_color: `#581c87`,
-        background_color: `#F3F4F6`,
+        name: `Seed`,
+        short_name: `Seed`,
+        // The light palette's canvas, as index.html's light theme-color: a manifest holds one.
+        theme_color: `#f3f4f6`,
+        background_color: `#f3f4f6`,
         icons: [
           {
             src: `/img/android/android-launchericon-192-192.png`,

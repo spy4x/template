@@ -1,11 +1,12 @@
 import type { ComponentChildren, JSX } from "preact"
 import { timeAgo } from "@spy4x/platform/universal/time"
-import { Kpi, KpiGrid } from "@spy4x/preact-charts/kpi"
 import { IconEllipsisVertical } from "@spy4x/preact-icons"
 import { Avatar } from "@spy4x/preact-ui/avatar"
 import { Badge } from "@spy4x/preact-ui/badge"
 import { Button, buttonClasses } from "@spy4x/preact-ui/button"
+import { Card } from "@spy4x/preact-ui/card"
 import { Dropdown, DropdownItem } from "@spy4x/preact-ui/dropdown"
+import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
 import { Cluster, Stack } from "@spy4x/preact-ui/layout"
 import { Link } from "@spy4x/preact-ui/link"
@@ -38,6 +39,7 @@ import {
 import { roleColor, roleLabel } from "./admin-users-screen.tsx"
 import { GroupMark } from "./group-appearance.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
+import { useFormat, When } from "@spy4x/preact-ui/format"
 
 /** The signed-in operator, as far as the page needs them. */
 export interface AdminGroupOperatorView {
@@ -148,6 +150,7 @@ export interface AdminGroupScreenProps {
  */
 export function AdminGroupScreen(props: AdminGroupScreenProps): JSX.Element {
   const { detail, error, operator, navigate } = props
+  const format = useFormat()
   const back = { href: ADMIN_GROUP_PATHS.list, label: `Groups` }
 
   if (!detail) {
@@ -236,19 +239,17 @@ export function AdminGroupScreen(props: AdminGroupScreenProps): JSX.Element {
             />
           )}
         </div>
-        <section aria-label="Counts" data-e2e="admin-group-counts">
-          <KpiGrid minWidth="9rem">
-            <Kpi label="Members" value={NUMBER.format(detail.members.length)} tone="accent" />
-            <Kpi
-              label="Notes"
-              value={NUMBER.format(counts.notes)}
-              sub={`${NUMBER.format(counts.deletedNotes)} in trash`}
-            />
-            <Kpi label="Tags" value={NUMBER.format(counts.tags)} />
-            <Kpi label="Open invitations" value={NUMBER.format(counts.pendingInvitations)} />
-          </KpiGrid>
-        </section>
-        <dl class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {/* The counts are facts like the dates: no card inside the header card. */}
+        <dl class="grid grid-cols-2 gap-4 sm:grid-cols-4" data-e2e="admin-group-counts">
+          <Fact label="Members">{NUMBER.format(detail.members.length)}</Fact>
+          <Fact label="Notes">
+            {NUMBER.format(counts.notes)}
+            <span class="font-normal text-muted">
+              {` · ${NUMBER.format(counts.deletedNotes)} in trash`}
+            </span>
+          </Fact>
+          <Fact label="Tags">{NUMBER.format(counts.tags)}</Fact>
+          <Fact label="Open invitations">{NUMBER.format(counts.pendingInvitations)}</Fact>
           <Fact label="Owner">
             <Link
               href={ADMIN_PATHS.user(group.owner.id)}
@@ -268,8 +269,8 @@ export function AdminGroupScreen(props: AdminGroupScreenProps): JSX.Element {
           <Fact label="Renews">
             {detail.billing?.currentPeriodEnd
               ? detail.billing.cancelAtPeriodEnd
-                ? `Ends ${new Date(detail.billing.currentPeriodEnd).toLocaleDateString()}`
-                : new Date(detail.billing.currentPeriodEnd).toLocaleDateString()
+                ? `Ends ${format.date(detail.billing.currentPeriodEnd)}`
+                : format.date(detail.billing.currentPeriodEnd)
               : `No subscription`}
           </Fact>
         </dl>
@@ -325,25 +326,18 @@ function Fact({ label, children }: { label: string; children: ComponentChildren 
   )
 }
 
-/** A moment as "3 days ago", with the exact time for a machine and on hover. */
-function When({ at }: { at: string }): JSX.Element {
-  return <time dateTime={at} title={new Date(at).toLocaleString()}>{timeAgo(at)}</time>
-}
-
 const ROW = `flex min-h-14 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3`
 
-/** A list in the page's bordered style, or one quiet line when it is empty. */
+/** A list in the page's bordered style, or a card with one quiet line when it is empty. */
 function Rows(
   { empty, dataE2E, children }: { empty: string; dataE2E: string; children: JSX.Element[] },
 ): JSX.Element {
   if (children.length === 0) {
     return (
-      <p
-        class="rounded-lg border border-dashed border-subtle px-4 py-6 text-center text-sm text-muted"
-        data-e2e={dataE2E}
-      >
-        {empty}
-      </p>
+      // The list's card with one quiet line in its body's place: no dashed box inside the page.
+      <Card data-e2e={dataE2E}>
+        <EmptyState inset description={empty} />
+      </Card>
     )
   }
   return (

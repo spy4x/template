@@ -37,10 +37,14 @@ says what is missing. Do not copy the gap into a new screen.
   `location` at render, no import from an app. Links take an optional `navigate` port instead of a
   router. `tests/ui-boundary.test.ts` walks `libs/ui` and runs preact-components' rule
   (`@spy4x/preact-system/boundary`) over every module, with this repository's app aliases.
-- **Built on preact-components' `EnhancedForm`.** Every form here is `ScreenForm`
-  (`libs/ui/progressive.tsx`): `EnhancedForm` with its status taken from the screen's `pending`
-  prop, so a pending form is disabled and refuses a second submit. A form takes its submit over
-  with `onSubmit`; only the newsletter's pass `action` too.
+- **Built on preact-components' forms.** A form here is `ScreenForm` (`libs/ui/progressive.tsx`):
+  `EnhancedForm` with its status taken from the screen's `pending` prop, so a pending form is
+  disabled and refuses a second submit. A form takes its submit over with `onSubmit`; only the
+  newsletter's pass `action` too. A screen whose whole form the library already has draws that
+  instead: the sign-in screens (`AuthScreen`, `AdminSignInScreen`) use preact-system's `AuthForm`,
+  and the billing screens use `PlanCard`'s and `PricingTable`'s forms and a `<form>`, each inside a
+  `<fieldset>` that `pending` disables, whose submits the app takes over with `onChoose` and
+  `onManage`. Any other form is `ScreenForm`.
 - **One page header.** Every signed-in page starts with `PageHeader` (from `@spy4x/preact-ui/page-header`):
   the title, the primary action and one "More actions" menu. Do not draw a second one.
 - **Laid out by the rules in [docs/design/ui-layout.md](docs/design/ui-layout.md):** one primary
@@ -72,15 +76,16 @@ modifies its admin counterpart in the same PR, so the two never drift apart.
 **Open:** the Android app ([#414](https://github.com/spy4x/template/issues/414)) and the desktop
 app ([#413](https://github.com/spy4x/template/issues/413)) are not built yet.
 
-## Website screenshots
+## Product screenshots
 
-The public website shows pictures of the product (`apps/mpa/static/shots/`). When a change alters a
-photographed screen significantly (the shell, a screen's layout, its primary action, the palette),
-re-capture them in a PR of their own with the `recapture-shots` skill
-(`.claude/skills/recapture-shots/SKILL.md`), once the change is merged. A small change (a wording,
-a spacing nudge) does not need it. When unsure, ask the owner. The owner asked for this on
-2026-10-16: "do that automatically when screens/UI/UX change significantly (not every small
-change). If unsure if screenshots to be remade - ask me."
+The public website (`apps/mpa/static/shots/`) and the README (`docs/screenshots/`) show pictures of
+the product. When a change alters a photographed screen significantly (the shell, a screen's
+layout, its primary action, the palette), re-capture both sets in a PR of their own with the
+`recapture-shots` skill (`.claude/skills/recapture-shots/SKILL.md`), once the change is merged. A
+small change (a wording, a spacing nudge) does not need it. When unsure, ask the owner. The owner
+asked for this on 2026-10-16: "do that automatically when screens/UI/UX change significantly (not
+every small change). If unsure if screenshots to be remade - ask me." On 2026-10-17 the owner
+agreed that the skill covers the README pictures too.
 
 ## Handoff
 

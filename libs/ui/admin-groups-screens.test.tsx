@@ -15,7 +15,7 @@ import {
   type AdminGroupRow,
   GroupRole,
 } from "@domain/groups"
-import { type AdminUserDetail, UserRole } from "@domain/identity"
+import { type AdminUserDetail, DEFAULT_PREFERENCES, UserRole } from "@domain/identity"
 import { AdminGroupsListScreen, type AdminGroupsListScreenProps } from "./admin-groups-list.tsx"
 import {
   activityTone,
@@ -360,6 +360,19 @@ describe(`one group in the admin app`, () => {
     expect(find(`[data-e2e=admin-group-status]`).textContent).toBe(`Active`)
   })
 
+  it(`draws the counts as plain facts, with no bordered box but badges inside the header card`, async () => {
+    await mount(<AdminGroupScreen {...groupProps([])} />)
+    const card = find(`[data-e2e=admin-group-card]`)
+    const boxed = [...card.querySelectorAll(`*`)].map((element) => element.className).filter((
+      name,
+    ) =>
+      /(^| )border( |$)/.test(name) && /rounded-(?!full)/.test(name) && !/inline-flex/.test(name)
+    )
+
+    expect(boxed).toEqual([])
+    expect(find(`[data-e2e=admin-group-counts]`).tagName).toBe(`DL`)
+  })
+
   it(`shows members with their roles, invitations with their states, and the activity`, async () => {
     const shown = async (tab: string, selector: string) => {
       await mount(<AdminGroupScreen {...groupProps([], { tab })} />)
@@ -529,6 +542,12 @@ describe(`the person page's groups`, () => {
       sessions: [],
       groups: [{ id: GROUP_ID, name: `Family`, role: GroupRole.OWNER }],
       audits: [],
+      preferences: {
+        value: DEFAULT_PREFERENCES,
+        version: 0,
+        updatedAt: null,
+        firstTimeZone: null,
+      },
     }
     const props: AdminUserScreenProps = {
       detail: person,

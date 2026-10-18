@@ -2,6 +2,7 @@ import { type } from "arktype"
 import { BaseModelSchema, dateSchema, PUSH_SUBSCRIPTION_LIMITS } from "@spy4x/platform/model"
 import type { SecondFactorStatus } from "@spy4x/server/sign-in"
 import { hasUnstorableTextCharacters } from "@spy4x/platform/universal/text"
+import type { AdminUserPreferences } from "./preferences.ts"
 import { parseSort, serializeSort, type SortRule } from "@spy4x/platform/universal/sort"
 
 // Not in @spy4x/platform/model: too template-specific (a user's name length limit) to belong in a
@@ -222,9 +223,9 @@ export const authPasswordSetSchema = type({
 export type AuthPasswordSet = typeof authPasswordSetSchema.infer
 
 /**
- * The body of "link a provider" and of "unlink a sign-in method". An account with a password
- * sends it; one without has signed in with a provider it already has a moment ago instead
- * ({@link PROVIDER_PROOF_MINUTES}).
+ * The body of "link a provider", of "unlink a sign-in method" and of "turn two-factor on". An
+ * account with a password sends it; one without has signed in with a provider it already has a
+ * moment ago instead ({@link PROVIDER_PROOF_MINUTES}).
  */
 export const signInMethodProofSchema = type({
   "password?": authPasswordSchema.get("password"),
@@ -697,6 +698,11 @@ export interface Actor {
   userMfa: UserMFAStatus
   sessionSecondFactor: SecondFactorStatus
   /**
+   * The session the actor acts through, when a session does. A write that must not outlive the
+   * session, such as storing a push subscription (#409), checks it again under a lock.
+   */
+  sessionId?: number
+  /**
    * Set when a personal API token acts instead of a session (#167). The session gate then lets
    * through only the messages a token may send, in the token's group, and only reads when the
    * token cannot write.
@@ -821,6 +827,8 @@ export interface AdminUserDetail {
   groups: AdminUserGroup[]
   /** The newest {@link ADMIN_AUDIT_LIMIT} rows of the person's audit trail. */
   audits: AdminAuditRow[]
+  /** Their theme, region format, time zone and clock, read-only (#163). */
+  preferences: AdminUserPreferences
 }
 
 /** How many audit rows the detail page shows. */
@@ -991,6 +999,7 @@ export function adminUsersExportPath(filter: AdminUserFilter): string {
 // #429: the audit log and the System page of the operator area.
 export * from "./admin-audit.ts"
 export * from "./admin-system.ts"
+export * from "./preferences.ts"
 
 /**
  * One push device of a person, as the operator area shows it (#427): never the endpoint or the

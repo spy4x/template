@@ -25,6 +25,8 @@ import { SettingGroup, SettingList, SettingRow } from "@spy4x/preact-ui/setting-
 import { SignedInDevices, type SignedInDevicesProps } from "./signed-in-devices.tsx"
 import { signInMethodName, SignInMethods, type SignInMethodsProps } from "./sign-in-methods.tsx"
 import { ApiTokens, type ApiTokensProps } from "./api-tokens.tsx"
+import { useFormat } from "@spy4x/preact-ui/format"
+import { PreferencesGroup, type PreferencesGroupProps } from "./preferences.tsx"
 import { useSucceeded } from "@spy4x/preact-ui/use-succeeded"
 import { ProviderProofNotice, providerProofOf } from "./provider-proof.tsx"
 import { TwoFactorProof, twoFactorProof, TwoFactorStep, twoFactorStep } from "./two-factor.ts"
@@ -48,6 +50,8 @@ export interface ProfileValues {
   /** The authenticator code a first password needs while two-factor is on. */
   passwordOtp: string
   otp: string
+  /** The password typed to turn two-factor on (#406). */
+  totpPassword: string
   /** The password or the authenticator code typed to turn two-factor off. */
   twoFactorProof: string
 }
@@ -79,6 +83,7 @@ const FIELD_ORDER: readonly (keyof ProfileValues)[] = [
   "currentPassword",
   "newPassword",
   "passwordOtp",
+  "totpPassword",
   "otp",
   "twoFactorProof",
 ]
@@ -121,7 +126,7 @@ export interface ProfileScreenProps {
   onSetPassword?: () => void
   /**
    * This device signed in with Google or GitHub a moment ago, which an account with no password
-   * confirms a first password and its deletion with.
+   * confirms a first password, two-factor sign-in and its deletion with.
    */
   providerProofFresh?: boolean
   /** Drops what was typed in the password dialog and its errors, when the person closes it. */
@@ -139,7 +144,16 @@ export interface ProfileScreenProps {
   devices?: SignedInDevicesProps
   /** The "API tokens" section, after the signed-in devices. Without it the page has none. */
   apiTokens?: ApiTokensProps
+  /** "Language and region": the theme, region format, time zone and clock. Without it, none. */
+  preferences?: PreferencesGroupProps
+  /**
+   * Called when the person submits the "Turn on" dialog, with the password in
+   * `values.totpPassword`; an account with no password confirms with a provider sign-in a moment
+   * ago instead, as the deletion does (#406).
+   */
   onStartTotp?: () => void
+  /** Drops what was typed in the "Turn on" dialog and its errors, when the person closes it. */
+  onCancelStartTotp?: () => void
   onFinishTotp?: () => void
   /** Drops an enrolment under way, when the person closes the set-up dialog. */
   onCancelTotp?: () => void
@@ -173,9 +187,10 @@ export interface ProfileScreenProps {
  * The profile page as a list of settings: name and e-mail address, then password and two-factor
  * sign-in, then the signed-in devices, the API tokens and push devices. Each row shows its value
  * and one action; a form opens in a dialog only when asked, and closes once its change went
- * through. Turning two-factor off asks for the password first, or for a code from the authenticator
- * app when the account has no password. Such an account sets its first password and deletes itself
- * after a sign-in with its provider a moment ago.
+ * through. Turning two-factor on asks for the password first, and turning it off for the password
+ * or, when the account has no password, a code from the authenticator app. Such an account turns
+ * two-factor on, sets its first password and deletes itself after a sign-in with its provider a
+ * moment ago.
  * Deleting the account sits last, in a closed "Danger zone".
  */
 export function ProfileScreen(
@@ -200,7 +215,9 @@ export function ProfileScreen(
     methods,
     devices,
     apiTokens,
+    preferences,
     onStartTotp,
+    onCancelStartTotp,
     onFinishTotp,
     onCancelTotp,
     onDisableTotp,
@@ -216,12 +233,14 @@ export function ProfileScreen(
   const providerOnly = providerOnlyNames(methods?.methods)
   const proof = twoFactorProof(providerOnly !== null)
   const providerProof = providerProofOf(methods?.methods, providerProofFresh)
+  const format = useFormat()
   const fieldRefs = {
     firstName: useRef<HTMLInputElement>(null),
     lastName: useRef<HTMLInputElement>(null),
     currentPassword: useRef<HTMLInputElement>(null),
     newPassword: useRef<HTMLInputElement>(null),
     passwordOtp: useRef<HTMLInputElement>(null),
+    totpPassword: useRef<HTMLInputElement>(null),
     otp: useRef<HTMLInputElement>(null),
     twoFactorProof: useRef<HTMLInputElement>(null),
   }
@@ -229,6 +248,7 @@ export function ProfileScreen(
   const disableButton = useRef<HTMLButtonElement>(null)
   const [editingName, setEditingName] = useState(false)
   const [changingPassword, setChangingPassword] = useState(false)
+  const [confirmingEnable, setConfirmingEnable] = useState(false)
   const [confirmingDisable, setConfirmingDisable] = useState(false)
   const cancelName = () => {
     setEditingName(false)
@@ -237,6 +257,10 @@ export function ProfileScreen(
   const cancelPassword = () => {
     setChangingPassword(false)
     onCancelPassword?.()
+  }
+  const cancelEnable = () => {
+    setConfirmingEnable(false)
+    onCancelStartTotp?.()
   }
   const cancelDisable = () => {
     setConfirmingDisable(false)
@@ -255,8 +279,11 @@ export function ProfileScreen(
   )
   useSucceeded(
     pending.totp,
-    Boolean(errors.totp || errors.fields.twoFactorProof),
-    () => setConfirmingDisable(false),
+    Boolean(errors.totp || errors.fields.twoFactorProof || errors.fields.totpPassword),
+    () => {
+      setConfirmingEnable(false)
+      setConfirmingDisable(false)
+    },
   )
 
   // A failed submit lands the person on the field to fix.
@@ -360,6 +387,8 @@ export function ProfileScreen(
         </SettingList>
       </SettingGroup>
 
+      {preferences && <PreferencesGroup {...preferences} />}
+
       {/* The first-steps card links here (`PROFILE_ANCHORS`); the header above is sticky. */}
       <div id={PROFILE_ANCHORS.security} class="scroll-mt-16">
         <SettingGroup title="Security">
@@ -409,27 +438,22 @@ export function ProfileScreen(
                   </Button>
                 )
                 : (
-                  <ScreenForm
-                    pending={pending.totp}
-                    onSubmit={onStartTotp}
+                  <Button
+                    ref={enableButton}
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    class={TOUCH_TARGET}
+                    data-e2e="totp-start"
+                    disabled={pending.totp}
+                    onClick={() => setConfirmingEnable(true)}
                   >
-                    <Button
-                      ref={enableButton}
-                      type="submit"
-                      variant="secondary"
-                      size="sm"
-                      class={TOUCH_TARGET}
-                      data-e2e="totp-start"
-                      busy={pending.totp && step === TwoFactorStep.Enable}
-                      busyLabel="Preparing…"
-                    >
-                      Turn on <span class="sr-only">two-factor sign-in</span>
-                    </Button>
-                  </ScreenForm>
+                    Turn on <span class="sr-only">two-factor sign-in</span>
+                  </Button>
                 )}
             />
           </SettingList>
-          {step !== TwoFactorStep.Confirm && !confirmingDisable && (
+          {step !== TwoFactorStep.Confirm && !confirmingEnable && !confirmingDisable && (
             <ErrorState message={errors.totp} />
           )}
         </SettingGroup>
@@ -473,7 +497,7 @@ export function ProfileScreen(
                       key={device.id}
                       dataE2E={`push-device-${device.deviceId}`}
                       label={`Device ${device.deviceId.slice(-8)}`}
-                      value={`Added ${new Date(device.createdAt).toLocaleString()}`}
+                      value={`Added ${format.dateTime(device.createdAt)}`}
                       action={
                         <ScreenForm
                           pending={pending.push}
@@ -687,6 +711,71 @@ export function ProfileScreen(
                       busyLabel="Updating…"
                     >
                       {providerProof ? "Set password" : "Change password"}
+                    </Button>
+                  }
+                />
+              </Stack>
+            </ScreenForm>
+          )}
+      </Modal>
+
+      <Modal
+        open={confirmingEnable && step === TwoFactorStep.Enable}
+        onClose={cancelEnable}
+        title="Turn on two-factor sign-in"
+        cancelLabel="Close"
+        dataE2E="totp-start-confirm"
+      >
+        {providerProof && !providerProof.fresh
+          ? (
+            <Stack>
+              <ProviderProofNotice proof={providerProof} next={SCREEN_PATHS.profile} />
+              <Cluster justify="end">
+                <Button type="button" variant="ghost" onClick={cancelEnable}>Close</Button>
+              </Cluster>
+            </Stack>
+          )
+          : (
+            <ScreenForm pending={pending.totp} onSubmit={onStartTotp}>
+              <Stack>
+                <p class="text-sm text-muted">
+                  Once it is on, sign-in also asks for a code from your authenticator app, and your
+                  other devices are signed out.{providerProof
+                    ? ""
+                    : " Enter your password to confirm it is you."}
+                </p>
+                {providerProof
+                  ? <ProviderProofNotice proof={providerProof} next={SCREEN_PATHS.profile} />
+                  : (
+                    <Field
+                      id="totp-start-password"
+                      label="Password"
+                      error={errors.fields.totpPassword}
+                      required
+                    >
+                      <Input
+                        ref={fieldRefs.totpPassword}
+                        data-e2e="totp-start-password"
+                        name="password"
+                        type="password"
+                        autocomplete="current-password"
+                        value={values.totpPassword}
+                        onInput={(e) => onValueChange("totpPassword", e.currentTarget.value)}
+                        required
+                      />
+                    </Field>
+                  )}
+                <ErrorState message={errors.totp} />
+                <DialogButtons
+                  onCancel={cancelEnable}
+                  submit={
+                    <Button
+                      type="submit"
+                      data-e2e="totp-start-submit"
+                      busy={pending.totp}
+                      busyLabel="Preparing…"
+                    >
+                      Continue
                     </Button>
                   }
                 />

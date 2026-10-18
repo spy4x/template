@@ -17,6 +17,8 @@ import {
   AuthAuditEventType,
 } from "@domain/identity"
 import { BILLING_AUDIT_EVENTS } from "@domain/billing"
+import { FormatContext } from "@spy4x/preact-ui/format"
+import { createFormatters } from "@spy4x/time/format"
 import {
   AdminAuditScreen,
   type AdminAuditScreenProps,
@@ -226,6 +228,20 @@ describe("audit log screen", () => {
     expect(rows[0].textContent).toContain("Job mail.password_reset")
   })
 
+  it("writes each entry's exact moment in UTC, in the operator's region format", async () => {
+    // An operator in Berlin with German formats: 08:00 UTC is 10:00 there, yet the log says UTC.
+    await mount(
+      <FormatContext.Provider
+        value={createFormatters({ locale: "de-DE", timeZone: "Europe/Berlin" })}
+      >
+        <AdminAuditScreen {...props([])} />
+      </FormatContext.Provider>,
+    )
+    const rows = [...find("[data-e2e=admin-audit-table]").querySelectorAll("tbody tr")]
+
+    expect(rows[2].textContent).toContain("15.10.2026, 08:00:00 UTC")
+  })
+
   it("calls a missing person deleted only on a person's own trail", async () => {
     const gone = { ...signedIn, key: "account-5", person: null, actor: null }
     await mount(<AdminAuditScreen {...props([], { entries: [retried, gone] })} />)
@@ -292,7 +308,45 @@ describe("audit log screen", () => {
     expect(find("[data-e2e=admin-audit-export]").getAttribute("href")).toBe(href)
   })
 
-  it("tells an empty log from a filter that matches nothing", async () => {
+  it("names the people inside the event cell for a phone, and hides their columns there", async () => {
+    await mount(<AdminAuditScreen {...props([])} />)
+    const rows = [...find("[data-e2e=admin-audit-table]").querySelectorAll("tbody tr")]
+    const phone = (row: Element) =>
+      row.querySelector("td:nth-child(2) [data-e2e=admin-audit-people-phone]")
+
+    expect(phone(rows[1])?.textContent).toBe("About Ada Lovelace · by Grace Hopper")
+    expect(phone(rows[1])?.className).toContain("sm:hidden")
+    expect(phone(rows[2])?.textContent).toBe("About Ada Lovelace")
+    const table = find("[data-e2e=admin-audit-table]").querySelector(`[class*="hidden"]`)!
+    expect(table.className).toContain("max-sm:[&_:is(th,td):nth-child(n+3)]:hidden")
+  })
+
+  it("keeps a long address on one line, with the whole address in its tooltip", async () => {
+    await mount(<AdminAuditScreen {...props([])} />)
+    const address = [...find("[data-e2e=admin-audit-table]").querySelectorAll("td span")]
+      .find((span) => span.textContent === "ada@example.com")!
+
+    expect(address.className).toContain("truncate")
+    expect(address.className).not.toContain("wrap-anywhere")
+    expect(address.getAttribute("title")).toBe("ada@example.com")
+  })
+
+  it("fits the detail in a narrow column on two lines, the whole detail in its tooltip", async () => {
+    const token = "01a1486e-38d4-74c2-a049-94b2bdd90d1d group=01a1486e-35ed access=write name=CI"
+    const created = { ...signedIn, key: "account-5", identifier: token }
+    await mount(<AdminAuditScreen {...props([], { entries: [created] })} />)
+    const detail = find("[data-e2e=admin-audit-detail]")
+    const text = detail.firstElementChild!
+
+    expect(detail.className).toContain("sm:w-28")
+    expect(text.textContent).toBe(token)
+    expect(text.className).toContain("line-clamp-2")
+    expect(text.getAttribute("title")).toBe(token)
+    const table = find("[data-e2e=admin-audit-table]").firstElementChild!
+    expect(table.className.split(" ")).toContain("[&_:is(th,td)]:px-3")
+  })
+
+  it("tells an empty log from a filter that matches nothing, without a dashed box", async () => {
     await mount(<AdminAuditScreen {...props([], { entries: [] })} />)
     expect(find("[data-e2e=admin-audit-empty]").textContent).toContain("Nothing recorded yet")
 
@@ -302,6 +356,7 @@ describe("audit log screen", () => {
       />,
     )
     expect(find("[data-e2e=admin-audit-empty]").textContent).toContain("Nothing matches")
+    expect(document.querySelector(".border-dashed") === null).toBe(true)
   })
 
   it("shows a loading state, then the error when the log could not be read", async () => {

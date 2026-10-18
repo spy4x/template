@@ -303,7 +303,8 @@ async function adminSession(
   const step = Math.max(currentStep(), enrolStep + 1)
   await page.locator("[data-e2e=auth-form-code]").fill(await totpCode(secret, step))
   await page.locator("[data-e2e=auth-form-submit]").click()
-  await page.locator("[data-e2e=admin-users-title]").waitFor()
+  // The admin host opens on its dashboard once she is in.
+  await page.locator("[data-e2e=admin-dashboard-stats]").waitFor()
   const state = await context.storageState()
   await context.close()
   return state
@@ -393,6 +394,7 @@ async function seed(browser: Browser, contexts: BrowserContext[], ada: Page): Pr
   // An authenticator, so the profile shows two-factor sign-in on.
   const started = await ada.request.post(`${APP}/api/auth/totp/connect/start`, {
     headers: sameOrigin(),
+    data: { password: PASSWORD },
   })
   await expectOk("authenticator start", started)
   const { secret } = await started.json() as { secret: string }
@@ -464,10 +466,10 @@ async function openPage(
   return page
 }
 
-/** Scrolls so `target`'s top sits just under the sticky header. */
+/** Scrolls so `target`'s top sits just under the window's top edge: the shell has no header bar. */
 async function scrollToTop(target: Locator): Promise<void> {
   await target.evaluate((element) => {
-    globalThis.scrollTo({ top: element.getBoundingClientRect().top + globalThis.scrollY - 80 })
+    globalThis.scrollTo({ top: element.getBoundingClientRect().top + globalThis.scrollY - 16 })
   })
 }
 
@@ -506,6 +508,8 @@ const SCREENS: Screen[] = [
     forms: ["desktop"],
     async open(page) {
       await gotoApp(page, "/", page.locator("[data-e2e=totp-disable]"))
+      // "Language and region" comes first now; the picture starts at Security.
+      await scrollToTop(page.locator("#security"))
     },
   },
   {
@@ -517,6 +521,8 @@ const SCREENS: Screen[] = [
         `/groups/${seeded.groupId}`,
         page.locator("[data-e2e=group-member]").nth(3),
       )
+      // The members come after the group's form on the same page.
+      await scrollToTop(page.locator("[data-e2e=group-section-members]"))
     },
   },
   {
@@ -528,7 +534,8 @@ const SCREENS: Screen[] = [
         `/groups/${seeded.groupId}`,
         page.locator("[data-e2e=billing-plan][data-plan=pro]"),
       )
-      await scrollToTop(page.locator("[data-e2e=group-section-billing]"))
+      // From the members down to the plan, which ends the page.
+      await scrollToTop(page.locator("[data-e2e=group-section-members]"))
     },
   },
   {
@@ -562,7 +569,8 @@ const SCREENS: Screen[] = [
     forms: ["desktop"],
     admin: true,
     async open(page) {
-      await page.goto(`${ADMIN}/`)
+      // The people list, which the website's caption describes. The host opens on a dashboard.
+      await page.goto(`${ADMIN}/users`)
       await page.locator("[data-e2e=admin-users-list] a").nth(3).waitFor()
     },
   },

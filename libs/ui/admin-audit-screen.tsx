@@ -4,6 +4,7 @@ import { IconDownload } from "@spy4x/preact-icons"
 import { timeAgo } from "@spy4x/platform/universal/time"
 import { Badge } from "@spy4x/preact-ui/badge"
 import { Button } from "@spy4x/preact-ui/button"
+import { Card } from "@spy4x/preact-ui/card"
 import { DataTable, type DataTableColumn } from "@spy4x/preact-ui/data-table"
 import { EmptyState } from "@spy4x/preact-ui/empty-state"
 import { ErrorState } from "@spy4x/preact-ui/error-state"
@@ -36,6 +37,7 @@ import { ADMIN_PATHS } from "./admin-frame.tsx"
 import { BILLING_AUDIT_LABELS } from "./admin-billing-list.tsx"
 import { AUDIT_EVENTS, auditTone } from "./admin-user-screen.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
+import { useFormat } from "@spy4x/preact-ui/format"
 
 /** How the log is drawn: a dense table, or a timeline that reads like a story. */
 export type AdminAuditView = "table" | "timeline"
@@ -115,17 +117,6 @@ const EVENT_OPTIONS: SelectOption[] = [
     label: `Operator: ${label}`,
   })),
 ]
-
-const EXACT = new Intl.DateTimeFormat("en", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  timeZone: "UTC",
-  timeZoneName: "short",
-})
 
 export interface AdminAuditScreenProps {
   /** What the address asked for; the filter form starts from it. */
@@ -214,14 +205,15 @@ export function AdminAuditScreen(props: AdminAuditScreenProps): JSX.Element {
         )
         : entries.length === 0
         ? (
-          <div data-e2e="admin-audit-empty">
+          <Card data-e2e="admin-audit-empty">
             <EmptyState
+              inset
               title={filtered ? "Nothing matches" : "Nothing recorded yet"}
               description={filtered
                 ? "Try a wider date range or another person, or clear the filters."
                 : "Sign-ins, account changes and group changes show here as they happen."}
             />
-          </div>
+          </Card>
         )
         : view === "timeline"
         ? <AuditTimeline entries={entries} navigate={navigate} />
@@ -369,10 +361,12 @@ function FilterForm(
  * entry may name nobody at all, and says only that.
  */
 function PersonLink(
-  { person, entry, navigate }: {
+  { person, entry, navigate, truncate = false }: {
     person: AdminAuditPerson | null
     entry: AdminAuditEntry
     navigate?: Navigate
+    /** One line cut with an ellipsis, the full name in the tooltip; it wraps by default. */
+    truncate?: boolean
   },
 ): JSX.Element {
   if (!person) {
@@ -382,7 +376,8 @@ function PersonLink(
     <Link
       href={ADMIN_PATHS.user(person.id)}
       navigate={navigate}
-      class="pc-link font-medium wrap-anywhere"
+      class={truncate ? "pc-link block truncate font-medium" : "pc-link font-medium wrap-anywhere"}
+      title={truncate ? person.name : undefined}
       data-e2e={`admin-audit-person-${person.id}`}
     >
       {person.name}
@@ -405,20 +400,108 @@ function selfDone(entry: AdminAuditEntry): boolean {
   return !entry.byOperator && entry.person !== null && entry.person.id === entry.actor?.id
 }
 
-/** The exact moment, in UTC, under a relative time. */
+/**
+ * The exact moment under a relative time. In UTC on purpose, in the operator's region format: an
+ * operator matches a row against the server's logs, which are in UTC.
+ */
 function When({ at }: { at: string }): JSX.Element {
+  const format = useFormat()
   return (
     <time class="flex flex-col whitespace-nowrap" dateTime={at}>
       <span class="text-sm">{timeAgo(at)}</span>
-      <span class="text-xs text-muted">{EXACT.format(new Date(at))}</span>
+      <span class="text-xs text-muted">{format.utc().exact(at)}</span>
     </time>
   )
 }
 
 function Cell({ children }: { children: ComponentChildren }): JSX.Element {
-  // At least 9rem wide: on a phone the table scrolls sideways instead of squeezing its words.
-  return <div class="flex min-w-36 flex-col gap-1 text-sm">{children}</div>
+  // At least 9rem wide from `sm`, where every column shows. A phone shows two columns, When and
+  // Event, and the Event cell takes the rest of the row.
+  return <div class="flex flex-col gap-1 text-sm sm:min-w-36">{children}</div>
 }
+
+/**
+ * A person in the About and Done by columns: the name as the link and the address under it, each
+ * on one line and cut with an ellipsis at 9rem (`w-36`), the full text in its tooltip. An address
+ * never breaks mid-word. The groups list's owner column draws the same.
+ */
+function PersonCell(
+  { person, entry, navigate, address = false }: {
+    person: AdminAuditPerson | null
+    entry: AdminAuditEntry
+    navigate?: Navigate
+    /** Whether to show the address under the name, when the name is not already it. */
+    address?: boolean
+  },
+): JSX.Element {
+  return (
+    <div class="flex w-36 min-w-0 flex-col gap-1 text-sm">
+      <PersonLink person={person} entry={entry} navigate={navigate} truncate />
+      {address && person && person.email !== person.name && (
+        <span class="truncate text-muted" title={person.email ?? undefined}>{person.email}</span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The people of an entry inside its Event cell on a phone, which hides the About and Done by
+ * columns: "About Ada · by Olga", or only the name when they did it themselves. Plain text: the
+ * links are the columns', which a phone hides.
+ */
+function PhonePeople({ entry }: { entry: AdminAuditEntry }): JSX.Element | null {
+  const name = (person: AdminAuditPerson | null) =>
+    person?.name ?? (entry.source === "account" ? "Deleted account" : null)
+  const about = name(entry.person)
+  const by = selfDone(entry) ? null : name(entry.actor)
+  if (!about && !by) return null
+  return (
+    <span class="text-muted wrap-anywhere sm:hidden" data-e2e="admin-audit-people-phone">
+      {about && (
+        <>
+          About <span class="font-medium text-foreground">{about}</span>
+        </>
+      )}
+      {about && by && " · "}
+      {by && (
+        <>
+          by <span class="font-medium text-foreground">{by}</span>
+        </>
+      )}
+    </span>
+  )
+}
+
+/**
+ * The Detail column: at most two lines of the detail and two of the browser, 7rem wide from `sm`,
+ * each with its full text in the tooltip. A token's detail names three ids, which would otherwise
+ * make the row tall and push the IP address column off the page.
+ */
+function DetailCell({ entry }: { entry: AdminAuditEntry }): JSX.Element {
+  const detail = detailOf(entry)
+  return (
+    <div class="flex flex-col gap-1 text-sm sm:w-28" data-e2e="admin-audit-detail">
+      <span class="line-clamp-2 wrap-anywhere" title={detail ?? undefined}>{detail ?? "—"}</span>
+      {entry.userAgent && (
+        <span class="line-clamp-2 text-xs text-muted wrap-anywhere" title={entry.userAgent}>
+          {entry.userAgent}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The table's classes. Below `sm` only When and Event show, and the Event cell names the people
+ * ({@link PhonePeople}), so a phone reads each entry without scrolling sideways. Positions follow
+ * {@link AuditTable}: 3 About, 4 Done by, 5 Detail, 6 IP address. The cells keep 0.75rem of side
+ * padding at every width, so all six columns fit the 64rem page at `lg` without sideways scroll.
+ */
+const AUDIT_TABLE_CLASS = [
+  `[&>div:first-child]:min-h-0`,
+  `[&_:is(th,td)]:px-3`,
+  `max-sm:[&_:is(th,td):nth-child(n+3)]:hidden`,
+].join(` `)
 
 function AuditTable(
   { entries, navigate }: { entries: readonly AdminAuditEntry[]; navigate?: Navigate },
@@ -438,6 +521,7 @@ function AuditTable(
               <Badge text="Operator" color="blue" type="outline" />
             </span>
           )}
+          <PhonePeople entry={entry} />
         </Cell>
       ),
     },
@@ -445,47 +529,35 @@ function AuditTable(
       id: "person",
       header: "About",
       render: (entry) => (
-        <Cell>
-          <PersonLink entry={entry} person={entry.person} navigate={navigate} />
-          {entry.person && entry.person.email !== entry.person.name && (
-            <span class="text-muted wrap-anywhere">{entry.person.email}</span>
-          )}
-        </Cell>
+        <PersonCell entry={entry} person={entry.person} navigate={navigate} address />
       ),
     },
     {
       id: "actor",
       header: "Done by",
       render: (entry) =>
-        selfDone(entry) ? <span class="text-sm text-muted">Themselves</span> : (
-          <Cell>
-            <PersonLink entry={entry} person={entry.actor} navigate={navigate} />
-          </Cell>
-        ),
+        selfDone(entry)
+          ? <span class="text-sm text-muted">Themselves</span>
+          : <PersonCell entry={entry} person={entry.actor} navigate={navigate} />,
     },
     {
       id: "detail",
       header: "Detail",
-      render: (entry) => (
-        <Cell>
-          <span class="wrap-anywhere">{detailOf(entry) ?? "—"}</span>
-          {entry.userAgent && (
-            <span class="line-clamp-2 text-xs text-muted wrap-anywhere" title={entry.userAgent}>
-              {entry.userAgent}
-            </span>
-          )}
-        </Cell>
-      ),
+      render: (entry) => <DetailCell entry={entry} />,
     },
     {
       id: "ip",
       header: "IP address",
-      render: (entry) => <span class="whitespace-nowrap font-mono text-sm">{entry.ip ?? "—"}</span>,
+      // 8rem holds a whole IPv4 address on one line; a longer IPv6 one wraps, never cut.
+      render: (entry) => (
+        <span class="block font-mono text-sm wrap-anywhere sm:w-32">{entry.ip ?? "—"}</span>
+      ),
     },
   ]
   return (
     <div data-e2e="admin-audit-table">
       <DataTable
+        class={AUDIT_TABLE_CLASS}
         columns={columns}
         rows={entries}
         sort={[]}
@@ -501,6 +573,7 @@ function AuditTable(
 function AuditTimeline(
   { entries, navigate }: { entries: readonly AdminAuditEntry[]; navigate?: Navigate },
 ): JSX.Element {
+  const format = useFormat()
   return (
     <div class="rounded-xl border border-subtle bg-surface p-4" data-e2e="admin-audit-timeline">
       <Timeline
@@ -511,7 +584,7 @@ function AuditTimeline(
             id: entry.key,
             title: auditEventLabel(entry.event),
             at: entry.at,
-            when: <span title={EXACT.format(new Date(entry.at))}>{timeAgo(entry.at)}</span>,
+            when: <span title={format.utc().exact(entry.at)}>{timeAgo(entry.at)}</span>,
             tone: entryTone(entry),
             dataE2E: `admin-audit-entry-${entry.key}`,
             description: (

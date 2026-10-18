@@ -21,6 +21,7 @@ import { createPasswordFailures } from "../../apps/api/services/password-failure
 import { createOAuthRoute } from "../../apps/api/routes/auth-oauth.ts"
 import {
   createAuthRoute,
+  EMAIL_ALREADY_CARRIED,
   PASSWORD_ALREADY_SET,
   PASSWORD_SET_CODE_REQUIRED,
   PROVIDER_PROOF_REQUIRED,
@@ -220,6 +221,7 @@ function browser({ app }: App) {
   return {
     get: (path: string) => send("GET", path),
     post: (path: string, body: unknown = {}) => send("POST", path, body),
+    delete: (path: string, body: unknown = {}) => send("DELETE", path, body),
     /** Goes to Google and comes back as the person `code` names; returns where it lands. */
     async throughGoogle(code: string): Promise<string> {
       const at = (await send("GET", "/auth/google/start")).headers.get("location")
@@ -446,8 +448,9 @@ Deno.test("an address the account left opens it no more, also after a first pass
 
     const keys = await sql`
       SELECT method, email FROM auth_keys WHERE user_id = ${userId} ORDER BY method`
+    // The Google key lost the first address at the first move (#403).
     expect(keys.map((key) => [key.method, key.email])).toEqual([
-      ["oauth:google", "ada@example.com"],
+      ["oauth:google", null],
       [PASSWORD_METHOD, "ada@third.example"],
     ])
     // The stranger is asked whether to create an account: Ada's is not theirs.
@@ -468,8 +471,9 @@ Deno.test("a first password takes the address off the code key that held it", as
 
     const keys = await sql`
       SELECT method, email FROM auth_keys WHERE user_id = ${userId} ORDER BY method`
+    // The Google key gave up the old address at the move (#403).
     expect(keys.map((key) => [key.method, key.email])).toEqual([
-      ["oauth:google", "ada@example.com"],
+      ["oauth:google", null],
       [PASSWORD_METHOD, "ada@new.example"],
     ])
   })
@@ -525,6 +529,27 @@ Deno.test("an account with a password links a provider only with that password",
   })
 })
 
+Deno.test("a link and an unlink wait out the lock the account's wrong passwords set (#406)", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada } = await googleAccount(app)
+    expect((await ada.post("/auth/password/set", { newPassword: NEW_PASSWORD })).status).toBe(200)
+    for (let guess = 0; guess < 6; guess++) {
+      const wrong = await ada.post("/auth/totp/disconnect", { password: "Wr0ng-one!" })
+      expect(wrong.status).toBe(400)
+      await wrong.body?.cancel()
+    }
+
+    const link = await ada.post("/auth/methods/google/link", { password: NEW_PASSWORD })
+    expect(link.headers.get("retry-after")).toBe("60")
+    expect(await refusal(link, 429)).toBe("Too many wrong passwords. Try again in 1 minute.")
+    const google = (await methodsOf(ada)).methods.find((method) => method.kind === "google")!
+    const unlink = await ada.delete(`/auth/methods/${google.id}`, { password: NEW_PASSWORD })
+    expect(await refusal(unlink, 429)).toBe("Too many wrong passwords. Try again in 1 minute.")
+    expect((await methodsOf(ada)).methods.map((method) => method.kind)).toContain("google")
+  })
+})
+
 Deno.test("a first password waits for the authenticator code while two-factor is on", async () => {
   await withSchema(async (sql) => {
     const app = buildApp(sql, { ada: ADA })
@@ -570,5 +595,179 @@ Deno.test("a session a password started confirms nothing in a provider's place",
 
     expect((await methodsOf(phone)).providerProofUntil).toBe(null)
     expect((await methodsOf(ada)).providerProofUntil).not.toBe(null)
+  })
+})
+
+/** Another device of the account the fake Google person `code` names, signed in with Google there. */
+async function secondDevice(app: App, code: string): Promise<Browser> {
+  const laptop = browser(app)
+  expect(await laptop.throughGoogle(code)).toBe("/")
+  expect((await laptop.get("/auth/methods")).status).toBe(200)
+  return laptop
+}
+
+Deno.test("an account without a password turns two-factor on only after a Google sign-in a moment ago (#406)", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada, userId } = await googleAccount(app)
+    await outliveTheProof(sql)
+
+    expect(await refusal(await ada.post("/auth/totp/connect/start"))).toBe(PROVIDER_PROOF_REQUIRED)
+    const [enrolment] = await sql`SELECT 1 FROM user_totp WHERE user_id = ${userId}`
+    expect(enrolment).toBe(undefined)
+
+    // Signing in with Google again is the proof.
+    expect(await ada.throughGoogle("ada")).toBe("/")
+    const started = await ada.post("/auth/totp/connect/start")
+    expect(started.status).toBe(200)
+    expect(typeof (await started.json()).secret).toBe("string")
+  })
+})
+
+Deno.test("a new address signs the other devices of an account without a password out (#406)", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada } = await googleAccount(app)
+    const laptop = await secondDevice(app, "ada")
+
+    await ada.post("/auth/email/change", { email: "ada@new.example" })
+    const verified = await ada.post("/auth/email/verify", {
+      code: app.codes.get("ada@new.example"),
+    })
+
+    expect(verified.status).toBe(200)
+    expect((await laptop.get("/auth/methods")).status).toBe(401)
+    expect((await ada.get("/auth/methods")).status).toBe(200)
+  })
+})
+
+Deno.test("a first password signs the other devices out, and keeps this one (#406)", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada } = await googleAccount(app)
+    const laptop = await secondDevice(app, "ada")
+
+    expect((await ada.post("/auth/password/set", { newPassword: NEW_PASSWORD })).status).toBe(200)
+
+    expect((await laptop.get("/auth/methods")).status).toBe(401)
+    expect((await ada.get("/auth/methods")).status).toBe(200)
+  })
+})
+
+Deno.test("a new address signs the other devices of an account with a password out, the Google ones too (#406)", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada } = await googleAccount(app)
+    expect((await ada.post("/auth/password/set", { newPassword: NEW_PASSWORD })).status).toBe(200)
+    // Both signed in after the password was set: one with Google, one with the password.
+    const laptop = await secondDevice(app, "ada")
+    const phone = browser(app)
+    const signedIn = await phone.post("/auth/password/check", {
+      login: "ada@example.com",
+      password: NEW_PASSWORD,
+    })
+    expect(signedIn.status).toBe(200)
+
+    const asked = await ada.post("/auth/email/change", {
+      email: "ada@new.example",
+      password: NEW_PASSWORD,
+    })
+    expect(asked.status).toBe(200)
+    const verified = await ada.post("/auth/email/verify", {
+      code: app.codes.get("ada@new.example"),
+    })
+
+    expect(verified.status).toBe(200)
+    expect((await laptop.get("/auth/methods")).status).toBe(401)
+    expect((await phone.get("/auth/methods")).status).toBe(401)
+    expect((await ada.get("/auth/methods")).status).toBe(200)
+    expect(await emailOf(ada)).toEqual({ email: "ada@new.example", proven: true, pending: null })
+  })
+})
+
+Deno.test("an account without a password cannot move to an address another of its methods carries (#406)", async () => {
+  await withSchema(async (sql) => {
+    const other: ProviderPerson = { sub: "1002", email: "ada@other.example" }
+    const app = buildApp(sql, { ada: ADA, other })
+    const { ada } = await googleAccount(app)
+    // A second Google account, linked: it carries another address.
+    const link = await ada.post("/auth/methods/google/link")
+    const state = new URL((await link.json()).url).searchParams.get("state")
+    expect((await ada.get(`/auth/google/callback?code=other&state=${state}`)).status).toBe(302)
+    expect((await methodsOf(ada)).methods.map((method) => method.email).sort())
+      .toEqual(["ada@example.com", "ada@other.example"])
+
+    expect(await refusal(await ada.post("/auth/email/change", { email: "ada@other.example" })))
+      .toBe(EMAIL_ALREADY_CARRIED)
+
+    expect(await emailOf(ada)).toEqual({ email: "ada@example.com", proven: true, pending: null })
+    expect(app.codes.size).toBe(0)
+  })
+})
+
+/** The provider keys of the user, as `[method, subject, email]`. */
+async function providerKeysOf(sql: postgres.Sql, userId: number): Promise<unknown[][]> {
+  const keys = await sql`
+    SELECT method, subject, email FROM auth_keys
+    WHERE user_id = ${userId} AND method LIKE 'oauth:%' ORDER BY id`
+  return keys.map((key) => [key.method, key.subject, key.email])
+}
+
+// Whoever holds Ada's old mailbox next, with a Google identity of their own that vouches for it.
+const NEXT_HOLDER: ProviderPerson = { sub: "9009", email: "ada@example.com" }
+
+Deno.test("after a move, another Google identity for the old address is not signed into the account (#403)", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA, next: NEXT_HOLDER })
+    const { ada, userId } = await googleAccount(app)
+    await ada.post("/auth/email/change", { email: "ada@new.example" })
+    const verified = await ada.post("/auth/email/verify", {
+      code: app.codes.get("ada@new.example"),
+    })
+    expect(verified.status).toBe(200)
+
+    const stranger = browser(app)
+    // Asked whether to create an account, as for any address nobody owns.
+    expect(await stranger.throughGoogle("next")).toBe("/sign-up/confirm")
+    expect((await stranger.get("/auth/me")).status).toBe(401)
+    expect(await providerKeysOf(sql, userId)).toEqual([["oauth:google", "1001", null]])
+  })
+})
+
+Deno.test("after a move, the Google identity linked before it still signs in to the account (#403)", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA })
+    const { ada, userId } = await googleAccount(app)
+    await ada.post("/auth/email/change", { email: "ada@new.example" })
+    await ada.post("/auth/email/verify", { code: app.codes.get("ada@new.example") })
+
+    const laptop = browser(app)
+    expect(await laptop.throughGoogle("ada")).toBe("/")
+    expect(await emailOf(laptop)).toEqual({ email: "ada@new.example", proven: true, pending: null })
+    const me = await laptop.get("/auth/me")
+    expect(me.status).toBe(200)
+    expect((await me.json()).id).toBe(userId)
+  })
+})
+
+Deno.test("after a password account moves, another Google identity for the old address is not signed in, and the linked one is (#403)", async () => {
+  await withSchema(async (sql) => {
+    const app = buildApp(sql, { ada: ADA, next: NEXT_HOLDER })
+    const { ada, userId } = await googleAccount(app)
+    expect((await ada.post("/auth/password/set", { newPassword: NEW_PASSWORD })).status).toBe(200)
+    await ada.post("/auth/email/change", { email: "ada@new.example", password: NEW_PASSWORD })
+    const verified = await ada.post("/auth/email/verify", {
+      code: app.codes.get("ada@new.example"),
+    })
+    expect(verified.status).toBe(200)
+
+    const stranger = browser(app)
+    expect(await stranger.throughGoogle("next")).toBe("/sign-up/confirm")
+    expect((await stranger.get("/auth/me")).status).toBe(401)
+
+    const laptop = browser(app)
+    expect(await laptop.throughGoogle("ada")).toBe("/")
+    expect((await (await laptop.get("/auth/me")).json()).id).toBe(userId)
+    expect(await providerKeysOf(sql, userId)).toEqual([["oauth:google", "1001", null]])
   })
 })

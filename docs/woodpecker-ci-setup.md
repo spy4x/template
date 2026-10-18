@@ -27,7 +27,7 @@ check ──┬── build ────────┐
   both servers, see docs/handoff.md trap 3.
 - `backup-restore` runs `infra/backup/restore.test.sh` in the `postgres:18.6` image against the same
   Postgres service: it backs a database up with restic, restores it into an empty one and compares
-  them (README, "Backups").
+  them (docs/backups.md).
 - `e2e-mpa` and `e2e-spa` run the website's browser tests and the SPA behind nginx
   (`e2e/mpa/run.sh`, `e2e/spa/run.sh`).
 - `e2e-smoke` runs the product's smoke set on every pull request and tag:
@@ -48,10 +48,9 @@ check ──┬── build ────────┐
 - The browser steps run one after another: each keeps the API's `vapid.json` in the shared
   checkout and starts a worker on the one Valkey service.
 - Both steps stop after that many failed tests. With sign-in broken every test fails, each after
-  30 s and two retries, and a step would otherwise run into the script's limit of 25 minutes.
-- A failed test is retried twice in CI and then counts as passed ("flaky" in the step's last
-  lines). Whether that stays is an open decision
-  (<https://github.com/spy4x/template/issues/357>).
+  30 s, and a step would otherwise run into the script's limit of 25 minutes.
+- A failed test is not retried: one failure fails the step, so a test that fails every second run
+  shows red, not green (`tests/playwright-retries.test.ts`).
 
 None of these steps needs a secret. A pull request from a fork waits until someone approves it in
 Woodpecker, because the repository requires approval for forks.
@@ -61,7 +60,7 @@ Every Deno step runs `deno install --frozen` first, so a `deno.lock` that does n
 
 ## Deploy is not wired up
 
-Deploys run from a developer's machine with `deno task deploy` (README, "Production
+Deploys run from a developer's machine with `deno task deploy` (docs/deploy.md, "Production
 certificates"). `.woodpecker/deploy.yml.example` holds an old build and
 deploy pipeline. Woodpecker ignores it because of the extension, and its steps have never run:
 its header lists what would have to change first. This guide documents no secrets or SSH keys for
@@ -88,7 +87,7 @@ Steps: `guard` (the tagged commit must be an ancestor of `main`), `build-base`, 
 `build-api`, `build-spa` and `build-mpa` in parallel, each followed by its `publish-*`. Kaniko
 builds into a tar file without any secret, and crane, the only step with the token, pushes it. A
 version without a pre-release suffix also gets `latest`. The worker and the migration run the API
-image, so there is no worker image. How to cut a release: [README](../README.md#releases).
+image, so there is no worker image. How to cut a release: [docs/deploy.md](deploy.md#releases).
 
 ## Changing the Deno version
 

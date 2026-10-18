@@ -183,10 +183,13 @@ is stored, one per address, 30 minutes, with no practical cap on wrong guesses: 
 in the same step, so the raw code exists only in the mail. `POST
 /api/auth/password/reset` with `{ email, code, newPassword }` spends the code,
 marks the address proven, sets the password and signs out every session of
-the user; it signs nobody in. It also revokes every API token and drops a
-waiting address change. When the address was not proven before, it removes
-the authenticator app and every sign-in method but the password as well
-("A squatted address" below); an address proven before keeps them. Limits: the IP limit of the other anonymous auth
+the user; it signs nobody in. It also revokes every API token, removes every
+push subscription (#409) and drops a waiting address change. A subscribe stores
+its row under the lock the reset takes on the user, after checking that its
+session is still live, so one that started before the reset stores nothing.
+When the address was not proven before, it removes the authenticator app and
+every sign-in method but the password as well ("A squatted address" below); an
+address proven before keeps them. Limits: the IP limit of the other anonymous auth
 routes, and 3 requests an hour per address (`ratelimit-reset` in Valkey,
 keyed by a hash of the address, refusing when Valkey is down).
 
@@ -195,7 +198,12 @@ password, writes a waiting sign-up to `sign_up_requests` (10 minutes, `SIGN_UP_C
 queues the `auth.sign-up-code-mail` job and sets the signed HttpOnly cookie `password_sign_up`
 (path `/api/auth/password/sign-up`). It does that for every well-formed address and never asks
 whether an account uses it, so the answer, the work and the mail are the same for a free and a
-taken address; it spends the address's code budget (`ratelimit-email-code`). The worker mails
+taken address. It spends the sign-up code budgets (`ratelimit-sign-up-code`, #494): three mails an
+hour to the address from one client (an IP, or an IPv6 /64), and ten an hour to the address from
+all clients together. A client past its three spends nothing of the ten, so a stranger who keeps
+signing an address up cannot lock its owner out, and the account's own budget
+(`ratelimit-email-code`) is never touched. The nightly cleanup deletes expired codes from
+`auth_challenges`. The worker mails
 `emailCodeMail` with a code of `libs/server/auth/sign-up-requests.ts` (a challenge of purpose
 `app.sign-up` bound to the waiting sign-up and the address, 5 guesses over all its codes). `POST
 /api/auth/password/sign-up/verify` with `{ code }`: the right code for a free address creates the
@@ -208,9 +216,10 @@ waiting sign-up back for a reload, `/resend` and `/cancel` give a new code or fo
 nightly cleanup deletes expired ones. `signIn.signUp`, which creates an unproven account at once,
 is no longer reachable from a route; the seed script and the integration tests still use it.
 The e2e specs sign up through `e2e/fixtures/sign-up.ts`, which reads the code from
-`/api/test/last-mail` and enters it. Every sign-up spends one of the address's three code mails
-an hour, so `POST /api/test/cleanup-user` also forgets that budget for the address it is given:
-a spec with a fixed address can run again on a dev stack within the hour.
+`/api/test/last-mail` and enters it. Every sign-up spends one of the caller's three code mails
+an hour to the address, so `POST /api/test/cleanup-user` also forgets the address's budgets, the
+caller's share among them: a spec with a fixed address can run again on a dev stack within the
+hour, as long as it calls the route through the same proxy as its browser.
 
 **Proving an address (#140).** An address change, and an account made before #142, prove their
 address with the `auth.email-code-mail` job
@@ -220,7 +229,8 @@ address with the `auth.email-code-mail` job
 entered, every signed-in page of the SPA shows a banner linking to `/email`.
 `GET /api/auth/email` answers `{ email, proven, pending }`; `POST
 /api/auth/email/verify` takes `{ code }`; `POST /api/auth/email/send` asks for
-a new code (3 mails an hour per address, `ratelimit-email-code` in Valkey);
+a new code (3 mails an hour per address, `ratelimit-email-code` in Valkey, which sign-ups
+never spend);
 codes come from `createEmailProof` and are bound to the user and the address,
 so another account proving the same address cannot spend this one's guesses;
 wrong codes also count against the account in `email_code_failures`
@@ -233,7 +243,7 @@ addresses both sides have verified (below).
 
 **Google and GitHub (#141, #142).** `apps/api/services/oauth-sign-in.ts` wraps
 `createOAuthSignIn` of `@spy4x/server/auth/oauth`, one per provider whose client id and secret
-are both set (README, "Sign in with Google and GitHub"); `apps/api/routes/auth-oauth.ts` holds
+are both set (docs/sign-in-providers.md); `apps/api/routes/auth-oauth.ts` holds
 the routes and is mounted before `createAuthRoute`. A provider method is a row of `auth_keys`
 with the provider's name as `method` and the provider's user id as `subject`: there is no table
 of its own. The state of a flow lives in Valkey for 10 minutes and in the HttpOnly cookie
@@ -266,14 +276,18 @@ from `GET /api/auth/methods`, once a person is signed in with every factor done.
 **An account with no password** confirms with a provider sign-in where the others give the
 password: `oauth.proofUntil` (`apps/api/services/oauth-sign-in.ts`) holds while the request's
 session was started by an `oauth:*` key less than `PROVIDER_PROOF_MINUTES` ago, read from
-`auth_sessions.created_at`. `POST /api/auth/account/delete` and `POST /api/auth/email/change`
-take it in place of `password`, and `POST /api/auth/password/set` adds the first password key,
-on the account's address, proven. `GET /api/auth/methods` answers `providerProofUntil`, so the
+`auth_sessions.created_at`. `POST /api/auth/account/delete`, `POST /api/auth/email/change` and
+`POST /api/auth/totp/connect/start` take it in place of `password`, and
+`POST /api/auth/password/set` adds the first password key, on the account's address, proven,
+and signs out every other session of the account; the one that set it stays signed in (#406).
+`GET /api/auth/methods` answers `providerProofUntil`, so the
 dialogs show the form or the links back to the provider (`libs/ui/provider-proof.tsx`). A
 changed address of such an account lives on the `email-code` key its code proved, which
 `readEmailStatus` reads before the provider's own address. A first password takes that key
 away (`dropCodeKeys`, `libs/server/auth/email-verification.ts`), and so does a later change of
-address, so no `email-code` key stays on an address the account has left.
+address, so no `email-code` key stays on an address the account has left. Such an account cannot
+move to an address another of its sign-in methods carries already (`EMAIL_ALREADY_CARRIED`): it
+reads its address from those methods, so the change would answer "done" and change nothing.
 `POST /api/auth/password/set` asks for `otp` while two-factor is on, and
 `POST /api/auth/methods/:provider/link` asks for the password or the same provider proof, so a
 session cannot make itself recent by linking one more provider. `DELETE /api/auth/methods/:id`
@@ -292,24 +306,51 @@ budget (3 an hour from all accounts, `ratelimit-email-change-address`), never
 the address's own code budget: the address may be someone else's, and a
 stranger must not run its owner's budget out (#224). Both refusals use one
 wording. The verify call then moves the password key to the new address,
-signs out every other session and gives this one a new cookie. A username
+signs out every other session, those a Google or GitHub sign-in started included, and gives
+this one a new cookie. An account with no password has its new address on the code key instead,
+and every other session ends the same way while this one keeps its cookie (#406). A username
 account adds its first address the same way, and from then on signs in with
 the address instead of the username. A password reset drops a waiting change.
 A reset and a move of one account both lock its password key first
 (`lockPasswordKey`), so neither copies a hash the other is replacing.
 
+**Wrong passwords from a session (#406).** Every step a signed-in person confirms with the
+password counts the wrong ones in `password_check_failures`, keyed by the user id: turning
+two-factor on or off, a password change, an address change, deleting the account, linking or
+unlinking a provider, creating an API token and handing a group over. They share one count
+(`signIn.checkPassword`, and `changePassword`, `requestEmailChange` and `countPasswordCheck`,
+which count the same way) with the sign-in page's policy: 5 free, then a lock of 1 minute doubling
+to 15 (`PASSWORD_LOCK_POLICY`, `apps/api/services/password-locked.ts`). While it runs, even the
+right password is answered 429 with `Retry-After` (`PasswordLockedError`). The sign-in page keeps
+its own count per name (`password_failures`), so a stranger who types the person's address there
+does not lock their signed-in steps, and a session's guesses do not lock the sign-in page. A check
+counts as wrong until it is found right, so more than six checks of one account at the same moment
+are refused (the sixth sets the lock): no person sends that many.
+
 **A squatted address.** Anyone can still sign up first with someone else's
 address, but it stays unproven and cannot carry a second factor. A reset
 link proves the mailbox, so it gives the owner the account back: new
-password, address proven, every session signed out and every API token
-revoked, any authenticator app removed, and every other sign-in method
-deleted (#404): each linked Google or GitHub account, and a code key for
+password, address proven, every session signed out, every API token
+revoked, every push subscription removed (#409), so no browser keeps getting
+the account's notifications, any authenticator app removed, and every other
+sign-in method deleted (#404): each linked Google or GitHub account, and a code key for
 another address if the account holds one. Whoever linked them did so before
 anyone proved the address, so they would be a way back in. This happens only
 on the reset that proves the address; a later reset keeps the methods. A
 person who linked their own provider before confirming their own address
 links it again after a reset. Since #142 a password sign-up can no longer squat an address: the
 account exists only once the code mailed to the address is entered.
+
+An account whose address is not proven cannot invite (#411): creating an invitation, by link or by
+address, is refused with `ADDRESS_NOT_PROVEN` (403) and "Verify your e-mail address on the E-mail
+page before you invite anyone.", which the SPA shows above the invitation form's buttons with a
+"Verify e-mail" button. The reset removes no members, so without this a squatter could let a second
+account of theirs into the first group and keep it there after the owner's reset. The reset that proves the address also revokes
+every pending invitation the account made, in every group (`revokeAllInvitationsOf`), so a link
+made before this rule existed lets nobody in afterwards. An account
+with no address (a username account from before #139) cannot invite either until it adds and
+proves one. The check is `hasProvenAddress` (`libs/server/auth/email-verification.ts`), asked by
+the create handler in `apps/api/features/groups/invitations.ts`.
 
 **Mail.** `libs/server/mail` picks the transport: with `ENV=dev` the console
 sender of `@spy4x/email` plus a copy in the `dev_mail` table, which the e2e
@@ -328,7 +369,7 @@ outside `ENV=dev`. The worker reads the keys at start-up, so a change needs a de
 
 A full-stack e2e spec imports `test` from `e2e/fixtures/stack.ts` and loads pages through `gotoApp`
 or `signIn`. That fixture warms Vite's page bundles once per
-worker and blocks Google Fonts, and `gotoApp` loads the page again when a network change
+worker, and `gotoApp` loads the page again when a network change
 leaves it blank. A spec on Playwright's own `test`, or one calling `page.goto` or
 `page.reload` while online, gets none of this and brings the cold-start flakes back. Older specs
 still call `page.reload()` directly; `grep -n "page.reload" e2e/*.e2e.ts` lists them.
@@ -342,6 +383,13 @@ change ended after a break-in. Before rolling back, delete those rows:
 `DELETE FROM api_tokens WHERE revoked_at IS NOT NULL;`. Their audit rows stay and still name
 them. Going forward is safe: old code runs against the new column, and compose runs the
 migration before the new API starts.
+
+### 11. A rollback past the cache's key prefix needs Valkey flushed first (PR #21)
+
+Since PR #21 every key the API writes to Valkey starts with `api:` (`apps/api/services/cache.ts`);
+older code reads and writes the same values without it. Rolled back past that change, the old code
+finds the unprefixed keys it left behind, up to a month old, and serves them as current. Flush
+Valkey before such a rollback. Going forward is safe: the new code ignores the old keys.
 
 ### 12. The operator area answers on the admin host only
 
@@ -359,7 +407,7 @@ deno task check            # fmt, lint, types, unit tests
 deno task spa:build
 deno task mpa:check
 deno task dev              # compose up
-deno task e2e:local        # browser tests on a stack of its own (README, "Browser tests")
+deno task e2e:local        # browser tests on a stack of its own (docs/development.md, "Browser tests")
 ```
 
 Integration tests need a throwaway Postgres and Valkey (Valkey requires a password, as in
@@ -410,10 +458,12 @@ start it with `deno run --allow-sys -E -N apps/worker/+main.ts` and the API's `D
 `DOMAIN` values. It also sends the password reset mails (trap 8).
 
 **Personal API tokens: what is asked, what ends one, what is kept.** Creating a token asks for the
-account's current password (`signIn.checkPassword`, behind the strict per-user limit), so a stolen
-session cannot mint one; an account with no password cannot create tokens and is told so. The
-password is checked inside the create's transaction, under the lock on the person's `users` row
-(`lockUser`). A password change and a reset take that lock too, after the password key's, and
+account's current password (`signIn.verifyPassword`, behind the strict per-user limit), so a
+stolen session cannot mint one; an account with no password cannot create tokens and is told so.
+The password is checked inside the create's transaction, under the lock on the person's `users` row
+(`lockUser`), and counted around it (`signIn.countPasswordCheck`, below "Wrong passwords from a
+session"): the count needs a pool connection of its own, which it must not wait for while the
+transaction holds one. A password change and a reset take that lock too, after the password key's, and
 write the password and revoke the tokens in one transaction: both happen or neither, and a token
 made with the old password never outlives the change. The create queues the
 `api-token.created-mail` job, which mails the owner's proven address. A token's name is one line:

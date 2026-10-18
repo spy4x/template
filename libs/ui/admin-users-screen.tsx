@@ -1,6 +1,5 @@
 import type { JSX } from "preact"
 import { useEffect, useRef } from "preact/hooks"
-import { timeAgo } from "@spy4x/platform/universal/time"
 import type { SortRule } from "@spy4x/platform/universal/sort"
 import { Avatar } from "@spy4x/preact-ui/avatar"
 import { Badge } from "@spy4x/preact-ui/badge"
@@ -28,6 +27,7 @@ import {
 } from "@domain/identity"
 import { ADMIN_PATHS } from "./admin-frame.tsx"
 import { type Navigate, ScreenForm } from "./progressive.tsx"
+import { OnDay, When } from "@spy4x/preact-ui/format"
 
 const ROLE_CHIPS = [UserRole.VIEWER, UserRole.OPERATOR, UserRole.SUPERVISOR, UserRole.ADMIN].map(
   (role) => ({ value: String(role), label: roleLabel(role) }),
@@ -37,8 +37,6 @@ const STATUS_CHIPS: { value: Exclude<AdminBlockedFilter, "any">; label: string }
   { value: "active", label: "Active" },
   { value: "blocked", label: "Blocked" },
 ]
-
-const CREATED = new Intl.DateTimeFormat("en", { year: "numeric", month: "short", day: "numeric" })
 
 /** A role as a person reads it: `Operator`. */
 export function roleLabel(role: UserRole): string {
@@ -170,7 +168,7 @@ export function AdminUsersScreen(
         >
           {/* Keyed by the query, so going back in history shows the search that page had. */}
           <div key={filter.query} class="flex flex-wrap items-end gap-3" role="search">
-            <div class="min-w-0 flex-1 basis-60">
+            <div class="min-w-0 flex-1 basis-60 sm:max-w-md">
               <Field id="admin-users-q" label="Name or address">
                 <Input
                   name="q"
@@ -197,6 +195,7 @@ export function AdminUsersScreen(
             <ToggleChips
               mode="single"
               label="Status"
+              class="flex-nowrap sm:flex-wrap"
               options={STATUS_CHIPS}
               value={filter.blocked === "any" ? null : filter.blocked}
               onChange={(value) =>
@@ -207,6 +206,7 @@ export function AdminUsersScreen(
             <ToggleChips
               mode="single"
               label="Role"
+              class="flex-nowrap sm:flex-wrap"
               options={ROLE_CHIPS}
               value={filter.role === null ? null : String(filter.role)}
               onChange={(value) =>
@@ -246,6 +246,7 @@ export function AdminUsersScreen(
           <div data-e2e="admin-users-list">
             <DataTable
               mode="server"
+              class="[&>div:first-child]:min-h-0"
               columns={userColumns(operatorId, navigate)}
               rows={rows}
               sort={filter.sort}
@@ -256,6 +257,7 @@ export function AdminUsersScreen(
               rowKey={(row) => row.user.id}
               empty={
                 <EmptyState
+                  inset
                   title="Nobody matches"
                   description="Try another name or address, or clear the filters."
                 />
@@ -312,11 +314,7 @@ function userColumns(
       sortable: true,
       render: ({ lastSeenAt }) =>
         lastSeenAt
-          ? (
-            <time class="whitespace-nowrap text-sm" dateTime={lastSeenAt}>
-              {timeAgo(lastSeenAt)}
-            </time>
-          )
+          ? <When class="whitespace-nowrap text-sm" at={lastSeenAt} />
           : <span class="text-sm text-muted">Never</span>,
     },
     {
@@ -324,9 +322,7 @@ function userColumns(
       header: "Created",
       sortable: true,
       render: ({ createdAt }) => (
-        <time class="whitespace-nowrap text-sm text-muted" dateTime={createdAt}>
-          {CREATED.format(new Date(createdAt))}
-        </time>
+        <OnDay class="whitespace-nowrap text-sm text-muted" at={createdAt} />
       ),
     },
   ]
@@ -337,8 +333,13 @@ function FilterChips(
   { label, dataE2E, children }: { label: string; dataE2E: string; children: JSX.Element },
 ): JSX.Element {
   return (
-    <div class="flex flex-wrap items-center gap-2" data-e2e={dataE2E}>
-      <span class="text-sm text-muted" aria-hidden="true">{label}</span>
+    // One row that scrolls sideways on a phone rather than wrapping onto a second line, as the
+    // billing page's chips do; from `sm` it wraps.
+    <div
+      class="-mx-4 flex max-w-[calc(100%+2rem)] items-center gap-2 overflow-x-auto px-4 sm:mx-0 sm:max-w-full sm:flex-wrap sm:px-0"
+      data-e2e={dataE2E}
+    >
+      <span class="shrink-0 text-sm text-muted" aria-hidden="true">{label}</span>
       {children}
     </div>
   )

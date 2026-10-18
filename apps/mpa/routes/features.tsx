@@ -17,9 +17,9 @@ import {
   RealtimePair,
 } from "../components/features-visuals.tsx"
 import { OnThisPage } from "../components/on-this-page.tsx"
-import { PageHero } from "../components/page-hero.tsx"
 import { Shot } from "../components/shot.tsx"
 import { WindowFrame } from "@spy4x/preact-ui/window-frame"
+import { PageHero } from "@spy4x/preact-ui/page-hero"
 import { REPOSITORY_URL, SITE_NAME, SiteFrame, type SitePageHead, spaLinks } from "../site.tsx"
 import { define } from "../utils.ts"
 
@@ -108,8 +108,8 @@ const TIERS: readonly Tier[] = [
         visual: (
           <WindowFrame variant="browser" title="app.seedsaas.com/groups">
             <Shot
-              name="group-members"
-              alt="The members page of a group: each member with their role, and a button to invite someone."
+              name="activity"
+              alt="A group's activity log: who added which note or tag, and when, with a link to open each note."
               sizes="(min-width: 1280px) 440px, (min-width: 768px) 672px, 100vw"
             />
           </WindowFrame>
@@ -234,7 +234,7 @@ const TIERS: readonly Tier[] = [
           <WindowFrame variant="browser" title="app.seedsaas.com/notifications">
             <Shot
               name="notifications"
-              alt="The notifications page: three unread notices about a new group owner, a role change and an invitation, each with a link to open it."
+              alt="The notifications page: three unread notices about a new group owner, a role change and an invitation, each row opening what it is about."
               sizes="(min-width: 1280px) 440px, (min-width: 768px) 672px, 100vw"
             />
           </WindowFrame>
@@ -388,6 +388,7 @@ function featuresJsonLd(origin: string, demo: string): unknown[] {
 function Hero({ demoHref }: { demoHref: string }): JSX.Element {
   return (
     <PageHero
+      class="site-glow"
       eyebrow="Features"
       title="Everything Seed ships, and what it does not yet"
       lead="Seed is a free, open-source SaaS starter with teams and billing. Each section says what a person using your product notices, then what you get as a developer, and links to the code."
