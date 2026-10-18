@@ -58,7 +58,7 @@ const result = (page: Page, label: string) =>
   palette(page).getByRole("option").filter({ hasText: label })
 
 test.describe("search", () => {
-  test("Ctrl+K and the rail's Search open the one search, and picking a note of another group opens it in that group", async ({ browser, request }) => {
+  test("Ctrl+K and the rail's Search open the one search, Escape leaves no focus in it, and picking a note of another group opens it in that group", async ({ browser, request }) => {
     const user = "e2e_search_online@example.com"
     await cleanup(request, user)
     const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
@@ -79,6 +79,23 @@ test.describe("search", () => {
         "Tomatoes by the fence",
       )
       await openNotes(page, roadmap.groupId, "Quarterly roadmap")
+
+      // Closed with Escape, it leaves no focus in the closed dialog: with nothing focused before,
+      // focus leaves the field, and otherwise it goes back where it was.
+      const focusInSearch = () =>
+        page.evaluate(() => document.activeElement?.closest("[data-e2e=search]") !== null)
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+      await page.keyboard.press("Control+k")
+      await expect(field(page)).toBeFocused()
+      await page.keyboard.press("Escape")
+      await expect(palette(page)).toBeHidden()
+      await expect.poll(focusInSearch).toBe(false)
+      const picker = page.locator("[data-e2e=group-picker]")
+      await picker.focus()
+      await page.keyboard.press("Control+k")
+      await expect(field(page)).toBeFocused()
+      await page.keyboard.press("Escape")
+      await expect(picker).toBeFocused()
 
       // The rail's cell opens it, and closing gives focus back to the cell.
       const railSearch = page.locator("[data-e2e=shell-search-rail] button")
