@@ -57,6 +57,9 @@ const field = (page: Page) => palette(page).getByRole("combobox")
 const result = (page: Page, label: string) =>
   palette(page).getByRole("option").filter({ hasText: label })
 
+/** What a page check reads back after the search closes. */
+type Probe = { focusAfterClose?: Promise<string> }
+
 test.describe("search", () => {
   test("Ctrl+K and the rail's Search open the one search, Escape leaves no focus in it, and picking a note of another group opens it in that group", async ({ browser, request }) => {
     const user = "e2e_search_online@example.com"
@@ -81,21 +84,33 @@ test.describe("search", () => {
       await openNotes(page, roadmap.groupId, "Quarterly roadmap")
 
       // Closed with Escape, it leaves no focus in the closed dialog: with nothing focused before,
-      // focus leaves the field, and otherwise it goes back where it was.
-      const focusInSearch = () =>
-        page.evaluate(() => document.activeElement?.closest("[data-e2e=search]") !== null)
-      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
-      await page.keyboard.press("Control+k")
-      await expect(field(page)).toBeFocused()
-      await page.keyboard.press("Escape")
-      await expect(palette(page)).toBeHidden()
-      await expect.poll(focusInSearch).toBe(false)
-      const picker = page.locator("[data-e2e=group-picker]")
-      await picker.focus()
-      await page.keyboard.press("Control+k")
-      await expect(field(page)).toBeFocused()
-      await page.keyboard.press("Escape")
-      await expect(picker).toBeFocused()
+      // focus is on the page's body once the close is handled, and otherwise it goes back where
+      // it was. Focus is read in the task after the dialog's close event, where the palette moves
+      // it; until then Chromium still reports the hidden field, or its own guess.
+      const openThenEscape = async (): Promise<string> => {
+        await page.keyboard.press("Control+k")
+        await expect(field(page)).toBeFocused()
+        await page.evaluate(() => {
+          ;(window as Probe).focusAfterClose = new Promise((resolve) =>
+            document.addEventListener(
+              "close",
+              () =>
+                setTimeout(() => {
+                  const focused = document.activeElement
+                  resolve(focused?.getAttribute("data-e2e") ?? focused?.tagName ?? "none")
+                }),
+              { capture: true, once: true },
+            )
+          )
+        })
+        await page.keyboard.press("Escape")
+        await expect(palette(page)).toBeHidden()
+        return await page.evaluate(() => (window as Probe).focusAfterClose!)
+      }
+      await expect(page.locator("body")).toBeFocused()
+      expect(await openThenEscape()).toBe("BODY")
+      await page.locator("[data-e2e=group-picker]").focus()
+      expect(await openThenEscape()).toBe("group-picker")
 
       // The rail's cell opens it, and closing gives focus back to the cell.
       const railSearch = page.locator("[data-e2e=shell-search-rail] button")
