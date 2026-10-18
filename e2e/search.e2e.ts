@@ -99,7 +99,7 @@ test.describe("search", () => {
 
       await expect(page).toHaveURL(new RegExp(`/notes/${garden.noteId}$`))
       await expect(page.locator("[data-e2e=note-title]")).toHaveValue("Garden notes")
-      await expect(page.locator("[data-e2e=group-picker]")).toContainText("Side project")
+      await expect(page.locator("[data-e2e=group-picker]")).toHaveAccessibleName(/Side project/)
     } finally {
       await context.close()
       await cleanup(request, user)
