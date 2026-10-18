@@ -402,65 +402,79 @@ describe("AppFrame", () => {
     expect(find("[data-e2e=app-shell-offline-strip]").textContent).toBe("Offline")
   })
 
-  it("puts the search under the group switcher in the sidebar and the rail, and none above a phone's page", async () => {
+  /** A stand-in for `SearchPalette`: its root and hidden trigger, noting each time it opens. */
+  function StubSearch({ opened }: { opened: string[] }) {
+    return (
+      <div data-e2e="search-root">
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          class="hidden"
+          onClick={() => {
+            const sheet = document.querySelector<HTMLDialogElement>(
+              "dialog[data-e2e=rail-shell-dialog]",
+            )
+            opened.push(`sheet ${sheet?.open ? "open" : "closed"}`)
+          }}
+        />
+      </div>
+    )
+  }
+
+  it("puts Search under the group switcher in the rail, which opens the one palette after the page", async () => {
+    const opened: string[] = []
     await mount(
       <AppFrame
         user={ada}
         onSignOut={() => {}}
         groupPicker={{ groups, selectedId: "g-1", onSelect: () => {} }}
-        search={(place) => <button type="button" data-e2e={`stub-search-${place}`}>s</button>}
+        search={<StubSearch opened={opened} />}
         banner={<p id="banner">b</p>}
       >
         <p id="page">page</p>
       </AppFrame>,
     )
 
-    for (const place of ["sidebar", "rail"]) {
-      const trigger = find(`[data-e2e=rail-shell-top] [data-e2e=stub-search-${place}]`)
-      const picker = trigger.closest("[data-e2e=rail-shell-top] > div")!
-        .querySelector("[data-e2e^=group-picker]")!
-      // The switcher comes first, then the search.
-      expect(picker.compareDocumentPosition(trigger) & 4).toBe(4)
-    }
-    // A signed-in page starts with its own header: the banner, then the page.
-    const column = find("#page").parentElement!
-    expect(column.firstElementChild?.id).toBe("banner")
-    expect(column.querySelectorAll("[data-e2e^=stub-search]").length).toBe(0)
+    const cell = find("[data-e2e=rail-shell-top] [data-e2e=shell-search-rail]")
+    const picker = find("[data-e2e=rail-shell-top] [data-e2e^=group-picker]")
+    // The switcher comes first, then the search.
+    expect(picker.compareDocumentPosition(cell) & 4).toBe(4)
+    expect(cell.querySelector("button")?.textContent?.trim()).toBe("Search")
+    expect(cell.querySelector("[data-e2e=rail-shell-tooltip]")?.textContent).toBe("Search")
+    // One palette, after the page: a signed-in page still starts with the banner, then its own.
+    expect(document.querySelectorAll("[data-e2e=search-root]").length).toBe(1)
+    const column = find("[data-e2e=app-shell-content]")
+    expect(column.firstElementChild?.querySelector("#banner")).not.toBe(null)
+    expect(find("#page").compareDocumentPosition(find("[data-e2e=search-root]")) & 4).toBe(4)
+
+    await act(() => {
+      cell.querySelector("button")!.dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true }) as unknown as Event,
+      )
+    })
+    expect(opened).toEqual(["sheet closed"])
   })
 
-  it("offers Search in the phone's Account sheet, which closes the sheet and then opens the sheet's palette", async () => {
+  it("offers Search first in the phone's Account sheet, which closes the sheet and then opens the palette", async () => {
     const opened: string[] = []
     await mount(
       <AppFrame
         user={ada}
         onSignOut={() => {}}
-        search={(place) => (
-          <button
-            type="button"
-            data-e2e={`stub-search-${place}`}
-            onClick={() => {
-              // The palette opens only once the sheet has closed.
-              const sheet = document.querySelector<HTMLDialogElement>(
-                "[data-e2e=rail-shell-dialog]",
-              )
-              opened.push(`${place}, sheet ${sheet?.open ? "open" : "closed"}`)
-            }}
-          >
-            s
-          </button>
-        )}
+        groupPicker={{ groups, selectedId: "g-1", onSelect: () => {} }}
+        search={<StubSearch opened={opened} />}
       >
         <p id="page">page</p>
       </AppFrame>,
     )
     const sheet = find<HTMLDialogElement>("dialog[data-e2e=rail-shell-dialog]")
-    const entry = find("[data-e2e=rail-shell-overlay-bottom] [data-e2e=shell-search-overlay]")
+    const entry = find("[data-e2e=rail-shell-overlay-top] [data-e2e=shell-search-sheet] button")
     expect(entry.textContent?.trim()).toBe("Search")
     expect(entry.className).toContain("min-h-11")
-    expect(find("[data-e2e=shell-search-sheet] [data-e2e=stub-search-sheet]")).not.toBe(null)
-    expect(
-      document.querySelectorAll("[data-e2e=rail-shell-overlay-top] [data-e2e^=stub-search]").length,
-    ).toBe(0)
+    const groupSheet = find(
+      "[data-e2e=rail-shell-overlay-top] [aria-labelledby=group-sheet-heading]",
+    )
+    expect(entry.compareDocumentPosition(groupSheet) & 4).toBe(4)
 
     await act(() => sheet.showModal())
     await act(async () => {
@@ -469,7 +483,7 @@ describe("AppFrame", () => {
     })
 
     expect(sheet.open).toBe(false)
-    expect(opened).toEqual(["sheet, sheet closed"])
+    expect(opened).toEqual(["sheet closed"])
   })
 
   it("draws the banner at the top of the page's own column on every page", async () => {

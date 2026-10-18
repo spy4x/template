@@ -11,6 +11,7 @@ import { act } from "preact/test-utils"
 import { GroupRole } from "@domain/groups"
 import {
   emptyLabel,
+  openSearch,
   type SearchChoice,
   type SearchNotesAnswer,
   SearchPalette,
@@ -22,6 +23,8 @@ const own = {
   document: globalThis.document,
   location: globalThis.location,
   getComputedStyle: globalThis.getComputedStyle,
+  Element: globalThis.Element,
+  HTMLElement: globalThis.HTMLElement,
 }
 
 beforeAll(() => {
@@ -30,6 +33,9 @@ beforeAll(() => {
     document: window.document,
     location: window.location,
     getComputedStyle: window.getComputedStyle.bind(window),
+    // The hotkey listener tests its target with `instanceof Element` and `HTMLElement`.
+    Element: window.Element,
+    HTMLElement: window.HTMLElement,
   })
 })
 
@@ -138,26 +144,32 @@ function status(): string {
 }
 
 describe("SearchPalette", () => {
-  it("names its trigger after what it searches and shows Ctrl K", async () => {
+  it("draws no trigger of its own, and opens on Ctrl K and on /", async () => {
     await mount()
+    const dialog = find<HTMLDialogElement>("dialog[data-e2e=search]")
+    expect(find("[data-e2e=search-open]").classList.contains("hidden")).toBe(true)
 
-    const trigger = find("[data-e2e=search-open]")
-    expect(trigger.getAttribute("aria-label")).toBe("Search notes and groups")
-    expect(trigger.getAttribute("aria-keyshortcuts")).toBe("Control+K /")
+    for (const init of [{ key: "k", code: "KeyK", ctrlKey: true }, { key: "/", code: "Slash" }]) {
+      await act(() => {
+        document.body.dispatchEvent(
+          new window.KeyboardEvent("keydown", { ...init, bubbles: true }) as unknown as Event,
+        )
+      })
+      await settle()
+      expect(dialog.open).toBe(true)
+      await act(() => dialog.close())
+    }
   })
 
-  it("keeps the sidebar's trigger named search and names the others after their place", async () => {
+  it("opens through openSearch on the element it is drawn in", async () => {
     await mount()
-    expect(document.querySelector("[data-e2e=search-open]")).not.toBeNull()
+    const dialog = find<HTMLDialogElement>("dialog[data-e2e=search]")
 
-    for (const place of ["rail", "sheet"] as const) {
-      await act(() => render(null, root!))
-      root!.remove()
-      await mount({ place })
-      expect(document.querySelectorAll("[data-e2e=search-open]").length).toBe(0)
-      expect(document.querySelector(`[data-e2e=search-${place}-open]`)).not.toBeNull()
-      expect(document.querySelector(`dialog[data-e2e=search-${place}]`)).not.toBeNull()
-    }
+    openSearch(document.body)
+    await settle()
+
+    expect(dialog.open).toBe(true)
+    expect(document.activeElement).toBe(find("[data-e2e=search] input"))
   })
 
   it("lists the current group's recent notes, then the actions, before anything is typed", async () => {

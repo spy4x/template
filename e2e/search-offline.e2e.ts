@@ -79,7 +79,7 @@ test.describe("search with no network", () => {
 
       const palette = page.locator("[data-e2e=search]")
       const field = palette.getByRole("combobox")
-      await page.locator("[data-e2e=search-open]").click()
+      await page.locator("[data-e2e=shell-search-rail] button").click()
       await field.fill("jacket")
       await expect(palette.getByRole("group").first()).toContainText("Notes on this device")
       await expect(palette.getByRole("option").filter({ hasText: "Packing list" })).toBeVisible()

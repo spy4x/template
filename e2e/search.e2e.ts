@@ -58,7 +58,7 @@ const result = (page: Page, label: string) =>
   palette(page).getByRole("option").filter({ hasText: label })
 
 test.describe("search", () => {
-  test("Ctrl+K opens the search, and picking a note of another group opens it in that group", async ({ browser, request }) => {
+  test("Ctrl+K and the rail's Search open the one search, and picking a note of another group opens it in that group", async ({ browser, request }) => {
     const user = "e2e_search_online@example.com"
     await cleanup(request, user)
     const context = await browser.newContext({ baseURL: test.info().project.use.baseURL })
@@ -80,7 +80,17 @@ test.describe("search", () => {
       )
       await openNotes(page, roadmap.groupId, "Quarterly roadmap")
 
+      // The rail's cell opens it, and closing gives focus back to the cell.
+      const railSearch = page.locator("[data-e2e=shell-search-rail] button")
+      await railSearch.click()
+      await expect(field(page)).toBeFocused()
+      await expect(page.locator("dialog[open]")).toHaveCount(1)
+      await page.keyboard.press("Escape")
+      await expect(palette(page)).toBeHidden()
+      await expect(railSearch).toBeFocused()
+
       await page.keyboard.press("Control+k")
+      await expect(page.locator("dialog[open]")).toHaveCount(1)
       await expect(field(page)).toBeFocused()
       await field(page).fill("tomato")
       await expect(result(page, "Garden notes")).toContainText("Side project")
@@ -96,7 +106,7 @@ test.describe("search", () => {
     }
   })
 
-  test("on a phone, Search in the Account sheet opens the search, gives focus back to Account, and finds a note", async ({ browser, request }) => {
+  test("on a phone, Search in the Account sheet and Ctrl+K open the search, focus goes back to Account, and it finds a note", async ({ browser, request }) => {
     const user = "e2e_search_phone@example.com"
     await cleanup(request, user)
     const context = await browser.newContext({
@@ -116,11 +126,11 @@ test.describe("search", () => {
       await openNotes(page, garden.groupId, "Garden notes")
       const account = page.locator("[data-e2e=rail-shell-more]")
       const sheet = page.locator("dialog[data-e2e=rail-shell-dialog]")
-      const phonePalette = page.locator("dialog[data-e2e=search-sheet]")
+      const phonePalette = page.locator("dialog[data-e2e=search]")
       const phoneField = phonePalette.getByRole("combobox")
       const chooseSearch = async () => {
         await account.click()
-        await sheet.locator("[data-e2e=shell-search-overlay]").click()
+        await sheet.locator("[data-e2e=shell-search-sheet] button").click()
         await expect(sheet).toBeHidden()
         await expect(phoneField).toBeFocused()
       }
@@ -129,6 +139,13 @@ test.describe("search", () => {
       await page.keyboard.press("Escape")
       await expect(phonePalette).toBeHidden()
       await expect(account).toBeFocused()
+
+      // A phone with a keyboard, or a narrow window, has the hotkey too: one dialog opens.
+      await page.keyboard.press("Control+k")
+      await expect(phoneField).toBeFocused()
+      await expect(page.locator("dialog[open]")).toHaveCount(1)
+      await page.keyboard.press("Escape")
+      await expect(phonePalette).toBeHidden()
 
       await chooseSearch()
       await phoneField.fill("tomato")

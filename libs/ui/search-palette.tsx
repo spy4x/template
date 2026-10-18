@@ -6,6 +6,7 @@ import {
   type CommandPaletteOption,
   rankOptions,
 } from "@spy4x/preact-ui/command-palette"
+import { hotkeyClickBinding, useHotkeys } from "@spy4x/preact-ui/hotkeys"
 import { type GroupRole } from "@domain/groups"
 import { ROLE_TEXT } from "./groups-screen.tsx"
 import { GROUP_PATHS, NOTE_PATHS, SCREEN_PATHS, TAG_PATHS } from "./progressive.tsx"
@@ -58,33 +59,13 @@ export interface SearchPaletteProps {
   online: boolean
   /** Called with what the person picked, after the palette has closed. */
   onSelect: (choice: SearchChoice) => void
-  /** Where the frame draws the trigger; see {@link SearchPlace}. Defaults to `"sidebar"`. */
-  place?: SearchPlace
 }
 
 /**
- * Where `AppFrame` draws a search trigger: under the group switcher in the labelled sidebar (from
- * `lg`), or in the 72 px icon rail (from `md`). A phone has no column, so its palette (`"sheet"`)
- * has a hidden trigger, and the Account sheet's "Search" entry opens it. The frame draws one per
- * place and CSS shows the one that fits, so the hotkeys reach the visible one only (a hidden
- * trigger ignores them).
+ * The keys that open the search from every page: Ctrl K (⌘K on a Mac), and `/` outside a text
+ * field.
  */
-export type SearchPlace = "sidebar" | "rail" | "sheet"
-
-/**
- * The trigger's look per place, over the library's (an icon below `sm`, a field from `sm`).
- * - The sidebar: a field the column's width with the words. The column is too narrow for the words
- *   and the hotkey hint as well, so the hint is left out; the hotkeys still work and the trigger
- *   still announces them.
- * - The rail: an icon the size of the rail's others, in a 44 px cell; its name is its tooltip.
- * - The sheet: no trigger of its own; the Account sheet's entry opens the palette.
- */
-const TRIGGER_CLASS: Record<SearchPlace, string> = {
-  sidebar: "min-h-11 w-full min-w-0 whitespace-nowrap sm:w-full lg:w-full [&>span+span]:hidden",
-  rail:
-    "min-h-11 w-full justify-center rounded-md px-0 hover:bg-canvas sm:w-full sm:border-transparent sm:bg-transparent sm:px-0 sm:hover:border-transparent lg:w-full [&>span]:hidden [&>svg]:size-6",
-  sheet: "hidden",
-}
+export const SEARCH_HOTKEYS: readonly string[] = ["mod+k", "/"]
 
 /** The fewest characters a note search takes; one letter finds too much. The API holds the same. */
 export const NOTE_QUERY_MIN = 2
@@ -132,9 +113,12 @@ export function emptyLabel(query: string, onDevice: boolean): string {
 }
 
 /**
- * The search of the signed-in shell, opened with Ctrl K (⌘K on a Mac) or `/` from every page, or
- * from its trigger. `AppFrame` draws one trigger per place ({@link SearchPlace}); only the visible
- * one answers the hotkeys.
+ * The search of the signed-in shell, opened with Ctrl K (⌘K on a Mac) or `/` from every page, at
+ * every width. It draws no trigger of its own: the frame's "Search" entries, in the rail and in the
+ * phone's Account sheet, open it by clicking its hidden one ({@link openSearch}). So the hotkeys
+ * still work while that trigger is hidden, the palette binds them itself, with its root, which is
+ * always drawn, as what has to be on screen (`clickByHotkey`'s `shown`). One palette, so one
+ * binding and one dialog at every width.
  *
  * Before anything is typed it lists the current group's most recent notes, then the actions. A
  * query lists the notes that match (from `searchNotes`), then the person's groups whose name
@@ -143,7 +127,12 @@ export function emptyLabel(query: string, onDevice: boolean): string {
  * "New tag" need a group they may write to, and "New group" needs the server.
  */
 export function SearchPalette(props: SearchPaletteProps): JSX.Element {
-  const place = props.place ?? "sidebar"
+  const root = useRef<HTMLDivElement>(null)
+  useHotkeys(
+    SEARCH_HOTKEYS.map((keys) =>
+      hotkeyClickBinding(keys, () => trigger(root.current), () => root.current)
+    ),
+  )
   const [empty, setEmpty] = useState(emptyLabel("", false))
   // The search runs inside the palette, after a render; it reads the latest props through this.
   const latest = useRef(props)
@@ -187,15 +176,31 @@ export function SearchPalette(props: SearchPaletteProps): JSX.Element {
   }
 
   return (
-    <CommandPalette<SearchOption>
-      search={search}
-      onSelect={(option) => props.onSelect(option.choice)}
-      hotkeys={["mod+k", "/"]}
-      labels={{ ...LABELS, empty }}
-      dataE2E={place === "sidebar" ? "search" : `search-${place}`}
-      class={TRIGGER_CLASS[place]}
-    />
+    <div ref={root} data-e2e="search-root">
+      <CommandPalette<SearchOption>
+        search={search}
+        onSelect={(option) => props.onSelect(option.choice)}
+        // Bound above, so they work while the trigger is hidden.
+        hotkeys={[]}
+        labels={{ ...LABELS, empty }}
+        dataE2E="search"
+        class="hidden"
+      />
+    </div>
   )
+}
+
+/** The palette's own trigger inside its root: hidden, and clicked to open it. */
+function trigger(root: Element | null): HTMLButtonElement | null {
+  return root?.querySelector<HTMLButtonElement>("button[aria-haspopup=dialog]") ?? null
+}
+
+/**
+ * Open the palette drawn inside `container`, as the frame's "Search" entries do. Nothing happens
+ * when there is none.
+ */
+export function openSearch(container: Element | null): void {
+  trigger(container?.querySelector("[data-e2e=search-root]") ?? null)?.click()
 }
 
 /** A note row's second line: the group, when the person has several, then the snippet. */
