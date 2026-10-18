@@ -1,3 +1,5 @@
+> **This repository moved to [spy4x/seed](https://github.com/spy4x/seed).** Its code, history and open issues are there now. This copy is archived; its merged pull requests and closed issues stay readable here.
+
 <div align="center">
 
 # template
